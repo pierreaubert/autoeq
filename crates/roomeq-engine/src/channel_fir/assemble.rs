@@ -33,6 +33,7 @@ pub(super) fn assemble_fir_result(
             spl: display_target.spl.to_vec(),
             phase: None,
             norm_range: request.preprocessed.norm_range,
+            ..Default::default()
         })
     } else {
         request.target.target_tilt_curve.as_ref().map(|tilt| {
@@ -45,6 +46,7 @@ pub(super) fn assemble_fir_result(
                 spl: (&display_tilt.spl + request.target.mean_spl).to_vec(),
                 phase: None,
                 norm_range: request.preprocessed.norm_range,
+                ..Default::default()
             }
         })
     };
@@ -55,7 +57,8 @@ pub(super) fn assemble_fir_result(
     let score_curve = if let Some(tilt_curve) = &request.target.target_tilt_curve {
         Curve {
             freq: final_curve.freq.clone(),
-            spl: &final_curve.spl - &tilt_curve.spl,
+            spl: &final_curve.spl
+                - &autoeq_core::interpolate_log_space(&final_curve.freq, tilt_curve).spl,
             phase: final_curve.phase.clone(),
             ..Curve::default()
         }
@@ -89,6 +92,7 @@ pub(super) fn assemble_fir_result(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve,
     };
     let (fir_coeffs, convolution_sidecar) = sidecar_output(optimizer_output);

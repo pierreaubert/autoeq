@@ -8,6 +8,7 @@ import 'builds/cross-autoeq.just'
 import 'builds/qa/qa-autoeq.just'
 import 'builds/qa/qa-roomeq.just'
 import 'builds/qa/qa-export.just'
+import 'builds/qa/qa-wolfram.just'
 # ----------------------------------------------------------------------
 
 _default:

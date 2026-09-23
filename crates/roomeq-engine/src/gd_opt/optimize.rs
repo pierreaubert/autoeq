@@ -142,6 +142,12 @@ fn optimize_group_delay_with_initial(
 
     let best_params = report.x.as_slice();
 
+    // Acceptance-side budget record: the emitted delays/polarity/all-pass
+    // controls must honor the search budgets.
+    let (lower, upper): (Vec<f64>, Vec<f64>) = bounds.iter().copied().unzip();
+    autoeq_optim::optim::verify_joint_budgets("group-delay", best_params, &lower, &upper)
+        .map_err(|reason| format!("group-delay candidate refused at emission: {reason}"))?;
+
     // Compute post-optimisation sum GD RMS
     let sum_gd_post_rms_ms = compute_sum_gd_rms(channels, best_params, &band_indices, config);
 

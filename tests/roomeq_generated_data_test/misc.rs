@@ -150,6 +150,8 @@ fn test_mixedphase_with_phase_data() {
                 pre_ringing_threshold_db: -30.0,
                 min_spatial_depth: 0.5,
                 phase_smoothing_octaves: 0.167,
+                assessment: Default::default(),
+                max_correction_latency_ms: None,
             }),
             fir: Some(FirConfig {
                 placement: Default::default(),

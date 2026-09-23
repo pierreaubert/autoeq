@@ -1,8 +1,10 @@
 use super::channel::sorted_channels;
 use super::export_format::ExportFormat;
 use super::write::camilladsp_crossover_filter_type;
-use roomeq_model::{BassManagementRoutingGraph, DspGraph, PluginConfigWrapper};
-use std::collections::{BTreeMap, BTreeSet};
+use roomeq_model::{
+    BassManagementRoutingGraph, DspGraph, PhysicalRoutingGraph, PluginConfigWrapper,
+};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum ExportNodeKind {
@@ -152,7 +154,7 @@ fn camilladsp_capabilities() -> ExportCapabilities {
     ExportCapabilities {
         format: ExportFormat::CamillaDsp,
         supported_plugin_types: CAMILLADSP_PLUGIN_TYPES,
-        supports_driver_branches: false,
+        supports_driver_branches: true,
         routed_stages: CAMILLADSP_ROUTED_STAGES,
         normalize_identifier: normalize_export_identifier,
         validate_plugin: validate_camilladsp_plugin,
@@ -169,7 +171,6 @@ pub(super) fn validate_camilladsp_input(
     output: &DspGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
-    validate_camilladsp_sub_output_scope(output)?;
     let graph = super::camilladsp_routing_graph(output);
     let routed_expected = routed_bass_management_declared(output);
     if routed_expected && graph.is_none() {
@@ -558,17 +559,34 @@ fn validate_export_input(
             );
         }
 
-        if !capabilities.supports_driver_branches
-            && chain
-                .drivers
-                .as_ref()
-                .is_some_and(|drivers| !drivers.is_empty())
-        {
-            anyhow::bail!(
-                "{:?} export cannot represent active-crossover driver branches for channel \
-                 '{channel_name}' without changing them into a serial cascade",
-                capabilities.format
-            );
+        if let Some(drivers) = chain.drivers.as_ref().filter(|drivers| !drivers.is_empty()) {
+            if !capabilities.supports_driver_branches
+                || !routed
+                || routing_graph.is_none_or(|graph| graph.physical_sub_output != *channel_name)
+            {
+                anyhow::bail!(
+                    "{:?} export cannot represent active-crossover driver branches for channel \
+                     '{channel_name}' without changing them into a serial cascade",
+                    capabilities.format
+                );
+            }
+            for driver in drivers {
+                for (plugin_index, plugin) in driver.plugins.iter().enumerate() {
+                    let context = format!(
+                        "physical driver '{}' plugin #{plugin_index} ('{}')",
+                        driver.name, plugin.plugin_type
+                    );
+                    anyhow::ensure!(
+                        plugin.parameters["room_eq_stage"] == "post_route"
+                            && capabilities
+                                .supported_plugin_types
+                                .contains(&plugin.plugin_type.as_str()),
+                        "{:?} routed export cannot represent {context}",
+                        capabilities.format
+                    );
+                    (capabilities.validate_plugin)(plugin, sample_rate, &context)?;
+                }
+            }
         }
 
         for (plugin_index, plugin) in chain.plugins.iter().enumerate() {
@@ -612,39 +630,107 @@ fn validate_export_input(
     Ok(())
 }
 
-/// Reject multi-sub-output declarations before rendering.
-///
-/// The routed CamillaDSP preset realizes one physical sub bus: per-route gain
-/// and polarity plus per-output post-route chains. Per-output gain, delay, and
-/// polarity trims declared in `sub_outputs` for several physical sub outputs
-/// (MSO/DBA strategies) have no corresponding preset stage, so rendering them
-/// would produce a partial preset that reads as complete. Single-output
-/// declarations (including the standard identity trim) pass through.
-fn validate_camilladsp_sub_output_scope(output: &DspGraph) -> anyhow::Result<()> {
-    let Some(report) = output
+pub(super) struct CamillaDspPhysicalRouting {
+    pub graph: BassManagementRoutingGraph,
+    pub physical: PhysicalRoutingGraph,
+    pub post_plugins: Vec<Vec<PluginConfigWrapper>>,
+}
+
+/// Resolve routed ports and factor declared output controls exactly once.
+pub(super) fn camilladsp_physical_routing(
+    output: &DspGraph,
+    graph: &BassManagementRoutingGraph,
+) -> anyhow::Result<CamillaDspPhysicalRouting> {
+    let physical =
+        roomeq_engine::physical_routing::resolve_physical_routing(&output.channels, graph)
+            .map_err(|error| {
+                anyhow::anyhow!("CamillaDsp physical routing is unavailable: {error}")
+            })?;
+    let mut controls = HashMap::new();
+    if let Some(report) = output
         .metadata
         .as_ref()
         .and_then(|metadata| metadata.bass_management.as_ref())
-    else {
-        return Ok(());
-    };
-    if report.sub_outputs.len() > 1 {
-        let roles = report
-            .sub_outputs
-            .iter()
-            .map(|sub_output| sub_output.output_role.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        anyhow::bail!(
-            "CamillaDsp export supports a single physical sub output ('{}') but the graph \
-             declares {} sub outputs ({}) with per-output alignment the preset cannot \
-             represent; downmix to one sub output or use Apply as Graph for this output",
-            report.physical_sub_outputs.join(", "),
-            report.sub_outputs.len(),
-            roles
-        );
+    {
+        if report.sub_outputs.len() > 1 {
+            let declared: BTreeSet<_> = report
+                .sub_outputs
+                .iter()
+                .map(|control| control.output_role.as_str())
+                .collect();
+            let routed: BTreeSet<_> = graph
+                .physical_sub_outputs
+                .iter()
+                .map(String::as_str)
+                .collect();
+            anyhow::ensure!(
+                declared.len() == report.sub_outputs.len()
+                    && routed.len() == graph.physical_sub_outputs.len()
+                    && declared == routed,
+                "CamillaDsp declared sub outputs do not match routed physical outputs"
+            );
+        }
+        for control in &report.sub_outputs {
+            anyhow::ensure!(
+                graph.output_channels.contains(&control.output_role)
+                    && control.gain_db.is_finite()
+                    && control.delay_ms.is_finite()
+                    && control.delay_ms >= 0.0,
+                "CamillaDsp declared sub output has invalid or unrouted controls"
+            );
+            anyhow::ensure!(
+                controls
+                    .insert(control.output_role.as_str(), control)
+                    .is_none(),
+                "CamillaDsp declared sub output is repeated"
+            );
+        }
     }
-    Ok(())
+
+    let mut adjusted = graph.clone();
+    for route in &mut adjusted.routes {
+        if let Some(control) = controls.get(route.destination.as_str()) {
+            route.gain_db -= control.gain_db;
+            route.delay_ms -= control.delay_ms;
+            route.polarity_inverted ^= control.polarity_inverted;
+            anyhow::ensure!(
+                route.gain_db.is_finite() && route.delay_ms.is_finite() && route.delay_ms >= -1e-9,
+                "CamillaDsp routed output controls are not present in every incoming route"
+            );
+            route.delay_ms = route.delay_ms.max(0.0);
+            route.gain_linear = 10.0_f64.powf(route.gain_db / 20.0);
+            route.matrix_gain = route.gain_linear;
+        }
+    }
+    adjusted.matrix = None;
+    let post_plugins = physical
+        .outputs
+        .iter()
+        .map(|port| {
+            let mut plugins = port.plugins.clone();
+            if let Some(control) = controls.get(port.name.as_str()) {
+                if control.gain_db != 0.0 || control.polarity_inverted {
+                    let mut gain = roomeq_engine::output::create_gain_plugin_with_invert(
+                        control.gain_db,
+                        control.polarity_inverted,
+                    );
+                    gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
+                    plugins.push(gain);
+                }
+                if control.delay_ms > 0.0 {
+                    let mut delay = roomeq_engine::output::create_delay_plugin(control.delay_ms);
+                    delay.parameters["room_eq_stage"] = serde_json::json!("post_route");
+                    plugins.push(delay);
+                }
+            }
+            plugins
+        })
+        .collect();
+    Ok(CamillaDspPhysicalRouting {
+        graph: adjusted,
+        physical,
+        post_plugins,
+    })
 }
 
 fn validate_camilladsp_global_plugins(
@@ -773,9 +859,8 @@ fn validate_camilladsp_routing_graph(
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
     let (input_channels, output_channels) = routed_channel_names(output, graph);
-    validate_channel_list(output, &input_channels, "input")?;
-    validate_channel_list(output, &output_channels, "output")?;
-
+    validate_channel_list(&input_channels, "input")?;
+    validate_channel_list(&output_channels, "output")?;
     let mut destination_has_route = vec![false; output_channels.len()];
     for (route_index, route) in graph.routes.iter().enumerate() {
         let context = format!(
@@ -829,20 +914,31 @@ fn validate_camilladsp_routing_graph(
             output_channels[index]
         );
     }
+    let physical = camilladsp_physical_routing(output, graph)?;
+    anyhow::ensure!(
+        physical
+            .physical
+            .inputs
+            .iter()
+            .map(|port| &port.name)
+            .eq(input_channels.iter())
+            && physical
+                .physical
+                .outputs
+                .iter()
+                .map(|port| &port.name)
+                .eq(output_channels.iter()),
+        "CamillaDsp resolved physical ports disagree with routed channel order"
+    );
     Ok(())
 }
 
-fn validate_channel_list(output: &DspGraph, channels: &[String], kind: &str) -> anyhow::Result<()> {
+fn validate_channel_list(channels: &[String], kind: &str) -> anyhow::Result<()> {
     if channels.is_empty() {
         anyhow::bail!("CamillaDsp routed export requires at least one {kind} channel");
     }
     let mut seen = BTreeSet::new();
     for channel in channels {
-        if !output.channels.contains_key(channel) {
-            anyhow::bail!(
-                "CamillaDsp routed export {kind} channel '{channel}' has no channel DSP chain"
-            );
-        }
         if !seen.insert(channel) {
             anyhow::bail!("CamillaDsp routed export repeats {kind} channel '{channel}'");
         }

@@ -359,6 +359,43 @@ pub struct EligibilityRecord {
     pub assessment: AssessmentRecord,
 }
 
+/// Operation-boundary verdicts for one channel on the public workflow path.
+///
+/// The workflow intake evaluates every applicable operation against the
+/// channel's declared provenance and attaches one gate per channel to the
+/// pipeline result. Consumers (phase dispatch, target policy, the final
+/// ledger) read these records instead of re-deriving permissions from a
+/// single phase flag.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelOperationGate {
+    /// Logical channel name, e.g. `"left"`.
+    pub channel: String,
+    /// Stable measurement identifier the verdicts apply to.
+    pub measurement_id: String,
+    /// One record per evaluated operation and band, in evaluation order.
+    pub records: Vec<EligibilityRecord>,
+}
+
+impl ChannelOperationGate {
+    /// Whether an operation may run on at least one evaluated band.
+    ///
+    /// Only structurally valid `Eligible` or `Limited` records for this
+    /// measurement authorize; `Unsupported` and `Unknown` refuse. This checks
+    /// record binding, not acquisition authenticity or whole-band coverage.
+    pub fn authorizes(&self, operation: CorrectionOperation) -> bool {
+        self.records.iter().any(|record| {
+            record.operation == operation
+                && !self.channel.trim().is_empty()
+                && record.measurement_id == self.measurement_id
+                && record.validate().is_ok()
+                && matches!(
+                    record.verdict,
+                    EligibilityVerdict::Eligible | EligibilityVerdict::Limited
+                )
+        })
+    }
+}
+
 impl EligibilityRecord {
     /// Structural check: IDs, scope, band bounds, and verdict/evidence
     /// consistency. A permission verdict (`Eligible`/`Limited`) with no
@@ -391,10 +428,14 @@ impl EligibilityRecord {
         if matches!(
             self.verdict,
             EligibilityVerdict::Eligible | EligibilityVerdict::Limited
-        ) && self.evidence_refs.is_empty()
+        ) && (self.evidence_refs.is_empty()
+            || self
+                .evidence_refs
+                .iter()
+                .any(|reference| reference.trim().is_empty()))
         {
             return Err(format!(
-                "eligibility verdict {:?} cites no evidence; permission requires evidence references",
+                "eligibility verdict {:?} requires nonempty evidence reference IDs",
                 self.verdict
             ));
         }

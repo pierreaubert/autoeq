@@ -1,6 +1,27 @@
 use crate::Curve;
 use autoeq_optim::DriverOptimizationResult;
 
+// Structural validation only: callers must derive labels from capture
+// evidence. Matching strings by themselves do not authenticate acquisition.
+pub(crate) fn timing_scopes_are_shared(
+    scope: Option<&[Vec<String>]>,
+    subs: usize,
+    seats: usize,
+) -> bool {
+    scope.is_some_and(|scope| {
+        subs > 0
+            && seats > 0
+            && scope.len() == subs
+            && scope.iter().all(|row| row.len() == seats)
+            && (0..seats).all(|seat| {
+                let reference = scope[0][seat].trim();
+                !reference.is_empty()
+                    && !reference.eq_ignore_ascii_case("unknown")
+                    && scope.iter().all(|row| row[seat] == scope[0][seat])
+            })
+    })
+}
+
 /// Separate spatial and temporal views of an optimized multi-sub system.
 #[derive(Debug, Clone)]
 pub struct MultiSubCombinedResponse {

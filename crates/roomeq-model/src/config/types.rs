@@ -691,6 +691,18 @@ pub struct MixedPhaseSerdeConfig {
     /// Phase smoothing width in octaves. Default: 1/6 octave
     #[serde(default = "default_mask_smoothing")]
     pub phase_smoothing_octaves: f64,
+    /// Evidence bar for the excess-phase assessment that must support the
+    /// phase action before any FIR is generated. Defaults mirror the
+    /// analysis-validated values; every field stays user-overridable.
+    #[serde(default)]
+    pub assessment: super::phase_assessment_config::PhaseAssessmentConfig,
+    /// Maximum causal FIR centering delay in milliseconds for standalone phase correction.
+    ///
+    /// This bounds the delay added by the generated FIR, not the measured
+    /// acoustic propagation delay. Other DSP stages and backend buffering
+    /// are separate. Default: None (no budget).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_correction_latency_ms: Option<f64>,
 }
 
 /// Multi-seat measurement configuration

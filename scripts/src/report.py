@@ -4,6 +4,16 @@ from html import escape
 import math
 from pathlib import Path
 
+from .capture_clock_views import capture_clock_qa_html, gated_lr_channel
+from .capture_reflection_views import capture_reflections_html
+from .acoustic_report import (
+    level_compensation_html,
+    pair_sum_difference,
+    summary_table_html,
+    symmetric_groups,
+    tof_html,
+    tof_table,
+)
 from .figures import (
     create_channel_figure,
     add_channel_response_overlays,
@@ -11,6 +21,9 @@ from .figures import (
     create_eq_figure,
     create_multipass_eq_figure,
     create_ir_figure,
+    create_smoothed_figure,
+    create_symmetric_pair_figure,
+    create_tof_figure,
     create_combined_figure,
     create_bass_management_routing_figure,
     create_bass_management_headroom_figure,
@@ -35,6 +48,7 @@ from .data_extract import (
     get_plottable_drivers,
 )
 from .dsp import (
+    kautz_sections,
     build_post_dsp_source_curves,
     driver_destination_route,
     per_driver_chain_plugins,
@@ -42,10 +56,12 @@ from .dsp import (
     per_driver_effective_eq,
     split_driver_eq_plugins,
     sum_driver_initial_curves,
-    synthesize_lr_channel,
 )
 from .target_overlay import build_target_overlay_curves
 from .correction_explanation import correction_explanation_html
+from .acceptance_views import acceptance_views_html, waveform_status_html
+from .payload_binding import verify_payload_binding
+from .loaders import RoomEqData
 
 # Synthetic channel name used for the complex L+R sum tab in the
 # comparison report. Picked so it cannot collide with a real recording
@@ -174,12 +190,22 @@ def _driver_shaping_summary_html(
 
 def _format_eq_filter_line(filt: dict, number: int) -> str:
     """Render one numbered EQ filter row."""
+    if filt.get("topology") == "kautz_filter":
+        # Parameter display only; the transfer evaluator validates actual Nyquist.
+        sections = kautz_sections(filt, math.inf)
+        entries = "; ".join(
+            f"section {i}: pole={pole:.1f} Hz, Q={q:.2f}, weight={gain:+.6g} (linear)"
+            for i, (pole, q, gain) in enumerate(sections, 1)
+        )
+        return f"Filter {number}: KAUTZ bank (unity dry path); {entries}<br>\n"
     filter_type = filt.get("filter_type", "peak")
+    if filt.get("topology") == "warped_biquad":
+        filter_type = f"WARPED {filter_type}"
     freq = filt.get("freq", 0)
     q = filt.get("q", 1)
     gain = filt.get("db_gain", 0)
     return (
-        f"Filter {number}: {filter_type.upper()} @ {freq:.1f} Hz, "
+        f"Filter {number}: {escape(str(filter_type).upper())} @ {freq:.1f} Hz, "
         f"Q={q:.2f}, Gain={gain:+.1f} dB<br>\n"
     )
 
@@ -311,6 +337,12 @@ def _eq_filter_table_html(passes: list[dict]) -> str:
             "                <tbody>\n"
         )
         for j, filt in enumerate(p["filters"], 1):
+            if filt.get("topology") in ("kautz_filter", "warped_biquad"):
+                parts.append(
+                    f'<tr><td>{j}</td><td colspan="4">'
+                    + _format_eq_filter_line(filt, j) + '</td></tr>\n'
+                )
+                continue
             filter_type = str(filt.get("filter_type", "peak")).upper()
             freq = filt.get("freq", 0)
             q = filt.get("q", 1)
@@ -701,6 +733,12 @@ def _fmt_ms(value: object) -> str:
 
 
 def _eq_filter_counts(data: dict) -> list[int]:
+    """Count emitted sections, including driver-local entries, per channel.
+
+    Kautz banks contribute every basis section, including zero weights. Shared
+    channel entries count once, not once per destination or driver. Route-owned
+    descriptive markers are excluded consistently with physical-driver replay.
+    """
     channels = data.get("channels") or {}
     if isinstance(channels, dict):
         channel_values = channels.values()
@@ -714,13 +752,22 @@ def _eq_filter_counts(data: dict) -> list[int]:
         if not isinstance(channel, dict):
             continue
         total = 0
-        for plugin in channel.get("plugins") or []:
+        owners = [channel] + [driver for driver in channel.get("drivers") or []
+                              if isinstance(driver, dict)]
+        plugins = [plugin for owner in owners for plugin in owner.get("plugins") or []]
+        for plugin in plugins:
             if not isinstance(plugin, dict) or plugin.get("plugin_type") != "eq":
                 continue
             params = plugin.get("parameters") or {}
+            if params.get("room_eq_stage") == "route_owned":
+                continue
             filters = params.get("filters") or plugin.get("filters") or []
             if isinstance(filters, list):
-                total += len(filters)
+                total += sum(
+                    len(kautz_sections(filt, math.inf))
+                    if filt.get("topology") == "kautz_filter" else 1
+                    for filt in filters
+                )
         counts.append(total)
     return counts
 
@@ -1014,7 +1061,7 @@ def _bass_management_sub_outputs_table_html(report: dict) -> str:
     )
 
 
-def _playback_status_html(metadata: dict, label: str = "") -> str:
+def _playback_status_html(metadata: dict, label: str = "", *, data: dict | None = None) -> str:
     """Expose recorded playback eligibility and conditional input assumptions."""
     acceptance = metadata.get("correction_acceptance") or {}
     outcome = acceptance.get("outcome")
@@ -1022,10 +1069,12 @@ def _playback_status_html(metadata: dict, label: str = "") -> str:
         outcome == "accepted" and acceptance.get("accepted") is True
         and acceptance.get("decision") == "accepted"
     )
+    verified, binding_reason, _ = verify_payload_binding(data or {})
+    approved = approved and verified
     title = "Recorded playback validation: " + str(outcome or "unverified")
     if label:
         title = label + " — " + title
-    details = []
+    details = [binding_reason]
     if not approved:
         details.append("Not approved for playback. These curves are diagnostic only.")
     policy = ((metadata.get("effective_config") or {}).get("optimizer") or {}).get("finalization") or {}
@@ -1060,6 +1109,7 @@ def create_html_report(
     data: dict,
     output_path: Path,
     output_json_path: Path | None = None,
+    smoothed_octaves: float = 1.0,
 ) -> None:
     """Create an HTML report with all channel plots.
 
@@ -1067,7 +1117,11 @@ def create_html_report(
         data: Output JSON data (roomeq result)
         output_path: Path to write HTML report
         output_json_path: Path to output JSON (for resolving relative paths)
+        smoothed_octaves: Fractional-octave smoothing for the Section 2
+            smoothed-response overlays (feat-report asks for 1 octave).
     """
+    if output_json_path is not None and not isinstance(data, RoomEqData):
+        data = RoomEqData(data, output_json_path.resolve().parent)
     channels_dict = data.get("channels", {})
     metadata = data.get("metadata", {})
     version = data.get("version", "unknown")
@@ -1366,8 +1420,11 @@ def create_html_report(
         f"        <h1>{page_title}</h1>\n"
     ]
 
-    html_parts.append(_playback_status_html(metadata))
+    html_parts.append(_playback_status_html(metadata, data=data))
     html_parts.append(correction_explanation_html(data))
+    html_parts.append(acceptance_views_html(data))
+    html_parts.append(waveform_status_html(data))
+    html_parts.append(summary_table_html(data))
 
     # Metadata section
     if metadata:
@@ -1431,6 +1488,8 @@ def create_html_report(
 """
         )
 
+    html_parts.append(capture_clock_qa_html(data))
+    html_parts.append(capture_reflections_html(data))
     mixed_phase_html = _mixed_phase_summary_html(metadata, channels_dict)
     if mixed_phase_html:
         html_parts.append(mixed_phase_html)
@@ -1452,6 +1511,40 @@ def create_html_report(
     html_parts.append(_gain_plugins_html(data))
     html_parts.append(_all_eq_filters_html(data))
     html_parts.append(_crossover_config_html(data))
+    html_parts.append(level_compensation_html(data))
+
+    # Time of flight before/after DSP (feat-report Section 3).
+    tof_rows = tof_table(metadata)
+    tof_before = create_tof_figure(tof_rows, after=False)
+    tof_after = create_tof_figure(tof_rows, after=True)
+    if tof_before or tof_after:
+        html_parts.append('<div class="plot-row">\n')
+        for fig in (tof_before, tof_after):
+            if fig:
+                html_parts.append(
+                    f'<div class="plot-container">{fig.to_html(full_html=False, include_plotlyjs=False)}</div>\n'
+                )
+        html_parts.append("</div>\n")
+    html_parts.append(tof_html(metadata))
+
+    # Symmetric-monitor summing, magnitude domain (feat-report Section 2).
+    # The complex pressure sum needs phase data roomeq does not emit yet.
+    pair_groups, _unpaired = symmetric_groups(channels_dict)
+    for label, members in pair_groups:
+        combo = pair_sum_difference(
+            (channels_dict[members[0]] or {}).get("final_curve"),
+            (channels_dict[members[1]] or {}).get("final_curve"),
+        )
+        if combo is None:
+            continue
+        pair_fig = create_symmetric_pair_figure(
+            label, combo["freq"], combo["sum_spl"], combo["diff_spl"]
+        )
+        html_parts.append(
+            '<div class="plot-container">\n'
+            f"{pair_fig.to_html(full_html=False, include_plotlyjs=False)}"
+            "\n</div>\n"
+        )
 
     # Bass-management routing/headroom section. This is driven by the
     # route-level #14 schema, not the deprecated single matrix summary.
@@ -1619,12 +1712,30 @@ def create_html_report(
 """
         )
 
+        # Smoothed response overlay (feat-report Section 2, 1 octave).
+        fig_smooth = create_smoothed_figure(
+            tab_label, initial_curve, final_curve, octaves=smoothed_octaves
+        )
+        if fig_smooth:
+            smooth_html = fig_smooth.to_html(full_html=False, include_plotlyjs=False)
+            html_parts.append(
+                f"""
+                <div class="plot-container">
+                    {smooth_html}
+                </div>
+"""
+            )
+
         # EQ response plot (uses per-pass breakdown when 3-pass labels are present)
         fig_eq = create_multipass_eq_figure(
-            tab_label, eq_source, eq_response_view
+            tab_label, eq_source, eq_response_view,
+            sample_rate=float(data.get("sample_rate", 48_000.0)),
         )
         if fig_eq is None:
-            fig_eq = create_eq_figure(tab_label, eq_filters, eq_response_view)
+            fig_eq = create_eq_figure(
+                tab_label, eq_filters, eq_response_view,
+                sample_rate=float(data.get("sample_rate", 48_000.0)),
+            )
         if fig_eq:
             eq_html = fig_eq.to_html(full_html=False, include_plotlyjs=False)
             html_parts.append(
@@ -1680,13 +1791,7 @@ def create_html_report(
 """
                 )
                 for j, f in enumerate(p["filters"], 1):
-                    filter_type = f.get("filter_type", "peak")
-                    freq = f.get("freq", 0)
-                    q = f.get("q", 1)
-                    gain = f.get("db_gain", 0)
-                    html_parts.append(
-                        f"Filter {j}: {filter_type.upper()} @ {freq:.1f} Hz, Q={q:.2f}, Gain={gain:+.1f} dB<br>\n"
-                    )
+                    html_parts.append(_format_eq_filter_line(f, j))
                 html_parts.append("                    </div>\n")
             html_parts.append("                </div>\n")
         elif eq_filters:
@@ -1698,13 +1803,7 @@ def create_html_report(
 """
             )
             for j, f in enumerate(eq_filters, 1):
-                filter_type = f.get("filter_type", "peak")
-                freq = f.get("freq", 0)
-                q = f.get("q", 1)
-                gain = f.get("db_gain", 0)
-                html_parts.append(
-                    f"Filter {j}: {filter_type.upper()} @ {freq:.1f} Hz, Q={q:.2f}, Gain={gain:+.1f} dB<br>\n"
-                )
+                html_parts.append(_format_eq_filter_line(f, j))
             html_parts.append(
                 """
                     </div>
@@ -1846,8 +1945,12 @@ def create_comparison_html_report(
     ]
 
     for mode_name, data in mode_datasets:
-        html_parts.append(_playback_status_html(data.get("metadata") or {}, mode_name))
+        html_parts.append(_playback_status_html(data.get("metadata") or {}, mode_name, data=data))
+        html_parts.append(capture_clock_qa_html(data))
+        html_parts.append(capture_reflections_html(data))
         html_parts.append(correction_explanation_html(data, mode_name))
+        html_parts.append(acceptance_views_html(data, mode_name))
+        html_parts.append(waveform_status_html(data, mode_name))
 
     # --- Summary table ---
     html_parts.append('<div class="plot-container">\n<h2>Summary</h2>\n')
@@ -1865,7 +1968,9 @@ def create_comparison_html_report(
     )
     if has_auto_summary:
         html_parts.append(
-            '<th title="Per-channel count of emitted EQ filters; ranges show min-max across channels">EQ filters</th>'
+            '<th title="Emitted EQ sections per channel, including driver-local sections; '
+            'Kautz banks count all basis sections and shared entries count once; '
+            'ranges show min-max across channels">EQ sections</th>'
         )
     if has_gd_summary:
         html_parts.append(
@@ -1975,14 +2080,9 @@ def create_comparison_html_report(
         source_label = _comparison_source_label(ch_name, includes_redirected_bass)
         if is_lr:
             html_parts.append(
-                "<h2>Logical source L+R (complex sum)</h2>\n"
-                '<p style="color:#666;font-size:0.9em;margin:-10px 0 15px 0;">'
-                "Coherent (phase-aware) sum of the L and R frequency "
-                "responses, computed per mode from the channel curves "
-                "in the JSON. Useful for spotting room-mode coupling and "
-                "centre-channel coloration that is invisible when L and R "
-                "are inspected separately."
-                "</p>\n"
+                "<h2>Logical source L+R</h2>\n"
+                "<p>Complex sums require valid per-microphone clock evidence and measured phase. "
+                "Otherwise the plot uses a magnitude-only power sum, which is not a coherent pressure prediction.</p>\n"
             )
         else:
             html_parts.append(f"<h2>{source_label}</h2>\n")
@@ -2003,7 +2103,9 @@ def create_comparison_html_report(
         for mode_name, data in mode_datasets:
             channels = comparison_channels[id(data)]
             if is_lr:
-                lr = synthesize_lr_channel(channels.get("L"), channels.get("R"))
+                lr, fallback_reason = gated_lr_channel(data, channels.get("L"), channels.get("R"))
+                if fallback_reason:
+                    html_parts.append(f"<p><strong>{escape(str(mode_name))}: magnitude-only fallback.</strong> {escape(fallback_reason)}</p>\n")
                 if lr:
                     mode_data.append((mode_name, lr))
             else:
@@ -2064,7 +2166,11 @@ def create_comparison_html_report(
         html_parts.append(f'<div class="plot-container">{fig_subplots.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
 
         # 6. EQ response overlay
-        fig_eq = create_comparison_eq_overlay_figure(ch_name, mode_data)
+        fig_eq = create_comparison_eq_overlay_figure(
+            ch_name, mode_data,
+            sample_rates={name: float(output.get("sample_rate", 48_000.0))
+                          for name, output in mode_datasets},
+        )
         if fig_eq:
             html_parts.append(f'<div class="plot-container">{fig_eq.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
 

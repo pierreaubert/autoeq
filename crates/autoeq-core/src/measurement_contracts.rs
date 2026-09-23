@@ -51,6 +51,15 @@ impl InlineMeasurement {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum MeasurementRef {
+    /// Frozen parsed response plus its original reference, not authenticated acquisition evidence.
+    /// Internal workflow handoff; not a public JSON configuration input form.
+    #[schemars(skip)]
+    Loaded {
+        /// Original source metadata, retained without reopening it for numerical loading.
+        original: Box<MeasurementRef>,
+        /// Complete parsed response on its native grid.
+        loaded_response: Box<Curve>,
+    },
     /// Inline measurement data (stored directly in JSON)
     Inline(InlineMeasurement),
     /// Named measurement with optional metadata
@@ -66,8 +75,18 @@ pub enum MeasurementRef {
 }
 
 impl MeasurementRef {
+    /// Return original metadata beneath any loaded-response snapshots.
+    pub fn original(&self) -> &Self {
+        let mut current = self;
+        while let Self::Loaded { original, .. } = current {
+            current = original;
+        }
+        current
+    }
+
     pub fn path(&self) -> Option<&PathBuf> {
         match self {
+            Self::Loaded { original, .. } => original.path(),
             Self::Path(path) | Self::Named { path, .. } => Some(path),
             Self::Inline(_) => None,
         }
@@ -75,6 +94,7 @@ impl MeasurementRef {
 
     pub fn name(&self) -> Option<&str> {
         match self {
+            Self::Loaded { original, .. } => original.name(),
             Self::Path(_) => None,
             Self::Named { name, .. } => name.as_deref(),
             Self::Inline(inline) => inline.name.as_deref(),
@@ -82,11 +102,11 @@ impl MeasurementRef {
     }
 
     pub fn is_inline(&self) -> bool {
-        matches!(self, Self::Inline(_))
+        matches!(self.original(), Self::Inline(_))
     }
 
     pub fn inline_data(&self) -> Option<&InlineMeasurement> {
-        match self {
+        match self.original() {
             Self::Inline(data) => Some(data),
             _ => None,
         }
@@ -94,6 +114,7 @@ impl MeasurementRef {
 
     pub fn resolve_paths(&mut self, base_dir: &Path) {
         match self {
+            Self::Loaded { original, .. } => original.resolve_paths(base_dir),
             Self::Path(path) | Self::Named { path, .. } if path.is_relative() => {
                 *path = base_dir.join(&*path);
             }
@@ -103,6 +124,63 @@ impl MeasurementRef {
     }
 }
 
+/// Declared acquisition kind of one measurement source.
+///
+/// This is a declaration, not an inference: the loader never guesses a kind
+/// from data shape. Undeclared sources stay [`ProvenanceCaptureKind::Unknown`]
+/// and unknown never authorizes phase-critical work.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ProvenanceCaptureKind {
+    /// Stationary impulse-response capture with a timing reference.
+    StationaryIr,
+    /// Spatial magnitude capture (including moving-microphone averages)
+    /// without a timing reference.
+    SpatialMagnitude,
+    /// Direct-sound capture.
+    DirectSound,
+    /// Exported-backend simulation or rendering; not an acoustic recording.
+    SimulatedBackend,
+    /// Capture kind not stated.
+    #[default]
+    Unknown,
+}
+
+/// Declared acquisition provenance of one measurement source.
+///
+/// Every field is optional at the schema level so old JSON stays readable;
+/// undeclared provenance degrades to unknown, never to an authorization.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MeasurementProvenance {
+    /// Declared acquisition kind (default unknown).
+    #[serde(default)]
+    pub capture_kind: ProvenanceCaptureKind,
+    /// Calibration identity applied at acquisition, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub calibration_id: Option<String>,
+    /// Shared stationary timing-reference identity, if any. Phase-critical
+    /// work needs the same identity across coherently combined sources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_reference_id: Option<String>,
+    /// Whether measured (not nominal) SPL backs this source.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_measured_spl: bool,
+    /// Gate-limited valid band in Hz, if a time gate bounds the evidence
+    /// (e.g. quasi-anechoic valid band). Absent means the full grid support.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub valid_band_hz: Option<[f64; 2]>,
+    /// Whether off-axis/angular coverage backs direct-sound detail claims.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_direct_angular: bool,
+    /// Capture facts and explicit policy for quasi-anechoic assessment.
+    /// The legacy angular boolean alone does not authorize detail correction.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_sound: Option<crate::direct_sound::DirectSoundEvidence>,
+    /// Ordered per-device capture facts; absent for legacy acquisition workflows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture: Option<crate::capture_provenance::CaptureProvenance>,
+}
+
 /// Single measurement with metadata
 ///
 /// Custom implementation to support both string path and object with speaker_name
@@ -110,6 +188,8 @@ impl MeasurementRef {
 pub struct MeasurementSingle {
     pub measurement: MeasurementRef,
     pub speaker_name: Option<String>,
+    /// Declared acquisition provenance (default unknown when absent).
+    pub provenance: MeasurementProvenance,
 }
 
 impl Serialize for MeasurementSingle {
@@ -117,12 +197,19 @@ impl Serialize for MeasurementSingle {
     where
         S: serde::Serializer,
     {
-        if self.speaker_name.is_none() {
+        if self.speaker_name.is_none() && self.provenance == MeasurementProvenance::default() {
             return self.measurement.serialize(serializer);
         }
         use serde::ser::SerializeMap;
         let mut map = serializer.serialize_map(None)?;
         match &self.measurement {
+            MeasurementRef::Loaded {
+                original,
+                loaded_response,
+            } => {
+                map.serialize_entry("original", original)?;
+                map.serialize_entry("loaded_response", loaded_response)?;
+            }
             MeasurementRef::Path(path) => map.serialize_entry("path", path)?,
             MeasurementRef::Named { path, name } => {
                 map.serialize_entry("path", path)?;
@@ -133,6 +220,9 @@ impl Serialize for MeasurementSingle {
             MeasurementRef::Inline(inline) => map.serialize_entry("inline", inline)?,
         }
         map.serialize_entry("speaker_name", &self.speaker_name)?;
+        if self.provenance != MeasurementProvenance::default() {
+            map.serialize_entry("provenance", &self.provenance)?;
+        }
         map.end()
     }
 }
@@ -144,10 +234,14 @@ impl<'de> Deserialize<'de> for MeasurementSingle {
     {
         #[derive(Deserialize)]
         struct Helper {
+            original: Option<Box<MeasurementRef>>,
+            loaded_response: Option<Box<Curve>>,
             path: Option<PathBuf>,
             name: Option<String>,
             inline: Option<InlineMeasurement>,
             speaker_name: Option<String>,
+            #[serde(default)]
+            provenance: MeasurementProvenance,
         }
 
         let value = serde_json::Value::deserialize(deserializer)?;
@@ -155,13 +249,27 @@ impl<'de> Deserialize<'de> for MeasurementSingle {
             return Ok(Self {
                 measurement: MeasurementRef::Path(path.into()),
                 speaker_name: None,
+                provenance: MeasurementProvenance::default(),
             });
         }
         if let Ok(helper) = serde_json::from_value::<Helper>(value.clone()) {
+            if let (Some(original), Some(loaded_response)) =
+                (helper.original, helper.loaded_response)
+            {
+                return Ok(Self {
+                    measurement: MeasurementRef::Loaded {
+                        original,
+                        loaded_response,
+                    },
+                    speaker_name: helper.speaker_name,
+                    provenance: helper.provenance,
+                });
+            }
             if let Some(inline) = helper.inline {
                 return Ok(Self {
                     measurement: MeasurementRef::Inline(inline),
                     speaker_name: helper.speaker_name,
+                    provenance: helper.provenance,
                 });
             }
             if let Some(path) = helper.path {
@@ -175,6 +283,7 @@ impl<'de> Deserialize<'de> for MeasurementSingle {
                 return Ok(Self {
                     measurement,
                     speaker_name: helper.speaker_name,
+                    provenance: helper.provenance,
                 });
             }
         }
@@ -182,6 +291,7 @@ impl<'de> Deserialize<'de> for MeasurementSingle {
         Ok(Self {
             measurement,
             speaker_name: None,
+            provenance: MeasurementProvenance::default(),
         })
     }
 }
@@ -193,6 +303,14 @@ pub struct MeasurementMultiple {
     /// Optional speaker name (e.g., "Genelec 8361A")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speaker_name: Option<String>,
+    /// Declared acquisition provenance shared by the set (default unknown).
+    #[serde(default, skip_serializing_if = "is_default_provenance")]
+    pub provenance: MeasurementProvenance,
+}
+
+/// True when a provenance declaration carries no information.
+fn is_default_provenance(provenance: &MeasurementProvenance) -> bool {
+    *provenance == MeasurementProvenance::default()
 }
 
 /// Source of measurements (single file, multiple files for averaging, or in-memory curve)
@@ -220,6 +338,45 @@ impl MeasurementSource {
             Self::Multiple(multiple) => multiple.speaker_name.as_deref(),
             Self::InMemory(_) | Self::InMemoryMultiple(_) => None,
         }
+    }
+
+    /// Declared acquisition provenance, if the source carries any.
+    ///
+    /// In-memory curves carry no declaration and report unknown: the loader
+    /// never infers a capture kind from data shape.
+    pub fn provenance(&self) -> MeasurementProvenance {
+        let (mut provenance, measurement_count) = match self {
+            Self::Single(single) => (single.provenance.clone(), 1),
+            Self::Multiple(multiple) => (multiple.provenance.clone(), multiple.measurements.len()),
+            Self::InMemory(_) | Self::InMemoryMultiple(_) => {
+                return MeasurementProvenance::default();
+            }
+        };
+        if provenance
+            .timing_reference_id
+            .as_deref()
+            .is_some_and(|reference| {
+                reference.trim().is_empty() || reference.trim().eq_ignore_ascii_case("unknown")
+            })
+        {
+            // Match the coherent-array admission rule: a placeholder is not a
+            // shared clock identity. Preserve the original source declaration.
+            provenance.timing_reference_id = None;
+        }
+        if let Some(capture) = &provenance.capture {
+            let valid = capture
+                .coherent_reference(measurement_count)
+                .is_ok_and(|reference| {
+                    provenance.timing_reference_id.as_deref() == Some(reference)
+                });
+            if !valid {
+                // Keep the original capture block for diagnostics, but never let
+                // a top-level timing label override failed per-device evidence.
+                provenance.timing_reference_id = None;
+                provenance.capture_kind = ProvenanceCaptureKind::SpatialMagnitude;
+            }
+        }
+        provenance
     }
 
     /// Associated recording WAV path, when the source carries inline data.
@@ -264,16 +421,126 @@ mod tests {
     }
 
     #[test]
+    fn loaded_reference_preserves_inline_recording_metadata() {
+        let reference = MeasurementRef::Loaded {
+            original: Box::new(inline(Some("original-recording.wav"))),
+            loaded_response: Box::new(Curve {
+                freq: vec![40.0, 80.0].into(),
+                spl: vec![80.0, 81.0].into(),
+                ..Default::default()
+            }),
+        };
+        assert!(reference.is_inline());
+        assert_eq!(
+            reference.inline_data().unwrap().wav_path.as_deref(),
+            Some("original-recording.wav")
+        );
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: reference,
+            speaker_name: Some("speaker metadata".into()),
+            provenance: MeasurementProvenance::default(),
+        });
+        let mut decoded: MeasurementSource =
+            serde_json::from_value(serde_json::to_value(&source).unwrap()).unwrap();
+        assert_eq!(decoded.wav_path(), source.wav_path());
+        decoded.resolve_paths(Path::new("/Volumes/home_tmp/tmp"));
+        assert_eq!(
+            decoded.wav_path(),
+            Some("/Volumes/home_tmp/tmp/original-recording.wav")
+        );
+        let MeasurementSource::Single(single) = decoded else {
+            panic!("single snapshot");
+        };
+        let MeasurementRef::Loaded {
+            loaded_response, ..
+        } = single.measurement
+        else {
+            panic!("snapshot retained");
+        };
+        assert_eq!(loaded_response.spl.to_vec(), vec![80.0, 81.0]);
+    }
+
+    #[test]
+    fn provenance_defaults_to_unknown_and_old_json_stays_readable() {
+        // Bare path JSON predates provenance: it reads with unknown kind.
+        let source: MeasurementSource = serde_json::from_str("\"meas.csv\"").unwrap();
+        assert_eq!(
+            source.provenance().capture_kind,
+            ProvenanceCaptureKind::Unknown
+        );
+        let named: MeasurementSource =
+            serde_json::from_str("{\"path\": \"meas.csv\", \"speaker_name\": \"s\"}").unwrap();
+        assert_eq!(
+            named.provenance().capture_kind,
+            ProvenanceCaptureKind::Unknown
+        );
+    }
+
+    #[test]
+    fn provenance_round_trips_and_in_memory_stays_unknown() {
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path(PathBuf::from("meas.csv")),
+            speaker_name: None,
+            provenance: MeasurementProvenance {
+                capture_kind: ProvenanceCaptureKind::StationaryIr,
+                calibration_id: Some(String::from("spl-cal-94db")),
+                timing_reference_id: Some(String::from("loopback-1")),
+                has_measured_spl: true,
+                valid_band_hz: Some([50.0, 8000.0]),
+                has_direct_angular: false,
+                direct_sound: None,
+                capture: None,
+            },
+        });
+        let json = serde_json::to_string(&source).unwrap();
+        let back: MeasurementSource = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.provenance(), source.provenance());
+        // In-memory curves carry no declaration: never inferred.
+        assert_eq!(
+            MeasurementSource::InMemory(Curve::default()).provenance(),
+            MeasurementProvenance::default()
+        );
+    }
+
+    #[test]
+    fn unknown_timing_labels_do_not_authorize_capture_provenance() {
+        for label in ["", " \t", "unknown", " UnKnOwN "] {
+            let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+                "path": "not-loaded.csv",
+                "provenance": {"capture_kind": "stationary_ir", "timing_reference_id": label}
+            }))
+            .unwrap();
+            assert_eq!(source.provenance().timing_reference_id, None, "{label:?}");
+            // Admission sanitization must not rewrite the retained declaration.
+            assert_eq!(
+                serde_json::to_value(&source).unwrap()["provenance"]["timing_reference_id"],
+                label
+            );
+        }
+        let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+            "path": "not-loaded.csv",
+            "provenance": {"capture_kind": "stationary_ir", "timing_reference_id": "clock-a"}
+        }))
+        .unwrap();
+        assert_eq!(
+            source.provenance().timing_reference_id.as_deref(),
+            Some("clock-a")
+        );
+    }
+
+    #[test]
     fn measurement_source_wav_path_uses_single_or_first_position() {
         let single = MeasurementSource::Single(MeasurementSingle {
             measurement: inline(Some("single.wav")),
             speaker_name: None,
+            provenance: MeasurementProvenance::default(),
         });
         assert_eq!(single.wav_path(), Some("single.wav"));
 
         let multiple = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![inline(Some("first.wav")), inline(Some("second.wav"))],
             speaker_name: None,
+            provenance: MeasurementProvenance::default(),
         });
         assert_eq!(multiple.wav_path(), Some("first.wav"));
         assert!(

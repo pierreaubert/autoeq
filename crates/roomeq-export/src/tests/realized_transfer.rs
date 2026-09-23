@@ -559,6 +559,9 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        operation_gates: None,
+
+        provisional_decisions: Vec::new(),
     };
     let graph = DspGraph {
         deployed_source_curves: Default::default(),
@@ -1608,11 +1611,9 @@ fn electrical_headroom_matches_independently_reparsed_camilladsp_outputs() {
 }
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_multisub_coherent_peak_at_all_rates() {
-    if std::env::var("ROOMEQ_CAMILLADSP_BIN").is_err() {
-        eprintln!("set ROOMEQ_CAMILLADSP_BIN for actual multi-sub PCM replay");
-        return;
-    }
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     for sub_count in [2, 4, 8] {
         for rate in [44_100.0, 48_000.0, 96_000.0] {
             let (_graph, irs, yaml, inputs, outputs) = render_routed(sub_count, rate);
@@ -1844,6 +1845,7 @@ fn multisub_allpass_is_phase_only() {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         )]),
         metadata: None,
@@ -2105,6 +2107,7 @@ fn multisub_delay_precision_contract() {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         )]),
         metadata: None,
@@ -2226,6 +2229,7 @@ fn camilladsp_rejects_shared_global_eq() {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         )]),
         metadata: None,
@@ -2275,6 +2279,7 @@ fn staged_chain(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     }
 }
 

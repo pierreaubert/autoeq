@@ -50,7 +50,11 @@ pub fn process_mixed_crossover(
         if fir_uses_low { "high" } else { "low" }
     );
 
-    let optimization_curve = subtract_target_tilt(request.curve, request.target);
+    let usable_curve = match request.prepared {
+        Some(prepared) => prepared.usable_curve(request.curve)?,
+        None => std::borrow::Cow::Borrowed(request.curve),
+    };
+    let optimization_curve = subtract_target_tilt(&usable_curve, request.target);
     let (low_curve, high_curve) = split_curve_at_frequency(&optimization_curve, crossover_freq);
     let (fir_curve, iir_curve) = if fir_uses_low {
         (&low_curve, &high_curve)

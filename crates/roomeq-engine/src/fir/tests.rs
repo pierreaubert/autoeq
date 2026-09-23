@@ -186,6 +186,7 @@ fn predefined_fir_target_uses_measurement_absolute_level() {
     let resources = EqResources {
         target: Some(PreparedEqTarget::Predefined("flat".to_string())),
         impulse_response: None,
+        ..Default::default()
     };
 
     let target = prepared_fir_target_curve(&measurement, &config, &resources);

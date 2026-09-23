@@ -23,7 +23,9 @@ fn default_evidence_version() -> String {
 /// Moving-microphone magnitude data cannot supply phase or impulse
 /// responses; stationary captures keep a timing reference. `Unknown`
 /// is the default for legacy data and must never read as a claim.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum CaptureKind {
     /// Stationary microphone sweep or impulse response.

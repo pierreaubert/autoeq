@@ -111,6 +111,7 @@ fn test_validate_min_freq_greater_than_max() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("test.csv")),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
 
@@ -144,6 +145,7 @@ fn test_validate_cea2034_score_mode_is_invalid_for_roomeq() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("spinorama_left.csv")),
             speaker_name: Some("Example Speaker".to_string()),
+            provenance: Default::default(),
         })),
     );
 
@@ -229,10 +231,12 @@ fn test_validate_crossover_reference() {
                 MeasurementSource::Single(MeasurementSingle {
                     measurement: MeasurementRef::Path(PathBuf::from("woofer.csv")),
                     speaker_name: None,
+                    provenance: Default::default(),
                 }),
                 MeasurementSource::Single(MeasurementSingle {
                     measurement: MeasurementRef::Path(PathBuf::from("tweeter.csv")),
                     speaker_name: None,
+                    provenance: Default::default(),
                 }),
             ],
             crossover: Some("nonexistent".to_string()),
@@ -274,10 +278,12 @@ fn test_validate_crossover_frequency_range_rejects_reversed_bounds() {
                 MeasurementSource::Single(MeasurementSingle {
                     measurement: MeasurementRef::Path(PathBuf::from("woofer.csv")),
                     speaker_name: None,
+                    provenance: Default::default(),
                 }),
                 MeasurementSource::Single(MeasurementSingle {
                     measurement: MeasurementRef::Path(PathBuf::from("tweeter.csv")),
                     speaker_name: None,
+                    provenance: Default::default(),
                 }),
             ],
             crossover: Some("xo".to_string()),
@@ -315,6 +321,7 @@ fn test_validate_speaker_name() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("left.csv")),
             speaker_name: Some("Invalid @ Name".to_string()),
+            provenance: Default::default(),
         })),
     );
 
@@ -349,6 +356,7 @@ fn validate_bass_management_rejects_negative_headroom_and_boost() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("sub.csv")),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     let config = RoomConfig {
@@ -406,6 +414,7 @@ fn validate_role_targets_rejects_invalid_bands_and_distances() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("center.csv")),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     let config = RoomConfig {
@@ -470,6 +479,7 @@ fn mso_two_sub_config(crossover: Option<SubwooferCrossoverRef>) -> RoomConfig {
         MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from(path)),
             speaker_name: None,
+            provenance: Default::default(),
         })
     }
     let mut speakers = HashMap::new();
@@ -482,6 +492,7 @@ fn mso_two_sub_config(crossover: Option<SubwooferCrossoverRef>) -> RoomConfig {
             speaker_name: None,
             subwoofers: vec![single("sub1.csv"), single("sub2.csv")],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     let lr24_range = |minimum: f64, maximum: f64| CrossoverConfig {

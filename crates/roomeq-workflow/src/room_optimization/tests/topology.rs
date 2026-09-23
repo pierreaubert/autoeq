@@ -34,7 +34,10 @@ fn select_topology_route_stereo_2_1() {
             config: SubwooferStrategy::Single,
             crossover: None,
             routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "sub".to_string(), speaker: "sub".to_string() }],
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "sub".to_string(),
+                speaker: "sub".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -66,7 +69,10 @@ fn select_topology_route_home_cinema_with_sub() {
             config: SubwooferStrategy::Single,
             crossover: None,
             routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "lfe".to_string(), speaker: "lfe".to_string() }],
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "lfe".to_string(),
+                speaker: "lfe".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -93,6 +99,7 @@ fn select_topology_route_home_cinema_keeps_mso_bass_output_on_routed_path() {
                 MeasurementSource::InMemory(flat_curve()),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     let system = SystemConfig {
@@ -106,7 +113,10 @@ fn select_topology_route_home_cinema_keeps_mso_bass_output_on_routed_path() {
             config: SubwooferStrategy::Mso,
             crossover: None,
             routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "lfe".to_string(), speaker: "lfe".to_string() }],
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "lfe".to_string(),
+                speaker: "lfe".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -124,6 +134,7 @@ fn select_topology_route_home_cinema_keeps_mso_bass_output_on_routed_path() {
             speaker_name: None,
             subwoofers: vec![MeasurementSource::InMemory(flat_curve())],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     assert_eq!(
@@ -231,6 +242,7 @@ fn select_topology_route_special_bass_configs_without_system_subs_are_generic() 
                 speaker_name: None,
                 subwoofers: vec![source()],
                 allpass_optimization: false,
+                joint_optimization: false,
             }),
         ),
         (
@@ -279,6 +291,7 @@ fn select_topology_route_stereo_mso_sub_reaches_stereo_2_1() {
                 MeasurementSource::InMemory(flat_curve()),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     let system = SystemConfig {
@@ -291,7 +304,10 @@ fn select_topology_route_stereo_mso_sub_reaches_stereo_2_1() {
             config: SubwooferStrategy::Mso,
             crossover: None,
             routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "subs".to_string(), speaker: "subs".to_string() }],
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "subs".to_string(),
+                speaker: "subs".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -326,7 +342,10 @@ fn select_topology_route_stereo_group_sub_stays_generic() {
             config: SubwooferStrategy::Single,
             crossover: None,
             routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "subs".to_string(), speaker: "subs".to_string() }],
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "subs".to_string(),
+                speaker: "subs".to_string(),
+            }],
         }),
         bass_management: None,
         ..Default::default()
@@ -596,16 +615,21 @@ fn home_cinema_5_1_4_config() -> RoomConfig {
         version: roomeq_model::default_config_version(),
         system: Some(SystemConfig {
             model: SystemModel::HomeCinema,
-                speakers: roles
-                    .iter()
-                    .filter(|(role, _)| *role != "LFE")
-                    .map(|(role, channel)| ((*role).to_string(), (*channel).to_string()))
+            speakers: roles
+                .iter()
+                .filter(|(role, _)| *role != "LFE")
+                .map(|(role, channel)| ((*role).to_string(), (*channel).to_string()))
                 .collect(),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec!["main".to_string()])),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                    "main".to_string(),
+                ])),
                 routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "lfe".to_string(), speaker: "lfe".to_string() }],
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "lfe".to_string(),
+                    speaker: "lfe".to_string(),
+                }],
             }),
             bass_management: None,
             ..Default::default()
@@ -825,6 +849,7 @@ fn assemble_workflow_result_persists_channels() {
 fn assemble_generic_result_empty_channels_fails() {
     let config = base_room_config(HashMap::new(), None);
     let generic = GenericChannelCollection {
+        provisional_decisions: Vec::new(),
         channel_chains: HashMap::new(),
         channel_results: HashMap::new(),
         pre_scores: Vec::new(),
@@ -853,6 +878,7 @@ fn assemble_generic_result_empty_channels_fails() {
 #[test]
 fn sanity_check_result_empty_channels_errors() {
     let result = RoomOptimizationResult {
+        finalized_decisions: None,
         channels: HashMap::new(),
         channel_results: HashMap::new(),
         deployed_source_curves: HashMap::new(),
@@ -913,9 +939,14 @@ fn crossover_reconstruction_config(
         ]),
         subwoofers: Some(SubwooferSystemConfig {
             config: SubwooferStrategy::Single,
-            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec!["bass_xo".to_string()])),
+            crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                "bass_xo".to_string(),
+            ])),
             routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "sub".to_string(), speaker: "sub".to_string() }],
+            outputs: vec![roomeq_model::SubwooferOutput {
+                id: "sub".to_string(),
+                speaker: "sub".to_string(),
+            }],
         }),
         bass_management: Some(roomeq_model::BassManagementConfig {
             enabled: true,
@@ -962,6 +993,8 @@ fn crossover_reconstruction_config(
             pre_ringing_threshold_db: -30.0,
             min_spatial_depth: 0.5,
             phase_smoothing_octaves: 1.0 / 6.0,
+            assessment: Default::default(),
+            max_correction_latency_ms: None,
         });
     }
 

@@ -24,7 +24,13 @@ def verify_crossover(row):
     graph = bass["routing_graph"]
     groups = {group["group_id"]: group for group in bass["groups"]}
     assert groups, "no physical crossover groups were reported"
-    expected_sources = set(graph["input_channels"]) - {bass["lfe_channel"]}
+    system = row["effective_config"]["system"]
+    expected_sources = set(system["speakers"])
+    assert expected_sources <= set(graph["input_channels"])
+    sub_outputs = system["subwoofers"]["outputs"]
+    assert len(sub_outputs) == 1, "single-sub matrix expected one physical output"
+    physical_sub_output = sub_outputs[0]["id"]
+    assert physical_sub_output in graph["output_channels"]
     seen = {"main_highpass_to_self": set(), "redirected_bass_lowpass_to_sub": set()}
     for route in graph["routes"]:
         kind = route["route_kind"]
@@ -43,7 +49,7 @@ def verify_crossover(row):
             assert route["destination"] == source
             assert route["high_pass_hz"] == frequency
         else:
-            assert route["destination"] == bass["physical_sub_output"]
+            assert route["destination"] == physical_sub_output
             assert route["low_pass_hz"] == frequency
     assert all(sources == expected_sources for sources in seen.values()), "missing main or sub branch"
     if automatic and axes["phase"] != 1:

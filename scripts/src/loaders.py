@@ -7,6 +7,27 @@ import struct
 from pathlib import Path
 
 
+class RoomEqData(dict):
+    """Keep the source directory outside the serialized payload being verified."""
+
+    def __init__(self, payload, source_directory):
+        super().__init__(payload)
+        self.source_directory = source_directory
+
+
+class FirParameters(dict):
+    """Expose plot-only replay caches without changing the serialized graph."""
+
+    def __init__(self, parameters, rate, taps):
+        super().__init__(parameters)
+        self._replay_cache = {"_fir_sample_rate": rate, "_fir_taps": taps}
+
+    def get(self, key, default=None):
+        if key in self._replay_cache:
+            return self._replay_cache[key]
+        return super().get(key, default)
+
+
 def read_fir_wav(filepath: Path) -> tuple[int, list[float]]:
     """Read mono IEEE-float FIR sidecars, including WAVE_FORMAT_EXTENSIBLE."""
     raw = filepath.read_bytes()
@@ -46,7 +67,7 @@ def load_roomeq_json(filepath: Path) -> dict:
         print(f"Error: File not found: {filepath}")
         sys.exit(1)
     with open(filepath, "r") as f:
-        data = json.load(f)
+        data = RoomEqData(json.load(f), filepath.resolve().parent)
     # Bind physical sidecars before plots replay a driver's plugin chain.
     # These private in-memory fields are never written back to the DSP JSON.
     for channel in (data.get("channels") or {}).values():
@@ -55,6 +76,5 @@ def load_roomeq_json(filepath: Path) -> dict:
                 parameters = plugin.get("parameters") or {}
                 if plugin.get("plugin_type") == "convolution" and parameters.get("room_eq_fir_placement") == "per_driver":
                     rate, taps = read_fir_wav(filepath.parent / parameters["ir_file"])
-                    parameters["_fir_sample_rate"] = rate
-                    parameters["_fir_taps"] = taps
+                    plugin["parameters"] = FirParameters(parameters, rate, taps)
     return data

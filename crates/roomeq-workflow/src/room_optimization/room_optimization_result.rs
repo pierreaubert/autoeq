@@ -1578,7 +1578,33 @@ fn runtime_temporal_quality_evidence(
             }
         })
         .collect();
-    roomeq_engine::quality::derive_temporal_quality_evidence(&channels, pre, post, sample_rate)
+    let mut evidence =
+        roomeq_engine::quality::derive_temporal_quality_evidence(&channels, pre, post, sample_rate);
+    let unresolved_fir = names.iter().any(|name| {
+        result.channels.get(name).is_some_and(|chain| {
+            chain.fir_temporal_masking.is_none()
+                && chain
+                    .plugins
+                    .iter()
+                    .chain(
+                        chain
+                            .drivers
+                            .iter()
+                            .flatten()
+                            .flat_map(|driver| &driver.plugins),
+                    )
+                    .any(|plugin| plugin.plugin_type == "convolution")
+        })
+    });
+    if unresolved_fir {
+        // Serialized convolution establishes that FIR evidence is required,
+        // even when missing resources also removed the tap-count metadata.
+        // A maximum over the remaining channels is not complete evidence.
+        evidence.temporal_evidence_available = false;
+        evidence.pre_ringing_energy_db = None;
+        evidence.latency_ms = None;
+    }
+    evidence
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2020,6 +2046,105 @@ fn correction_stages(chain: &ChannelDspChain) -> BTreeSet<CorrectionStage> {
         }
     }
     stages
+}
+
+/// Record actual selected PEQ stages before the final workflow mutation pass.
+pub(super) fn record_peq_candidates(result: &mut RoomOptimizationResult, config: &RoomConfig) {
+    use roomeq_model::decision_ledger::{
+        DECISION_LEDGER_VERSION, DecisionAction, DecisionRecord, DecisionStage, DecisionStatus,
+        ObservedQuantity,
+    };
+    let supporting_outputs = supporting_source_output_names(result);
+    let mut names: Vec<_> = result.channels.keys().cloned().collect();
+    names.sort();
+    for name in names {
+        if supporting_outputs.contains(&name)
+            || !correction_stages(&result.channels[&name]).contains(&CorrectionStage::Peq)
+        {
+            continue;
+        }
+        let decision_id = format!("candidate-peq-{name}");
+        if result
+            .metadata
+            .provisional_decisions
+            .iter()
+            .any(|record| record.decision_id == decision_id)
+        {
+            continue;
+        }
+        let gate = result
+            .metadata
+            .operation_gates
+            .as_ref()
+            .and_then(|gates| gates.iter().find(|gate| gate.channel == name));
+        let mut measurement_refs = Vec::new();
+        let mut seat_refs = BTreeSet::new();
+        let mut evidence_refs = BTreeSet::new();
+        if let Some(gate) = gate {
+            measurement_refs.push(gate.measurement_id.clone());
+            for record in &gate.records {
+                if record.operation
+                    == roomeq_model::eligibility::CorrectionOperation::MagnitudeCorrection
+                {
+                    seat_refs.extend(record.seat_ids.iter().cloned());
+                    evidence_refs.insert(record.record_id.clone());
+                    evidence_refs.extend(record.evidence_refs.iter().cloned());
+                }
+            }
+        }
+        let mut observed = Vec::new();
+        if let Some(channel) = result.channel_results.get(&name) {
+            for (quantity, value) in [
+                ("candidate_pre_score", channel.pre_score),
+                ("candidate_post_score", channel.post_score),
+            ] {
+                if value.is_finite() {
+                    observed.push(ObservedQuantity {
+                        name: quantity.to_owned(),
+                        value,
+                        unit: "objective_units".to_owned(),
+                    });
+                }
+            }
+        }
+        // Requested optimizer limits are not an observed affected interval.
+        let limits = [
+            ("requested_min_frequency", config.optimizer.min_freq),
+            ("requested_max_frequency", config.optimizer.max_freq),
+        ]
+        .into_iter()
+        .filter(|(_, value)| value.is_finite() && *value > 0.0)
+        .map(|(name, value)| ObservedQuantity {
+            name: name.to_owned(),
+            value,
+            unit: "hz".to_owned(),
+        })
+        .collect();
+        result.metadata.provisional_decisions.push(DecisionRecord {
+            decision_id,
+            ledger_version: DECISION_LEDGER_VERSION.to_owned(),
+            stage: DecisionStage::Provisional,
+            logical_input: name.clone(),
+            physical_output: name,
+            measurement_refs,
+            seat_refs: seat_refs.into_iter().collect(),
+            frequency_band_hz: None,
+            filter_center_hz: None,
+            action: DecisionAction::Equalize,
+            status: DecisionStatus::Applied,
+            reason_codes: vec![
+                "optimizer_selected_magnitude_correction".to_owned(),
+                "candidate_prediction_not_playback_validation".to_owned(),
+            ],
+            observed,
+            limits,
+            evidence_refs: evidence_refs.into_iter().collect(),
+            confidence: roomeq_model::AssessmentConfidence::Unknown,
+            related_decision_ids: Vec::new(),
+            supersedes_ids: Vec::new(),
+            final_graph_identity: None,
+        });
+    }
 }
 
 fn correction_stage(plugin: &roomeq_model::PluginConfigWrapper) -> Option<CorrectionStage> {
@@ -2941,6 +3066,29 @@ mod tests {
     }
 
     #[test]
+    fn temporal_evidence_does_not_treat_unresolved_convolution_as_iir() {
+        let mut result = single_channel_room_result("left");
+        result.channel_results.get_mut("left").unwrap().fir_coeffs = None;
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.fir_temporal_masking = None;
+        chain.plugins = vec![roomeq_model::PluginConfigWrapper {
+            plugin_type: "convolution".into(),
+            parameters: serde_json::json!({"ir_file": "unresolved.wav"}),
+        }];
+        let evidence = runtime_temporal_quality_evidence(
+            &result,
+            &["left".into()],
+            &[],
+            &[],
+            48_000.0,
+            roomeq_model::ProcessingMode::PhaseLinear,
+        );
+        assert!(!evidence.temporal_evidence_available);
+        assert!(evidence.pre_ringing_energy_db.is_none());
+        assert!(evidence.latency_ms.is_none());
+    }
+
+    #[test]
     fn temporal_evidence_preserves_measured_precursor_across_modes() {
         // F11: the same FIR/evidence must retain the same measured precursor
         // value across mode labels. Policy decisions may differ transparently;
@@ -3189,6 +3337,7 @@ mod tests {
     #[test]
     fn sanity_check_result_empty_errors() {
         let result = RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::new(),
             channel_results: HashMap::new(),
             deployed_source_curves: HashMap::new(),
@@ -3954,11 +4103,13 @@ mod tests {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         );
         result.channel_results.insert(
             "WideLeft_support".to_string(),
             roomeq_engine::room_result::ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: "WideLeft_support".to_string(),
                 pre_score: 0.0,
                 post_score: 0.0,
@@ -4051,11 +4202,13 @@ mod tests {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         );
         result.channel_results.insert(
             "WideLeft_support".to_string(),
             roomeq_engine::room_result::ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: "WideLeft_support".to_string(),
                 pre_score: 0.0,
                 post_score: 0.0,
@@ -4325,7 +4478,19 @@ fn combined_boost_limit_refreshes_biquad_coefficients_and_ir_report() {
         )
         .unwrap();
         let actual_ir = result.channels["left"].post_ir.as_ref().unwrap();
-        assert_eq!(actual_ir.amplitude, expected_ir.amplitude);
+        assert_eq!(actual_ir.amplitude.len(), expected_ir.amplitude.len());
+        let max_delta = actual_ir
+            .amplitude
+            .iter()
+            .zip(&expected_ir.amplitude)
+            .map(|(actual, expected)| (actual - expected).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_delta < 1e-12,
+            "serialized IR differs from expected biquad IR by {max_delta} at {sample_rate} Hz; first actual={}, expected={}",
+            actual_ir.amplitude[0],
+            expected_ir.amplitude[0]
+        );
         assert_ne!(actual_ir.amplitude, old_ir.amplitude);
     }
 }

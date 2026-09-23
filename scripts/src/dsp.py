@@ -247,34 +247,107 @@ def biquad_coefficients(
 def compute_eq_response(
     filters: list[dict], freq_points: list[float], sample_rate: float = 48_000.0
 ) -> list[float]:
-    """Compute the combined EQ response using Rust-canonical biquad math."""
+    """Compute EQ magnitude using the serialized filter topology."""
     if not filters or not freq_points:
         return []
-
     combined_db = [0.0] * len(freq_points)
     for filt in filters:
-        coefficients = biquad_coefficients(
-            filt.get("filter_type", "peak"),
-            filt.get("freq", filt.get("frequency", 1_000.0)),
-            sample_rate,
-            filt.get("q", 1.0),
-            filt.get("db_gain", filt.get("gain", 0.0)),
-        )
-        a1, a2, b0, b1, b2 = coefficients
-        for index, frequency in enumerate(freq_points):
-            if frequency <= 0.0:
-                continue
-            omega = 2.0 * math.pi * frequency / sample_rate
-            cosine, sine = math.cos(omega), math.sin(omega)
-            cosine_2w, sine_2w = math.cos(2.0 * omega), math.sin(2.0 * omega)
-            numerator = complex(b0 + b1 * cosine + b2 * cosine_2w, -b1 * sine - b2 * sine_2w)
-            denominator = complex(1.0 + a1 * cosine + a2 * cosine_2w, -a1 * sine - a2 * sine_2w)
-            denominator_magnitude = abs(denominator)
-            if denominator_magnitude > 1.0e-10:
-                magnitude = max(abs(numerator) / denominator_magnitude, 1.0e-10)
-                combined_db[index] += 20.0 * math.log10(magnitude)
-
+        for index, value in enumerate(serialized_filter_response(filt, freq_points, sample_rate)):
+            combined_db[index] += 20.0 * math.log10(max(abs(value), 1.0e-10))
     return combined_db
+
+
+def _finite_filter_number(value, field):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"invalid serialized EQ {field}: {value!r}")
+    return float(value)
+
+
+def kautz_sections(filt: dict, sample_rate: float) -> list[tuple[float, float, float]]:
+    """Read ordered (pole Hz, Q, linear weight) entries, including legacy forms."""
+    if "kautz_sections" in filt and "sections" in filt:
+        raise ValueError("duplicate Kautz section fields")
+    values = filt.get("kautz_sections", filt.get("sections", []))
+    if not isinstance(values, list):
+        raise ValueError("Kautz sections must be an array")
+    if not values:
+        values = [{"pole_freq": filt.get("freq"), "q": filt.get("q"),
+                   "gain": filt.get("db_gain", 0.0)}]
+    result = []
+    for section in values:
+        if not isinstance(section, dict):
+            raise ValueError("Kautz section must be an object")
+        keys = [key for key in ("pole_freq", "freq", "frequency", "pole_freq_hz") if key in section]
+        if len(keys) != 1:
+            raise ValueError("Kautz section requires a unique pole frequency")
+        pole = _finite_filter_number(section[keys[0]], "pole frequency")
+        q = _finite_filter_number(section.get("q"), "Q")
+        gain = _finite_filter_number(section.get("gain", 0.0), "linear weight")
+        if not 0 < pole < sample_rate / 2 or q <= 0:
+            raise ValueError("Kautz requires a sub-Nyquist positive pole and positive Q")
+        result.append((pole, q, gain))
+    return result
+
+
+def serialized_filter_response(filt: dict, frequencies: list[float], sample_rate: float) -> list[complex]:
+    """Complex transfer matching Rust's serialized EQ realization contract.
+
+    Kautz is unity plus an ordered basis bank, not a cascade of PEQs. Warped
+    biquads map both design and evaluation frequencies. This is a transfer
+    prediction, not a recording or whole-host validation.
+    """
+    sample_rate = _finite_filter_number(sample_rate, "sample rate")
+    if sample_rate <= 0:
+        raise ValueError("EQ sample rate must be positive")
+    for frequency in frequencies:
+        _finite_filter_number(frequency, "evaluation frequency")
+        if not 0 <= frequency <= sample_rate / 2:
+            raise ValueError("EQ evaluation frequency must be between DC and Nyquist")
+    topology = filt.get("topology", "biquad")
+    if topology not in ("biquad", "warped_biquad", "kautz_filter"):
+        raise ValueError(f"unsupported serialized EQ topology: {topology!r}")
+    if topology == "kautz_filter":
+        sections = []
+        for pole, q, gain in kautz_sections(filt, sample_rate):
+            radius = min(math.exp(-math.pi * pole / (max(q, 0.1) * sample_rate)), 0.9999)
+            a1 = -2 * radius * math.cos(2 * math.pi * pole / sample_rate)
+            a2 = radius * radius
+            sections.append((a1, a2, gain * (1-a2)**1.5))
+        result = []
+        for frequency in frequencies:
+            angle = -2 * math.pi * frequency / sample_rate
+            z = complex(math.cos(angle), math.sin(angle))
+            chain, value = 1+0j, 1+0j
+            for a1, a2, numerator in sections:
+                denominator = 1 + a1*z + a2*z*z
+                value += numerator * chain / denominator
+                chain *= (a2 + a1*z + z*z) / denominator
+            result.append(value)
+        return result
+
+    center = filt.get("freq", filt.get("frequency", 1_000.0))
+    q, gain = filt.get("q", 1.0), filt.get("db_gain", filt.get("gain", 0.0))
+    evaluation = frequencies
+    if topology == "warped_biquad":
+        center = _finite_filter_number(filt.get("freq"), "frequency")
+        q = _finite_filter_number(filt.get("q"), "Q")
+        gain = _finite_filter_number(filt.get("db_gain"), "dB gain")
+        if not 0 < center < sample_rate / 2 or q <= 0:
+            raise ValueError("warped EQ requires a sub-Nyquist positive frequency and positive Q")
+        default_lambda = 1.0674 * math.sqrt(2/math.pi * math.atan(0.06583*sample_rate)) - 0.1916
+        lam = _finite_filter_number(filt.get("lambda", default_lambda), "lambda")
+        if not -1 < lam < 1:
+            raise ValueError("warped EQ lambda must be between -1 and 1")
+
+        def warp(frequency):
+            omega = 2 * math.pi * frequency / sample_rate
+            omega += 2 * math.atan2(lam * math.sin(omega), 1-lam*math.cos(omega))
+            return min(max(omega * sample_rate / (2*math.pi), 0.0), sample_rate/2)
+
+        center = warp(center)
+        evaluation = [warp(frequency) for frequency in frequencies]
+    coefficients = biquad_coefficients(filt.get("filter_type", "peak"), center, sample_rate, q, gain)
+    return [_biquad_complex_response(coefficients, frequency, sample_rate) for frequency in evaluation]
 
 
 def _biquad_complex_response(
@@ -380,17 +453,9 @@ def apply_plugins_to_curve(
             ]
         elif plugin_type == "eq":
             for filt in parameters.get("filters", []):
-                coefficients = biquad_coefficients(
-                    filt.get("filter_type", "peak"),
-                    filt.get("freq", filt.get("frequency", 1_000.0)),
-                    sample_rate,
-                    filt.get("q", 1.0),
-                    filt.get("db_gain", filt.get("gain", 0.0)),
-                )
                 transfer = [
-                    value
-                    * _biquad_complex_response(coefficients, frequency, sample_rate)
-                    for value, frequency in zip(transfer, frequencies)
+                    value * eq
+                    for value, eq in zip(transfer, serialized_filter_response(filt, frequencies, sample_rate))
                 ]
         elif plugin_type == "convolution" and parameters.get("room_eq_fir_placement") == "per_driver":
             taps = parameters.get("_fir_taps")

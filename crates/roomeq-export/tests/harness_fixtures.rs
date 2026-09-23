@@ -9,8 +9,8 @@
 //! Parse-back here is not playback proof and implies no listening benefit.
 
 use roomeq_export::{
-    build_export_package, canonical_dsp_identity, package_fingerprint, render_dsp_graph,
-    ConvolutionResource, ExportFormat,
+    ConvolutionResource, ExportFormat, build_export_package, canonical_dsp_identity,
+    package_fingerprint, render_dsp_graph,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -38,7 +38,9 @@ fn impulse_wav(frames: usize) -> Vec<u8> {
     {
         let mut writer = hound::WavWriter::new(&mut cursor, spec).unwrap();
         for frame in 0..frames {
-            writer.write_sample(if frame == 0 { 1.0_f32 } else { 0.0 }).unwrap();
+            writer
+                .write_sample(if frame == 0 { 1.0_f32 } else { 0.0 })
+                .unwrap();
         }
         writer.finalize().unwrap();
     }
@@ -64,7 +66,8 @@ fn serial_graph() -> roomeq_model::DspGraph {
                 ]}},
             ]},
         },
-    })).unwrap()
+    }))
+    .unwrap()
 }
 
 fn hybrid_graph() -> (roomeq_model::DspGraph, Vec<ConvolutionResource>) {
@@ -72,24 +75,33 @@ fn hybrid_graph() -> (roomeq_model::DspGraph, Vec<ConvolutionResource>) {
     graph.channels.get_mut("left").unwrap().plugins.push(
         serde_json::from_value(json!({
             "plugin_type": "convolution", "parameters": {"ir_file": "left.wav"}
-        })).unwrap(),
+        }))
+        .unwrap(),
     );
     let resource = ConvolutionResource {
         reference: "left.wav".into(),
         bytes: impulse_wav(256).into(),
     };
     let sha = resource.sha256();
-    graph.metadata = Some(serde_json::from_value(json!({
-        "pre_score": 5.0, "post_score": 2.0, "algorithm": "fixture",
-        "iterations": 1, "timestamp": "2026-09-21T00:00:00Z",
-        "final_convolution_sha256": {"left.wav": sha},
-    })).unwrap());
+    graph.metadata = Some(
+        serde_json::from_value(json!({
+            "pre_score": 5.0, "post_score": 2.0, "algorithm": "fixture",
+            "iterations": 1, "timestamp": "2026-09-21T00:00:00Z",
+            "final_convolution_sha256": {"left.wav": sha},
+        }))
+        .unwrap(),
+    );
     (graph, vec![resource])
 }
 
 fn routed_graph() -> roomeq_model::DspGraph {
-    let route = |source: &str, source_index: usize, destination: &str, destination_index: usize,
-                 kind: &str, high: Option<f64>, low: Option<f64>| {
+    let route = |source: &str,
+                 source_index: usize,
+                 destination: &str,
+                 destination_index: usize,
+                 kind: &str,
+                 high: Option<f64>,
+                 low: Option<f64>| {
         json!({
             "group_id": "lcr", "source_channel": source, "source_index": source_index,
             "destination": destination, "destination_index": destination_index,
@@ -175,25 +187,37 @@ fn emit_backend_harness_fixtures() {
         let artifact = render_dsp_graph(&serial, ExportFormat::BiquadCoefficients, rate).unwrap();
         let identity = canonical_dsp_identity(&serial, rate, &[]).unwrap();
         std::fs::write(dir.join(&name), &artifact).unwrap();
-        manifest.insert(name, json!({
-            "kind": "serial_iir", "sample_rate_hz": rate,
-            "dsp_identity": identity.dsp_identity,
-        }));
+        manifest.insert(
+            name,
+            json!({
+                "kind": "serial_iir", "sample_rate_hz": rate,
+                "dsp_identity": identity.dsp_identity,
+            }),
+        );
         let name = format!("serial_iir_{}.yaml", rate as u32);
         let artifact = render_dsp_graph(&serial, ExportFormat::CamillaDsp, rate).unwrap();
         std::fs::write(dir.join(&name), &artifact).unwrap();
-        manifest.insert(name, json!({
-            "kind": "serial_iir_camilladsp", "sample_rate_hz": rate,
-            "dsp_identity": identity.dsp_identity,
-        }));
+        manifest.insert(
+            name,
+            json!({
+                "kind": "serial_iir_camilladsp", "sample_rate_hz": rate,
+                "dsp_identity": identity.dsp_identity,
+            }),
+        );
     }
 
     // Hybrid IIR+FIR evidence-bound package at 48 kHz.
     let (hybrid, resources) = hybrid_graph();
     let package = build_export_package(
-        &hybrid, ExportFormat::CamillaDsp, Path::new("hybrid.yaml"),
-        48_000.0, &resources, &BTreeSet::new(), &HashMap::new(),
-    ).unwrap();
+        &hybrid,
+        ExportFormat::CamillaDsp,
+        Path::new("hybrid.yaml"),
+        48_000.0,
+        &resources,
+        &BTreeSet::new(),
+        &HashMap::new(),
+    )
+    .unwrap();
     package.validate_integrity().unwrap();
     let identity = canonical_dsp_identity(&hybrid, 48_000.0, &resources).unwrap();
     let fingerprint = package_fingerprint(&package);
@@ -201,12 +225,15 @@ fn emit_backend_harness_fixtures() {
     for member in &package.members {
         let name = format!("hybrid_{}", member.relative_path.display());
         std::fs::write(dir.join(&name), member.bytes.as_ref()).unwrap();
-        manifest.insert(name, json!({
-            "kind": "hybrid_package_member",
-            "sha256": member.sha256,
-            "dsp_identity": identity.dsp_identity,
-            "package_fingerprint": fingerprint,
-        }));
+        manifest.insert(
+            name,
+            json!({
+                "kind": "hybrid_package_member",
+                "sha256": member.sha256,
+                "dsp_identity": identity.dsp_identity,
+                "package_fingerprint": fingerprint,
+            }),
+        );
     }
 
     // Routed shared-bass CamillaDSP at 48 kHz.
@@ -214,18 +241,28 @@ fn emit_backend_harness_fixtures() {
     let yaml = render_dsp_graph(&routed, ExportFormat::CamillaDsp, 48_000.0).unwrap();
     let identity = canonical_dsp_identity(&routed, 48_000.0, &[]).unwrap();
     std::fs::write(dir.join("routed_shared_bass_48000.yaml"), &yaml).unwrap();
-    manifest.insert("routed_shared_bass_48000.yaml".to_string(), json!({
-        "kind": "routed_shared_bass", "sample_rate_hz": 48_000.0,
-        "dsp_identity": identity.dsp_identity,
-    }));
+    manifest.insert(
+        "routed_shared_bass_48000.yaml".to_string(),
+        json!({
+            "kind": "routed_shared_bass", "sample_rate_hz": 48_000.0,
+            "dsp_identity": identity.dsp_identity,
+        }),
+    );
 
     let manifest_path = dir.join("manifest.json");
-    std::fs::write(&manifest_path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+    std::fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
     let back: BTreeMap<String, serde_json::Value> =
         serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
     assert_eq!(back.len(), 9, "fixture count changed: {back:?}");
     for (name, entry) in &back {
         assert!(dir.join(name).exists(), "missing fixture file {name}");
-        assert!(entry.get("dsp_identity").is_some(), "missing DSP identity for {name}");
+        assert!(
+            entry.get("dsp_identity").is_some(),
+            "missing DSP identity for {name}"
+        );
     }
 }

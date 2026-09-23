@@ -278,6 +278,8 @@ mod tests {
                 pre_ringing_threshold_db: -30.0,
                 min_spatial_depth: 0.5,
                 phase_smoothing_octaves: 1.0 / 6.0,
+                assessment: Default::default(),
+                max_correction_latency_ms: None,
             }),
             ..OptimizerConfig::default()
         }
@@ -571,6 +573,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
             target_curve: None,
         };
         let mut config = OptimizerConfig {

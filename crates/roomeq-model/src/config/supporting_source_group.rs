@@ -41,6 +41,7 @@ mod tests {
         MeasurementSource::Single(MeasurementSingle {
             measurement: crate::MeasurementRef::Path(std::path::PathBuf::from(path)),
             speaker_name: None,
+            provenance: Default::default(),
         })
     }
 

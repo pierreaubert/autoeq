@@ -54,6 +54,7 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
                 // the same measured primary seat as the mains, never their RMS.
                 shared_eq_seats: (seats.len() > 1).then_some(seats),
                 common_eq_complete: false,
+                joint_sub: None,
                 optimizer_evidence: Vec::new(),
                 advisories: Vec::new(),
                 combined_curve: curve,
@@ -67,6 +68,9 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
                 sample_rate,
                 frequency_samples,
             ),
+            SubwooferStrategy::Single if ms.joint_optimization => Err(AutoeqError::InvalidConfiguration {
+                message: "joint_optimization requires routed subwoofer strategy 'mso'; 'single' selects independent subs".into(),
+            }),
             SubwooferStrategy::Single => {
                 preprocess_multisub_independent_with_frequency_samples(ms, frequency_samples)
             }
@@ -107,7 +111,8 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     sample_rate: f64,
     frequency_samples: usize,
 ) -> Result<SubPreprocessResult> {
-    if ms.allpass_optimization
+    if ms.joint_optimization
+        || ms.allpass_optimization
         || optimizer
             .multi_seat
             .as_ref()
@@ -139,28 +144,42 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("MSO optimization failed: {}", e),
     })?;
-    // Keep the spatial magnitude used for multi-seat EQ, but carry the
-    // primary-seat complex phase/coherence into crossover timing. The legacy
-    // curve alone is intentionally magnitude-only.
-    let mut combined = optimized.combined_response.legacy_combined_curve();
-    if let Some(primary) = optimized.combined_response.primary_seat_complex.as_ref() {
-        combined.phase = primary.phase.clone();
-        combined.coherence = primary.coherence.clone();
-    }
+    // Routing uses the complete primary-seat complex response when available.
+    // Keep spatial EQ seats separately below; never attach primary-seat phase
+    // to an averaged magnitude. The compatibility helper preserves this split.
+    let combined = optimized.combined_response.legacy_combined_curve();
+    let phase_controls_enabled = optimized.phase_controls_enabled;
+    let mut advisories = optimized.advisories;
     let result = optimized.base;
-    let shared_eq_seats =
+    let seat_measurements =
         crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples(
             ms,
             frequency_samples,
-        )?
-        .map(|seats| {
-            roomeq_engine::multisub::render_mso_seat_responses(
-                &seats,
-                &result.gains,
-                &result.delays,
-            )
-        })
-        .transpose()?;
+        )?;
+    let shared_eq_seats = if phase_controls_enabled {
+        seat_measurements
+            .map(|seats| {
+                roomeq_engine::multisub::render_mso_seat_responses(
+                    &seats,
+                    &result.gains,
+                    &result.delays,
+                )
+            })
+            .transpose()?
+    } else {
+        if seat_measurements.is_some() {
+            let reason = if advisories
+                .iter()
+                .any(|advisory| advisory == "unverified_timing_gain_only")
+            {
+                "unverified_timing_shared_eq_seats_unavailable"
+            } else {
+                "missing_phase_shared_eq_seats_unavailable"
+            };
+            advisories.push(reason.into());
+        }
+        None
+    };
 
     info!(
         "  MSO result: gains={:?}, delays={:?}",
@@ -199,8 +218,9 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     Ok(SubPreprocessResult {
         shared_eq_seats,
         common_eq_complete: false,
+        joint_sub: None,
         optimizer_evidence: Vec::new(),
-        advisories: Vec::new(),
+        advisories,
         combined_curve: combined,
         drivers: Some(drivers),
     })
@@ -252,10 +272,22 @@ fn preprocess_multisub_advanced(
             message: error.to_string(),
         }
     })?;
-    let prepared = roomeq_engine::group_processing::PreparedMultiSubGroup {
+    let mut prepared = roomeq_engine::group_processing::PreparedMultiSubGroup {
         subwoofers: measurements.clone(),
         seat_measurements: seats,
+        reference_scope: None,
     };
+    let band_curves = prepared
+        .seat_measurements
+        .as_ref()
+        .map(|seats| seats.iter().flatten().cloned().collect::<Vec<_>>())
+        .unwrap_or_else(|| prepared.subwoofers.clone());
+    let bounded =
+        roomeq_engine::group_processing::sub_optimizer_config(&band_curves, &room.optimizer);
+    prepared.reference_scope = crate::group_measurements::multisub_reference_scope(
+        ms,
+        [bounded.min_freq, bounded.max_freq],
+    );
     let (chain, _, _, _, combined, _, _, _, _, evidence) =
         roomeq_engine::group_processing::process_multisub_group(
             &ms.name,
@@ -308,16 +340,23 @@ fn preprocess_multisub_advanced(
         shared_eq_seats: None,
         drivers: Some(drivers),
         common_eq_complete: true,
+        joint_sub: chain.joint_sub.clone(),
         optimizer_evidence: evidence,
         advisories: vec![
             format!(
                 "sub_alignment_strategy:{}",
-                optimizer
-                    .multi_seat
-                    .as_ref()
-                    .filter(|seat| seat.enabled)
-                    .map(|seat| format!("{:?}", seat.strategy))
-                    .unwrap_or_else(|| "single_seat_allpass".into())
+                if chain.joint_sub.is_some() {
+                    "joint_coherent".to_string()
+                } else if ms.joint_optimization {
+                    "joint_unavailable_detailed_fallback".to_string()
+                } else {
+                    optimizer
+                        .multi_seat
+                        .as_ref()
+                        .filter(|seat| seat.enabled)
+                        .map(|seat| format!("{:?}", seat.strategy))
+                        .unwrap_or_else(|| "single_seat_allpass".into())
+                }
             ),
             format!("sub_alignment_primary_seat:{primary}"),
         ],
@@ -393,6 +432,7 @@ pub(in super::super) fn preprocess_multisub_independent_with_frequency_samples(
     Ok(SubPreprocessResult {
         shared_eq_seats: None,
         common_eq_complete: false,
+        joint_sub: None,
         optimizer_evidence: Vec::new(),
         advisories: Vec::new(),
         combined_curve: combined,
@@ -563,6 +603,7 @@ fn render_cardioid_seat(
     Ok(SubPreprocessResult {
         shared_eq_seats: None,
         common_eq_complete: false,
+        joint_sub: None,
         optimizer_evidence: Vec::new(),
         advisories: Vec::new(),
         combined_curve: combined,
@@ -624,6 +665,7 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
     Ok(SubPreprocessResult {
         shared_eq_seats: None,
         common_eq_complete: false,
+        joint_sub: None,
         optimizer_evidence: vec![optimized.optimizer_evidence],
         advisories: Vec::new(),
         combined_curve: combined,
@@ -635,6 +677,32 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
 mod tests {
     use super::*;
     use roomeq_engine::Curve;
+
+    #[test]
+    fn roadmap_correction_joint_routed_independent_strategy_cannot_silently_replace_selection() {
+        let source = SpeakerConfig::MultiSub(MultiSubGroup {
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))); 2],
+            joint_optimization: true,
+            allpass_optimization: false,
+        });
+        let result = preprocess_sub_with_frequency_samples(
+            &source,
+            &SubwooferStrategy::Single,
+            &tiny_optimizer(),
+            48_000.0,
+            16,
+        );
+        let error = result
+            .err()
+            .expect("independent strategy must not silently replace joint mode");
+        assert!(
+            error
+                .to_string()
+                .contains("requires routed subwoofer strategy 'mso'")
+        );
+    }
     use roomeq_model::{
         CardioidConfig, DBAConfig, MeasurementSource, MultiSubGroup, OptimizerConfig,
         SpeakerConfig, SpeakerGroup, SubwooferStrategy,
@@ -666,15 +734,32 @@ mod tests {
 
     #[test]
     fn legacy_mso_retains_each_shared_eq_seat_separately_from_routing() {
-        let source = MeasurementSource::InMemoryMultiple(vec![
-            make_curve(16, 80.0, Some(37.0)),
-            make_curve(16, 90.0, Some(-89.0)),
-        ]);
+        // Synthetic positive control with a declared common reference and
+        // matching seat labels; plain in-memory phase arrays stay gain-only.
+        let source = MeasurementSource::Multiple(autoeq_core::MeasurementMultiple {
+            measurements: [("seat-0", 80.0, 37.0), ("seat-1", 90.0, -89.0)]
+                .into_iter()
+                .map(|(seat, level, phase)| autoeq_core::MeasurementRef::Loaded {
+                    original: Box::new(autoeq_core::MeasurementRef::Named {
+                        path: format!("synthetic-{seat}.csv").into(),
+                        name: Some(seat.into()),
+                    }),
+                    loaded_response: Box::new(make_curve(16, level, Some(phase))),
+                })
+                .collect(),
+            speaker_name: None,
+            provenance: autoeq_core::MeasurementProvenance {
+                capture_kind: autoeq_core::ProvenanceCaptureKind::StationaryIr,
+                timing_reference_id: Some("synthetic-common-reference".into()),
+                ..Default::default()
+            },
+        });
         let group = MultiSubGroup {
             name: "subs".into(),
             speaker_name: None,
             subwoofers: vec![source.clone(), source],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         let result =
             preprocess_multisub_mso_with_frequency_samples(&group, &tiny_optimizer(), 48_000.0, 16)
@@ -692,6 +777,23 @@ mod tests {
             "routing lost complex phase"
         );
         assert!(!result.common_eq_complete);
+        let routing = interpolate_log_space(&seats[0].freq, &result.combined_curve);
+        for (actual, expected) in routing.spl.iter().zip(&seats[0].spl) {
+            assert!(
+                (actual - expected).abs() < 1e-8,
+                "routing magnitude must belong to the same primary seat as its phase: {actual} vs {expected}"
+            );
+        }
+        for (actual, expected) in routing
+            .phase
+            .as_ref()
+            .unwrap()
+            .iter()
+            .zip(seats[0].phase.as_ref().unwrap())
+        {
+            assert!((actual - expected).to_radians().sin().abs() < 1e-8);
+            assert!((actual - expected).to_radians().cos() > 0.0);
+        }
         for driver in result.drivers.as_ref().unwrap() {
             let physical = driver.initial_curve.as_ref().unwrap();
             assert!(physical.spl.iter().all(|spl| (*spl - 80.0).abs() < 1e-8));
@@ -707,6 +809,77 @@ mod tests {
     }
 
     #[test]
+    fn legacy_mso_does_not_invent_coherent_shared_eq_seats_without_timing() {
+        let source = MeasurementSource::InMemoryMultiple(vec![
+            make_curve(16, 80.0, Some(37.0)),
+            make_curve(16, 90.0, Some(-89.0)),
+        ]);
+        let group = MultiSubGroup {
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![source.clone(), source],
+            allpass_optimization: false,
+            joint_optimization: false,
+        };
+        let result =
+            preprocess_multisub_mso_with_frequency_samples(&group, &tiny_optimizer(), 48_000.0, 16)
+                .unwrap();
+        assert!(result.shared_eq_seats.is_none());
+        assert!(result.combined_curve.phase.is_none());
+        assert!(
+            result
+                .advisories
+                .iter()
+                .any(|reason| reason == "unverified_timing_shared_eq_seats_unavailable")
+        );
+        assert!(
+            result
+                .drivers
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|driver| driver.delay == 0.0)
+        );
+    }
+
+    #[test]
+    fn legacy_mso_retains_gain_only_admission_reason() {
+        let group = MultiSubGroup {
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![
+                MeasurementSource::InMemory(make_curve(16, 80.0, None)),
+                MeasurementSource::InMemory(make_curve(16, 82.0, None)),
+            ],
+            allpass_optimization: false,
+            joint_optimization: false,
+        };
+        let result = preprocess_sub_with_frequency_samples(
+            &SpeakerConfig::MultiSub(group),
+            &SubwooferStrategy::Mso,
+            &tiny_optimizer(),
+            48_000.0,
+            16,
+        )
+        .unwrap();
+        assert!(
+            result
+                .advisories
+                .iter()
+                .any(|reason| reason == "missing_phase_gain_only")
+        );
+        assert!(result.combined_curve.phase.is_none());
+        assert!(
+            result
+                .drivers
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|driver| driver.delay == 0.0)
+        );
+    }
+
+    #[test]
     fn preprocess_independent_subs_preserve_coherent_phase() {
         for (phase, expected) in [(0.0, 86.020599913), (180.0, -240.0)] {
             let group = MultiSubGroup {
@@ -717,6 +890,7 @@ mod tests {
                     MeasurementSource::InMemory(make_curve(16, 80.0, Some(phase))),
                 ],
                 allpass_optimization: false,
+                joint_optimization: false,
             };
             let result =
                 preprocess_multisub_independent_with_frequency_samples(&group, 16).unwrap();
@@ -740,14 +914,34 @@ mod tests {
 
     #[test]
     fn preprocess_allpass_retains_deployable_filters_and_replay() {
+        // Synthetic positive control modeling declared same-seat capture
+        // provenance, not evidence from physical measurement hardware.
+        let declared = |curve| {
+            MeasurementSource::Single(autoeq_core::MeasurementSingle {
+                measurement: autoeq_core::MeasurementRef::Loaded {
+                    original: Box::new(autoeq_core::MeasurementRef::Named {
+                        path: "synthetic-allpass.csv".into(),
+                        name: Some("seat-0".into()),
+                    }),
+                    loaded_response: Box::new(curve),
+                },
+                speaker_name: None,
+                provenance: autoeq_core::MeasurementProvenance {
+                    capture_kind: autoeq_core::ProvenanceCaptureKind::StationaryIr,
+                    timing_reference_id: Some("synthetic-common-reference".into()),
+                    ..Default::default()
+                },
+            })
+        };
         let group = MultiSubGroup {
             name: "subs".into(),
             speaker_name: None,
             subwoofers: vec![
-                MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))),
-                MeasurementSource::InMemory(make_curve(16, 78.0, Some(40.0))),
+                declared(make_curve(16, 80.0, Some(0.0))),
+                declared(make_curve(16, 78.0, Some(40.0))),
             ],
             allpass_optimization: true,
+            joint_optimization: false,
         };
         let result =
             preprocess_multisub_mso_with_frequency_samples(&group, &tiny_optimizer(), 48000.0, 16)
@@ -796,6 +990,7 @@ mod tests {
                 2
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         let mut optimizer = tiny_optimizer();
         optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
@@ -938,6 +1133,7 @@ mod tests {
                 MeasurementSource::InMemory(make_curve(16, 80.0, Some(0.0))),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         let config = SpeakerConfig::MultiSub(subs);
         let result = preprocess_sub_with_frequency_samples(
@@ -953,7 +1149,13 @@ mod tests {
         let drivers = result.drivers.unwrap();
         assert!(!drivers.is_empty());
         assert!(result.combined_curve.spl.iter().all(|v| v.is_finite()));
-        assert!(result.combined_curve.phase.is_some());
+        assert!(result.combined_curve.phase.is_none());
+        assert!(
+            result
+                .advisories
+                .contains(&"unverified_timing_gain_only".into())
+        );
+        assert!(drivers.iter().all(|driver| driver.delay == 0.0));
     }
 
     #[test]
@@ -966,6 +1168,7 @@ mod tests {
                 MeasurementSource::InMemory(make_curve(16, 80.0, None)),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         let config = SpeakerConfig::MultiSub(subs);
         let result = preprocess_sub_with_frequency_samples(

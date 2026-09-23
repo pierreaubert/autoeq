@@ -193,6 +193,7 @@ mod alignment_tests {
             freq,
             phase: None,
             norm_range: None,
+            ..Default::default()
         }
     }
 
@@ -248,5 +249,6 @@ pub fn compute_eq_response(initial: &CurveData, final_curve: &CurveData) -> Curv
         spl,
         phase: None,
         norm_range: None,
+        ..Default::default()
     }
 }

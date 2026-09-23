@@ -74,6 +74,47 @@ mod tests {
     }
 
     #[test]
+    fn roadmap_correction_target_rejects_preference_before_calibration() {
+        let mut target = chain();
+        let preference = TargetStage {
+            kind: TargetStageKind::PreferenceTilt,
+            stage_id: "preference".into(),
+            label: "user tilt".into(),
+            evidence_refs: Vec::new(),
+        };
+        target.stages.insert(0, preference);
+        let proposals = [ProposedDetailBand {
+            band_hz: [2000.0, 8000.0],
+            evidence: DirectEvidence::ValidatedDirectSound,
+            evidence_refs: vec!["direct-capture".into()],
+        }];
+        assert!(enforce_target_chain(&target, &proposals).is_err());
+        assert!(enforce_target_chain(&target, &[]).is_err());
+        target.stages.swap(0, 1);
+        let report = enforce_target_chain(&target, &proposals).unwrap();
+        assert!(!report.outcomes[0].fires);
+        assert_eq!(report.resolution.user_target_id, target.user_target_id);
+    }
+
+    #[test]
+    fn roadmap_correction_target_requires_cited_direct_evidence() {
+        for evidence_refs in [vec![], vec![String::new()], vec!["  ".to_owned()]] {
+            let proposals = [ProposedDetailBand {
+                band_hz: [2000.0, 8000.0],
+                evidence: DirectEvidence::ValidatedDirectSound,
+                evidence_refs,
+            }];
+            let report = enforce_target_chain(&chain(), &proposals).unwrap();
+            assert!(
+                report.outcomes[0].fires,
+                "an evidence label is not evidence"
+            );
+            assert_eq!(report.resolution.limited_bands, vec![[2000.0, 8000.0]]);
+            assert_eq!(report.resolution.user_target_id, chain().user_target_id);
+        }
+    }
+
+    #[test]
     fn enforcement_blocks_room_curve_detail_eq() {
         let proposals = vec![ProposedDetailBand {
             band_hz: [2000.0, 8000.0],

@@ -12,17 +12,20 @@ def fixture(policy=0, phase=1):
             dict(route_kind="main_highpass_to_self", source_channel=source,
                  destination=source, high_pass_hz=frequency, group_id="front", crossover_type=kind),
             dict(route_kind="redirected_bass_lowpass_to_sub", source_channel=source,
-                 destination="LFE", low_pass_hz=frequency, group_id="front", crossover_type=kind),
+                 destination="Sub1", low_pass_hz=frequency, group_id="front", crossover_type=kind),
         ])
     return {
         "requested_axes": dict(topology=1, crossover=policy, phase=phase),
+        "effective_config": {"system": {"speakers": {"L": "l", "R": "r"},
+                                        "subwoofers": {"outputs": [{"id": "Sub1", "speaker": "lfe"}]}}},
         "bass_management": {
-            "enabled": True, "lfe_channel": "LFE", "physical_sub_output": "LFE",
+            "enabled": True,
             "optimization": dict(crossover_type=kind, crossover_range_hz=[120.0, 220.0] if policy == 1 else None,
                                  phase_available=phase == 1, applied=phase == 1,
                                  advisories=[] if phase == 1 else ["missing_phase_crossover_alignment_skipped"]),
             "groups": [dict(group_id="front", selected_crossover_hz=frequency, crossover_type=kind)],
-            "routing_graph": dict(input_channels=["L", "R", "LFE"], routes=routes),
+            "routing_graph": dict(input_channels=["L", "R"],
+                                  output_channels=["L", "R", "Sub1"], routes=routes),
         },
     }
 

@@ -360,6 +360,7 @@ def create_eq_figure(
     channel_name: str,
     eq_filters: list[dict],
     eq_response_data: dict | None = None,
+    sample_rate: float = 48_000.0,
 ) -> go.Figure | None:
     """Create a Plotly figure showing the EQ frequency response.
 
@@ -378,8 +379,9 @@ def create_eq_figure(
         freq_points = eq_response_data["freq"]
         eq_response = eq_response_data["spl"]
     else:
-        freq_points = generate_freq_points(20.0, 20000.0, 500)
-        eq_response = compute_eq_response(eq_filters, freq_points)
+        freq_points = generate_freq_points(20.0, min(20000.0, sample_rate / 2), 500)
+        freq_points = [min(f, sample_rate / 2) for f in freq_points]
+        eq_response = compute_eq_response(eq_filters, freq_points, sample_rate)
 
     if not eq_response:
         return None
@@ -409,17 +411,22 @@ def create_eq_figure(
     ]
 
     for i, filt in enumerate(eq_filters):
-        single_response = compute_eq_response([filt], freq_points)
+        single_response = compute_eq_response([filt], freq_points, sample_rate)
         freq = filt.get("freq", 0)
         gain = filt.get("db_gain", 0)
         filter_type = filt.get("filter_type", "peak")
+        if filt.get("topology") == "kautz_filter":
+            filter_label = "KAUTZ bank (unity + weighted basis)"
+        else:
+            prefix = "WARPED " if filt.get("topology") == "warped_biquad" else ""
+            filter_label = f"{prefix}{filter_type.upper()} {freq:.0f}Hz {gain:+.1f}dB"
 
         fig.add_trace(
             go.Scatter(
                 x=freq_points,
                 y=single_response,
                 mode="lines",
-                name=f"{filter_type.upper()} {freq:.0f}Hz {gain:+.1f}dB",
+                name=filter_label,
                 line=dict(color=colors[i % len(colors)], width=1, dash="dot"),
             )
         )
@@ -495,6 +502,7 @@ def create_multipass_eq_figure(
     channel_name: str,
     channel_data: dict,
     eq_response_data: dict | None = None,
+    sample_rate: float = 48_000.0,
 ) -> go.Figure | None:
     """Create a Plotly figure showing per-pass EQ responses for the 3-pass pipeline.
 
@@ -518,9 +526,10 @@ def create_multipass_eq_figure(
         all_filters = []
         for p in passes:
             all_filters.extend(p["filters"])
-        return create_eq_figure(channel_name, all_filters, eq_response_data)
+        return create_eq_figure(channel_name, all_filters, eq_response_data, sample_rate)
 
-    freq_points = generate_freq_points(20.0, 20000.0, 500)
+    freq_points = generate_freq_points(20.0, min(20000.0, sample_rate / 2), 500)
+    freq_points = [min(f, sample_rate / 2) for f in freq_points]
     fig = go.Figure()
 
     # Collect all filters for the combined response
@@ -534,7 +543,7 @@ def create_multipass_eq_figure(
         combined_response = eq_response_data["spl"]
     else:
         combined_freq = freq_points
-        combined_response = compute_eq_response(all_filters, freq_points)
+        combined_response = compute_eq_response(all_filters, freq_points, sample_rate)
 
     if combined_response:
         fig.add_trace(
@@ -549,7 +558,7 @@ def create_multipass_eq_figure(
 
     # Per-pass responses
     for p in passes:
-        pass_response = compute_eq_response(p["filters"], freq_points)
+        pass_response = compute_eq_response(p["filters"], freq_points, sample_rate)
         if pass_response:
             fig.add_trace(
                 go.Scatter(
@@ -1775,6 +1784,8 @@ def create_comparison_zoomed_figure(
 def create_comparison_eq_overlay_figure(
     channel_name: str,
     mode_data: list[tuple[str, dict]],
+    *,
+    sample_rates: dict[str, float] | None = None,
 ) -> go.Figure | None:
     """Overlay EQ response curves from multiple modes."""
     fig = go.Figure()
@@ -1793,8 +1804,12 @@ def create_comparison_eq_overlay_figure(
                 if plugin.get("plugin_type") == "eq":
                     filters = plugin.get("parameters", {}).get("filters", [])
                     eq_filters.extend(filters)
-            eq_freq = freq_points if eq_filters else None
-            eq_spl = compute_eq_response(eq_filters, freq_points) if eq_filters else None
+            sample_rate = float((sample_rates or {}).get(mode_name, 48_000.0))
+            if not math.isfinite(sample_rate) or sample_rate <= 40.0:
+                raise ValueError("EQ comparison sample rate must support frequencies above 20 Hz")
+            eq_freq = [min(f, sample_rate / 2) for f in generate_freq_points(
+                20.0, min(20000.0, sample_rate / 2), 500)] if eq_filters else None
+            eq_spl = compute_eq_response(eq_filters, eq_freq, sample_rate) if eq_filters else None
 
         if eq_spl:
             has_data = True
@@ -2222,5 +2237,95 @@ def create_score_comparison_figure(
         margin=dict(l=60, r=30, t=80 if annotations else 60, b=50),
         legend=dict(font=dict(size=10)),
         annotations=annotations,
+    )
+    return fig
+
+
+def create_smoothed_figure(
+    channel_name: str,
+    initial_curve: dict | None,
+    final_curve: dict | None,
+    octaves: float = 1.0,
+) -> go.Figure | None:
+    """Per-speaker 1-octave smoothed Before/After overlay (feat-report 2b)."""
+    if not initial_curve and not final_curve:
+        return None
+    fig = go.Figure()
+    curves = (("Before EQ (1-oct smoothed)", initial_curve, "rgba(255, 100, 100, 0.8)"),
+              ("After EQ (1-oct smoothed)", final_curve, "rgba(100, 200, 100, 0.9)"))
+    for label, curve, color in curves:
+        if not curve or not curve.get("freq") or not curve.get("spl"):
+            continue
+        fig.add_trace(go.Scatter(
+            x=curve["freq"],
+            y=smooth_octave(curve["freq"], curve["spl"], octaves),
+            mode="lines", name=label,
+            line=dict(color=color, width=2),
+        ))
+    freq_axis = get_freq_axis_config()
+    freq_axis["range"] = [1.3, 4.3]
+    y_min, y_max = compute_y_range([initial_curve, final_curve])
+    fig.update_layout(
+        title=dict(text=f"Smoothed response (1 oct): {channel_name}", font=dict(size=14)),
+        xaxis=freq_axis,
+        yaxis=get_spl_axis_config((y_min, y_max)),
+        legend=dict(yanchor="top", y=0.99, xanchor="right", x=0.99, font=dict(size=10)),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=60, r=40, t=60, b=60), height=360,
+    )
+    return fig
+
+
+def create_tof_figure(tof_rows: list[dict], after: bool = False) -> go.Figure | None:
+    """Time-of-flight bar chart before (measured) or after (final) DSP."""
+    names = [r["name"] for r in tof_rows]
+    key = "after_ms" if after else "before_ms"
+    vals = [r.get(key) for r in tof_rows]
+    if not names or not any(isinstance(v, (int, float)) for v in vals):
+        return None
+    title = "Time of flight after DSP" if after else "Time of flight before DSP"
+    fig = go.Figure()
+    fig.add_trace(go.Bar(name=title, x=names, y=[
+        v if isinstance(v, (int, float)) else 0.0 for v in vals],
+        marker_color="rgba(100, 200, 100, 0.8)" if after else "rgba(255, 100, 100, 0.8)"))
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=14)),
+        yaxis=dict(title=dict(text="Arrival (ms)", font=dict(size=11))),
+        plot_bgcolor="white", paper_bgcolor="white",
+        height=340, margin=dict(l=60, r=30, t=60, b=50),
+        showlegend=False,
+    )
+    return fig
+
+
+def create_symmetric_pair_figure(
+    label: str,
+    freq: list[float],
+    sum_spl: list[float],
+    diff_spl: list[float],
+) -> go.Figure:
+    """Symmetric-pair magnitude sum + difference (feat-report 2d, viewer part)."""
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=freq, y=sum_spl, mode="lines",
+                             name=f"{label} magnitude sum",
+                             line=dict(color="rgba(74, 144, 217, 0.9)", width=2)))
+    fig.add_trace(go.Scatter(x=freq, y=diff_spl, mode="lines",
+                             name=f"{label} difference",
+                             line=dict(color="rgba(255, 150, 50, 0.9)", width=2,
+                                       dash="dash")))
+    freq_axis = get_freq_axis_config()
+    freq_axis["range"] = [1.3, 4.3]
+    all_spl = list(sum_spl) + list(diff_spl)
+    finite = [v for v in all_spl if math.isfinite(v)]
+    pad = (max(finite) - min(finite)) * 0.1 if finite else 5.0
+    y_range = (min(finite) - pad, max(finite) + pad) if finite else (0.0, 1.0)
+    fig.update_layout(
+        title=dict(text=f"Symmetric pair: {label} (magnitude domain; "
+                        "complex sum pending roomeq field)", font=dict(size=12)),
+        xaxis=freq_axis,
+        yaxis=get_spl_axis_config(y_range),
+        legend=dict(font=dict(size=10)),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=60, r=40, t=60, b=60), height=360,
     )
     return fig

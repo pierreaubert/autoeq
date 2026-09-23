@@ -2,6 +2,20 @@
 
 use autoeq_core::Curve;
 
+/// Producer-recorded loading operations bound to prepared response content.
+///
+/// This transports the canonical measurement ledger; it is not acquisition
+/// authentication or a claim that later engine conditioning is fully recorded.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
+pub struct MeasurementConditioningReceipt {
+    /// Producer-recorded loaded-curve roots; absent in legacy receipts.
+    #[serde(default)]
+    pub native_identities: Vec<String>,
+    pub entries: Vec<autoeq_measurements::LedgerEntry>,
+    pub representative_identity: String,
+    pub individual_identities: Vec<String>,
+}
+
 /// Measurement curves resolved by the workflow before channel processing.
 ///
 /// This contract deliberately contains no source descriptors or filesystem
@@ -13,6 +27,8 @@ pub struct PreparedChannelMeasurements {
     representative: Curve,
     individual: Vec<Curve>,
     multi_measurement_source: bool,
+    conditioning: Vec<autoeq_measurements::LedgerEntry>,
+    native_identities: Vec<String>,
 }
 
 impl PreparedChannelMeasurements {
@@ -26,7 +42,49 @@ impl PreparedChannelMeasurements {
             representative,
             individual,
             multi_measurement_source,
+            conditioning: Vec::new(),
+            native_identities: Vec::new(),
         }
+    }
+
+    /// Attach producer-recorded measurement conditioning operations.
+    pub fn with_conditioning(
+        mut self,
+        conditioning: Vec<autoeq_measurements::LedgerEntry>,
+    ) -> Self {
+        self.conditioning = conditioning;
+        self
+    }
+
+    /// Attach loaded-curve identities recorded before source alignment.
+    ///
+    /// Roots must come from the loader, not be inferred from ledger inputs.
+    /// They do not authenticate acquisition or physical seat attribution.
+    pub fn with_native_identities(mut self, native_identities: Vec<String>) -> Self {
+        self.native_identities = native_identities;
+        self
+    }
+
+    /// Recorded source loading operations, excluding unrecorded downstream processing.
+    pub fn conditioning(&self) -> &[autoeq_measurements::LedgerEntry] {
+        &self.conditioning
+    }
+
+    /// Bind recorded loading operations to the prepared numerical responses.
+    ///
+    /// # Errors
+    /// Rejects curves that cannot provide a valid canonical content identity.
+    pub fn conditioning_receipt(&self) -> autoeq_core::Result<MeasurementConditioningReceipt> {
+        Ok(MeasurementConditioningReceipt {
+            native_identities: self.native_identities.clone(),
+            entries: self.conditioning.clone(),
+            representative_identity: self.representative.content_hash()?,
+            individual_identities: self
+                .individual
+                .iter()
+                .map(Curve::content_hash)
+                .collect::<autoeq_core::Result<_>>()?,
+        })
     }
 
     /// Power-domain representative response for the channel.

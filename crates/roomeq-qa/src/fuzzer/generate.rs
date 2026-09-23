@@ -258,6 +258,7 @@ pub(super) fn generate_stratified_config(
                     speaker_name: Some(random_speaker_name(rng)),
                     subwoofers: sub_sources,
                     allpass_optimization: scenario_kind == ScenarioKind::MultiSubAllpass,
+                    joint_optimization: false,
                 }),
             );
         }
@@ -596,6 +597,7 @@ pub(super) fn generate_random_mixed_config(
                         speaker_name: Some(random_speaker_name(rng)),
                         subwoofers: sub_sources,
                         allpass_optimization: false,
+                        joint_optimization: false,
                     }),
                 );
             }
@@ -721,6 +723,7 @@ pub(super) fn generate_random_source(
                     .map(|s| MeasurementRef::Path(PathBuf::from(s)))
                     .collect(),
                 speaker_name: Some(random_speaker_name(rng)),
+                provenance: Default::default(),
             }),
             paths,
         ))
@@ -729,6 +732,7 @@ pub(super) fn generate_random_source(
             MeasurementSource::Single(MeasurementSingle {
                 measurement: MeasurementRef::Path(PathBuf::from(file_strings[0].clone())),
                 speaker_name: Some(random_speaker_name(rng)),
+                provenance: Default::default(),
             }),
             paths,
         ))

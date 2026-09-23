@@ -30,6 +30,7 @@ pub type ChannelWorkflowResult = (
     Vec<OptimizerRunEvidence>,
     Vec<roomeq_model::FilterVetoVerdict>,
     Option<roomeq_model::VetoAdjudicationReport>,
+    Option<roomeq_engine::channel_measurements::MeasurementConditioningReceipt>,
 );
 
 /// Load resources, execute one channel, and persist any generated sidecar.
@@ -174,10 +175,16 @@ pub fn process_single_channel_with_frequency_samples(
     if phase_linear && let Some(callback) = callback.as_mut() {
         callback(2, result.post_score, None);
     }
-    Ok(result_tuple(result))
+    Ok(result_tuple(
+        result,
+        prepared.measurements().conditioning_receipt()?,
+    ))
 }
 
-fn result_tuple(result: ChannelProcessingResult) -> ChannelWorkflowResult {
+fn result_tuple(
+    result: ChannelProcessingResult,
+    conditioning: roomeq_engine::channel_measurements::MeasurementConditioningReceipt,
+) -> ChannelWorkflowResult {
     (
         result.channel,
         result.pre_score,
@@ -191,6 +198,7 @@ fn result_tuple(result: ChannelProcessingResult) -> ChannelWorkflowResult {
         result.optimizer_evidence,
         result.audibility_veto,
         result.veto_adjudication,
+        Some(conditioning),
     )
 }
 

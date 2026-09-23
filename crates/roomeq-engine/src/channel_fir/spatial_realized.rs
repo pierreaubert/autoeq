@@ -30,14 +30,24 @@ pub(super) fn optimize(
         measurements.individual(),
         curve,
     );
-    let (objective, _, effective) = crate::eq::prepare_multi_measurement_objective(
-        &curves,
-        request.optimizer,
-        request.optimizer.multi_measurement.as_ref().unwrap(),
-        Some(request.eq_resources),
-        sample_rate,
-    )
-    .map_err(|error| fail(format!("Minimum-phase FIR objective: {error}")))?;
+    let curves = curves
+        .iter()
+        .map(|curve| {
+            request
+                .prepared
+                .usable_curve(curve)
+                .map(|curve| curve.into_owned())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (objective, _, effective, normalization) =
+        crate::eq::prepare_multi_measurement_objective_recorded(
+            &curves,
+            request.optimizer,
+            request.optimizer.multi_measurement.as_ref().unwrap(),
+            Some(request.eq_resources),
+            sample_rate,
+        )
+        .map_err(|error| fail(format!("Minimum-phase FIR objective: {error}")))?;
     let bank = &objective.multi_objective.as_ref().unwrap().objectives;
     let grid = bank[0].freqs.as_ref();
     if bank.iter().any(|seat| seat.freqs.as_ref() != grid) {
@@ -215,7 +225,7 @@ pub(super) fn optimize(
         .optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
         .map_err(|error| fail(format!("Minimum-phase FIR search: {error}")))?;
     let returned = evaluate(&result.x);
-    let selected_search = returned.is_finite() && returned < loss;
+    let mut selected_search = returned.is_finite() && returned < loss;
     if selected_search {
         loss = returned;
         best = result.x;
@@ -228,8 +238,42 @@ pub(super) fn optimize(
             "Minimum-phase FIR search has no finite candidate".into(),
         ));
     }
+    // Realized-transfer ceiling: every candidate is already realized before
+    // scoring, so judge the emitted taps directly. A breaching winner
+    // reverts to the neutral vertex with a recorded reason; refusal when
+    // neutral breaches.
+    let mut neutral_weights = vec![0.0; count];
+    neutral_weights[count - 1] = 1.0;
+    let neutral_taps = realize(&neutral_weights)
+        .filter(|taps| !taps.is_empty() && taps.iter().all(|value| value.is_finite()))
+        .ok_or_else(|| fail("Minimum-phase FIR neutral fallback is invalid".into()))?;
+    let mut ceiling_note: Option<String> = None;
+    let coefficients = match super::enforce_realized_fir_ceiling(
+        "hybrid-realized-fir",
+        coefficients,
+        neutral_taps,
+        std::slice::from_ref(grid),
+        sample_rate,
+        request.optimizer,
+    ) {
+        Ok((taps, note)) => {
+            if note.is_some() {
+                loss = evaluate(&neutral_weights);
+                if !loss.is_finite() {
+                    return Err(fail(
+                        "Minimum-phase FIR neutral fallback has no finite objective".into(),
+                    ));
+                }
+                best = neutral_weights;
+                selected_search = false;
+                ceiling_note = note;
+            }
+            taps
+        }
+        Err(error) => return Err(error),
+    };
     let status = format!(
-        "{}hybrid {} realized dB-basis search; {} templates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; {}",
+        "{}hybrid {} realized dB-basis search; {} templates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; {}{}",
         if result.success {
             ""
         } else {
@@ -245,7 +289,10 @@ pub(super) fn optimize(
         },
         result.fun,
         returned,
-        result.message
+        result.message,
+        ceiling_note
+            .map(|note| format!("; {note}"))
+            .unwrap_or_default(),
     );
     let mut evidence = OptimizerRunEvidence::from_backend_result(
         &result.algorithm,
@@ -256,6 +303,7 @@ pub(super) fn optimize(
         effective.max_iter,
         effective.seed,
     );
+    evidence.multi_input_normalization = Some(normalization);
     evidence.evaluation_count = Some(evaluations.load(std::sync::atomic::Ordering::Relaxed));
     Ok((coefficients, evidence))
 }

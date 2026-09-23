@@ -139,6 +139,7 @@ fn test_camilladsp_uses_second_order_filters() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     let output = DspGraph {
@@ -192,6 +193,7 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     let output = DspGraph {
@@ -229,6 +231,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     channels.insert(
@@ -248,6 +251,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     let output = DspGraph {
@@ -281,6 +285,7 @@ fn test_unknown_channels_sort_alphabetically() {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         );
     }
@@ -315,6 +320,7 @@ fn standard_channel_order_places_rears_before_surrounds() {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         );
     }
@@ -422,6 +428,7 @@ fn test_export_with_drivers() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
 
@@ -506,6 +513,7 @@ fn per_driver_low_pass_survives_canonical_graph_paths() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     let output = DspGraph {

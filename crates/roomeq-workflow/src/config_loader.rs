@@ -472,6 +472,7 @@ mod tests {
                     csv_path: Some("missing.csv".to_string()),
                 }),
                 speaker_name: None,
+                provenance: Default::default(),
             })),
         );
         config.resolve_paths(dir.path());

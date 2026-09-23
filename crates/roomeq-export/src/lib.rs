@@ -55,7 +55,14 @@ pub fn camilladsp_delay_realization(
     graph.validate().map_err(anyhow::Error::msg)?;
     ensure_external_export_supported(graph, ExportFormat::CamillaDsp)?;
     validate_camilladsp_input(graph, Some(sample_rate))?;
-    Ok(delay::report(graph, sample_rate))
+    if let Some(routing) =
+        camilladsp_routing_graph(graph).filter(|routing| !routing.routes.is_empty())
+    {
+        let resolved = camilladsp_physical_routing(graph, &routing)?;
+        Ok(delay::report_routed(&resolved, sample_rate))
+    } else {
+        Ok(delay::report(graph, sample_rate))
+    }
 }
 
 use channel::channel_short_name;
@@ -64,6 +71,7 @@ use channel::sorted_channels;
 use collect::collect_all_plugins;
 use conformance::ExportArtifactManifest;
 use conformance::ExportNodeKind;
+use conformance::camilladsp_physical_routing;
 use conformance::normalize_export_identifier;
 use conformance::validate_camilladsp_input;
 use conformance::{routed_channel_names, validate_pipewire_input, validate_serial_external_input};
@@ -117,6 +125,23 @@ pub fn build_export_package(
     occupied_names: &BTreeSet<String>,
     reusable_names: &HashMap<String, String>,
 ) -> anyhow::Result<ExportPackage> {
+    package::validate_source_ledger(graph)?;
+    if let Some(evidence) = graph
+        .correction_decisions
+        .as_ref()
+        .and_then(|ledger| ledger.acceptance_evidence.as_ref())
+    {
+        anyhow::ensure!(
+            sample_rate.is_finite()
+                && sample_rate > 0.0
+                && evidence
+                    .payload
+                    .get("sample_rate_hz")
+                    .and_then(serde_json::Value::as_f64)
+                    == Some(sample_rate),
+            "export sample rate differs from acceptance diagnostics; regenerate the workflow at the requested rate"
+        );
+    }
     package::validate_final_convolution_identity(graph, resources)?;
     graph.validate().map_err(anyhow::Error::msg)?;
     let mut members = Vec::new();
@@ -132,6 +157,13 @@ pub fn build_export_package(
         )?);
         if let Some((_, bytes)) = archive {
             members.push(ExportPackageMember::new("room_eq_convolution.zip", bytes)?);
+        }
+        if let Some(views) = acceptance_views::acceptance_views_member(graph, &members[0])? {
+            anyhow::ensure!(
+                !occupied_names.contains(&views.relative_path.to_string_lossy().to_string()),
+                "acceptance view sidecar destination is already occupied"
+            );
+            members.push(views);
         }
         return ExportPackage::new(members);
     }
@@ -153,6 +185,16 @@ pub fn build_export_package(
         main_file_name,
         content.into_bytes(),
     )?);
+    if let Some(views) = acceptance_views::acceptance_views_member(
+        &export_graph,
+        members.last().expect("main artifact"),
+    )? {
+        anyhow::ensure!(
+            !occupied_names.contains(&views.relative_path.to_string_lossy().to_string()),
+            "acceptance view sidecar destination is already occupied"
+        );
+        members.push(views);
+    }
     ExportPackage::new(members)
 }
 
@@ -354,6 +396,8 @@ fn export_camilladsp_routed(
     graph: &BassManagementRoutingGraph,
     sample_rate: f64,
 ) -> anyhow::Result<String> {
+    let resolved = camilladsp_physical_routing(output, graph)?;
+    let graph = &resolved.graph;
     let mut out = String::new();
     let mut manifest = ExportArtifactManifest::new(ExportFormat::CamillaDsp);
     writeln!(out, "# CamillaDSP configuration")?;
@@ -362,7 +406,7 @@ fn export_camilladsp_routed(
     writeln!(out)?;
 
     let (input_channels, output_channels) = routed_channel_names(output, graph);
-    let delay_report = delay::report(output, sample_rate);
+    let delay_report = delay::report_routed(&resolved, sample_rate);
     let pre_padding = delay_report.pre_route_padding_samples;
     let post_padding = delay_report.post_route_padding_samples;
     let route_padding = delay_report.route_padding_samples;
@@ -397,17 +441,13 @@ fn export_camilladsp_routed(
 
     writeln!(out, "filters:")?;
     let mut pre_route_filter_names = Vec::with_capacity(input_channels.len());
-    for channel_name in &input_channels {
-        let chain = output.channels.get(channel_name).ok_or_else(|| {
-            anyhow::anyhow!("missing DSP chain for CamillaDSP input channel '{channel_name}'")
-        })?;
+    for (channel_name, port) in input_channels.iter().zip(&resolved.physical.inputs) {
         let prefix = format!("pre_{}", normalize_export_identifier(channel_name));
-        let plugins = plugins_for_stage(chain, "pre_route");
         pre_route_filter_names.push(delay::write_stage(
             &mut out,
             &mut manifest,
             &prefix,
-            &plugins,
+            &port.plugins,
             sample_rate,
             pre_padding,
         )?);
@@ -448,17 +488,13 @@ fn export_camilladsp_routed(
     }
 
     let mut post_route_filter_names = Vec::with_capacity(output_channels.len());
-    for channel_name in &output_channels {
-        let chain = output.channels.get(channel_name).ok_or_else(|| {
-            anyhow::anyhow!("missing DSP chain for CamillaDSP output channel '{channel_name}'")
-        })?;
+    for (channel_name, plugins) in output_channels.iter().zip(&resolved.post_plugins) {
         let prefix = format!("post_{}", normalize_export_identifier(channel_name));
-        let plugins = plugins_for_stage(chain, "post_route");
         post_route_filter_names.push(delay::write_stage(
             &mut out,
             &mut manifest,
             &prefix,
-            &plugins,
+            plugins,
             sample_rate,
             post_padding,
         )?);

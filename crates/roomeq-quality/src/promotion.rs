@@ -14,6 +14,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::protocol::ComparisonIntent;
+use roomeq_model::reference_registry::{ApprovedReferenceRegistry, VerifiedReferenceEvidence};
 
 /// Prefix marking an outcome blocked on external inputs.
 pub const BLOCKED_EXTERNAL_PREFIX: &str = "blocked_external";
@@ -148,6 +149,10 @@ pub fn summarize_controls(
 }
 
 /// Enforcement readiness from the evidence side.
+///
+/// `reference` is explanation only and never admits enforcement. Only
+/// verified numeric `reference_evidence` checked against the approved
+/// registry admits anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EnforcementReadiness {
     /// Independent reference description with its predeclared tolerance.
@@ -158,6 +163,13 @@ pub struct EnforcementReadiness {
     pub validated_domain: String,
     /// Predeclared per-metric tolerances.
     pub tolerances: Vec<String>,
+    /// Model family the evidence must validate.
+    pub model_family: String,
+    /// Model edition the evidence must validate.
+    pub edition: String,
+    /// Verified numeric agreement evidence, when independently observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_evidence: Option<VerifiedReferenceEvidence>,
 }
 
 impl EnforcementReadiness {
@@ -166,8 +178,9 @@ impl EnforcementReadiness {
     /// # Errors
     ///
     /// Returns `blocked_external` while the reference, calibration,
-    /// domain, or tolerances are missing.
-    pub fn check_ready(&self) -> Result<(), String> {
+    /// domain, tolerances, or verified evidence are missing, and a hard
+    /// error when present evidence disagrees with its approval.
+    pub fn check_ready(&self, registry: &ApprovedReferenceRegistry) -> Result<(), String> {
         if self.reference.trim().is_empty() {
             return Err(format!(
                 "{BLOCKED_EXTERNAL_PREFIX}: enforcement needs an independent reference"
@@ -193,7 +206,18 @@ impl EnforcementReadiness {
                 "{BLOCKED_EXTERNAL_PREFIX}: enforcement needs predeclared tolerances"
             ));
         }
-        Ok(())
+        match &self.reference_evidence {
+            Some(evidence) => registry.verify_evidence(
+                evidence,
+                &self.model_family,
+                &self.edition,
+                &self.calibration_id,
+                &self.validated_domain,
+            ),
+            None => Err(format!(
+                "{BLOCKED_EXTERNAL_PREFIX}: enforcement needs verified reference evidence, not a reference description"
+            )),
+        }
     }
 }
 
@@ -267,6 +291,48 @@ mod promotion_tests {
             calibration_id: String::from("spl-cal-94db"),
             validated_domain: String::from("mono 50-80 dB SPL, 100 Hz-8 kHz"),
             tolerances: vec![String::from("level-sweep within tolerance")],
+            model_family: String::from("pemo-q"),
+            edition: String::from("pemo-q-2024-ed1"),
+            reference_evidence: None,
+        }
+    }
+
+    /// Test-local registry approving one synthetic fixture for protocol
+    /// testing only; never a licensed independent implementation.
+    fn registry() -> ApprovedReferenceRegistry {
+        use roomeq_model::reference_registry::ApprovedReferenceEntry;
+        ApprovedReferenceRegistry {
+            entries: vec![ApprovedReferenceEntry {
+                implementation_id: "test-ref-impl".to_string(),
+                implementation_hash: "test-hash".to_string(),
+                vectors_id: "test-vectors-v1".to_string(),
+                model_family: String::from("pemo-q"),
+                edition: String::from("pemo-q-2024-ed1"),
+                calibration_id: String::from("spl-cal-94db"),
+                domain: String::from("mono 50-80 dB SPL, 100 Hz-8 kHz"),
+                error_metric: "max_abs_protocol_p_error".to_string(),
+                error_tolerance: Some(1e-9),
+                required_coverage: vec![String::from("level-sweep")],
+            }],
+        }
+    }
+
+    fn verified_readiness() -> EnforcementReadiness {
+        EnforcementReadiness {
+            reference_evidence: Some(VerifiedReferenceEvidence {
+                implementation_id: "test-ref-impl".to_string(),
+                implementation_hash: "test-hash".to_string(),
+                vectors_id: "test-vectors-v1".to_string(),
+                model_family: String::from("pemo-q"),
+                edition: String::from("pemo-q-2024-ed1"),
+                calibration_id: String::from("spl-cal-94db"),
+                domain: String::from("mono 50-80 dB SPL, 100 Hz-8 kHz"),
+                error_metric: "max_abs_protocol_p_error".to_string(),
+                observed_error: 1e-10,
+                error_tolerance: 1e-9,
+                coverage: vec![String::from("level-sweep")],
+            }),
+            ..readiness()
         }
     }
 
@@ -310,23 +376,47 @@ mod promotion_tests {
 
     #[test]
     fn promotion_enforcement_blocked_without_reference() {
-        assert!(readiness().check_ready().is_ok());
+        // A populated description string without verified evidence admits
+        // nothing: the old shortcut is closed.
+        let error = readiness()
+            .check_ready(&registry())
+            .expect_err("description without evidence must not admit");
+        assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
+        // Verified protocol evidence against the test registry admits.
+        assert!(verified_readiness().check_ready(&registry()).is_ok());
+        // No approval in-tree means real readiness stays blocked.
+        let error = verified_readiness()
+            .check_ready(&ApprovedReferenceRegistry::default())
+            .expect_err("empty registry blocks");
+        assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
         let no_reference = EnforcementReadiness {
             reference: String::new(),
-            ..readiness()
+            ..verified_readiness()
         };
-        let error = no_reference.check_ready().expect_err("reference missing");
+        let error = no_reference
+            .check_ready(&registry())
+            .expect_err("reference missing");
         assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
         let unvalidated = EnforcementReadiness {
             validated_domain: String::from("unvalidated"),
-            ..readiness()
+            ..verified_readiness()
         };
-        let error = unvalidated.check_ready().expect_err("domain missing");
+        let error = unvalidated
+            .check_ready(&registry())
+            .expect_err("domain missing");
         assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
         let no_tolerances = EnforcementReadiness {
             tolerances: Vec::new(),
-            ..readiness()
+            ..verified_readiness()
         };
-        assert!(no_tolerances.check_ready().is_err());
+        assert!(no_tolerances.check_ready(&registry()).is_err());
+    }
+
+    /// Failed numeric evidence never admits, even with full descriptions.
+    #[test]
+    fn roadmap_correction_promotion_failed_evidence_rejected() {
+        let mut failed = verified_readiness();
+        failed.reference_evidence.as_mut().unwrap().observed_error = 2e-9;
+        assert!(failed.check_ready(&registry()).is_err());
     }
 }

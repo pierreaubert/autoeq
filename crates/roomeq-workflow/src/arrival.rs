@@ -246,15 +246,20 @@ pub fn prepare_channel_input_with_frequency_samples(
         .cloned()
         .map(Box::new);
 
-    Ok(PreparedChannelInput::new(
+    let mut prepared = PreparedChannelInput::new(
         measurements,
         arrival_time_ms,
         PreparedCea2034::new(speaker_name, cea2034_data),
         EqResources {
             target,
             impulse_response,
+            capture: source.provenance().capture,
         },
-    ))
+    );
+    if let Some(band) = source.provenance().valid_band_hz {
+        prepared = prepared.with_valid_band_hz(band)?;
+    }
+    Ok(prepared)
 }
 
 #[cfg(test)]
@@ -288,6 +293,7 @@ mod tests {
                 csv_path: None,
             }),
             speaker_name: None,
+            provenance: Default::default(),
         })
     }
 
@@ -305,6 +311,101 @@ mod tests {
         }
         writer.finalize().unwrap();
         file
+    }
+
+    #[test]
+    fn roadmap_correction_declared_band_reaches_channel_execution() {
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: vec![100.0, 200.0, 400.0, 600.0, 800.0, 1000.0],
+                magnitude_db: vec![80.0, 80.0, 85.0, 84.0, 80.0, 80.0],
+                phase_deg: None,
+                name: None,
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: None,
+            provenance: autoeq_core::MeasurementProvenance {
+                valid_band_hz: Some([200.0, 800.0]),
+                ..Default::default()
+            },
+        });
+        for mode in [
+            roomeq_model::ProcessingMode::LowLatency,
+            roomeq_model::ProcessingMode::PhaseLinear,
+            roomeq_model::ProcessingMode::Hybrid,
+        ] {
+            let mut config = RoomConfig::default();
+            config.optimizer.min_freq = 100.0;
+            config.optimizer.max_freq = 1000.0;
+            config.optimizer.processing_mode = mode;
+            config.optimizer.num_filters = 2;
+            config.optimizer.max_iter = 100;
+            config.optimizer.parallel_threads = Some(1);
+            config.optimizer.seed = Some(42);
+            let prepared = prepare_channel_input_with_frequency_samples(
+                "left", &source, &config, 48_000.0, None, 128,
+            )
+            .unwrap();
+            let execution = roomeq_engine::channel_execution::prepare_channel_execution(
+                "left", &prepared, &config, 48_000.0, None,
+            )
+            .unwrap();
+            assert_eq!(execution.target().min_freq, 200.0);
+            assert_eq!(execution.target().max_freq, 800.0);
+            assert_eq!(prepared.measurements().representative().freq[0], 100.0);
+            assert_eq!(config.optimizer.min_freq, 100.0);
+            assert_eq!(config.optimizer.max_freq, 1000.0);
+            if config.optimizer.processing_mode == roomeq_model::ProcessingMode::LowLatency {
+                let result = roomeq_engine::channel_execution::execute_prepared_channel(
+                    "left",
+                    &prepared,
+                    &config,
+                    48_000.0,
+                    &execution,
+                    prepared.eq_resources(),
+                    None,
+                    None,
+                )
+                .unwrap();
+                assert!(!result.filters.is_empty());
+                assert!(
+                    result
+                        .filters
+                        .iter()
+                        .all(|filter| (200.0..=800.0).contains(&filter.freq))
+                );
+                assert_eq!(result.raw_pre_eq_curve.freq[0], 100.0);
+            }
+            let unbounded = prepare_channel_input_with_frequency_samples(
+                "left",
+                &MeasurementSource::InMemory(prepared.measurements().representative().clone()),
+                &config,
+                48_000.0,
+                None,
+                128,
+            )
+            .unwrap();
+            let unbounded_execution = roomeq_engine::channel_execution::prepare_channel_execution(
+                "left", &unbounded, &config, 48_000.0, None,
+            )
+            .unwrap();
+            assert_eq!(unbounded_execution.target().min_freq, 100.0);
+            assert_eq!(unbounded_execution.target().max_freq, 1000.0);
+            for band in [[1.0, 50.0], [1100.0, 2000.0], [1000.0, 2000.0]] {
+                let disjoint = unbounded.clone().with_valid_band_hz(band).unwrap();
+                let error = roomeq_engine::channel_execution::prepare_channel_execution(
+                    "left", &disjoint, &config, 48_000.0, None,
+                )
+                .err()
+                .expect("disjoint or touching bands must be rejected");
+                assert!(
+                    error
+                        .to_string()
+                        .contains("does not overlap measurement support")
+                );
+            }
+        }
     }
 
     #[test]
@@ -436,6 +537,7 @@ mod tests {
                 csv_path: None,
             }),
             speaker_name: Some("Source speaker".to_string()),
+            provenance: Default::default(),
         });
 
         let input = prepare_channel_input("left", &source, &config, 48_000.0, None).unwrap();
@@ -452,6 +554,38 @@ mod tests {
         let input = prepare_channel_input("left", &source, &config, 48_000.0, None).unwrap();
         assert_eq!(input.cea2034().speaker_name(), Some("Prepared speaker"));
         assert!(input.cea2034().data().is_none());
+    }
+
+    #[test]
+    fn prepares_capture_evidence_without_authorizing_invalid_clock() {
+        let response = curve();
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies: response.freq.to_vec(),
+                magnitude_db: response.spl.to_vec(),
+                phase_deg: None,
+                name: None,
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: None,
+            provenance: autoeq_core::MeasurementProvenance {
+                capture: Some(autoeq_core::capture_provenance::CaptureProvenance {
+                    geometry: autoeq_core::capture_provenance::CaptureGeometry::Compact,
+                    takes: Vec::new(),
+                    reflection_report: None,
+                }),
+                ..Default::default()
+            },
+        });
+        let input =
+            prepare_channel_input("left", &source, &RoomConfig::default(), 48_000.0, None).unwrap();
+        let capture = input
+            .eq_resources()
+            .capture
+            .as_ref()
+            .expect("capture evidence retained");
+        assert!(capture.coherent_reference(1).is_err());
     }
 
     #[test]

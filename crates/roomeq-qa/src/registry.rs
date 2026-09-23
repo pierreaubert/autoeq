@@ -939,6 +939,7 @@ mod tests {
     #[test]
     fn unknown_runtime_claims_fail_closed() {
         let result = RoomOptimizationResult {
+            finalized_decisions: None,
             channels: Default::default(),
             channel_results: Default::default(),
             deployed_source_curves: Default::default(),
@@ -975,6 +976,9 @@ mod tests {
                 stage_outcomes: Vec::new(),
                 qa_seed_distribution: None,
                 effective_config: None,
+                operation_gates: None,
+
+                provisional_decisions: Vec::new(),
             },
         };
         assert_eq!(

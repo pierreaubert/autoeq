@@ -140,13 +140,14 @@ pub struct TargetChain {
 impl TargetChain {
     /// Check version, stage separation, and transition parameters.
     ///
-    /// Exactly one calibration stage is required; tilt and level stages
-    /// may each appear at most once. Stage identities stay unique.
+    /// Exactly one calibration stage is required, before optional tilt and
+    /// level stages, which may each appear at most once. Identities stay unique.
     ///
     /// # Errors
     ///
     /// Returns a reason for a version mismatch, missing or duplicated
-    /// stages, empty or duplicate identities, or an invalid transition.
+    /// stages, calibration after an optional stage, empty or duplicate
+    /// identities, or an invalid transition.
     pub fn validate(&self) -> Result<(), String> {
         if self.version != TARGET_TRANSITION_VERSION {
             return Err(format!("unknown target chain version '{}'", self.version));
@@ -160,6 +161,12 @@ impl TargetChain {
         if calibrations != 1 {
             return Err(format!(
                 "target chain needs exactly one calibration stage (got {calibrations})"
+            ));
+        }
+        if self.stages.first().map(|stage| stage.kind) != Some(TargetStageKind::MeasuredCalibration)
+        {
+            return Err(String::from(
+                "target calibration must precede preference tilt and level compensation",
             ));
         }
         for kind in [
@@ -236,7 +243,9 @@ pub struct DamageGuardOutcome {
 ///
 /// The guard fires when the band reaches the anechoic-weighted region
 /// (weight at least 0.5 at the band top edge) without validated
-/// direct-sound evidence. Unknown evidence fails closed. Bass-region
+/// direct-sound evidence with nonempty reference IDs. Unknown or uncited
+/// evidence fails closed. Reference validation is structural, not authentication.
+/// Bass-region
 /// proposals below the transition never fire regardless of evidence.
 ///
 /// # Errors
@@ -259,7 +268,17 @@ pub fn evaluate_damage_guard(
     let mut reasons = Vec::new();
     let fires = if weight >= 0.5 {
         match proposal.evidence {
-            DirectEvidence::ValidatedDirectSound => false,
+            DirectEvidence::ValidatedDirectSound => {
+                let missing_references = proposal.evidence_refs.is_empty()
+                    || proposal
+                        .evidence_refs
+                        .iter()
+                        .any(|reference| reference.trim().is_empty());
+                if missing_references {
+                    reasons.push(String::from("missing_direct_evidence_references"));
+                }
+                missing_references
+            }
             DirectEvidence::RoomCurveOnly => {
                 reasons.push(String::from("room_curve_only_detail_eq"));
                 true
@@ -349,6 +368,79 @@ pub fn resolve_user_target(
     }
 }
 
+/// Fallback transition center in Hz when no room-derived Schroeder
+/// frequency is configured.
+///
+/// Mirrors the analysis-anchored handover used across the transition
+/// tests: a neutral small-room value, documented as a fallback rather
+/// than a measurement. Callers with a configured Schroeder frequency
+/// must prefer it; the builder documents which source was used.
+pub const FALLBACK_TRANSITION_CENTER_HZ: f64 = 300.0;
+/// Fallback transition half-width in octaves; see
+/// [`FALLBACK_TRANSITION_CENTER_HZ`].
+pub const FALLBACK_TRANSITION_WIDTH_OCT: f64 = 1.0;
+
+impl TargetChain {
+    /// Build the chain from the configured target response.
+    ///
+    /// Calibration is always present. A preference-tilt stage is added
+    /// exactly when the configuration shapes the target away from flat
+    /// calibration: a non-flat `shape`, or nonzero preference shelves.
+    /// No level-compensation stage is emitted: no playback-level
+    /// compensation is currently configurable, and inventing one would
+    /// fabricate a processing stage. The transition center prefers a
+    /// room-derived `schroeder_hz` and falls back to
+    /// [`FALLBACK_TRANSITION_CENTER_HZ`]; the user target keeps its
+    /// configured identity throughout.
+    pub fn from_target_config(
+        target: Option<&crate::config::TargetResponseConfig>,
+        schroeder_hz: Option<f64>,
+        calibration_evidence_refs: Vec<String>,
+    ) -> Self {
+        let mut stages = vec![TargetStage {
+            kind: TargetStageKind::MeasuredCalibration,
+            stage_id: String::from("measured-calibration"),
+            label: String::from("measured calibration baseline"),
+            evidence_refs: calibration_evidence_refs,
+        }];
+        let mut user_target_id: Option<String> = None;
+        if let Some(response) = target {
+            let shape_tilt = !matches!(response.shape, crate::config::TargetShape::Flat);
+            let shelf_tilt = response.preference.bass_shelf_db != 0.0
+                || response.preference.treble_shelf_db != 0.0;
+            if shape_tilt || shelf_tilt {
+                let mut label = String::from("preference tilt");
+                if shape_tilt {
+                    label.push_str(&format!(" ({:?} target shape)", response.shape));
+                }
+                if shelf_tilt {
+                    label.push_str(" + user shelves");
+                }
+                stages.push(TargetStage {
+                    kind: TargetStageKind::PreferenceTilt,
+                    stage_id: String::from("preference-tilt"),
+                    label,
+                    evidence_refs: Vec::new(),
+                });
+            }
+            user_target_id = Some(format!("target-{:?}", response.shape).to_lowercase());
+        }
+        let center_hz = schroeder_hz
+            .filter(|hz| hz.is_finite() && *hz > 0.0)
+            .unwrap_or(FALLBACK_TRANSITION_CENTER_HZ);
+        Self {
+            version: TARGET_TRANSITION_VERSION.to_string(),
+            stages,
+            transition: TransitionConfig {
+                version: TARGET_TRANSITION_VERSION.to_string(),
+                center_hz,
+                width_oct: FALLBACK_TRANSITION_WIDTH_OCT,
+            },
+            user_target_id,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +478,30 @@ mod tests {
     }
 
     #[test]
+    fn roadmap_correction_target_calibration_precedes_optional_stages() {
+        let original = chain();
+        for order in [[1, 0, 2], [1, 2, 0], [2, 0, 1], [2, 1, 0]] {
+            let mut reordered = original.clone();
+            reordered.stages = order.map(|index| original.stages[index].clone()).to_vec();
+            // Exercise the same contract after transport, not just a builder.
+            let json = serde_json::to_string(&reordered).unwrap();
+            let decoded: TargetChain = serde_json::from_str(&json).unwrap();
+            assert!(decoded.validate().is_err(), "accepted order {order:?}");
+        }
+        // Either optional stage can follow calibration independently. No
+        // additional ordering between the optional layers is imposed here.
+        for optional in [None, Some(1), Some(2)] {
+            let mut supported = original.clone();
+            supported.stages.truncate(1);
+            if let Some(index) = optional {
+                supported.stages.push(original.stages[index].clone());
+            }
+            supported.validate().unwrap();
+        }
+        original.validate().unwrap();
+    }
+
+    #[test]
     fn transition_is_smooth_not_a_cutoff() {
         let transition = TransitionConfig {
             version: TARGET_TRANSITION_VERSION.to_string(),
@@ -402,6 +518,52 @@ mod tests {
             assert!(pair[0] < pair[1], "weights must rise strictly");
         }
         assert!(weights[0] > 0.0 && weights[4] < 1.0);
+    }
+
+    #[test]
+    fn chain_builder_keeps_stages_identifiable() {
+        use crate::config::{TargetResponseConfig, TargetShape};
+        // No configured response: calibration only, fallback handover.
+        let bare = TargetChain::from_target_config(None, None, Vec::new());
+        bare.validate().expect("built chain validates");
+        assert_eq!(bare.stages.len(), 1);
+        assert_eq!(bare.stages[0].kind, TargetStageKind::MeasuredCalibration);
+        assert_eq!(bare.transition.center_hz, FALLBACK_TRANSITION_CENTER_HZ);
+        assert_eq!(bare.user_target_id, None);
+        // Flat shape without shelves: still calibration only.
+        let flat = TargetResponseConfig {
+            shape: TargetShape::Flat,
+            ..Default::default()
+        };
+        let flat_chain = TargetChain::from_target_config(Some(&flat), None, Vec::new());
+        assert_eq!(flat_chain.stages.len(), 1);
+        assert_eq!(flat_chain.user_target_id, Some(String::from("target-flat")));
+        // Non-flat shape adds exactly one tilt stage; the target keeps
+        // its configured identity instead of being substituted.
+        let harman = TargetResponseConfig {
+            shape: TargetShape::Harman,
+            ..Default::default()
+        };
+        let tilted = TargetChain::from_target_config(Some(&harman), None, Vec::new());
+        tilted.validate().expect("tilted chain validates");
+        assert_eq!(tilted.stages.len(), 2);
+        assert_eq!(tilted.stages[1].kind, TargetStageKind::PreferenceTilt);
+        assert_eq!(tilted.user_target_id, Some(String::from("target-harman")));
+        // Shelves alone also declare tilt; room-derived Schroeder wins
+        // over the fallback handover.
+        let mut shelved = TargetResponseConfig {
+            shape: TargetShape::Flat,
+            ..Default::default()
+        };
+        shelved.preference.bass_shelf_db = 2.0;
+        let room = TargetChain::from_target_config(
+            Some(&shelved),
+            Some(250.0),
+            vec![String::from("meas-1")],
+        );
+        assert_eq!(room.stages.len(), 2);
+        assert_eq!(room.transition.center_hz, 250.0);
+        assert_eq!(room.stages[0].evidence_refs, vec![String::from("meas-1")]);
     }
 
     #[test]

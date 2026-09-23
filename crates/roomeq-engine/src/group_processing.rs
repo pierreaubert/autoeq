@@ -163,6 +163,12 @@ mod tests {
 pub struct PreparedMultiSubGroup {
     pub subwoofers: Vec<Curve>,
     pub seat_measurements: Option<Vec<Vec<Curve>>>,
+    /// Verified shared-timing labels per `[sub][seat]`; every sub must
+    /// agree within each seat before coherent joint optimization. `None`
+    /// is unknown: selected joint dispatch refuses it without substituting
+    /// another optimizer. Stays `None` until the measurement-envelope plumbing
+    /// derives per-capture timing labels.
+    pub reference_scope: Option<Vec<Vec<String>>>,
 }
 
 /// In-memory front/rear measurements for gradient-cardioid processing.
@@ -979,11 +985,34 @@ pub fn process_multisub_group_with_callback(
             ),
         });
     }
+    // All-pass fitting is phase-sensitive even when the later dispatch uses
+    // the legacy multiseat branch. Admit it before any such branch runs.
+    if group.allpass_optimization && !group.joint_optimization {
+        let seats = prepared
+            .seat_measurements
+            .as_ref()
+            .and_then(|matrix| matrix.first())
+            .map_or(1, Vec::len);
+        let trusted = multisub::timing_scopes_are_shared(
+            prepared.reference_scope.as_deref(),
+            prepared.subwoofers.len(),
+            seats,
+        );
+        if !trusted {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "all-pass multi-sub processing for '{channel_name}' requires a shared timing reference for every source and seat; no alternate optimizer was run"
+                ),
+            });
+        }
+    }
+    // Joint mode explicitly selects a different array objective. Legacy
+    // multi-seat settings must not intercept that selection (or its refusals).
     if let Some(multi_seat_config) = room_config
         .optimizer
         .multi_seat
         .as_ref()
-        .filter(|config| config.enabled)
+        .filter(|config| config.enabled && !group.joint_optimization)
     {
         match prepared.seat_measurements.clone() {
             Some(seat_measurements) => {
@@ -1006,7 +1035,40 @@ pub fn process_multisub_group_with_callback(
         }
     }
 
-    let (result, combined_response, allpass_filters) = if group.allpass_optimization {
+    // An explicit joint request cannot be satisfied by a different optimizer.
+    if group.joint_optimization && prepared.seat_measurements.is_none() {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "joint multi-sub selected for '{}' requires a per-seat matrix; no alternate optimizer was run",
+                group.name
+            ),
+        });
+    }
+    let joint_scope_ready = group.joint_optimization && prepared.seat_measurements.is_some();
+    let mut joint_details = None;
+    let (result, combined_response, allpass_filters) = if joint_scope_ready {
+        // Joint coherent optimization over the transfer matrix; the
+        // downstream shared residual EQ stage runs unchanged. An
+        // unverified timing scope refuses the coherent result before any
+        // array search runs, including searches by alternate optimizers.
+        info!("  Using joint coherent multi-sub optimization");
+        match multisub::process_joint_sub_group_detailed(
+            channel_name,
+            group,
+            room_config,
+            sample_rate,
+            prepared,
+            prepared.reference_scope.clone(),
+        ) {
+            Ok((base, combined, details)) => {
+                joint_details = Some(details);
+                (base, combined, None)
+            }
+            Err(other) => {
+                return Err(other);
+            }
+        }
+    } else if group.allpass_optimization {
         // All-pass enhanced optimization
         info!("  Using all-pass enhanced multi-sub optimization");
         let ap_result = multisub::optimize_multisub_with_allpass(
@@ -1073,7 +1135,7 @@ pub fn process_multisub_group_with_callback(
         sub_eq_config.min_freq,
         sub_eq_config.max_freq,
     );
-    let eq_result = match callback {
+    let mut eq_result = match callback {
         Some(callback) => eq::optimize_channel_eq_with_callback_detailed(
             &combined_curve,
             &multisub_eq_optimizer,
@@ -1091,6 +1153,21 @@ pub fn process_multisub_group_with_callback(
     .map_err(|e| AutoeqError::OptimizationFailed {
         message: format!("EQ optimization failed for multi-sub sum: {}", e),
     })?;
+    let shared_eq_rejection_reason = if let Some(details) = &joint_details {
+        eq::protect_shared_eq_seats(
+            &mut eq_result,
+            &combined_curve,
+            &details.per_seat_post,
+            &multisub_eq_optimizer,
+            eq_resources,
+            sample_rate,
+        )
+        .map_err(|error| AutoeqError::OptimizationFailed {
+            message: format!("shared multi-sub EQ acceptance failed: {error}"),
+        })?
+    } else {
+        None
+    };
     let eq_filters = eq_result.filters;
     let post_score = eq_result.loss;
     let optimizer_evidence = eq_result.optimizer_evidence;
@@ -1159,6 +1236,19 @@ pub fn process_multisub_group_with_callback(
     chain.initial_curve = Some(initial_data.clone());
     chain.final_curve = Some(final_data.clone());
     chain.eq_response = Some(output::compute_eq_response(&initial_data, &final_data));
+
+    if let Some(details) = &joint_details {
+        chain.joint_sub = Some(multisub::joint_sub_diagnostics(
+            details,
+            &eq_filters,
+            sample_rate,
+            [min_freq, max_freq],
+            &chain,
+        )?);
+        if let Some(report) = &mut chain.joint_sub {
+            report.shared_eq_rejection_reason = shared_eq_rejection_reason;
+        }
+    }
 
     Ok((
         chain,

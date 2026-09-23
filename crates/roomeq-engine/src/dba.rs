@@ -176,12 +176,27 @@ pub fn optimize_dba_detailed(
         )
         .into());
     }
+    // Emission-side record: non-PEQ gain/delay layouts pass the envelope
+    // choke-point untouched, but the diagnostics still attach so the DBA
+    // return path is judged like every other emission site.
+    crate::evidence_gate::verify_emission_candidate(
+        "dba-array",
+        &x,
+        &objective_data,
+        &optim_params,
+        &mut optimizer_evidence,
+    )
+    .map_err(|reason| format!("DBA candidate refused at emission: {reason}"))?;
 
     if !post_objective.is_finite() || post_objective > pre_objective + 1e-9 {
         log::warn!("DBA objective regressed; retaining the initial array controls");
         x = initial_x;
         optimizer_evidence.selected_for_output = false;
     }
+    // Acceptance-side budget record: the emitted array gains/delays must
+    // honor the DBA search budgets on the accepted vector.
+    autoeq_optim::optim::verify_joint_budgets("dba-array", &x, &lower_bounds, &upper_bounds)
+        .map_err(|reason| format!("DBA candidate refused at emission: {reason}"))?;
 
     // Recompute scores
     // Note: compute_base_fitness uses args.loss_type which we set to MultiSubFlat

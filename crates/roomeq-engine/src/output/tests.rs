@@ -441,6 +441,7 @@ fn test_add_delay_plugin() {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     };
 
@@ -491,6 +492,9 @@ fn test_create_dsp_chain_output() {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        operation_gates: None,
+
+        provisional_decisions: Vec::new(),
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));
@@ -569,6 +573,9 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        operation_gates: None,
+
+        provisional_decisions: Vec::new(),
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));
@@ -909,12 +916,14 @@ fn test_compute_eq_response() {
         spl: vec![80.0, 80.0],
         phase: None,
         norm_range: None,
+        ..Default::default()
     };
     let final_curve = CurveData {
         freq: vec![100.0, 200.0],
         spl: vec![82.0, 79.0],
         phase: None,
         norm_range: None,
+        ..Default::default()
     };
     let eq = super::compute::compute_eq_response(&initial, &final_curve);
     assert_eq!(eq.spl[0], 2.0);
@@ -957,6 +966,7 @@ fn multichannel_epa_aligns_initial_and_final_channel_grids() {
             spl: common.spl.to_vec(),
             phase: None,
             norm_range: None,
+            ..Default::default()
         });
         chain.final_curve = chain.initial_curve.clone();
     }

@@ -21,6 +21,7 @@ fn channel(name: &str, plugins: Vec<PluginConfigWrapper>) -> ChannelDspChain {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     }
 }
 
@@ -117,7 +118,9 @@ fn generic_renderer_accepts_supported_camilladsp_fixture_in_source_order() {
 }
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_pcm_preserves_polarity_and_delay() {
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     let output = output_with_plugins(vec![
         PluginConfigWrapper {
             plugin_type: "gain".to_string(),
@@ -151,7 +154,9 @@ fn tool_contract_camilladsp_pcm_preserves_polarity_and_delay() {
 }
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_pcm_preserves_routed_channel_matrix() {
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     let mut output = make_routed_bass_output();
     for chain in output.channels.values_mut() {
         chain.plugins.clear();
@@ -206,7 +211,9 @@ fn tool_contract_camilladsp_pcm_preserves_routed_channel_matrix() {
 }
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_pcm_matches_peaking_filter_gain() {
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     let output = output_with_plugins(vec![PluginConfigWrapper {
         plugin_type: "eq".to_string(),
         parameters: json!({
@@ -247,7 +254,9 @@ fn tool_contract_camilladsp_pcm_matches_peaking_filter_gain() {
 }
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_pcm_matches_linkwitz_riley_crossover_gain() {
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     let output = output_with_plugins(vec![PluginConfigWrapper {
         plugin_type: "crossover".to_string(),
         parameters: json!({
@@ -375,7 +384,9 @@ fn tool_contract_equalizer_apo_benchmark_processes_real_pcm() {
 }
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_pcm_processes_convolution_sidecar() {
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     let output = output_with_plugins(vec![PluginConfigWrapper {
         plugin_type: "convolution".to_string(),
         parameters: json!({"ir_file": "identity.wav"}),
@@ -680,7 +691,7 @@ fn camilladsp_routed_export_requires_every_plugin_to_have_a_stage() {
 }
 
 #[test]
-fn camilladsp_rejects_multiple_sub_outputs_before_rendering() {
+fn camilladsp_rejects_sub_outputs_without_matching_physical_routes() {
     let mut output = make_routed_bass_output();
     output
         .metadata
@@ -712,10 +723,9 @@ fn camilladsp_rejects_multiple_sub_outputs_before_rendering() {
 
     let error = camilladsp_error(&output);
     assert!(
-        error.contains("supports a single physical sub output"),
+        error.contains("declared sub outputs do not match routed physical outputs"),
         "unexpected error: {error}"
     );
-    assert!(error.contains("SUB1") && error.contains("SUB2"));
 }
 
 #[test]
@@ -761,6 +771,168 @@ fn camilladsp_routed_export_rejects_driver_branches() {
         error.contains("cannot represent active-crossover driver branches"),
         "unexpected error: {error}"
     );
+}
+
+fn hierarchical_physical_sub_output() -> DspGraph {
+    let mut output = make_routed_bass_output();
+    let report = output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap();
+    report.physical_sub_outputs = vec!["LFE".into(), "SUB2".into()];
+    report.sub_outputs = ["LFE", "SUB2"]
+        .into_iter()
+        .map(|name| roomeq_model::BassManagementSubOutputReport {
+            output_role: name.into(),
+            gain_db: if name == "SUB2" { 1.0 } else { 0.0 },
+            delay_ms: if name == "SUB2" { 0.25 } else { 0.0 },
+            polarity_inverted: name == "SUB2",
+            strategy_source: "routed-fixture".into(),
+            headroom_contribution_db: 0.0,
+            selected_low_pass_hz: None,
+        })
+        .collect();
+    let routing = report.routing_graph.as_mut().unwrap();
+    let second_index = routing.output_channels.len();
+    routing.output_channels.push("SUB2".into());
+    routing.physical_sub_outputs = vec!["LFE".into(), "SUB2".into()];
+    routing.matrix = None;
+    let second_routes: Vec<_> = routing
+        .routes
+        .iter()
+        .filter(|route| route.destination == "LFE")
+        .cloned()
+        .map(|mut route| {
+            route.destination = "SUB2".into();
+            route.destination_index = second_index;
+            route.post_chain_channel = Some("SUB2".into());
+            route.gain_db += 1.0;
+            route.gain_linear = 10.0_f64.powf(route.gain_db / 20.0);
+            route.matrix_gain = route.gain_linear;
+            route.delay_ms += 0.25;
+            route.polarity_inverted = !route.polarity_inverted;
+            route
+        })
+        .collect();
+    routing.routes.extend(second_routes);
+    output.channels.get_mut("LFE").unwrap().drivers = Some(vec![
+        roomeq_model::DriverDspChain {
+            name: "LFE".into(),
+            index: 0,
+            plugins: Vec::new(),
+            initial_curve: None,
+            measured_band_hz: None,
+        },
+        roomeq_model::DriverDspChain {
+            name: "SUB2".into(),
+            index: 1,
+            plugins: vec![PluginConfigWrapper {
+                plugin_type: "delay".into(),
+                parameters: json!({
+                    "delay_ms": 0.5,
+                    "room_eq_stage": "post_route",
+                    "room_eq_correction_delay": true
+                }),
+            }],
+            initial_curve: None,
+            measured_band_hz: None,
+        },
+    ]);
+    output
+}
+
+#[test]
+fn camilladsp_routed_export_realizes_hierarchical_physical_sub_delay() {
+    let output = hierarchical_physical_sub_output();
+
+    let routing = output
+        .metadata
+        .as_ref()
+        .unwrap()
+        .bass_management
+        .as_ref()
+        .unwrap()
+        .routing_graph
+        .as_ref()
+        .unwrap();
+    let resolved = super::super::conformance::camilladsp_physical_routing(&output, routing)
+        .expect("hierarchical physical routes must resolve");
+    for (original, factored) in routing
+        .routes
+        .iter()
+        .filter(|route| route.destination == "LFE")
+        .zip(
+            resolved
+                .graph
+                .routes
+                .iter()
+                .filter(|route| route.destination == "SUB2"),
+        )
+    {
+        assert!((original.gain_db - factored.gain_db).abs() < 1e-12);
+        assert!((original.delay_ms - factored.delay_ms).abs() < 1e-12);
+        assert_eq!(original.polarity_inverted, factored.polarity_inverted);
+    }
+    let yaml = render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0)
+        .expect("hierarchical routed physical outputs must retain their delay");
+    assert!(yaml.contains("out: 4"));
+    assert!(yaml.contains("post_SUB2_gain"));
+    assert!(yaml.contains("post_SUB2_delay"));
+}
+
+#[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
+fn tool_contract_camilladsp_pcm_realizes_hierarchical_sub_controls() {
+    std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
+    let mut output = hierarchical_physical_sub_output();
+    for chain in output.channels.values_mut() {
+        chain.plugins.clear();
+    }
+    let routes = &mut output
+        .metadata
+        .as_mut()
+        .unwrap()
+        .bass_management
+        .as_mut()
+        .unwrap()
+        .routing_graph
+        .as_mut()
+        .unwrap()
+        .routes;
+    for route in routes {
+        route.high_pass_hz = None;
+        route.low_pass_hz = None;
+        route.delay_ms = if route.destination == "SUB2" {
+            0.25
+        } else {
+            0.0
+        };
+    }
+
+    let config = render_dsp_chain(&output, ExportFormat::CamillaDsp, 48_000.0).unwrap();
+    let frame_count = 8192;
+    let channel_count = 4;
+    let impulse_frame = 128;
+    let amplitude = 1 << 26;
+    let mut input = vec![0_i32; frame_count * 3];
+    input[impulse_frame * 3] = amplitude;
+    let rendered =
+        run_optional_pcm_backend_contract("ROOMEQ_CAMILLADSP_BIN", "yaml", &config, &input, |_| {})
+            .expect("the required CamillaDSP backend did not run");
+    let delayed_frame = impulse_frame + 36;
+    let lfe = rendered[impulse_frame * channel_count + 2];
+    let sub2 = rendered[delayed_frame * channel_count + 3];
+    let expected_lfe = f64::from(amplitude) * 10.0_f64.powf(-6.0 / 20.0);
+    let expected_sub2 = -expected_lfe * 10.0_f64.powf(1.0 / 20.0);
+    assert!((f64::from(lfe) - expected_lfe).abs() < 16.0, "LFE: {lfe}");
+    assert!(
+        (f64::from(sub2) - expected_sub2).abs() < 16.0,
+        "SUB2: {sub2}"
+    );
+    assert!(rendered[impulse_frame * channel_count + 3].abs() < 16);
 }
 
 #[test]

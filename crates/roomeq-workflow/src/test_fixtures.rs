@@ -42,6 +42,8 @@ pub fn empty_metadata() -> OptimizationMetadata {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        operation_gates: None,
+        provisional_decisions: Vec::new(),
     }
 }
 
@@ -73,12 +75,14 @@ pub fn single_channel_room_result(channel_name: &str) -> RoomOptimizationResult 
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     let mut channel_results = HashMap::new();
     channel_results.insert(
         channel_name.to_string(),
         ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: channel_name.to_string(),
             pre_score: 0.5,
             post_score: 0.9,
@@ -92,6 +96,7 @@ pub fn single_channel_room_result(channel_name: &str) -> RoomOptimizationResult 
         },
     );
     RoomOptimizationResult {
+        finalized_decisions: None,
         channels,
         channel_results,
         deployed_source_curves: HashMap::new(),

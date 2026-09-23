@@ -39,7 +39,44 @@ pub fn compute_channel_ir_waveforms(
     delay_ms: f64,
     sample_rate: f64,
 ) -> Option<(IrWaveform, IrWaveform)> {
-    // Guard: phase data is required
+    compute_channel_ir_waveforms_with_transfer(initial_curve, sample_rate, |linear_freqs| {
+        let freqs = ndarray::Array1::from(linear_freqs.to_vec());
+        let mut response =
+            autoeq_core::response::compute_peq_complex_response(biquads, &freqs, sample_rate);
+        if let Some(coeffs) = fir_coeffs {
+            let fir =
+                autoeq_core::response::compute_fir_complex_response(coeffs, &freqs, sample_rate);
+            for (value, fir) in response.iter_mut().zip(fir) {
+                *value *= fir;
+            }
+        }
+        for (value, &frequency) in response.iter_mut().zip(linear_freqs) {
+            *value *= Complex64::from_polar(1.0, -2.0 * PI * frequency * delay_ms / 1000.0);
+        }
+        Some(response)
+    })
+}
+
+/// Reconstruct waveform views using a supplied complete complex correction transfer.
+///
+/// `transfer` receives the uniform DC-to-Nyquist grid for a 65,536-point IFFT
+/// and must return one complex value per bin, including all processing delay.
+/// The forward convention is exp(-j 2 pi f t); inverse normalization is 1/N.
+/// Both views use the uncorrected peak reference and are cropped to 400 ms.
+/// This finite-period spectral reconstruction is a visualization, not a raw
+/// capture or proof of linear-convolution support for arbitrary long responses.
+///
+/// Returns `None` for missing/invalid measurement phase, invalid sample rate,
+/// failed transfer evaluation, mismatched response size, or nonfinite spectra.
+pub fn compute_channel_ir_waveforms_with_transfer(
+    initial_curve: &autoeq_core::Curve,
+    sample_rate: f64,
+    transfer: impl FnOnce(&[f64]) -> Option<Vec<Complex64>>,
+) -> Option<(IrWaveform, IrWaveform)> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return None;
+    }
+    initial_curve.validate("IR waveform measurement").ok()?;
     let phase_deg = initial_curve.phase.as_ref()?;
 
     let n_bins = FFT_SIZE / 2 + 1;
@@ -67,33 +104,29 @@ pub fn compute_channel_ir_waveforms(
     // Force DC and Nyquist to be real
     pre_spectrum[0] = Complex64::new(pre_spectrum[0].re.abs(), 0.0);
     pre_spectrum[n_bins - 1] = Complex64::new(pre_spectrum[n_bins - 1].re, 0.0);
-
-    let pre_ir_raw = spectrum_to_impulse_response(&pre_spectrum, FFT_SIZE);
-
-    // Build post-IR spectrum: pre * biquad chain * fir * delay
-    let freqs_arr = ndarray::Array1::from(linear_freqs.clone());
-    let peq_response =
-        autoeq_core::response::compute_peq_complex_response(biquads, &freqs_arr, sample_rate);
-    let mut post_spectrum: Vec<Complex64> = pre_spectrum
+    if pre_spectrum
         .iter()
-        .zip(peq_response.iter())
-        .map(|(&h_pre, &h_eq)| h_pre * h_eq)
-        .collect();
-
-    if let Some(coeffs) = fir_coeffs {
-        let fir_response =
-            autoeq_core::response::compute_fir_complex_response(coeffs, &freqs_arr, sample_rate);
-        for (h, h_fir) in post_spectrum.iter_mut().zip(fir_response.iter()) {
-            *h *= h_fir;
-        }
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return None;
     }
 
-    // Apply delay: e^(-j * 2π * f * delay_s)
-    let delay_s = delay_ms / 1000.0;
-    for (k, h) in post_spectrum.iter_mut().enumerate() {
-        let f = linear_freqs[k];
-        let angle = -2.0 * PI * f * delay_s;
-        *h *= Complex64::from_polar(1.0, angle);
+    // The caller owns topology realization. Never infer an advanced filter's
+    // transfer from a PEQ-shaped diagnostic summary or add its delay twice.
+    let correction = transfer(&linear_freqs)?;
+    if correction.len() != n_bins {
+        return None;
+    }
+    let mut post_spectrum: Vec<Complex64> = pre_spectrum
+        .iter()
+        .zip(correction.iter())
+        .map(|(&h_pre, &h_eq)| h_pre * h_eq)
+        .collect();
+    if post_spectrum
+        .iter()
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return None;
     }
     // A real IFFT requires self-conjugate DC and Nyquist bins. Fractional
     // delays rotate Nyquist away from the real axis, so restore the invariant
@@ -101,7 +134,72 @@ pub fn compute_channel_ir_waveforms(
     post_spectrum[0] = Complex64::new(post_spectrum[0].re, 0.0);
     post_spectrum[n_bins - 1] = Complex64::new(post_spectrum[n_bins - 1].re, 0.0);
 
-    let post_ir_raw = spectrum_to_impulse_response(&post_spectrum, FFT_SIZE);
+    waveforms_from_spectra(&pre_spectrum, &post_spectrum, sample_rate)
+}
+
+/// Reconstruct two acoustic responses using a common uncorrected peak reference.
+///
+/// Use this when parallel physical branches have already been summed as complex
+/// acoustic responses. No common electrical correction or division by the
+/// uncorrected response is assumed. Both curves require valid phase; their
+/// frequency grids may differ. The caller must establish compatible measurement
+/// timing, level calibration, and processing provenance.
+///
+/// Returns `None` for invalid curves, absent phase, invalid sample rate, nonfinite
+/// spectra, or an unusably small uncorrected peak. Views use a 65,536-point IFFT
+/// and a 400 ms crop, not raw captures or a long-response convolution guarantee.
+pub fn compute_channel_ir_waveforms_from_curves(
+    initial_curve: &autoeq_core::Curve,
+    final_curve: &autoeq_core::Curve,
+    sample_rate: f64,
+) -> Option<(IrWaveform, IrWaveform)> {
+    if !sample_rate.is_finite() || sample_rate <= 0.0 {
+        return None;
+    }
+    let linear_freqs: Vec<_> = (0..=FFT_SIZE / 2)
+        .map(|k| k as f64 * sample_rate / FFT_SIZE as f64)
+        .collect();
+    let pre = acoustic_spectrum(initial_curve, &linear_freqs)?;
+    let post = acoustic_spectrum(final_curve, &linear_freqs)?;
+    waveforms_from_spectra(&pre, &post, sample_rate)
+}
+
+fn acoustic_spectrum(curve: &autoeq_core::Curve, frequencies: &[f64]) -> Option<Vec<Complex64>> {
+    curve.validate("IR waveform acoustic response").ok()?;
+    let phase = phase_for_interpolation(curve.phase.as_ref()?);
+    let spl = interpolate_to_linear_grid(&curve.freq.to_vec(), &curve.spl.to_vec(), frequencies);
+    let phase = interpolate_to_linear_grid(&curve.freq.to_vec(), &phase.to_vec(), frequencies);
+    let mut spectrum: Vec<_> = spl
+        .iter()
+        .zip(phase)
+        .map(|(&spl, phase)| Complex64::from_polar(10.0_f64.powf(spl / 20.0), phase.to_radians()))
+        .collect();
+    if spectrum
+        .iter()
+        .any(|value| !value.re.is_finite() || !value.im.is_finite())
+    {
+        return None;
+    }
+    // Preserve polarity while imposing real-valued self-conjugate endpoints.
+    spectrum[0].im = 0.0;
+    spectrum.last_mut()?.im = 0.0;
+    Some(spectrum)
+}
+
+fn waveforms_from_spectra(
+    pre_spectrum: &[Complex64],
+    post_spectrum: &[Complex64],
+    sample_rate: f64,
+) -> Option<(IrWaveform, IrWaveform)> {
+    let pre_ir_raw = spectrum_to_impulse_response(pre_spectrum, FFT_SIZE);
+    let post_ir_raw = spectrum_to_impulse_response(post_spectrum, FFT_SIZE);
+    if pre_ir_raw
+        .iter()
+        .chain(&post_ir_raw)
+        .any(|value| !value.is_finite())
+    {
+        return None;
+    }
 
     // Normalize both by pre-IR peak
     let pre_peak = pre_ir_raw.iter().map(|&x| x.abs()).fold(0.0_f64, f64::max);
@@ -193,8 +291,143 @@ fn spectrum_to_impulse_response(one_sided: &[Complex64], fft_size: usize) -> Vec
 }
 
 #[cfg(test)]
+mod transfer_tests {
+    use super::*;
+
+    fn flat() -> autoeq_core::Curve {
+        autoeq_core::Curve {
+            freq: ndarray::array![20.0, 20_000.0],
+            spl: ndarray::array![0.0, 0.0],
+            phase: Some(ndarray::array![0.0, 0.0]),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn waveform_transfer_preserves_gain_delay_polarity_and_energy() {
+        let sample_rate = 48_000.0;
+        let (pre, post) =
+            compute_channel_ir_waveforms_with_transfer(&flat(), sample_rate, |frequencies| {
+                Some(
+                    frequencies
+                        .iter()
+                        .map(|frequency| {
+                            -0.5 * Complex64::from_polar(
+                                1.0,
+                                -2.0 * PI * frequency * 17.0 / sample_rate,
+                            )
+                        })
+                        .collect(),
+                )
+            })
+            .unwrap();
+        assert!((pre.amplitude[0] - 1.0).abs() < 1e-12);
+        for (index, amplitude) in post.amplitude.iter().enumerate() {
+            let expected = if index == 17 { -0.5 } else { 0.0 };
+            assert!((amplitude - expected).abs() < 1e-12);
+        }
+        let energy: f64 = post.amplitude.iter().map(|value| value * value).sum();
+        assert!((energy - 0.25).abs() < 1e-12);
+        assert_eq!(post.time_ms[17], 17.0 * 1000.0 / sample_rate);
+    }
+
+    #[test]
+    fn waveform_transfer_withholds_missing_or_invalid_evidence() {
+        let mut missing = flat();
+        missing.phase = None;
+        assert!(
+            compute_channel_ir_waveforms_with_transfer(&missing, 48_000.0, |_| panic!(
+                "missing phase must not be invented"
+            ))
+            .is_none()
+        );
+        let mut malformed = flat();
+        malformed.phase = Some(ndarray::array![0.0]);
+        assert!(
+            compute_channel_ir_waveforms_with_transfer(&malformed, 48_000.0, |_| panic!(
+                "invalid measurement must not be evaluated"
+            ))
+            .is_none()
+        );
+        assert!(
+            compute_channel_ir_waveforms_with_transfer(&flat(), f64::NAN, |_| panic!(
+                "invalid sample rate"
+            ))
+            .is_none()
+        );
+        assert!(compute_channel_ir_waveforms_with_transfer(&flat(), 48_000.0, |_| None).is_none());
+        assert!(
+            compute_channel_ir_waveforms_with_transfer(&flat(), 48_000.0, |_| Some(vec![
+                Complex64::new(1.0, 0.0)
+            ]))
+            .is_none()
+        );
+        assert!(
+            compute_channel_ir_waveforms_with_transfer(&flat(), 48_000.0, |frequencies| Some(
+                vec![Complex64::new(f64::NAN, 0.0); frequencies.len()]
+            ))
+            .is_none()
+        );
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn acoustic_curve_pair_preserves_gain_and_polarity_multirate() {
+        for rate in [44100.0, 48000.0, 96000.0] {
+            let initial = autoeq_core::Curve {
+                freq: ndarray::array![20.0, 20000.0],
+                spl: ndarray::array![80.0, 80.0],
+                phase: Some(ndarray::array![0.0, 0.0]),
+                ..Default::default()
+            };
+            for gain_db in [-6.0, 6.0] {
+                for polarity in [1.0, -1.0] {
+                    // Different grids must not imply different level references.
+                    let final_curve = autoeq_core::Curve {
+                        freq: ndarray::array![20.0, 1000.0, 20000.0],
+                        spl: ndarray::Array1::from_elem(3, 80.0 + gain_db),
+                        phase: Some(ndarray::Array1::from_elem(
+                            3,
+                            if polarity < 0.0 { 180.0 } else { 0.0 },
+                        )),
+                        ..Default::default()
+                    };
+                    let (pre, post) =
+                        compute_channel_ir_waveforms_from_curves(&initial, &final_curve, rate)
+                            .unwrap();
+                    let expected = polarity * 10.0_f64.powf(gain_db / 20.0);
+                    assert!((pre.amplitude[0] - 1.0).abs() < 1e-12);
+                    assert!((post.amplitude[0] - expected).abs() < 1e-12);
+                    assert!(post.amplitude[1..].iter().all(|value| value.abs() < 1e-12));
+                    assert_eq!(pre.time_ms, post.time_ms);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn acoustic_curve_pair_rejects_unavailable_or_invalid_evidence() {
+        let initial = autoeq_core::Curve {
+            freq: ndarray::array![20.0, 20000.0],
+            spl: ndarray::array![80.0, 80.0],
+            phase: Some(ndarray::array![0.0, 0.0]),
+            ..Default::default()
+        };
+        let mut invalid = initial.clone();
+        invalid.phase = None;
+        assert!(compute_channel_ir_waveforms_from_curves(&initial, &invalid, 48000.0).is_none());
+        assert!(compute_channel_ir_waveforms_from_curves(&invalid, &initial, 48000.0).is_none());
+        invalid.phase = Some(ndarray::array![f64::NAN, 0.0]);
+        assert!(compute_channel_ir_waveforms_from_curves(&initial, &invalid, 48000.0).is_none());
+        assert!(compute_channel_ir_waveforms_from_curves(&initial, &initial, f64::NAN).is_none());
+        invalid = initial.clone();
+        invalid.spl.fill(-4000.0);
+        assert!(compute_channel_ir_waveforms_from_curves(&invalid, &initial, 48000.0).is_none());
+    }
     use ndarray::Array1;
     use std::f64::consts::PI;
 

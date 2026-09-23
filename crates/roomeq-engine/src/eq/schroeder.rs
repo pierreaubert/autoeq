@@ -509,6 +509,8 @@ mod tests {
     fn schroeder_split_above_band_uses_only_low_frequency_pass() {
         let curve = curve_with_bass_peak_and_treble_tilt();
         let optimizer = OptimizerConfig {
+            seed: Some(37),
+            parallel_threads: Some(1),
             num_filters: 2,
             max_iter: 20,
             population: 6,

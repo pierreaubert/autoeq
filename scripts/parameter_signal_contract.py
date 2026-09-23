@@ -12,8 +12,11 @@ def verify_signal_axes(row):
     rates = row["delivered_biquad_sample_rates_hz"]
     system = row["effective_config"].get("system")
     roles = system["speakers"] if system else {name: name for name in measurements}
-    assert set(roles.values()) == set(measurements), "missing role measurement evidence"
-    assert set(rates) == set(roles), "missing delivered channel rate evidence"
+    sub_outputs = system.get("subwoofers", {}).get("outputs", []) if system else []
+    expected_measurements = set(roles.values()) | {output["speaker"] for output in sub_outputs}
+    expected_channels = set(roles) | {output["id"] for output in sub_outputs}
+    assert expected_measurements == set(measurements), "missing role measurement evidence"
+    assert set(rates) == expected_channels, "missing delivered channel rate evidence"
     count = 0
     for channel_rates in rates.values():
         for rate in channel_rates:

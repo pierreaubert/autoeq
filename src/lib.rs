@@ -1,5 +1,8 @@
 #![doc = include_str!("../README.md")]
 
+/// Capture-clock and measurement acquisition contracts.
+#[doc(inline)]
+pub use autoeq_core::{MeasurementProvenance, ProvenanceCaptureKind, capture_provenance};
 pub use autoeq_workflow::qa_println;
 
 // Re-export external crate functionality

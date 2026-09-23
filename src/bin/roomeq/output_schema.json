@@ -1,5 +1,27 @@
 {
   "$defs": {
+    "AcceptanceEvidence": {
+      "description": "Graph-bound diagnostic payload, not a safety or acoustic acceptance certificate.",
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/PayloadBinding",
+          "description": "Independent digest covering both the view payload and delivered graph ID."
+        },
+        "payload": {
+          "description": "Serialized quality bundles and explicit unavailable reasons by channel."
+        },
+        "version": {
+          "description": "Version controlling interpretation of the quality-owned payload.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "payload",
+        "binding"
+      ],
+      "type": "object"
+    },
     "AcousticQualityScorecard": {
       "properties": {
         "correction_band_hz": {
@@ -98,6 +120,20 @@
         "evaluated_band_hz",
         "finite"
       ],
+      "type": "object"
+    },
+    "AngularCoverage": {
+      "description": "Off-axis/angular coverage of a direct-sound capture.\n\nDetail correction above the modal transition needs angular evidence;\na single on-axis capture never authorizes high-resolution speaker\ninversion. Angles are loudspeaker-relative azimuth in degrees.",
+      "properties": {
+        "angles_deg": {
+          "description": "Measured off-axis angles in degrees (on-axis `0.0` may be included).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "AppliedThreshold": {
@@ -541,6 +577,26 @@
         }
       },
       "type": "object"
+    },
+    "AveragingMethod": {
+      "description": "How the capture was averaged across space or time.\n\nA moving-microphone average cannot supply a physical phase response\nor room impulse response, so it is never a phase source.",
+      "oneOf": [
+        {
+          "const": "stationary",
+          "description": "Stationary microphone; timing reference preserved.",
+          "type": "string"
+        },
+        {
+          "const": "moving_microphone",
+          "description": "Moving-microphone magnitude average; magnitude only.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Averaging method was not recorded.",
+          "type": "string"
+        }
+      ]
     },
     "BassAnchorChannelResultLegacy": {
       "description": "Per-channel bass-anchor result (mirror of `BassAnchorChannelResult`).",
@@ -1769,6 +1825,312 @@
         }
       ]
     },
+    "CaptureCorrection": {
+      "description": "Clock correction actually applied to a saved take.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Samples remain on their original device clock.",
+          "type": "string"
+        },
+        {
+          "const": "resampled",
+          "description": "Samples were resampled to the declared timing reference.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureGeometry": {
+      "description": "Interpretation of the microphone positions within a capture session.",
+      "oneOf": [
+        {
+          "const": "spread",
+          "description": "Independent listening seats for spatial magnitude measurements.",
+          "type": "string"
+        },
+        {
+          "const": "compact",
+          "description": "Surveyed microphone cluster for conditional direction estimation.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureKind": {
+      "description": "How the underlying capture was acquired.\n\nMoving-microphone magnitude data cannot supply phase or impulse\nresponses; stationary captures keep a timing reference. `Unknown`\nis the default for legacy data and must never read as a claim.",
+      "oneOf": [
+        {
+          "const": "stationary_ir",
+          "description": "Stationary microphone sweep or impulse response.",
+          "type": "string"
+        },
+        {
+          "const": "spatial_magnitude",
+          "description": "Spatial magnitude capture (e.g. moving microphone).",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound",
+          "description": "Gated/windowed direct-sound measurement.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Capture mode was not recorded.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureArrival": {
+      "description": "A detected event with explicit limits on its measured direction.",
+      "properties": {
+        "arrival_ms": {
+          "description": "Arrival time relative to the shared sweep origin, in milliseconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "band_hz": {
+          "description": "Band used for the pair-delay estimate, in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "Unit vector toward the arriving source/image source, when identifiable.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "issues": {
+          "description": "Missing or ambiguous direction evidence is explained here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "level_db": {
+          "description": "First microphone event peak energy relative to direct sound, in dB.",
+          "format": "double",
+          "type": "number"
+        },
+        "microphone_energy_db": {
+          "default": [],
+          "description": "Integrated event energy relative to each microphones direct segment, in capture order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "mirror_ambiguous": {
+          "description": "True when a planar array leaves the side of arrival unresolved.",
+          "type": "boolean"
+        },
+        "relative_ms": {
+          "description": "Delay relative to the detected direct sound, in milliseconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "residual_samples": {
+          "description": "RMS pair-delay fit residual in samples; not an angular uncertainty.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "arrival_ms",
+        "relative_ms",
+        "level_db",
+        "mirror_ambiguous",
+        "issues"
+      ],
+      "type": "object"
+    },
+    "CaptureReflectionReport": {
+      "description": "Measured arrival candidates for one simultaneously captured source.",
+      "properties": {
+        "direct_sound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureArrival"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "SSIR direct-arrival candidate; detection is not a surveyed source label."
+        },
+        "early_reflections": {
+          "description": "Early reflection candidates, ordered by arrival time.",
+          "items": {
+            "$ref": "#/$defs/CaptureArrival"
+          },
+          "type": "array"
+        },
+        "issues": {
+          "description": "Conditions that prevented source-level analysis.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_id": {
+          "description": "Sequentially excited source identity.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "early_reflections",
+        "issues"
+      ],
+      "type": "object"
+    },
+    "CaptureProvenance": {
+      "description": "Capture provenance in exactly the associated measurement-reference order.",
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/CaptureGeometry",
+          "description": "One geometry interpretation for the complete session."
+        },
+        "reflection_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureReflectionReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Detected source arrivals and conditional measured directions."
+        },
+        "takes": {
+          "description": "One entry per measurement, including every failed timing fit.",
+          "items": {
+            "$ref": "#/$defs/CaptureTakeProvenance"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "geometry",
+        "takes"
+      ],
+      "type": "object"
+    },
+    "CaptureTakeProvenance": {
+      "description": "Clock, calibration, and position evidence for one microphone take.",
+      "properties": {
+        "calibration_id": {
+          "description": "Frozen calibration identity, preferably its SHA-256 digest.",
+          "type": "string"
+        },
+        "calibration_orientation": {
+          "description": "Calibration orientation: `on_axis` or `ninety_degrees`.",
+          "type": "string"
+        },
+        "correction_applied": {
+          "$ref": "#/$defs/CaptureCorrection",
+          "description": "Transformation applied to the associated measurement audio."
+        },
+        "device_id": {
+          "description": "Actual negotiated input device identity.",
+          "type": "string"
+        },
+        "gain_db": {
+          "description": "Frozen microphone input gain in decibels.",
+          "format": "double",
+          "type": "number"
+        },
+        "microphone_id": {
+          "description": "Physical microphone identity, unique within this source capture.",
+          "type": "string"
+        },
+        "offset_samples": {
+          "description": "Input sample index corresponding to reference sample zero.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "position_m": {
+          "description": "Position in the session's right-handed coordinate system, in meters.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "position_uncertainty_mm": {
+          "description": "Position survey uncertainty in millimeters.",
+          "format": "double",
+          "type": "number"
+        },
+        "preserves_acoustic_delay": {
+          "default": false,
+          "description": "False for arrival-aligned data that removed unknown propagation delay.",
+          "type": "boolean"
+        },
+        "quality_passed": {
+          "default": false,
+          "description": "Separate measurement-quality acceptance, never inferred from a clock fit.",
+          "type": "boolean"
+        },
+        "residual_uncertainty_us": {
+          "description": "Conditional residual timing bound; missing never means zero.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "skew_ppm": {
+          "description": "Relative input clock skew in parts per million.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "timing_reference_id": {
+          "description": "Common acoustic or electrical reference identity, when established.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "microphone_id",
+        "device_id",
+        "correction_applied",
+        "calibration_id",
+        "gain_db",
+        "calibration_orientation",
+        "position_m",
+        "position_uncertainty_mm"
+      ],
+      "type": "object"
+    },
     "CardioidConfig": {
       "description": "Configuration for Gradient Cardioid Subwoofer (2 subwoofers)",
       "properties": {
@@ -1980,6 +2342,17 @@
           ],
           "description": "Initial frequency response curve before optimization (optional)"
         },
+        "joint_sub": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JointSubDiagnostics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stage-bound joint subwoofer diagnostics, when that method ran."
+        },
         "plugins": {
           "description": "Ordered list of plugins (AudioEngine PluginConfig format)",
           "items": {
@@ -2049,6 +2422,32 @@
           "type": "number"
         }
       },
+      "type": "object"
+    },
+    "ChannelOperationGate": {
+      "description": "Operation-boundary verdicts for one channel on the public workflow path.\n\nThe workflow intake evaluates every applicable operation against the\nchannel's declared provenance and attaches one gate per channel to the\npipeline result. Consumers (phase dispatch, target policy, the final\nledger) read these records instead of re-deriving permissions from a\nsingle phase flag.",
+      "properties": {
+        "channel": {
+          "description": "Logical channel name, e.g. `\"left\"`.",
+          "type": "string"
+        },
+        "measurement_id": {
+          "description": "Stable measurement identifier the verdicts apply to.",
+          "type": "string"
+        },
+        "records": {
+          "description": "One record per evaluated operation and band, in evaluation order.",
+          "items": {
+            "$ref": "#/$defs/EligibilityRecord"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "channel",
+        "measurement_id",
+        "records"
+      ],
       "type": "object"
     },
     "ChannelTimingReport": {
@@ -2284,6 +2683,17 @@
     "CorrectionDecisionLedger": {
       "description": "Ordered set of decision records with a pinned ledger version.",
       "properties": {
+        "acceptance_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AcceptanceEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Supplemental quality views, independently bound to this ledger's graph.\nAbsent in legacy outputs; never promotes a correction or playback verdict."
+        },
         "decisions": {
           "description": "Decision records in insertion order.",
           "items": {
@@ -2295,6 +2705,17 @@
           "default": "1.0.0",
           "description": "Ledger version; must equal [`DECISION_LEDGER_VERSION`].",
           "type": "string"
+        },
+        "payload_binding": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PayloadBinding"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Recomputable payload binding for report consumers; absent in legacy files."
         }
       },
       "type": "object"
@@ -2350,6 +2771,46 @@
         "max_abs_correction_db"
       ],
       "type": "object"
+    },
+    "CorrectionOperation": {
+      "description": "Operations gated by evidence eligibility (global K2 vocabulary).\n\nEligibility is not the final correction decision; the workflow applies\nits configured policy on top of these per-band verdicts.",
+      "oneOf": [
+        {
+          "const": "magnitude_correction",
+          "description": "Minimum-phase magnitude equalization.",
+          "type": "string"
+        },
+        {
+          "const": "coherent_summation",
+          "description": "Coherent combination of multiple sources or seats.",
+          "type": "string"
+        },
+        {
+          "const": "excess_phase_correction",
+          "description": "Correction of excess (non-minimum) phase.",
+          "type": "string"
+        },
+        {
+          "const": "absolute_loudness_analysis",
+          "description": "Analysis of absolute loudness; requires measured SPL attribution.",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound_speaker_correction",
+          "description": "Correction derived from the direct sound of a speaker.",
+          "type": "string"
+        },
+        {
+          "const": "decay_analysis",
+          "description": "Reverberation/decay analysis.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Operation not stated; legacy input degrades here, never to eligible.",
+          "type": "string"
+        }
+      ]
     },
     "CrossoverCancellationBaseline": {
       "description": "Frozen measured cancellation spectrum of the configured, unoptimized route.",
@@ -3062,8 +3523,19 @@
       "type": "object"
     },
     "CurveData": {
-      "description": "Frequency response curve data for serialization\n\nRepresents a curve with frequency points and SPL values.\nSPL values are normalized (mean-subtracted in the 1000-2000 Hz range)\nfor consistent comparison across measurements.",
+      "description": "Frequency response curve data for serialization\n\nRepresents a curve with frequency points and SPL values.\nConversion preserves the source level; it does not normalize captures.\nDisplay normalization, when present, is identified by `norm_range`.",
       "properties": {
+        "coherence": {
+          "description": "Measured coherence on this grid; absence is not perfect coherence.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "freq": {
           "description": "Frequency points in Hz",
           "items": {
@@ -3071,6 +3543,17 @@
             "type": "number"
           },
           "type": "array"
+        },
+        "noise_floor_db": {
+          "description": "Measured noise floor on this grid, in the same level reference as `spl`.\nA level-reference shift must shift this array by the same amount.\nAbsent for legacy curves or when capture noise was not measured.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "norm_range": {
           "description": "Optional frequency range used for normalization",
@@ -3103,7 +3586,7 @@
           ]
         },
         "spl": {
-          "description": "Sound Pressure Level in dB (normalized)",
+          "description": "Sound pressure level in dB, in the source curve's reference convention.",
           "items": {
             "format": "double",
             "type": "number"
@@ -3518,6 +4001,91 @@
       ],
       "type": "object"
     },
+    "DirectSoundCaptureFacts": {
+      "description": "Raw direct-sound acquisition facts for one measurement.\n\nField mapping onto core contract K1: capture kind travels verbatim;\ngate length, geometry, angular coverage, and averaging method are the\ncapture facts the K1 envelope cites by reference. Nothing here is a\nverdict; assessment belongs to `roomeq-analysis`.",
+      "properties": {
+        "angular": {
+          "$ref": "#/$defs/AngularCoverage",
+          "default": {},
+          "description": "Recorded angular coverage."
+        },
+        "averaging": {
+          "$ref": "#/$defs/AveragingMethod",
+          "default": "unknown",
+          "description": "How the capture was averaged."
+        },
+        "capture_kind": {
+          "$ref": "#/$defs/CaptureKind",
+          "default": "unknown",
+          "description": "K1 capture kind, reused verbatim."
+        },
+        "direct_path_m": {
+          "description": "Direct source-to-microphone path length in meters.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "first_reflection_path_m": {
+          "description": "First-reflection path length in meters.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "gate_s": {
+          "description": "Gate/window length in seconds applied for direct-sound isolation.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sample_rate_hz": {
+          "description": "Capture sample rate in Hz, when known.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sound_speed_m_s": {
+          "description": "Speed of sound in m/s used for the interval conversion.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sound_speed_m_s"
+      ],
+      "type": "object"
+    },
+    "DirectSoundEvidence": {
+      "description": "Capture facts and the explicitly selected policy used to assess them.\n\nNeither declarations nor a policy establish acquisition authenticity.\nAnalysis checks internal consistency and usable frequency support.",
+      "properties": {
+        "facts": {
+          "$ref": "#/$defs/DirectSoundCaptureFacts",
+          "description": "Raw acquisition facts, retained without upgrading unknown values."
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuasiAnechoicPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit policy; absence cannot silently select fixture defaults."
+        }
+      },
+      "required": [
+        "facts"
+      ],
+      "type": "object"
+    },
     "DirectivityModel": {
       "oneOf": [
         {
@@ -3689,6 +4257,112 @@
         }
       },
       "type": "object"
+    },
+    "EligibilityRecord": {
+      "description": "One per-band eligibility verdict for a single operation.\n\nEvidence is cited by stable reference ID; the core K1 envelope owns the\nvalues. The embedded [`AssessmentRecord`] reuses the existing\nconfidence/provenance vocabulary.",
+      "properties": {
+        "assessment": {
+          "$ref": "#/$defs/AssessmentRecord",
+          "default": {
+            "confidence": "unknown",
+            "enforcement": "advisory",
+            "outcome": "insufficient_evidence",
+            "provenance": {
+              "calibration": "unknown",
+              "model": "unspecified",
+              "model_version": "unspecified",
+              "reference": "unspecified"
+            },
+            "reason": "unstated"
+          },
+          "description": "Existing assessment vocabulary (confidence/provenance)."
+        },
+        "band_hz": {
+          "description": "Frequency band in Hz; must be finite with `0 < lo < hi` to validate.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "evidence_refs": {
+          "description": "Stable evidence reference IDs behind the verdict.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "measurement_id": {
+          "description": "Stable measurement identifier the verdict applies to.",
+          "type": "string"
+        },
+        "observations": {
+          "description": "Human-readable observations behind the verdict.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "operation": {
+          "$ref": "#/$defs/CorrectionOperation",
+          "default": "unknown",
+          "description": "Gated operation."
+        },
+        "policy_limits": {
+          "description": "Policy limits applied, with units.",
+          "items": {
+            "$ref": "#/$defs/AppliedThreshold"
+          },
+          "type": "array"
+        },
+        "record_id": {
+          "description": "Stable record identifier; must be nonempty to validate.",
+          "type": "string"
+        },
+        "seat_ids": {
+          "description": "Seat identifiers in scope; empty means the scope was not stated.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "verdict": {
+          "$ref": "#/$defs/EligibilityVerdict",
+          "default": "unknown",
+          "description": "Verdict for this band; legacy input defaults to unknown."
+        }
+      },
+      "type": "object"
+    },
+    "EligibilityVerdict": {
+      "description": "Per-band eligibility verdict for one operation.",
+      "oneOf": [
+        {
+          "const": "eligible",
+          "description": "Evidence supports executing the operation on this band.",
+          "type": "string"
+        },
+        {
+          "const": "limited",
+          "description": "Execution is allowed under the recorded policy limits only.",
+          "type": "string"
+        },
+        {
+          "const": "unsupported",
+          "description": "Evidence rules out the operation on this band.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Evidence is missing or unassessed; the default for legacy input.",
+          "type": "string"
+        }
+      ]
     },
     "EnforcementState": {
       "description": "Whether an assessment drove an applied change.\n\nSeparating this from the outcome keeps \"evaluated and recorded\" visibly\ndistinct from \"evaluated and applied\".",
@@ -4229,6 +4903,24 @@
           "format": "double",
           "type": "number"
         },
+        "physical_drive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhysicalDrivePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional operator-declared steady-sine physical limits, checked on final routes.\nAbsence does not establish hardware capacity; this is not a dynamic safety gate."
+        },
+        "physical_drive_weight": {
+          "default": 0.0,
+          "description": "Optional final-candidate cost per squared worst declared demand/limit ratio.\nAdded to mean seat target error in dB; zero preserves acoustic-only ranking.\nPositive values require physical declarations and never relax safety gates.",
+          "format": "double",
+          "type": "number"
+        },
         "subwoofer_limiter": {
           "default": false,
           "description": "Protect summed physical sub outputs with a runtime limiter instead of static cuts.\nRequires native playback to preserve the limiter and matching output delays.",
@@ -4606,7 +5298,7 @@
         },
         "max_q": {
           "default": 2.0,
-          "description": "If the global Q bound is still at/above this value, cap it when the\npolicy is applied. Frequency-selective Q caps are not available in the\ncurrent PEQ parameterization, so this is intentionally conservative.",
+          "description": "Frequency-local maximum Q in the guarded band. The optimizer adapter\ncombines it with the global and Schroeder policies; the stricter cap\nwins. This does not lower the global Q limit for bass filters.",
           "format": "double",
           "type": "number"
         },
@@ -4832,6 +5524,50 @@
       },
       "type": "object"
     },
+    "InputNormalizationEvidence": {
+      "description": "Actual analysis-level gain applied before EQ smoothing and objective construction.\n\nIdentities bind parsed numerical curves, not raw recordings. This gain is\nnot emitted playback gain, SPL calibration, or a claim about later conditioning.",
+      "properties": {
+        "applied_gain_db": {
+          "description": "Scalar added to input dB levels; subtracting the reference gives a negative gain.",
+          "format": "double",
+          "type": "number"
+        },
+        "correction_band_hz": {
+          "description": "Active correction bounds, not necessarily the reference-estimation band.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "input_curve_identity": {
+          "type": "string"
+        },
+        "normalized_curve_identity": {
+          "type": "string"
+        },
+        "reference_policy": {
+          "$ref": "#/$defs/NormalizationReferencePolicy"
+        },
+        "reference_target_identity": {
+          "description": "Target used to derive a limited-band reference, when applicable.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "input_curve_identity",
+        "normalized_curve_identity",
+        "applied_gain_db",
+        "reference_policy",
+        "correction_band_hz"
+      ],
+      "type": "object"
+    },
     "InterChannelDeviation": {
       "description": "Measurement of inter-channel SPL consistency after optimization",
       "properties": {
@@ -4934,6 +5670,220 @@
       ],
       "type": "object"
     },
+    "JointSubDiagnostics": {
+      "description": "Joint-array and shared-EQ stage diagnostics, not a playback acceptance verdict.",
+      "properties": {
+        "after_array_objective": {
+          "$ref": "#/$defs/JointSubObjectiveReport",
+          "description": "Objective after array control and before shared EQ."
+        },
+        "array_delays_ms": {
+          "description": "Array delays in milliseconds, excluding subsequent processing.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "array_gains_db": {
+          "description": "Array gains in decibels, excluding shared EQ and later workflow trims.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "array_rejection_reason": {
+          "description": "Array-stage rejection reason; absence does not establish final-chain acceptance.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "assessed_channel_processing": {
+          "description": "Fingerprint of channel plugins and driver controls at assessment time.\n\nIt does not bind external resource bytes, global routing, or hardware.",
+          "type": "string"
+        },
+        "before_objective": {
+          "$ref": "#/$defs/JointSubObjectiveReport",
+          "description": "Objective before array control."
+        },
+        "channel_processing_matches": {
+          "default": false,
+          "description": "Whether those channel controls still match at the last output conversion.\n\nFalse keeps the report as stage history after processing changes. True\nis not a full-graph, resource, output-safety, or acoustic validation.",
+          "type": "boolean"
+        },
+        "converged": {
+          "description": "Whether the array optimizer reported convergence, independent of acceptance.",
+          "type": "boolean"
+        },
+        "gain_applications": {
+          "description": "Logical gain applications observed at the array stage.",
+          "items": {
+            "$ref": "#/$defs/JointSubGainApplication"
+          },
+          "type": "array"
+        },
+        "level_band_hz": {
+          "description": "Frequency band used for the unnormalized level summaries, in hertz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "physical_outputs": {
+          "description": "Physical outputs in array-control order.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "description": "Explicit scope of these predictions and their unavailable claims.",
+          "type": "string"
+        },
+        "seats": {
+          "description": "Every retained seat, not only its spatial mean or primary seat.",
+          "items": {
+            "$ref": "#/$defs/JointSubSeatReport"
+          },
+          "type": "array"
+        },
+        "shared_eq_rejection_reason": {
+          "description": "Shared-EQ rejection reason before later trims and routing; not final-chain acceptance.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "scope",
+        "level_band_hz",
+        "physical_outputs",
+        "array_gains_db",
+        "array_delays_ms",
+        "converged",
+        "before_objective",
+        "after_array_objective",
+        "seats",
+        "gain_applications",
+        "assessed_channel_processing"
+      ],
+      "type": "object"
+    },
+    "JointSubGainApplication": {
+      "description": "One explicit logical gain application retained from array optimization.",
+      "properties": {
+        "gain_db": {
+          "description": "Gain in decibels; later routing must not apply this stage twice.",
+          "format": "double",
+          "type": "number"
+        },
+        "physical_output": {
+          "description": "Physical output identity used by the optimizer.",
+          "type": "string"
+        },
+        "stage": {
+          "description": "Logical gain stage: `lfe` or `redirected`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stage",
+        "physical_output",
+        "gain_db"
+      ],
+      "type": "object"
+    },
+    "JointSubObjectiveReport": {
+      "description": "Objective components before or after joint array control.",
+      "properties": {
+        "output_drive_penalty": {
+          "description": "Unnormalized output-loss penalty; not a calibrated excursion estimate.",
+          "format": "double",
+          "type": "number"
+        },
+        "target_error_db2": {
+          "description": "Mean squared target error in squared decibels.",
+          "format": "double",
+          "type": "number"
+        },
+        "total": {
+          "description": "Weighted scalar objective used by this search.",
+          "format": "double",
+          "type": "number"
+        },
+        "variation_db2": {
+          "description": "Mean seat-to-seat variance in squared decibels.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "variation_db2",
+        "output_drive_penalty",
+        "target_error_db2",
+        "total"
+      ],
+      "type": "object"
+    },
+    "JointSubSeatReport": {
+      "description": "One seat's unnormalized predictions through the joint processing stages.",
+      "properties": {
+        "after_array": {
+          "$ref": "#/$defs/CurveData",
+          "description": "Combined response after array gain and delay changes, before shared EQ."
+        },
+        "after_array_level_db": {
+          "description": "Mean input-reference level after array control.",
+          "format": "double",
+          "type": "number"
+        },
+        "after_shared_eq": {
+          "$ref": "#/$defs/CurveData",
+          "description": "Combined response after the same shared EQ is applied to every seat."
+        },
+        "after_shared_eq_level_db": {
+          "description": "Mean input-reference level after shared EQ; never independently normalized.",
+          "format": "double",
+          "type": "number"
+        },
+        "before": {
+          "$ref": "#/$defs/CurveData",
+          "description": "Combined response before array gain and delay changes."
+        },
+        "before_level_db": {
+          "description": "Mean input-reference level over the evaluated band, before control.",
+          "format": "double",
+          "type": "number"
+        },
+        "reference_scope": {
+          "description": "Shared timing-reference and seat scope carried by measurement intake.",
+          "type": "string"
+        },
+        "seat_index": {
+          "description": "Seat index in the retained source-by-seat matrix.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seat_index",
+        "reference_scope",
+        "before",
+        "after_array",
+        "after_shared_eq",
+        "before_level_db",
+        "after_array_level_db",
+        "after_shared_eq_level_db"
+      ],
+      "type": "object"
+    },
     "LfeBassManagementReport": {
       "description": "Canonical home-cinema LFE programme-input policy.",
       "properties": {
@@ -5000,6 +5950,10 @@
           },
           "type": "array"
         },
+        "provenance": {
+          "$ref": "#/$defs/MeasurementProvenance",
+          "description": "Declared acquisition provenance shared by the set (default unknown)."
+        },
         "speaker_name": {
           "description": "Optional speaker name (e.g., \"Genelec 8361A\")",
           "type": [
@@ -5011,6 +5965,74 @@
       "required": [
         "measurements"
       ],
+      "type": "object"
+    },
+    "MeasurementProvenance": {
+      "description": "Declared acquisition provenance of one measurement source.\n\nEvery field is optional at the schema level so old JSON stays readable;\nundeclared provenance degrades to unknown, never to an authorization.",
+      "properties": {
+        "calibration_id": {
+          "description": "Calibration identity applied at acquisition, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Ordered per-device capture facts; absent for legacy acquisition workflows."
+        },
+        "capture_kind": {
+          "$ref": "#/$defs/ProvenanceCaptureKind",
+          "default": "unknown",
+          "description": "Declared acquisition kind (default unknown)."
+        },
+        "direct_sound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectSoundEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Capture facts and explicit policy for quasi-anechoic assessment.\nThe legacy angular boolean alone does not authorize detail correction."
+        },
+        "has_direct_angular": {
+          "description": "Whether off-axis/angular coverage backs direct-sound detail claims.",
+          "type": "boolean"
+        },
+        "has_measured_spl": {
+          "description": "Whether measured (not nominal) SPL backs this source.",
+          "type": "boolean"
+        },
+        "timing_reference_id": {
+          "description": "Shared stationary timing-reference identity, if any. Phase-critical\nwork needs the same identity across coherently combined sources.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "valid_band_hz": {
+          "description": "Gate-limited valid band in Hz, if a time gate bounds the evidence\n(e.g. quasi-anechoic valid band). Absent means the full grid support.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "MeasurementProvenanceReference": {
@@ -5080,6 +6102,10 @@
         "measurement": {
           "$ref": "#/$defs/MeasurementRef"
         },
+        "provenance": {
+          "$ref": "#/$defs/MeasurementProvenance",
+          "description": "Declared acquisition provenance (default unknown when absent)."
+        },
         "speaker_name": {
           "type": [
             "string",
@@ -5088,7 +6114,8 @@
         }
       },
       "required": [
-        "measurement"
+        "measurement",
+        "provenance"
       ],
       "type": "object"
     },
@@ -5130,6 +6157,14 @@
     "MixedPhaseCorrectionReport": {
       "description": "Compact report for the excess-phase FIR generated by mixed-phase mode.",
       "properties": {
+        "causal_center_delay_ms": {
+          "description": "Causal FIR centering delay in milliseconds, when the realization is known.\n\nThis is distinct from acoustic propagation and frequency-dependent\nexcess group delay. It excludes backend buffering and other DSP stages.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "estimated_delay_ms": {
           "description": "Linear propagation delay removed from excess phase before FIR design.",
           "format": "double",
@@ -5169,6 +6204,28 @@
     "MixedPhaseSerdeConfig": {
       "description": "Serializable mixed-phase correction configuration for JSON config files",
       "properties": {
+        "assessment": {
+          "$ref": "#/$defs/PhaseAssessmentConfig",
+          "default": {
+            "consistency_tol_ms": 0.5,
+            "dip_depth_db": 6.0,
+            "min_valid_fraction": 0.8,
+            "smooth_narrow_oct": 0.16666666666666666,
+            "smooth_wide_oct": 0.5,
+            "snr_floor_db": 10.0,
+            "strict_dips": false,
+            "taper_oct": 0.5
+          },
+          "description": "Evidence bar for the excess-phase assessment that must support the\nphase action before any FIR is generated. Defaults mirror the\nanalysis-validated values; every field stays user-overridable."
+        },
+        "max_correction_latency_ms": {
+          "description": "Maximum causal FIR centering delay in milliseconds for standalone phase correction.\n\nThis bounds the delay added by the generated FIR, not the measured\nacoustic propagation delay. Other DSP stages and backend buffering\nare separate. Default: None (no budget).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "max_fir_length_ms": {
           "default": 10.0,
           "description": "Maximum FIR length in milliseconds for excess phase correction. Default: 10.0",
@@ -5194,6 +6251,25 @@
           "type": "number"
         }
       },
+      "type": "object"
+    },
+    "MultiInputNormalizationEvidence": {
+      "description": "Normalization records in the same order as the prepared multi-objective bank.",
+      "properties": {
+        "objectives": {
+          "items": {
+            "$ref": "#/$defs/InputNormalizationEvidence"
+          },
+          "type": "array"
+        },
+        "population": {
+          "$ref": "#/$defs/NormalizationPopulation"
+        }
+      },
+      "required": [
+        "population",
+        "objectives"
+      ],
       "type": "object"
     },
     "MultiMeasurementConfig": {
@@ -5770,7 +6846,12 @@
       "properties": {
         "allpass_optimization": {
           "default": false,
-          "description": "Enable per-subwoofer all-pass filter optimization",
+          "description": "Enable per-subwoofer all-pass filter optimization.\nMeasurement-backed workflows require shared stationary timing evidence.",
+          "type": "boolean"
+        },
+        "joint_optimization": {
+          "default": false,
+          "description": "Select joint coherent multi-sub optimization over the\nsource-by-seat transfer matrix instead of the variation-only\ndetailed mode. Requires per-seat measurements with phase on\nevery sub and a verified shared timing reference. Refuses missing\nevidence without running an alternate optimizer. Takes precedence over legacy\n`optimizer.multi_seat` processing for this group. Default: false.\nRouted systems must select subwoofer strategy `mso`; `single` would\nselect independent subs and is rejected when joint mode is requested.",
           "type": "boolean"
         },
         "name": {
@@ -5797,6 +6878,36 @@
         "subwoofers"
       ],
       "type": "object"
+    },
+    "NormalizationPopulation": {
+      "description": "Population whose actual objective curves were normalized.",
+      "enum": [
+        "aligned_measurements",
+        "rir_prototype",
+        "bootstrap_resamples",
+        "bootstrap_of_rir_prototype"
+      ],
+      "type": "string"
+    },
+    "NormalizationReferencePolicy": {
+      "description": "Policy that supplied the actual EQ analysis normalization reference.",
+      "oneOf": [
+        {
+          "const": "provided_shared_reference",
+          "description": "A caller supplied a common reference; seats were not independently centered.",
+          "type": "string"
+        },
+        {
+          "const": "limited_correction_target_reference",
+          "description": "A target-relative reference outside a limited correction band was available.",
+          "type": "string"
+        },
+        {
+          "const": "correction_band_arithmetic_mean",
+          "description": "Arithmetic mean of measured dB samples inside the active correction band.",
+          "type": "string"
+        }
+      ]
     },
     "ObservedQuantity": {
       "description": "One observed or limiting quantity with explicit units.",
@@ -6008,6 +7119,16 @@
             }
           ],
           "description": "Coverage summary for multi-position measurements beyond sub-only MSO."
+        },
+        "operation_gates": {
+          "description": "Per-channel operation-boundary verdicts from the evidence intake.\nPhase dispatch, target policy, and the final ledger read these\nrecords; a missing gate means the channel ran before intake gating.",
+          "items": {
+            "$ref": "#/$defs/ChannelOperationGate"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "optimizer_evidence": {
           "anyOf": [
@@ -6335,6 +7456,8 @@
             "max_attenuation_db": 12.0,
             "max_useful_output_loss_db": 3.0,
             "output_ceiling_dbfs": 0.0,
+            "physical_drive": null,
+            "physical_drive_weight": 0.0,
             "subwoofer_limiter": false
           },
           "description": "Final graph electrical limits and cumulative correction selection."
@@ -6808,9 +7931,31 @@
           "minimum": 0,
           "type": "integer"
         },
+        "input_normalization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InputNormalizationEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Absent means conditioning was not recorded by this producer, not zero gain."
+        },
         "max_constraint_violation": {
           "format": "double",
           "type": "number"
+        },
+        "multi_input_normalization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MultiInputNormalizationEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-objective conditioning; objective indices are not authenticated seat identities."
         },
         "objective": {
           "format": "double",
@@ -6918,6 +8063,29 @@
       "required": [
         "id",
         "driver_ids"
+      ],
+      "type": "object"
+    },
+    "PayloadBinding": {
+      "description": "Binding between a delivered payload and its existing decision graph identity.",
+      "properties": {
+        "algorithm": {
+          "description": "Exact encoding version; unknown versions cannot authorize report claims.",
+          "type": "string"
+        },
+        "graph_identity": {
+          "description": "Existing graph identity used by all final decision records.",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "SHA-256 over the typed payload encoding and graph identity.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "algorithm",
+        "graph_identity",
+        "sha256"
       ],
       "type": "object"
     },
@@ -7204,6 +8372,175 @@
       },
       "type": "object"
     },
+    "PhaseAssessmentConfig": {
+      "description": "Evidence bar for excess-phase assessment before phase correction.\n\nBins below `snr_floor_db` are excluded; assessment returns unknown\nunless `min_valid_fraction` of the band stays usable. Narrow-vs-wide\ngroup-delay disagreement above `consistency_tol_ms` marks the phase\nwindow-sensitive. `strict_dips` forces unknown on any uncertain dip.",
+      "properties": {
+        "consistency_tol_ms": {
+          "default": 0.5,
+          "description": "Maximum tolerated narrow-vs-wide group-delay disagreement in ms.",
+          "format": "double",
+          "type": "number"
+        },
+        "dip_depth_db": {
+          "default": 6.0,
+          "description": "Depth below the wide-smoothed magnitude that counts as a dip in dB.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_valid_fraction": {
+          "default": 0.8,
+          "description": "Minimum usable fraction of in-band bins.",
+          "format": "double",
+          "type": "number"
+        },
+        "retain_magnitude_on_refusal": {
+          "description": "Retain existing magnitude processing when per-driver phase evidence is refused.\n\nOpt-in workflow policy: no replacement FIR is designed, and a phase\nrefusal is recorded. Shared-FIR behavior is unchanged. Invalid capture\ntiming, malformed input, and operational failures still abort.",
+          "type": "boolean"
+        },
+        "smooth_narrow_oct": {
+          "default": 0.16666666666666666,
+          "description": "Fractional-octave smoothing width for excess group delay.",
+          "format": "double",
+          "type": "number"
+        },
+        "smooth_wide_oct": {
+          "default": 0.5,
+          "description": "Second wider smoothing width for the window-sensitivity check.",
+          "format": "double",
+          "type": "number"
+        },
+        "snr_floor_db": {
+          "default": 10.0,
+          "description": "Bins below this SNR in dB are excluded from the assessment.",
+          "format": "double",
+          "type": "number"
+        },
+        "strict_dips": {
+          "default": false,
+          "description": "When true, any uncertain dip forces an unknown verdict.",
+          "type": "boolean"
+        },
+        "taper_oct": {
+          "default": 0.5,
+          "description": "Cosine taper width in octaves at the assessment band edges.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "PhysicalDriveEnvelope": {
+      "additionalProperties": false,
+      "description": "One explicitly calibrated, frequency-sampled physical-demand envelope.",
+      "properties": {
+        "calibration_id": {
+          "description": "Operator-declared calibration identity, not merely microphone FR calibration.",
+          "type": "string"
+        },
+        "demand_at_reference": {
+          "description": "Demand at `reference_output_peak`, in the quantity's units at each frequency.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "frequencies_hz": {
+          "description": "Increasing positive measured frequencies; no interpolation of physical limits.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "limit_conditions_id": {
+          "description": "Must match the demand conditions; incompatible limits cannot authorize passing.",
+          "type": "string"
+        },
+        "limits": {
+          "description": "Compatible maximum demand at each frequency, in the same quantity and units.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "linear_valid_output_peak": {
+          "description": "Highest digital output peak for which linear scaling is declared valid.",
+          "format": "double",
+          "type": "number"
+        },
+        "quantity": {
+          "$ref": "#/$defs/PhysicalDriveQuantity"
+        },
+        "reference_conditions_id": {
+          "description": "Hardware/load/protection/stimulus reference for the demand measurements.",
+          "type": "string"
+        },
+        "reference_output_peak": {
+          "description": "Digital sinusoid peak at the serialized physical output during calibration.",
+          "format": "double",
+          "type": "number"
+        },
+        "sine_duration_seconds": {
+          "description": "Duration shared by the demand and limit declarations, in seconds.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "quantity",
+        "calibration_id",
+        "reference_conditions_id",
+        "limit_conditions_id",
+        "sine_duration_seconds",
+        "reference_output_peak",
+        "linear_valid_output_peak",
+        "frequencies_hz",
+        "demand_at_reference",
+        "limits"
+      ],
+      "type": "object"
+    },
+    "PhysicalDrivePolicy": {
+      "additionalProperties": false,
+      "description": "Optional declared physical limits; every emitted physical output must be covered.",
+      "properties": {
+        "outputs": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/PhysicalDriveEnvelope"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "outputs"
+      ],
+      "type": "object"
+    },
+    "PhysicalDriveQuantity": {
+      "description": "Physical amplitude quantity; all supported demands scale linearly with drive.",
+      "oneOf": [
+        {
+          "const": "voltage_rms",
+          "description": "Amplifier output voltage, volts RMS for a steady sinusoid.",
+          "type": "string"
+        },
+        {
+          "const": "current_rms",
+          "description": "Amplifier output current, amperes RMS for a steady sinusoid.",
+          "type": "string"
+        },
+        {
+          "const": "excursion_peak_mm",
+          "description": "Driver displacement, millimeters peak for a steady sinusoid.",
+          "type": "string"
+        }
+      ]
+    },
     "PluginConfigWrapper": {
       "description": "Backend-neutral serialized plugin descriptor. Native adapters translate this\ncontract into their runtime types; the model does not depend on AudioEngine.",
       "properties": {
@@ -7395,6 +8732,36 @@
         {
           "const": "kautz_modal",
           "description": "Kautz modal mode — pole-tuned filter targeting detected room modes.\nUses room mode analysis to place filter poles at resonance frequencies.\nGain optimization via linear least-squares (very fast, no DE needed).\nExports the runtime topology as `kautz_filter` with modal sections.\nBest for small, highly resonant rooms with clear modal problems.\nReturns an error if no room modes are detected.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProvenanceCaptureKind": {
+      "description": "Declared acquisition kind of one measurement source.\n\nThis is a declaration, not an inference: the loader never guesses a kind\nfrom data shape. Undeclared sources stay [`ProvenanceCaptureKind::Unknown`]\nand unknown never authorizes phase-critical work.",
+      "oneOf": [
+        {
+          "const": "stationary_ir",
+          "description": "Stationary impulse-response capture with a timing reference.",
+          "type": "string"
+        },
+        {
+          "const": "spatial_magnitude",
+          "description": "Spatial magnitude capture (including moving-microphone averages)\nwithout a timing reference.",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound",
+          "description": "Direct-sound capture.",
+          "type": "string"
+        },
+        {
+          "const": "simulated_backend",
+          "description": "Exported-backend simulation or rendering; not an acoustic recording.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Capture kind not stated.",
           "type": "string"
         }
       ]
@@ -7770,6 +9137,38 @@
         "post_worst_abs_residual_db",
         "mean_normalized_seat_spread_db",
         "max_normalized_seat_spread_db"
+      ],
+      "type": "object"
+    },
+    "QuasiAnechoicPolicy": {
+      "description": "Explicit assessment budgets, not universal acoustic thresholds.",
+      "properties": {
+        "cycles_for_valid_band": {
+          "description": "Full cycles required within the reflection-free gate.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_off_axis_abs_deg": {
+          "description": "Minimum absolute angle counting as off-axis, in degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_off_axis_count": {
+          "description": "Minimum number of distinct off-axis directions.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Policy version, currently `quasi-anechoic-v1`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "cycles_for_valid_band",
+        "min_off_axis_count",
+        "min_off_axis_abs_deg"
       ],
       "type": "object"
     },
@@ -8389,6 +9788,8 @@
               "max_attenuation_db": 12.0,
               "max_useful_output_loss_db": 3.0,
               "output_ceiling_dbfs": 0.0,
+              "physical_drive": null,
+              "physical_drive_weight": 0.0,
               "subwoofer_limiter": false
             },
             "local_algo": "cobyla",

@@ -58,6 +58,7 @@ pub(super) fn make_test_output() -> DspGraph {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
 
@@ -90,6 +91,7 @@ pub(super) fn make_test_output() -> DspGraph {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
 
@@ -129,6 +131,9 @@ pub(super) fn make_test_output() -> DspGraph {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+
+            provisional_decisions: Vec::new(),
         }),
         correction_decisions: None,
     }
@@ -176,6 +181,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspGraph {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
 
@@ -223,6 +229,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         );
     }
@@ -408,6 +415,9 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+
+            provisional_decisions: Vec::new(),
         }),
         correction_decisions: None,
     }

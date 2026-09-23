@@ -150,6 +150,7 @@ pub fn all_channel_multiseat_acceptance_with_frequency_samples(
             idx,
             seat_curve,
             &roomeq_engine::room_result::ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: channel_name.to_string(),
                 pre_score: 0.0,
                 post_score: 0.0,

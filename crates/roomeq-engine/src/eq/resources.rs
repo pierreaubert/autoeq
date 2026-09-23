@@ -23,6 +23,8 @@ pub struct PreparedImpulseResponse {
 pub struct EqResources {
     pub target: Option<PreparedEqTarget>,
     pub impulse_response: Option<PreparedImpulseResponse>,
+    /// Path-free capture evidence for measured RIR-prototype direction weights.
+    pub capture: Option<autoeq_core::capture_provenance::CaptureProvenance>,
 }
 
 pub(crate) fn target_curve(normalized_curve: &Curve, resources: Option<&EqResources>) -> Curve {

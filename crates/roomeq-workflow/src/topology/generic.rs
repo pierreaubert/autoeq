@@ -131,6 +131,7 @@ impl WorkflowExecutor for GenericExecutor {
             roomeq_engine::output::compute_epa_multichannel(&channel_chains, &epa_cfg);
 
         Ok(RoomOptimizationResult {
+            finalized_decisions: None,
             channels: channel_chains,
             channel_results,
             deployed_source_curves: HashMap::new(),
@@ -167,6 +168,9 @@ impl WorkflowExecutor for GenericExecutor {
                 stage_outcomes: Vec::new(),
                 qa_seed_distribution: None,
                 effective_config: None,
+                operation_gates: None,
+
+                provisional_decisions: Vec::new(),
             },
         })
     }

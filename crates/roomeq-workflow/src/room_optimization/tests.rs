@@ -88,6 +88,8 @@ fn mixed_phase_owns_phase_correction_stage() {
         pre_ringing_threshold_db: -30.0,
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 1.0 / 6.0,
+        assessment: Default::default(),
+        max_correction_latency_ms: None,
     });
     assert!(!should_run_standalone_phase_correction(&config));
 
@@ -110,6 +112,7 @@ fn route_owned_topology_owns_main_sub_phase_alignment() {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     };
     let routed = HashMap::from([("LFE".to_string(), routed_chain)]);
@@ -131,6 +134,7 @@ fn routed_test_chain(target: &Curve) -> ChannelDspChain {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     }
 }
 
@@ -528,6 +532,7 @@ fn topology_height_residual_is_added_after_existing_delay() {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     };
 
@@ -575,6 +580,7 @@ fn reported_curve_retains_user_preference_filters() {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     };
 
@@ -928,6 +934,7 @@ fn phase_correction_precedes_downstream_phase_alignment_for_multisub() {
                 MeasurementSource::InMemory(phased),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     config.optimizer.phase_alignment = Some(Default::default());
@@ -936,6 +943,8 @@ fn phase_correction_precedes_downstream_phase_alignment_for_multisub() {
         pre_ringing_threshold_db: -30.0,
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 1.0 / 6.0,
+        assessment: Default::default(),
+        max_correction_latency_ms: None,
     });
     config.optimizer.allow_delay = Some(true);
 

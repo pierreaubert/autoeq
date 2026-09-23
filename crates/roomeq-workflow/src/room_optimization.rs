@@ -30,6 +30,8 @@ use std::sync::{
 
 mod finalization;
 mod gd;
+mod input_snapshot;
+mod parallel_timing;
 mod per_driver_fir;
 mod phase;
 mod reports;
@@ -137,7 +139,13 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
     observer: Option<Box<dyn PipelineObserver>>,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
-    let seat_captures = seat_replay::capture_training(request.config)?;
+    let snapshot = input_snapshot::freeze(request.config)?;
+    let request = roomeq_engine::EngineRequest {
+        config: &snapshot,
+        ..request
+    };
+    let (seat_captures, input_receipt) =
+        seat_replay::capture_with_receipt(request.config, context.validation_measurements)?;
     let routed_pruning_requested =
         routed_pruning::requested(request.config, !context.validation_measurements.is_empty());
     let mut local_config = request.config.clone();
@@ -157,6 +165,9 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.artifact_store,
         frequency_samples,
     )?;
+    room_optimization_result::record_peq_candidates(&mut result, request.config);
+    let decision_processing = crate::final_ledger::processing_snapshot(&result)
+        .map_err(|message| AutoeqError::OptimizationFailed { message })?;
     per_driver_fir::distribute_routed_firs(
         &mut result,
         request.config,
@@ -189,6 +200,27 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
             context.output_dir.unwrap_or_else(|| Path::new(".")),
         );
     }
+    // Routed pruning can alter physical demand after candidate selection.
+    // Check the delivered controls, not a cached pre-pruning assessment.
+    finalization::verify_declared_physical_drive(
+        &mut result,
+        request.config,
+        request.sample_rate,
+        context.output_dir.unwrap_or_else(|| Path::new(".")),
+    )?;
+    result.metadata.stage_outcomes.push(input_receipt);
+    crate::evidence_intake::attach_measurement_conditioning(&mut result, request.config)
+        .map_err(|message| AutoeqError::OptimizationFailed { message })?;
+    crate::evidence_intake::attach_optimizer_conditioning(&mut result)
+        .map_err(|message| AutoeqError::OptimizationFailed { message })?;
+    crate::final_ledger::finalize_result_ledger(
+        &mut result,
+        &decision_processing,
+        request.sample_rate,
+    )
+    .map_err(|message| AutoeqError::OptimizationFailed { message })?;
+    // Publish only after provenance and final decisions describe the delivered
+    // graph. The bundle's own report pointer is attached by this last step.
     generate_validation_bundle_report(
         &mut result,
         request.config,
@@ -1867,17 +1899,59 @@ fn assemble_workflow_result_with_frequency_samples(
             },
         )?;
     }
+    // Evidence intake runs on every pipeline pass: per-channel operation
+    // boundaries are evaluated from declared provenance and attached to the
+    // result whether or not phase correction is enabled.
+    let phase_names: Vec<String> = result.channel_results.keys().cloned().collect();
+    let gate_inputs: Vec<crate::evidence_intake::ChannelGateInput<'_>> = phase_names
+        .iter()
+        .filter_map(|name| {
+            result.channel_results.get(name).map(|ch| {
+                let source = crate::evidence_intake::resolve_channel_source(config, name);
+                crate::evidence_intake::ChannelGateInput {
+                    channel: name,
+                    source,
+                    freq_hz: ch.initial_curve.freq.as_slice().unwrap_or(&[]),
+                    has_phase_data: ch
+                        .initial_curve
+                        .phase
+                        .as_ref()
+                        .is_some_and(|p| !p.is_empty()),
+                }
+            })
+        })
+        .collect();
+    let phase_gates = crate::evidence_intake::gate_all_channels(&gate_inputs, None);
+    result.metadata.operation_gates = Some(phase_gates.clone());
     if should_run_standalone_phase_correction(config)
         && let Some(ref pc_config) = config.optimizer.phase_correction
     {
         let out_dir = output_dir.unwrap_or(Path::new("."));
-        let names: Vec<String> = result.channel_results.keys().cloned().collect();
-        for name in &names {
+        for name in &phase_names {
             if let Some(ch) = result.channel_results.get_mut(name)
                 && let Some(chain) = result.channels.get_mut(name)
             {
+                let gate = phase_gates.iter().find(|gate| gate.channel == *name);
                 let before_plugins = chain.plugins.len();
-                apply_phase_correction(name, ch, chain, pc_config, sample_rate, Some(out_dir));
+                if let Some(gate) = gate {
+                    let refusals = apply_phase_correction(
+                        name,
+                        ch,
+                        chain,
+                        pc_config,
+                        sample_rate,
+                        Some(out_dir),
+                        gate,
+                        config.optimizer.target_response.as_ref(),
+                        config
+                            .optimizer
+                            .schroeder_split
+                            .as_ref()
+                            .filter(|split| split.enabled)
+                            .map(|split| split.schroeder_freq),
+                    );
+                    result.metadata.provisional_decisions.extend(refusals);
+                }
                 workflow_refresh_needed |= chain.plugins.len() != before_plugins;
             }
         }
@@ -2927,6 +3001,7 @@ fn assemble_generic_result_with_frequency_samples(
         mut curves,
         channel_means,
         mut channel_arrivals,
+        provisional_decisions,
     } = generic;
     let mut stage_outcomes = Vec::new();
 
@@ -3815,15 +3890,54 @@ fn assemble_generic_result_with_frequency_samples(
             },
         )?;
     }
+    // Evidence intake runs on every assembly: per-channel operation
+    // boundaries are evaluated from declared provenance and attached to the
+    // result whether or not phase correction is enabled.
+    let phase_names: Vec<String> = channel_results.keys().cloned().collect();
+    let gate_inputs: Vec<crate::evidence_intake::ChannelGateInput<'_>> = phase_names
+        .iter()
+        .filter_map(|name| {
+            channel_results.get(name.as_str()).map(|ch| {
+                let source = crate::evidence_intake::resolve_channel_source(config, name);
+                crate::evidence_intake::ChannelGateInput {
+                    channel: name,
+                    source,
+                    freq_hz: ch.initial_curve.freq.as_slice().unwrap_or(&[]),
+                    has_phase_data: ch
+                        .initial_curve
+                        .phase
+                        .as_ref()
+                        .is_some_and(|p| !p.is_empty()),
+                }
+            })
+        })
+        .collect();
+    let phase_gates = crate::evidence_intake::gate_all_channels(&gate_inputs, None);
+    let mut phase_refusals = provisional_decisions;
     if should_run_standalone_phase_correction(config)
         && let Some(ref pc_config) = config.optimizer.phase_correction
     {
-        let names: Vec<String> = channel_results.keys().cloned().collect();
-        for name in &names {
+        for name in &phase_names {
             if let Some(ch) = channel_results.get_mut(name.as_str())
                 && let Some(chain) = channel_chains.get_mut(name.as_str())
+                && let Some(gate) = phase_gates.iter().find(|gate| gate.channel == *name)
             {
-                apply_phase_correction(name, ch, chain, pc_config, sample_rate, output_dir);
+                phase_refusals.extend(apply_phase_correction(
+                    name,
+                    ch,
+                    chain,
+                    pc_config,
+                    sample_rate,
+                    output_dir,
+                    gate,
+                    config.optimizer.target_response.as_ref(),
+                    config
+                        .optimizer
+                        .schroeder_split
+                        .as_ref()
+                        .filter(|split| split.enabled)
+                        .map(|split| split.schroeder_freq),
+                ));
             }
         }
         emit_pipeline_event(
@@ -4032,9 +4146,13 @@ fn assemble_generic_result_with_frequency_samples(
         stage_outcomes,
         qa_seed_distribution: None,
         effective_config: None,
+        operation_gates: None,
+
+        provisional_decisions: phase_refusals,
     };
 
     let mut result = RoomOptimizationResult {
+        finalized_decisions: None,
         channels: channel_chains,
         channel_results,
         deployed_source_curves: HashMap::new(),
@@ -4042,6 +4160,7 @@ fn assemble_generic_result_with_frequency_samples(
         combined_post_score: avg_post_score,
         metadata,
     };
+    result.metadata.operation_gates = Some(phase_gates);
 
     // Compute inter-channel deviation and optionally correct it
     if curves.len() > 1 {
@@ -4188,6 +4307,7 @@ pub fn optimize_speaker(
         optimizer_evidence,
         audibility_veto,
         veto_adjudication,
+        measurement_conditioning,
     ) = process_speaker_internal(
         channel_name,
         speaker_config,
@@ -4211,5 +4331,6 @@ pub fn optimize_speaker(
         optimizer_evidence,
         audibility_veto,
         veto_adjudication,
+        measurement_conditioning,
     })
 }

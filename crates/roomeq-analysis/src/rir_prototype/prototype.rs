@@ -1,7 +1,7 @@
 //! Weighted RIR prototype builder.
 
 use super::config::{DirectivityModel, DistanceWeightMode, RirPrototypeConfig};
-use super::weights::{compute_angles, compute_distances, normalized_weights};
+use super::weights::{compute_angles, compute_distances};
 use crate::Curve;
 use ndarray::Array1;
 
@@ -62,6 +62,8 @@ pub enum RirPrototypeError {
 pub struct WeightedPrototype {
     pub curve: Curve,
     pub weights: ndarray::Array2<f64>,
+    /// Per-microphone bin counts using at least one accepted measured direction.
+    pub measured_direction_bins: Vec<usize>,
 }
 
 /// Build a single prototype curve from multiple measurement curves and positions.
@@ -77,6 +79,21 @@ pub struct WeightedPrototype {
 pub fn build_weighted_prototype(
     curves: &[Curve],
     config: &RirPrototypeConfig,
+) -> Result<WeightedPrototype, RirPrototypeError> {
+    build_weighted_prototype_with_capture(curves, config, None)
+}
+
+/// Build a magnitude prototype using measured arrival-energy mixtures where supported.
+///
+/// Unsupported events and frequencies retain geometric direction weights. This
+/// power-domain approximation does not reconstruct coherent reflection interference.
+///
+/// # Errors
+/// Rejects the same malformed curves and geometry as `build_weighted_prototype`.
+pub fn build_weighted_prototype_with_capture(
+    curves: &[Curve],
+    config: &RirPrototypeConfig,
+    capture: Option<&autoeq_core::capture_provenance::CaptureProvenance>,
 ) -> Result<WeightedPrototype, RirPrototypeError> {
     if curves.is_empty() {
         return Err(RirPrototypeError::NoCurves);
@@ -149,7 +166,8 @@ pub fn build_weighted_prototype(
     .map_err(|_e| RirPrototypeError::SourceReferenceTooClose)?;
 
     let freqs = curves[0].freq.clone();
-    let weights = normalized_weights(&distances, &angles, &freqs, config);
+    let (weights, measured_direction_bins) =
+        super::measured::weights_with_capture(&distances, &angles, &freqs, config, capture);
 
     let mut power_sum = Array1::<f64>::zeros(freqs.len());
     for (i, curve) in curves.iter().enumerate() {
@@ -171,6 +189,7 @@ pub fn build_weighted_prototype(
     Ok(WeightedPrototype {
         curve: prototype,
         weights,
+        measured_direction_bins,
     })
 }
 

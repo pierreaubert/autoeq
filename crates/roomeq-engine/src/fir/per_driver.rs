@@ -9,6 +9,7 @@ use num_complex::Complex64;
 use roomeq_model::{OptimizerConfig, ProcessingMode};
 use rustfft::FftPlanner;
 
+#[derive(Debug)]
 pub struct PerDriverFir {
     pub coefficients: Vec<Vec<f64>>,
     pub final_curve: Curve,
@@ -16,6 +17,10 @@ pub struct PerDriverFir {
     pub protected_bins: usize,
     pub before_rms_db: f64,
     pub after_rms_db: f64,
+    /// Selected scale of the assessed phase proposal; zero means none was selected.
+    ///
+    /// This is a search result, not a claim that every branch or bin changed.
+    pub selected_phase_strength: f64,
 }
 
 /// Conservative local notch / unreliable-data detector. The half-octave
@@ -73,6 +78,139 @@ fn sum(branches: &[Curve], taps: &[Vec<f64>], fs: f64) -> Curve {
     }
 }
 
+/// Distinguishes invalid phase inputs from insufficient evidence for correction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PerDriverPhaseError {
+    /// Invalid captures, frequency bounds, sample rate, or assessment policy.
+    InvalidInput(String),
+    /// Valid inputs whose evidence does not support excess-phase correction.
+    Unsupported(String),
+}
+
+impl std::fmt::Display for PerDriverPhaseError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidInput(reason) | Self::Unsupported(reason) => formatter.write_str(reason),
+        }
+    }
+}
+
+impl std::error::Error for PerDriverPhaseError {}
+
+/// Assess one physical capture before designing its excess-phase correction.
+///
+/// Returns the assessment-derived correction in degrees on the capture grid.
+/// This numerical check does not establish shared capture timing or direct-sound
+/// support; callers must enforce those independently before deploying filters.
+///
+/// # Errors
+///
+/// Returns [`PerDriverPhaseError::InvalidInput`] for malformed captures, sample
+/// rates, bands, or policy, and [`PerDriverPhaseError::Unsupported`] when valid
+/// input lacks sufficient phase, SNR, or window-consistency evidence.
+pub fn assess_per_driver_phase_target(
+    curve: &Curve,
+    policy: &roomeq_model::PhaseAssessmentConfig,
+    band: [f64; 2],
+    fs: f64,
+) -> Result<Vec<f64>, PerDriverPhaseError> {
+    use roomeq_analysis::excess_phase::{
+        Assessment, ExcessPhaseConfig, ExcessPhaseInput, assess_excess_phase,
+    };
+    curve
+        .validate("per-driver phase capture")
+        .map_err(|error| PerDriverPhaseError::InvalidInput(error.to_string()))?;
+    if !fs.is_finite()
+        || fs <= 0.0
+        || !band.iter().all(|value| value.is_finite())
+        || band[0] <= 0.0
+        || band[1] <= band[0]
+        || band[1] >= fs / 2.0
+        || curve.freq.iter().any(|frequency| *frequency > fs / 2.0)
+    {
+        return Err(PerDriverPhaseError::InvalidInput(
+            "invalid per-driver phase sample rate or band".into(),
+        ));
+    }
+    if ![
+        policy.taper_oct,
+        policy.snr_floor_db,
+        policy.min_valid_fraction,
+        policy.smooth_narrow_oct,
+        policy.smooth_wide_oct,
+        policy.consistency_tol_ms,
+        policy.dip_depth_db,
+    ]
+    .iter()
+    .all(|value| value.is_finite())
+        || policy.taper_oct <= 0.0
+        || !(0.0..=1.0).contains(&policy.min_valid_fraction)
+        || policy.min_valid_fraction == 0.0
+        || policy.smooth_narrow_oct <= 0.0
+        || policy.smooth_wide_oct < policy.smooth_narrow_oct
+        || policy.consistency_tol_ms < 0.0
+        || policy.dip_depth_db <= 0.0
+    {
+        return Err(PerDriverPhaseError::InvalidInput(
+            "invalid assessment policy".into(),
+        ));
+    }
+    let input = ExcessPhaseInput {
+        freqs_hz: curve.freq.to_vec(),
+        magnitude_db: curve.spl.to_vec(),
+        phase_deg: curve.phase.as_ref().map(|phase| phase.to_vec()),
+        snr_db: curve
+            .spl
+            .iter()
+            .enumerate()
+            .map(|(i, level)| {
+                // Match the existing FIR coherence guard. Missing coherence is
+                // not synthesized; measured poor coherence excludes the bin.
+                if curve
+                    .coherence
+                    .as_ref()
+                    .is_some_and(|values| values[i] < 0.8)
+                {
+                    return f64::NEG_INFINITY;
+                }
+                curve
+                    .noise_floor_db
+                    .as_ref()
+                    .map_or(f64::NEG_INFINITY, |floor| {
+                        let snr = level - floor[i];
+                        if snr.is_finite() {
+                            snr
+                        } else {
+                            f64::NEG_INFINITY
+                        }
+                    })
+            })
+            .collect(),
+        sample_rate_hz: fs,
+    };
+    let config = ExcessPhaseConfig {
+        taper_oct: policy.taper_oct,
+        snr_floor_db: policy.snr_floor_db,
+        min_valid_fraction: policy.min_valid_fraction,
+        smooth_narrow_oct: policy.smooth_narrow_oct,
+        smooth_wide_oct: policy.smooth_wide_oct,
+        consistency_tol_ms: policy.consistency_tol_ms,
+        strict_dips: policy.strict_dips,
+        dip_depth_db: policy.dip_depth_db,
+        analysis_band_hz: (band[0], band[1]),
+    };
+    match assess_excess_phase(&input, &config) {
+        Assessment::Supported(report) => Ok(report
+            .correction_phase_rad
+            .iter()
+            .map(|phase| phase.to_degrees())
+            .collect()),
+        Assessment::Unknown { reason, .. } | Assessment::Unsupported { reason } => {
+            Err(PerDriverPhaseError::Unsupported(reason))
+        }
+    }
+}
+
 fn band_weight(f: f64, lo: f64, hi: f64) -> f64 {
     if f <= lo || f >= hi {
         return 0.0;
@@ -125,10 +263,18 @@ fn realize(freq: &Array1<f64>, db: &[f64], phase: &[f64], taps: usize, fs: f64) 
         .collect()
 }
 
+/// Design bounded FIRs jointly for phase-referenced physical branches.
+///
 /// `branches` include retained gain/delay/crossover/IIR and common DSP, on an
 /// identical grid; `measurements` are their unfiltered calibrated captures.
 /// Mixed phase retains phase-only semantics. A delayed identity is an explicit
 /// safe fallback when no finite candidate improves the protected objective.
+/// Explicit excess-phase requests require a supported numerical assessment
+/// for every raw capture. Callers must separately authorize source timing,
+/// target policy, and measurement provenance before deploying the result.
+///
+/// # Errors
+/// Returns an error for invalid inputs or an unsupported excess-phase assessment.
 pub fn generate_per_driver_firs(
     branches: &[Curve],
     measurements: &[Curve],
@@ -150,8 +296,16 @@ pub fn generate_per_driver_firs(
         if c.freq != target.freq {
             return Err("per-driver FIR grids must match".into());
         }
+        if c.phase.is_none() {
+            return Err("per-driver FIR coherent design requires measured branch phase".into());
+        }
     }
-    if active_min_freq <= 0.0 || active_max_freq <= active_min_freq || active_max_freq >= fs / 2.0 {
+    if !active_min_freq.is_finite()
+        || !active_max_freq.is_finite()
+        || active_min_freq <= 0.0
+        || active_max_freq <= active_min_freq
+        || active_max_freq >= fs / 2.0
+    {
         return Err("invalid per-driver FIR correction band".into());
     }
     let phase_only = config.processing_mode == ProcessingMode::MixedPhase;
@@ -188,6 +342,7 @@ pub fn generate_per_driver_firs(
     let before = score(&baseline);
     let mut best_score = before;
     let mut best_curve = baseline.clone();
+    let mut selected_phase_strength = 0.0;
     let boost = fir
         .max_boost_db
         .unwrap_or(config.max_db)
@@ -195,22 +350,26 @@ pub fn generate_per_driver_firs(
         .max(0.0);
     let phase_enabled =
         phase_only || (fir.phase.eq_ignore_ascii_case("kirkeby") && fir.correct_excess_phase);
-    let mp_config = crate::mixed_phase::MixedPhaseConfig {
-        phase_smoothing_octaves: mp.map_or(fir.phase_smoothing, |c| c.phase_smoothing_octaves),
-        ..Default::default()
-    };
+    let assessment = mp
+        .map(|config| config.assessment.clone())
+        .unwrap_or_default();
     let phases: Vec<_> = measurements
         .iter()
-        .map(|c| {
-            if phase_enabled && c.phase.is_some() {
-                crate::mixed_phase::decompose_phase(c, &mp_config)
-                    .map(|(_, _, _, residual)| residual.to_vec())
-                    .unwrap_or_else(|_| vec![0.0; c.freq.len()])
+        .enumerate()
+        .map(|(driver, c)| {
+            if phase_enabled {
+                assess_per_driver_phase_target(
+                    c,
+                    &assessment,
+                    [active_min_freq, active_max_freq],
+                    fs,
+                )
+                .map_err(|reason| format!("per-driver {driver} excess-phase assessment: {reason}"))
             } else {
-                vec![0.0; c.freq.len()]
+                Ok(vec![0.0; c.freq.len()])
             }
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
     // Joint search: every candidate is a complete set, never a collection of
     // independently accepted full-target inverses.
     for phase_strength in [0.0, 0.25, 0.5, 1.0] {
@@ -244,7 +403,9 @@ pub fn generate_per_driver_firs(
                                 * (target.spl[i] - baseline.spl[i]).clamp(-12.0, cap);
                         }
                         if !masks[driver][i] {
-                            phase[i] = -phase_strength * band * phases[driver][i];
+                            // The assessment already negates and tapers the excess
+                            // phase. Search only bounded strengths of that proposal.
+                            phase[i] = phase_strength * band * phases[driver][i];
                         }
                         if branch.spl[i] < baseline.spl[i] - 30.0 {
                             db[i] = 0.0;
@@ -313,6 +474,7 @@ pub fn generate_per_driver_firs(
                 best = candidate;
                 best_score = loss;
                 best_curve = curve;
+                selected_phase_strength = phase_strength;
             }
         }
     }
@@ -336,6 +498,7 @@ pub fn generate_per_driver_firs(
         protected_bins,
         before_rms_db: before,
         after_rms_db: best_score,
+        selected_phase_strength,
     })
 }
 
@@ -430,7 +593,9 @@ mod tests {
     }
     #[test]
     fn per_driver_fir_mixed_phase_is_not_magnitude_equalization() {
-        let c = flat(80.0);
+        let mut c = flat(80.0);
+        // Explicit synthetic 40 dB SNR for this numerical phase fixture.
+        c.noise_floor_db = Some(&c.spl - 40.0);
         let target = flat(86.0);
         let mut config = config();
         config.processing_mode = ProcessingMode::MixedPhase;
@@ -455,9 +620,87 @@ mod tests {
     }
 
     #[test]
+    fn per_driver_fir_honors_assessment_policy_and_rejects_invalid_policy() {
+        let mut c = flat(80.0);
+        c.noise_floor_db = Some(&c.spl - 40.0);
+        let mut config = config();
+        config.processing_mode = ProcessingMode::MixedPhase;
+        config.mixed_phase = Some(
+            serde_json::from_value(serde_json::json!({
+                "assessment": { "snr_floor_db": 41.0 }
+            }))
+            .unwrap(),
+        );
+        let result = generate_per_driver_firs(&[c.clone()], &[c.clone()], &c, &config, 48000.0);
+        assert!(result.err().unwrap().contains("snr coverage"));
+        for invalid in [f64::NAN, -1.0, 1.1] {
+            config
+                .mixed_phase
+                .as_mut()
+                .unwrap()
+                .assessment
+                .min_valid_fraction = invalid;
+            let result = generate_per_driver_firs(&[c.clone()], &[c.clone()], &c, &config, 48000.0);
+            assert!(result.err().unwrap().contains("invalid assessment policy"));
+        }
+    }
+
+    #[test]
+    fn per_driver_phase_assessment_preserves_pure_propagation_delay() {
+        let mut c = flat(80.0);
+        c.noise_floor_db = Some(&c.spl - 40.0);
+        c.phase = Some(c.freq.mapv(|f| -360.0 * f * 0.003));
+        let phase = assess_per_driver_phase_target(&c, &Default::default(), [20.0, 200.0], 48000.0)
+            .unwrap();
+        assert!(phase.iter().all(|phase| phase.abs() < 1e-8));
+    }
+
+    #[test]
+    fn per_driver_phase_admission_distinguishes_missing_evidence_from_invalid_inputs() {
+        let mut capture = flat(80.0);
+        let policy = roomeq_model::PhaseAssessmentConfig::default();
+        assert!(matches!(
+            assess_per_driver_phase_target(&capture, &policy, [20.0, 200.0], 48000.0),
+            Err(PerDriverPhaseError::Unsupported(_))
+        ));
+        capture.noise_floor_db = Some(&capture.spl - 40.0);
+        assert!(assess_per_driver_phase_target(&capture, &policy, [20.0, 200.0], 48000.0).is_ok());
+        for (band, rate) in [
+            ([20.0, 200.0], f64::NAN),
+            ([20.0, 200.0], 0.0),
+            ([200.0, 20.0], 48000.0),
+            ([20.0, 24000.0], 48000.0),
+        ] {
+            assert!(matches!(
+                assess_per_driver_phase_target(&capture, &policy, band, rate),
+                Err(PerDriverPhaseError::InvalidInput(_))
+            ));
+        }
+        let mut invalid_policy = policy.clone();
+        invalid_policy.min_valid_fraction = f64::NAN;
+        assert!(matches!(
+            assess_per_driver_phase_target(&capture, &invalid_policy, [20.0, 200.0], 48000.0),
+            Err(PerDriverPhaseError::InvalidInput(_))
+        ));
+        let mut malformed = capture.clone();
+        malformed.noise_floor_db = Some(Array1::zeros(1));
+        assert!(matches!(
+            assess_per_driver_phase_target(&malformed, &policy, [20.0, 200.0], 48000.0),
+            Err(PerDriverPhaseError::InvalidInput(_))
+        ));
+        capture.phase = None;
+        assert!(matches!(
+            assess_per_driver_phase_target(&capture, &policy, [20.0, 200.0], 48000.0),
+            Err(PerDriverPhaseError::Unsupported(_))
+        ));
+    }
+
+    #[test]
     fn per_driver_fir_repairs_relative_phase_without_electrical_boost() {
         let target = flat(80.0);
-        let first = flat(80.0 - 20.0 * 2.0_f64.log10());
+        let mut first = flat(80.0 - 20.0 * 2.0_f64.log10());
+        // Explicit synthetic 40 dB SNR, not inferred production evidence.
+        first.noise_floor_db = Some(&first.spl - 40.0);
         let mut second = first.clone();
         for (i, &f) in second.freq.iter().enumerate() {
             second.phase.as_mut().unwrap()[i] = 80.0 * (-((f / 85.0).log2() / 0.8).powi(2)).exp();

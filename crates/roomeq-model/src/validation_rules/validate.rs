@@ -239,6 +239,7 @@ fn measurement_paths(source: &MeasurementSource) -> Vec<PathBuf> {
 
 fn measurement_path(measurement: &crate::MeasurementRef) -> Option<PathBuf> {
     match measurement {
+        crate::MeasurementRef::Loaded { .. } => None,
         crate::MeasurementRef::Path(path) | crate::MeasurementRef::Named { path, .. } => {
             Some(path.clone())
         }
@@ -282,6 +283,9 @@ fn validate_acoustic_inputs(config: &RoomConfig) -> Vec<String> {
                 MeasurementSource::InMemory(curve) => vec![curve],
                 MeasurementSource::InMemoryMultiple(curves) => curves.iter().collect(),
                 MeasurementSource::Single(single) => match &single.measurement {
+                    crate::MeasurementRef::Loaded {
+                        loaded_response, ..
+                    } => vec![loaded_response.as_ref()],
                     crate::MeasurementRef::Inline(inline) => {
                         validate_inline_measurement(
                             inline,
@@ -294,7 +298,14 @@ fn validate_acoustic_inputs(config: &RoomConfig) -> Vec<String> {
                     _ => Vec::new(),
                 },
                 MeasurementSource::Multiple(multiple) => {
+                    let mut retained = Vec::new();
                     for measurement in &multiple.measurements {
+                        if let crate::MeasurementRef::Loaded {
+                            loaded_response, ..
+                        } = measurement
+                        {
+                            retained.push(loaded_response.as_ref());
+                        }
                         if let crate::MeasurementRef::Inline(inline) = measurement {
                             validate_inline_measurement(
                                 inline,
@@ -304,7 +315,7 @@ fn validate_acoustic_inputs(config: &RoomConfig) -> Vec<String> {
                             );
                         }
                     }
-                    Vec::new()
+                    retained
                 }
             };
             if matches!(source, MeasurementSource::InMemoryMultiple(curves) if curves.is_empty()) {
@@ -1665,6 +1676,7 @@ mod room_config_validation_tests {
         MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from(path)),
             speaker_name: speaker_name.map(String::from),
+            provenance: Default::default(),
         })
     }
 
@@ -1679,6 +1691,7 @@ mod room_config_validation_tests {
                 csv_path: csv_path.map(String::from),
             }),
             speaker_name: None,
+            provenance: Default::default(),
         })
     }
 
@@ -1832,6 +1845,7 @@ mod room_config_validation_tests {
                 speaker_name: None,
                 subwoofers: vec![],
                 allpass_optimization: false,
+                joint_optimization: false,
             }),
         );
         let result = validate_room_config(&config);
@@ -1850,6 +1864,7 @@ mod room_config_validation_tests {
                 speaker_name: None,
                 subwoofers: vec![single_source("s.csv", None)],
                 allpass_optimization: false,
+                joint_optimization: false,
             }),
         );
         let result = validate_room_config(&config);

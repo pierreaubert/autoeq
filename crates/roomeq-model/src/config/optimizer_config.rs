@@ -550,21 +550,18 @@ impl OptimizerConfig {
         self.apply_high_frequency_correction_defaults(override_existing);
     }
 
-    /// Apply high-frequency guard defaults when correction extends above the
-    /// conservative RoomEQ range. Explicit Q/smoothing overrides are preserved
-    /// unless requested by the policy layer.
+    /// Apply high-frequency smoothing defaults without restricting bass Q.
+    ///
+    /// The optimizer adapter carries the guard's frequency-local Q cap into
+    /// candidate constraints. Lowering the global cap here would also restrict
+    /// bass filters and defeat that local contract. `override_existing` controls
+    /// smoothing defaults, never replaces the separately configured global Q.
     pub fn apply_high_frequency_correction_defaults(&mut self, override_existing: bool) {
         let Some(hf) = self.high_frequency_correction else {
             return;
         };
         if !hf.enabled || self.max_freq <= hf.start_hz {
             return;
-        }
-
-        if (override_existing || (self.max_q - default_max_q()).abs() < 1e-9)
-            && self.max_q > hf.max_q
-        {
-            self.max_q = hf.max_q.max(self.min_q);
         }
 
         if override_existing || self.psychoacoustic_smoothing.is_none() {

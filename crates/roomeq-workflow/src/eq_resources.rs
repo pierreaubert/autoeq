@@ -16,6 +16,7 @@ pub fn prepare_eq_resources(
     Ok(EqResources {
         target,
         impulse_response,
+        capture: None,
     })
 }
 

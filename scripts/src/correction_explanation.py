@@ -1,7 +1,9 @@
 """Explain recorded RoomEQ decisions without inferring causes from response curves."""
 
 from html import escape
+import json
 import math
+from .payload_binding import verify_payload_binding
 
 
 def _band(value):
@@ -15,6 +17,50 @@ def _band(value):
 
 def _band_label(value):
     return f"{value[0]:g}–{value[1]:g} Hz"
+
+
+def _measurement_conditioning_history(stage):
+    """Describe producer receipts without upgrading them into capture validation."""
+    details = []
+    names = {
+        "source_overlap_alignment": "Aligned source grids within shared support",
+        "source_spatial_power_rms": "Averaged spatial magnitudes in the power domain (no averaged phase)",
+        "source_coherent_pressure_mean": "Computed a declared coherent pressure mean",
+        "roomeq_dense_grid_conditioning": "Executed the dense-grid conditioning policy",
+    }
+    for check in stage.get("checks") or []:
+        if not isinstance(check, dict) or check.get("passed") is not True:
+            continue
+        try:
+            payload = json.loads(check.get("diagnostic") or "null")
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or not isinstance(payload.get("receipt"), dict):
+            continue
+        entries = payload["receipt"].get("entries")
+        if not isinstance(entries, list):
+            continue
+        channel = payload.get("channel", "unknown channel")
+        if payload.get("source_snapshot_binding") == "verified_parsed_curve_snapshot":
+            details.append(f"Measurement preparation for {channel}: native response identities match the frozen input snapshot in source order; this does not authenticate the original recording.")
+        if not entries:
+            details.append(f"Measurement preparation for {channel}: no numerical loading change recorded; this does not describe later processing.")
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            operation = entry.get("operation", "unknown operation")
+            description = names.get(operation, f"Recorded operation: {operation}")
+            parameters = entry.get("parameters")
+            parameters = parameters if isinstance(parameters, dict) else {}
+            band = _band(parameters.get("declared_valid_band_hz"))
+            if band:
+                description += f"; declared usable band {_band_label(band)}"
+            if "input_bins" in parameters and "output_bins" in parameters:
+                description += f"; {parameters['input_bins']} → {parameters['output_bins']} bins"
+            details.append(f"Measurement preparation for {channel}: {description}.")
+    if details:
+        details.append("Measurement preparation is partial recorded history, not proof of capture/calibration validity or complete conditioning lineage.")
+    return details
 
 
 _K4_STATUS_TEXT = {
@@ -34,6 +80,20 @@ _K4_ACTION_TEXT = {
     "gain_adjust": "Gain adjustment",
     "reroute": "Reroute",
     "prune": "Prune",
+}
+
+_K4_REASON_TEXT = {
+    "serialized_final_gain": "Gain present in the delivered DSP",
+    "final_electrical_headroom": "Attenuation for the configured digital headroom ceiling and any declared physical-drive limits",
+    "final_channel_level_alignment": "Final channel-level alignment",
+    "branch_gain_not_acoustic_benefit_or_net_parallel_gain": (
+        "Scalar gain on this input/output branch; not net parallel-path gain or measured acoustic benefit"
+    ),
+    "joint_array_proposal_reverted": "Joint subwoofer gain/delay proposal reverted",
+    "joint_shared_eq_proposal_reverted": "Shared subwoofer EQ proposal reverted",
+    "stage_history_not_final_route_acceptance": (
+        "This is stage history, not approval of later routing or recorded playback"
+    ),
 }
 
 
@@ -100,7 +160,8 @@ def _k4_decision_text(record: dict) -> str:
 
 def _k4_reason_text(record: dict) -> str:
     codes = [str(code) for code in (record.get("reason_codes") or []) if str(code).strip()]
-    reason = f"Recorded reason: {', '.join(codes)}." if codes else "No reason recorded."
+    labels = [_K4_REASON_TEXT.get(code, code) for code in codes]
+    reason = f"Recorded reason: {', '.join(labels)}." if codes else "No reason recorded."
     confidence = record.get("confidence")
     reason += f" Confidence: {confidence}." if isinstance(confidence, str) and confidence else " Confidence: unknown."
     observed = _quantities_text(record.get("observed"))
@@ -119,6 +180,75 @@ def _k4_reason_text(record: dict) -> str:
     return reason
 
 
+_K4_SET_STATUSES = {
+    "applied": {"applied", "already_acceptable", "constrained"},
+    "reverted": {"reverted"},
+    "withheld": {"insufficient_evidence", "outside_scope", "unresolved", "advisory"},
+}
+
+_K4_SET_TEXT = {
+    "applied": "applied delivery claims",
+    "reverted": "reverted (rolled back; not delivered)",
+    "provisional": "provisional history (not delivery claims)",
+    "withheld": "withheld (final rows without delivery)",
+}
+
+
+def _k4_sets_summary(records: list, delivery_blocked: bool = False) -> str:
+    """Group decision records into acceptance sets for the top summary.
+
+    Applied delivery claims, reversions, provisional history, and withheld
+    rows each render with counts, IDs, and recorded reasons. Malformed
+    entries join provisional history as unverified, never as delivery.
+    """
+    sets: dict[str, list[str]] = {"applied": [], "reverted": [], "provisional": [], "withheld": []}
+    reasons: dict[str, list[str]] = {"applied": [], "reverted": [], "provisional": [], "withheld": []}
+    for record in records:
+        if not isinstance(record, dict):
+            sets["provisional"].append("unreadable entry")
+            continue
+        decision_id = record.get("decision_id")
+        label = decision_id.strip() if isinstance(decision_id, str) and decision_id.strip() else "missing decision ID"
+        codes = [str(code) for code in (record.get("reason_codes") or []) if str(code).strip()]
+        if record.get("stage") != "final":
+            bucket = "provisional"
+        else:
+            status = record.get("status")
+            bucket = next((name for name, members in _K4_SET_STATUSES.items() if status in members), "withheld")
+            if delivery_blocked and bucket == "applied":
+                bucket = "withheld"
+        sets[bucket].append(label)
+        for code in codes:
+            if code not in reasons[bucket]:
+                reasons[bucket].append(code)
+    parts = []
+    for bucket in ("applied", "reverted", "provisional", "withheld"):
+        ids = ", ".join(sets[bucket]) if sets[bucket] else "none"
+        why = f" Reasons: {', '.join(reasons[bucket])}." if reasons[bucket] else " No reason recorded."
+        parts.append(f"{len(sets[bucket])} {_K4_SET_TEXT[bucket]} ({ids}).{why}")
+    return "Final acceptance sets: " + " ".join(parts)
+
+
+def _k4_bucket_ids(records: list, bucket: str) -> list[str]:
+    """Decision IDs in one acceptance set (applied/reverted/provisional/withheld)."""
+    ids = []
+    for record in records:
+        if not isinstance(record, dict):
+            if bucket == "provisional":
+                ids.append("unreadable entry")
+            continue
+        decision_id = record.get("decision_id")
+        label = decision_id.strip() if isinstance(decision_id, str) and decision_id.strip() else "missing decision ID"
+        if record.get("stage") != "final":
+            record_bucket = "provisional"
+        else:
+            status = record.get("status")
+            record_bucket = next((name for name, members in _K4_SET_STATUSES.items() if status in members), "withheld")
+        if record_bucket == bucket:
+            ids.append(label)
+    return ids
+
+
 def _k4_section_html(data: dict) -> tuple[str, list[str]]:
     """Render K4 final decision records; provisional records stay history.
 
@@ -133,6 +263,9 @@ def _k4_section_html(data: dict) -> tuple[str, list[str]]:
     if not isinstance(decisions, list) or not decisions:
         return "", []
     metadata = data.get("metadata") or {}
+    acceptance = metadata.get("correction_acceptance") or {}
+    delivery_blocked = (acceptance.get("decision") == "identity_fallback"
+                        or acceptance.get("outcome") == "rejected")
     delivered = metadata.get("delivered_graph_identity")
     if not (isinstance(delivered, str) and delivered.strip()):
         delivered = None
@@ -142,6 +275,10 @@ def _k4_section_html(data: dict) -> tuple[str, list[str]]:
                   if isinstance(record.get("final_graph_identity"), str)
                   and str(record.get("final_graph_identity")).strip()}
     disagree = len(identities) > 1
+    payload_verified, payload_reason, payload_identity = verify_payload_binding(data)
+    binding_invalid = (not payload_verified or disagree
+                       or any(record.get("final_graph_identity") != payload_identity for record in finals)
+                       or (delivered is not None and delivered != payload_identity))
     rows = []
     history = []
     for record in decisions:
@@ -162,16 +299,22 @@ def _k4_section_html(data: dict) -> tuple[str, list[str]]:
                 "Final reconciled records above take precedence.")
             continue
         identity = record.get("final_graph_identity")
-        verified = (isinstance(identity, str) and identity.strip()
+        if delivery_blocked and record.get("status") in _K4_SET_STATUSES["applied"]:
+            decision += " (not delivered correction)"
+            reason += " Final rejection or identity fallback overrides this candidate record."
+        verified = (payload_verified and identity == payload_identity
+                    and isinstance(identity, str) and identity.strip()
                     and not disagree
                     and (delivered is None or identity.strip() == delivered.strip()))
         if not verified:
+            decision += " (unverified; not a delivery claim)"
+            reason += f" {payload_reason}"
             if not (isinstance(identity, str) and identity.strip()):
                 reason += " Unverified: final record without a delivered-graph identity is not a delivery claim."
             elif disagree:
                 reason += (" Unverified: final records disagree on the delivered-graph identity; "
                            "the explanation cannot be bound to one delivered graph.")
-            else:
+            elif (delivered is not None and identity != delivered) or payload_verified:
                 reason += (" Unverified: record identity does not match the recorded delivered graph; "
                            "not displayed as applied.")
         rows.append("<tr>" + "".join(
@@ -180,11 +323,12 @@ def _k4_section_html(data: dict) -> tuple[str, list[str]]:
         ) + "</tr>")
     if not rows and not history:
         return "", []
-    banner = ""
+    banner = (f"<p><strong>{escape(payload_reason)}</strong></p>")
     if disagree:
-        banner = ("<p><strong>Final records disagree on the delivered-graph identity; "
+        banner += ("<p><strong>Final records disagree on the delivered-graph identity; "
                   "this explanation is unverified and nothing below is shown as delivered.</strong></p>")
-    table = ('<h3>Recorded final correction decisions</h3>' + banner)
+    summary = f"<p><strong>{escape(_k4_sets_summary(decisions, delivery_blocked or binding_invalid))}</strong></p>"
+    table = ('<h3>Recorded final correction decisions</h3>' + summary + banner)
     if rows:
         table += ('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;text-align:left">'
                   "<thead><tr><th>Channel / output / seat</th><th>Frequency</th><th>Decision</th><th>Why</th></tr></thead>"
@@ -316,6 +460,18 @@ def correction_explanation_html(data: dict, label: str = "") -> str:
         final_message = "The acceptance record is incomplete or inconsistent; final correction is not verified."
     else:
         final_message = final_messages.get(outcome, "No final correction decision was recorded.")
+    if outcome in ("accepted", "unchanged") and data.get("correction_decisions"):
+        verified, binding_reason, _ = verify_payload_binding(data)
+        if not verified:
+            final_message = f"Recorded outcome: {outcome}; not verified for this payload. {binding_reason}"
+    # Final acceptance is authoritative even when stale candidate records
+    # remain in a legacy ledger. A fallback cannot supersede itself.
+    if acceptance.get("decision") == "identity_fallback":
+        final_message = (
+            "The final outcome is unchanged: it fell back to identity; no applied correction records "
+            "can override that outcome. The fallback withheld correction; candidate "
+            "records below are not delivered correction."
+        )
     row("System", "All assessed frequencies", "Final outcome", final_message)
 
     # Prefer realized scorecard scope, preserving the requested scope separately
@@ -384,6 +540,8 @@ def correction_explanation_html(data: dict, label: str = "") -> str:
     for stage in metadata.get("stage_outcomes") or []:
         name = stage.get("stage", "unknown")
         status = stage.get("status", "unknown")
+        if name == "measurement_input_conditioning":
+            details.extend(_measurement_conditioning_history(stage))
         for advisory in stage.get("advisories") or []:
             details.append(f"Stage {name} ({status}): {advisory}")
         for check in stage.get("checks") or []:

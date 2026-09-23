@@ -159,6 +159,7 @@ pub fn build_channel_dsp_chain_with_curves(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     }
 }
@@ -304,6 +305,7 @@ pub fn build_multidriver_dsp_chain_with_curves(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     }
 }
@@ -399,6 +401,7 @@ pub fn build_topology_dsp_chain_with_curves(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     }
 }
@@ -541,12 +544,13 @@ pub fn build_multisub_dsp_chain_advanced(
             .unwrap_or(false);
         if invert {
             sub_plugins.push(create_gain_plugin_with_invert(gain, true));
-        } else if gain.abs() > 0.01 {
+        } else if gain != 0.0 {
             sub_plugins.push(create_gain_plugin(gain));
         }
 
-        // Add delay plugin if non-zero
-        if i < delays.len() && delays[i].abs() > 0.001 {
+        // Preserve the optimized controls exactly. Any deliberate pruning
+        // must recompute the response and diagnostics before emission.
+        if i < delays.len() && delays[i] != 0.0 {
             sub_plugins.push(create_delay_plugin(delays[i]));
         }
 
@@ -599,6 +603,7 @@ pub fn build_multisub_dsp_chain_advanced(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     }
 }
@@ -687,6 +692,7 @@ fn build_dual_driver_array_chain(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     }
 }
@@ -876,6 +882,7 @@ pub fn build_mixed_mode_crossover_chain_with_post_merge_eq(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: None,
     }
 }
@@ -907,6 +914,7 @@ pub fn build_supporting_source_dsp_chains(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: constrained_target.map(|c| c.into()),
     };
 
@@ -930,6 +938,7 @@ pub fn build_supporting_source_dsp_chains(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve: constrained_target.map(|c| c.into()),
     };
 

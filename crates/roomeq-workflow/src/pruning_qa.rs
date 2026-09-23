@@ -442,6 +442,7 @@ fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
                             speaker_name: None,
                             subwoofers,
                             allpass_optimization: false,
+                            joint_optimization: false,
                         }),
                     );
                 }
@@ -510,7 +511,8 @@ fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
                                     .as_array()
                                     .is_some_and(|filters| filters.contains(&filter))
                         }),
-                        "stale filter metadata for {name}: {filter}"
+                        "stale filter metadata for {name}: {filter}; multi_sub={multi_sub}, grouped={grouped}, report_only={report_only}; emitted={:?}",
+                        chain.plugins
                     );
                 }
             }

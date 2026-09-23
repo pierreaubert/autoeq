@@ -120,7 +120,7 @@ pub struct JointSubComponents {
 /// # Errors
 ///
 /// Returns an error string when inputs are empty, ragged, length-mismatched,
-/// or nonfinite.
+/// or nonfinite, weights are invalid, or derived components overflow.
 ///
 /// # Panics
 ///
@@ -132,6 +132,13 @@ pub fn joint_multisub_loss(
     target_db: &[f64],
     weights: &JointSubWeights,
 ) -> Result<JointSubComponents, String> {
+    // Public fields permit direct construction and mutation after `new`.
+    // Validate at evaluation too; invalid weights cannot define a valid loss.
+    JointSubWeights::new(
+        weights.variation,
+        weights.output_drive,
+        weights.target_error,
+    )?;
     if seat_levels.is_empty() {
         return Err("joint multi-sub objective needs at least one seat".to_string());
     }
@@ -185,6 +192,12 @@ pub fn joint_multisub_loss(
     let total = weights.variation * variation
         + weights.output_drive * output_drive
         + weights.target_error * target_error;
+    if [variation, output_drive, target_error, total]
+        .iter()
+        .any(|value| !value.is_finite())
+    {
+        return Err("joint multi-sub objective arithmetic produced nonfinite components".into());
+    }
     Ok(JointSubComponents {
         variation,
         output_drive,
@@ -199,6 +212,41 @@ mod tests {
 
     fn unit_weights() -> JointSubWeights {
         JointSubWeights::default()
+    }
+
+    #[test]
+    fn joint_loss_rejects_invalid_public_weights_and_overflow() {
+        for value in [-1.0, f64::NAN, f64::INFINITY] {
+            for component in 0..3 {
+                let mut weights = unit_weights();
+                match component {
+                    0 => weights.variation = value,
+                    1 => weights.output_drive = value,
+                    _ => weights.target_error = value,
+                }
+                assert!(joint_multisub_loss(&[vec![80.0]], &[80.0], &[80.0], &weights).is_err());
+            }
+        }
+        let zero = JointSubWeights {
+            variation: 0.0,
+            output_drive: 0.0,
+            target_error: 0.0,
+        };
+        assert!(joint_multisub_loss(&[vec![80.0]], &[80.0], &[80.0], &zero).is_err());
+        assert!(
+            joint_multisub_loss(
+                &[vec![1e308], vec![1e308]],
+                &[80.0],
+                &[80.0],
+                &unit_weights()
+            )
+            .is_err()
+        );
+        let huge = JointSubWeights {
+            target_error: f64::MAX,
+            ..unit_weights()
+        };
+        assert!(joint_multisub_loss(&[vec![82.0]], &[80.0], &[80.0], &huge).is_err());
     }
 
     #[test]

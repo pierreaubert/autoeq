@@ -17,6 +17,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+pub use roomeq_model::reference_registry::{
+    ApprovedReferenceEntry, ApprovedReferenceRegistry, VerifiedReferenceEvidence,
+};
+
 /// The single pinnable signal-pair fidelity model family.
 pub const PINNED_MODEL_FAMILY: &str = "pemo-q";
 
@@ -296,18 +300,28 @@ impl ValidationControls {
 }
 
 /// Independent reference backing an enforcement claim.
+///
+/// `description`, `tolerance`, and `agreement` are explanation only: they
+/// never admit enforcement. Only verified numeric `evidence` checked against
+/// an [`ApprovedReferenceRegistry`] admits anything.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct IndependentReference {
     /// What was reimplemented and how agreement is measured.
     pub description: String,
     /// Predeclared agreement tolerance, e.g. `"within 1e-9 of the protocol p value"`.
     pub tolerance: String,
-    /// Observed agreement against the reference.
+    /// Observed agreement against the reference (explanation only).
     pub agreement: String,
+    /// Verified numeric agreement evidence, when independently observed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<VerifiedReferenceEvidence>,
 }
 
 impl IndependentReference {
     /// Validate the reference is stated before results exist.
+    ///
+    /// This checks explanation presence only and never admits enforcement;
+    /// use [`IndependentReference::validate_evidence`] for admission.
     ///
     /// # Errors
     ///
@@ -319,6 +333,36 @@ impl IndependentReference {
             ))
         } else {
             Ok(())
+        }
+    }
+
+    /// Validate verified agreement evidence for an enforcement claim.
+    ///
+    /// Binds the evidence to the pinned model and the declared domain
+    /// through the approved registry. Free-text agreement without evidence
+    /// stays `blocked_external`; present but disagreeing evidence errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns `blocked_external` when evidence is absent or approval is
+    /// missing, and a hard error when evidence disagrees with its approval.
+    pub fn validate_evidence(
+        &self,
+        model: &PinnedFidelityModel,
+        domain: &DeclaredDomain,
+        registry: &ApprovedReferenceRegistry,
+    ) -> Result<(), String> {
+        match &self.evidence {
+            Some(evidence) => registry.verify_evidence(
+                evidence,
+                &model.model_family,
+                &model.edition,
+                &domain.calibration_id,
+                &domain.domain,
+            ),
+            None => Err(format!(
+                "{BLOCKED_EXTERNAL_PREFIX}: enforcement needs verified reference evidence, not a descriptive agreement string"
+            )),
         }
     }
 }
@@ -397,23 +441,28 @@ pub fn admit_to_reranker(
 /// Admit a reranked model to enforcement.
 ///
 /// Promotion order is advisory, then reranker, then enforcement: this
-/// gate re-checks every reranker input plus the independent reference
+/// gate re-checks every reranker input plus verified reference evidence
 /// and the declared domain. Skipping straight from advisory fails here.
+/// With no licensed independent fixture in-tree, the registry stays empty
+/// and enforcement stays `blocked_external`.
 ///
 /// # Errors
 ///
-/// Returns `blocked_external` while references, domain, or tolerances
-/// are missing; enforcement is never granted on advisory evidence alone.
+/// Returns `blocked_external` while references, domain, tolerances, or
+/// registry approval are missing; enforcement is never granted on
+/// descriptive strings or advisory evidence alone.
 pub fn admit_to_enforcement(
     model: &PinnedFidelityModel,
     calibration: &InputCalibration,
     controls: &ValidationControls,
     reference: &IndependentReference,
     domain: &DeclaredDomain,
+    registry: &ApprovedReferenceRegistry,
 ) -> Result<PromotionStage, String> {
     admit_to_reranker(model, calibration, controls)?;
     reference.validate()?;
     domain.validate()?;
+    reference.validate_evidence(model, domain, registry)?;
     Ok(PromotionStage::Enforcement)
 }
 
@@ -481,6 +530,46 @@ mod perceptual_promotion_tests {
             description: String::from("second implementation agrees on reference vectors"),
             tolerance: String::from("within pinned tolerance"),
             agreement: String::from("agrees"),
+            evidence: None,
+        }
+    }
+
+    /// Test-local approved registry exercising the verification protocol.
+    /// This approves a synthetic fixture for protocol testing only; it is
+    /// not a licensed independent implementation and never leaves the test.
+    fn registry() -> ApprovedReferenceRegistry {
+        ApprovedReferenceRegistry {
+            entries: vec![ApprovedReferenceEntry {
+                implementation_id: "test-ref-impl".to_string(),
+                implementation_hash: "test-hash".to_string(),
+                vectors_id: "test-vectors-v1".to_string(),
+                model_family: String::from("pemo-q"),
+                edition: String::from("pemo-q-2024-ed1"),
+                calibration_id: String::from("spl-cal-94db"),
+                domain: String::from("mono 50-80 dB SPL, 100 Hz-8 kHz"),
+                error_metric: "max_abs_protocol_p_error".to_string(),
+                error_tolerance: Some(1e-9),
+                required_coverage: vec![String::from("level-sweep")],
+            }],
+        }
+    }
+
+    fn verified_reference() -> IndependentReference {
+        IndependentReference {
+            evidence: Some(VerifiedReferenceEvidence {
+                implementation_id: "test-ref-impl".to_string(),
+                implementation_hash: "test-hash".to_string(),
+                vectors_id: "test-vectors-v1".to_string(),
+                model_family: String::from("pemo-q"),
+                edition: String::from("pemo-q-2024-ed1"),
+                calibration_id: String::from("spl-cal-94db"),
+                domain: String::from("mono 50-80 dB SPL, 100 Hz-8 kHz"),
+                error_metric: "max_abs_protocol_p_error".to_string(),
+                observed_error: 1e-10,
+                error_tolerance: 1e-9,
+                coverage: vec![String::from("level-sweep")],
+            }),
+            ..reference()
         }
     }
 
@@ -561,21 +650,35 @@ mod perceptual_promotion_tests {
             admit_to_reranker(&pinned(), &calibrated(), &controls()).unwrap(),
             PromotionStage::Reranker
         );
+        // Verified protocol evidence against a test-local registry admits.
         assert_eq!(
             admit_to_enforcement(
                 &pinned(),
                 &calibrated(),
                 &controls(),
-                &reference(),
-                &domain()
+                &verified_reference(),
+                &domain(),
+                &registry(),
             )
             .unwrap(),
             PromotionStage::Enforcement
         );
+        // No registry approval exists in-tree: enforcement stays blocked.
+        let error = admit_to_enforcement(
+            &pinned(),
+            &calibrated(),
+            &controls(),
+            &verified_reference(),
+            &domain(),
+            &ApprovedReferenceRegistry::default(),
+        )
+        .expect_err("empty registry blocks");
+        assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
         let blank_reference = IndependentReference {
             description: String::new(),
             tolerance: String::new(),
             agreement: String::new(),
+            evidence: None,
         };
         let error = admit_to_enforcement(
             &pinned(),
@@ -583,6 +686,7 @@ mod perceptual_promotion_tests {
             &controls(),
             &blank_reference,
             &domain(),
+            &registry(),
         )
         .expect_err("reference missing");
         assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
@@ -594,11 +698,73 @@ mod perceptual_promotion_tests {
             &pinned(),
             &calibrated(),
             &controls(),
-            &reference(),
+            &verified_reference(),
             &unvalidated,
+            &registry(),
         )
         .expect_err("domain unvalidated");
         assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
+    }
+
+    /// Absent, empty, failed, and NaN agreement never admit enforcement.
+    #[test]
+    fn roadmap_correction_promotion_agreement_evidence() {
+        let admit = |reference: &IndependentReference| {
+            admit_to_enforcement(
+                &pinned(),
+                &calibrated(),
+                &controls(),
+                reference,
+                &domain(),
+                &registry(),
+            )
+        };
+        // Absent evidence blocks even with populated description strings.
+        assert!(admit(&reference()).is_err());
+        // Failed numeric agreement errors instead of admitting.
+        let mut failed = verified_reference();
+        failed.evidence.as_mut().unwrap().observed_error = 2e-9;
+        assert!(admit(&failed).is_err());
+        // NaN error is not agreement.
+        let mut nan = verified_reference();
+        nan.evidence.as_mut().unwrap().observed_error = f64::NAN;
+        assert!(admit(&nan).is_err());
+        // Stale implementation hash is rejected.
+        let mut stale = verified_reference();
+        stale.evidence.as_mut().unwrap().implementation_hash = "old-hash".to_string();
+        assert!(admit(&stale).is_err());
+        // Wrong edition, domain, or calibration is rejected.
+        let mut edition = verified_reference();
+        edition.evidence.as_mut().unwrap().edition = "other-edition".to_string();
+        assert!(admit(&edition).is_err());
+        let mut calibration = verified_reference();
+        calibration.evidence.as_mut().unwrap().calibration_id = "other-cal".to_string();
+        assert!(admit(&calibration).is_err());
+        // Synthetic controls presented as independent vectors are unknown
+        // to the registry and stay blocked.
+        let mut synthetic = verified_reference();
+        synthetic.evidence.as_mut().unwrap().implementation_id = "synthetic-self-check".to_string();
+        let error = admit(&synthetic).expect_err("synthetic vectors stay blocked");
+        assert!(error.starts_with(BLOCKED_EXTERNAL_PREFIX), "{error}");
+    }
+
+    /// A6 regression: populated description/tolerance plus a free-text
+    /// `agreement` must not admit enforcement without verified evidence.
+    #[test]
+    fn roadmap_correction_promotion_text_agreement_admits_nothing() {
+        let error = admit_to_enforcement(
+            &pinned(),
+            &calibrated(),
+            &controls(),
+            &reference(),
+            &domain(),
+            &ApprovedReferenceRegistry::default(),
+        )
+        .expect_err("free-text agreement must not admit enforcement");
+        assert!(
+            error.starts_with(BLOCKED_EXTERNAL_PREFIX),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -161,24 +161,23 @@ pub fn package_fingerprint(package: &ExportPackage) -> String {
 /// Unsupported targets fail explicitly (unsupported routing, required
 /// limiters, unavailable convolution resources); this helper never drops,
 /// rescales, or converts DSP silently. It performs no rendering and no I/O.
-pub fn export_readiness(
-    graph: &DspGraph,
-    formats: &[super::ExportFormat],
-) -> Vec<ExportReadiness> {
+pub fn export_readiness(graph: &DspGraph, formats: &[super::ExportFormat]) -> Vec<ExportReadiness> {
     formats
         .iter()
-        .map(|format| match super::external_export_supported(graph, *format) {
-            Ok(()) => ExportReadiness {
-                format: *format,
-                supported: true,
-                reason: None,
+        .map(
+            |format| match super::external_export_supported(graph, *format) {
+                Ok(()) => ExportReadiness {
+                    format: *format,
+                    supported: true,
+                    reason: None,
+                },
+                Err(error) => ExportReadiness {
+                    format: *format,
+                    supported: false,
+                    reason: Some(error.to_string()),
+                },
             },
-            Err(error) => ExportReadiness {
-                format: *format,
-                supported: false,
-                reason: Some(error.to_string()),
-            },
-        })
+        )
         .collect()
 }
 
@@ -210,10 +209,7 @@ fn canonical_plugins(plugins: &[PluginConfigWrapper]) -> Vec<Value> {
                 "type".to_string(),
                 Value::String(plugin.plugin_type.clone()),
             );
-            entry.insert(
-                "parameters".to_string(),
-                canonical_json(&plugin.parameters),
-            );
+            entry.insert("parameters".to_string(), canonical_json(&plugin.parameters));
             Value::Object(entry.into_iter().collect())
         })
         .collect()
@@ -232,11 +228,7 @@ fn canonical_channel(chain: &ChannelDspChain) -> Value {
             )
         })
         .collect();
-    drivers.sort_by(|left, right| {
-        left.0
-            .cmp(&right.0)
-            .then_with(|| left.1.cmp(&right.1))
-    });
+    drivers.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
     let mut entry = BTreeMap::new();
     entry.insert(
         "plugins".to_string(),
@@ -249,10 +241,7 @@ fn canonical_channel(chain: &ChannelDspChain) -> Value {
                 .into_iter()
                 .map(|(index, name, plugins)| {
                     let mut driver = BTreeMap::new();
-                    driver.insert(
-                        "index".to_string(),
-                        Value::Number(index.into()),
-                    );
+                    driver.insert("index".to_string(), Value::Number(index.into()));
                     driver.insert("name".to_string(), Value::String(name));
                     driver.insert("plugins".to_string(), Value::Array(plugins));
                     Value::Object(driver.into_iter().collect())
@@ -328,11 +317,13 @@ mod tests {
     fn package_fingerprint_ignores_member_order() {
         let first = crate::ExportPackageMember::new("a.txt", Vec::from(b"a")).unwrap();
         let second = crate::ExportPackageMember::new("b.txt", Vec::from(b"b")).unwrap();
-        let forward =
-            crate::ExportPackage::new(vec![first.clone(), second.clone()]).unwrap();
+        let forward = crate::ExportPackage::new(vec![first.clone(), second.clone()]).unwrap();
         let mut reversed = crate::ExportPackage::new(vec![second, first]).unwrap();
         reversed.members.reverse();
-        assert_eq!(package_fingerprint(&forward), package_fingerprint(&reversed));
+        assert_eq!(
+            package_fingerprint(&forward),
+            package_fingerprint(&reversed)
+        );
         let altered = crate::ExportPackage::new(vec![
             crate::ExportPackageMember::new("a.txt", Vec::from(b"altered")).unwrap(),
         ])

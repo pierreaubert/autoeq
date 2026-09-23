@@ -453,6 +453,7 @@ pub fn process_supporting_source_channel_with_frequency_samples(
     )?;
     support_chain.final_curve = Some((&support_final_curve).into());
     let primary_result = ChannelOptimizationResult {
+        measurement_conditioning: None,
         name: logical_role.to_string(),
         pre_score: 0.0,
         post_score: 0.0,
@@ -465,6 +466,7 @@ pub fn process_supporting_source_channel_with_frequency_samples(
         veto_adjudication: None,
     };
     let support_result = ChannelOptimizationResult {
+        measurement_conditioning: None,
         name: support_name.clone(),
         pre_score: 0.0,
         post_score: 0.0,
@@ -602,6 +604,7 @@ mod tests {
                 "/definitely/not/a/real/supporting-source.csv".into(),
             ),
             speaker_name: None,
+            provenance: Default::default(),
         });
 
         assert_eq!(

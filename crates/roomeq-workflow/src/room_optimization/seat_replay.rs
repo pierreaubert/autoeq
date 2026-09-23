@@ -9,6 +9,7 @@ use std::path::Path;
 #[cfg(test)]
 mod asymmetric;
 mod bounded_sum;
+mod intake;
 use bounded_sum::{Summed, process_branch, sum_branches};
 
 type DriverIdentity = (Option<String>, usize);
@@ -94,6 +95,37 @@ fn invalid(message: impl Into<String>) -> AutoeqError {
 }
 
 pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
+    capture_training_impl(config, None)
+}
+
+pub(super) fn capture_with_receipt(
+    config: &RoomConfig,
+    held_out: &HashMap<String, Vec<Curve>>,
+) -> Result<(Vec<Capture>, roomeq_model::StageOutcome)> {
+    let mut receipt = intake::Receipt::default();
+    let captures = capture_training_impl(config, Some(&mut receipt))?;
+    // Stable ordering makes retained identity independent of HashMap iteration.
+    let held_out: BTreeMap<_, _> = held_out.iter().collect();
+    for (channel, curves) in held_out {
+        receipt.record(
+            "held_out",
+            None,
+            &Capture {
+                channel: channel.clone(),
+                driver: None,
+                curves: curves.clone(),
+                seat_labels: None,
+            },
+            Default::default(),
+        )?;
+    }
+    Ok((captures, receipt.into_stage()))
+}
+
+fn capture_training_impl(
+    config: &RoomConfig,
+    mut receipt: Option<&mut intake::Receipt>,
+) -> Result<Vec<Capture>> {
     let roles: BTreeMap<String, String> = match &config.system {
         Some(system) => {
             let mut roles: BTreeMap<String, String> = system
@@ -189,12 +221,11 @@ pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
             }
         }
         for (driver, source) in sources {
-            // No optimization/display cap: native narrow features are evidence.
-            let curves = crate::measurement::load_source_individual_with_frequency_samples(
-                source,
-                usize::MAX,
-            )
-            .map_err(|error| invalid(format!("{error:#}")))?;
+            // Retain native support, grids, levels, and auxiliary evidence.
+            // Alignment belongs to the later physical-branch summation, not
+            // capture retention. Parsed responses are not raw recordings.
+            let curves = autoeq_measurements::read::load_source_unaligned(source)
+                .map_err(|error| invalid(format!("{error:#}")))?;
             for curve in &curves {
                 curve.validate("final-seat raw capture")?;
             }
@@ -203,12 +234,16 @@ pub fn capture_training(config: &RoomConfig) -> Result<Vec<Capture>> {
                     "multi-seat legacy driver groups require explicit topology IDs for final replay",
                 ));
             }
-            captures.push(Capture {
+            let capture = Capture {
                 channel: role.clone(),
                 driver,
                 curves,
                 seat_labels: crate::group_measurements::seat_labels(source),
-            });
+            };
+            if let Some(receipt) = receipt.as_deref_mut() {
+                receipt.record("training", Some(&key), &capture, source.provenance())?;
+            }
+            captures.push(capture);
         }
     }
     Ok(captures)
@@ -1520,6 +1555,7 @@ mod tests {
                 speaker_name: None,
                 subwoofers: vec![source(70.0), source(80.0)],
                 allpass_optimization: false,
+                joint_optimization: false,
             }),
             SpeakerConfig::Cardioid(Box::new(roomeq_model::CardioidConfig {
                 name: String::from("subs"),
@@ -1618,6 +1654,7 @@ mod tests {
                 speaker_name: None,
                 subwoofers: vec![],
                 allpass_optimization: false,
+                joint_optimization: false,
             }),
         );
         let playback = replay_final_physical_seat(
@@ -2271,6 +2308,49 @@ mod tests {
             score.useful_output[1].logical_input.as_deref(),
             Some("left")
         );
+    }
+
+    #[test]
+    fn native_capture_preserves_distinct_grids_and_auxiliary_evidence() {
+        let first = Curve {
+            freq: vec![40.0, 80.0, 120.0].into(),
+            spl: vec![80.0; 3].into(),
+            ..Default::default()
+        };
+        let second = Curve {
+            freq: vec![20.0, 40.0, 79.0, 80.0, 81.0, 120.0, 200.0].into(),
+            spl: vec![80.0, 80.0, 80.0, 95.0, 80.0, 80.0, 80.0].into(),
+            phase: Some(vec![0.0, -1.0, -2.0, -3.0, -4.0, -5.0, -6.0].into()),
+            coherence: Some(vec![0.9; 7].into()),
+            noise_floor_db: Some(vec![20.0; 7].into()),
+            ..Default::default()
+        };
+        let originals = vec![first, second];
+        let config = RoomConfig {
+            speakers: HashMap::from([(
+                "left".into(),
+                SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(originals.clone())),
+            )]),
+            ..Default::default()
+        };
+        let (captured, receipt) = capture_with_receipt(&config, &HashMap::new()).unwrap();
+        let payload: serde_json::Value =
+            serde_json::from_str(receipt.checks[0].diagnostic.as_ref().unwrap()).unwrap();
+        for (index, original) in originals.iter().enumerate() {
+            assert_eq!(
+                payload["takes"][index]["curve"],
+                serde_json::to_value(original).unwrap()
+            );
+        }
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].curves.len(), originals.len());
+        for (actual, original) in captured[0].curves.iter().zip(&originals) {
+            assert_eq!(actual.freq, original.freq);
+            assert_eq!(actual.spl, original.spl);
+            assert_eq!(actual.phase, original.phase);
+            assert_eq!(actual.coherence, original.coherence);
+            assert_eq!(actual.noise_floor_db, original.noise_floor_db);
+        }
     }
 
     #[test]

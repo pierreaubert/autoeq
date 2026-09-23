@@ -39,6 +39,7 @@ mod validation_corpus;
 pub use acceptance::*;
 pub use acceptance_bundle::*;
 pub mod electrical_headroom;
+pub mod physical_drive;
 pub use band_policy::*;
 pub use capture::*;
 pub use chain_constraints::*;

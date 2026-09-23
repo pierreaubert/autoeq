@@ -326,6 +326,7 @@ mod apply_tests {
 
     fn flat_result() -> roomeq_engine::room_result::ChannelOptimizationResult {
         roomeq_engine::room_result::ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: "test".to_string(),
             pre_score: 1.0,
             post_score: 0.5,
@@ -629,6 +630,7 @@ mod coverage_tests {
                     MeasurementSource::InMemoryMultiple(vec![flat_curve(), flat_curve()])
                 ],
                 allpass_optimization: false,
+                joint_optimization: false,
             })),
             Some(2)
         );
@@ -682,6 +684,7 @@ mod coverage_tests {
         let config = home_cinema_config();
         let source = MeasurementSource::InMemory(flat_curve());
         let _result = roomeq_engine::room_result::ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: "LFE".to_string(),
             pre_score: 0.0,
             post_score: 0.0,

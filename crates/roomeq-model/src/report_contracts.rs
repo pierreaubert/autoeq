@@ -88,6 +88,53 @@ const fn default_true() -> bool {
     true
 }
 
+/// Policy that supplied the actual EQ analysis normalization reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NormalizationReferencePolicy {
+    /// A caller supplied a common reference; seats were not independently centered.
+    ProvidedSharedReference,
+    /// A target-relative reference outside a limited correction band was available.
+    LimitedCorrectionTargetReference,
+    /// Arithmetic mean of measured dB samples inside the active correction band.
+    CorrectionBandArithmeticMean,
+}
+
+/// Actual analysis-level gain applied before EQ smoothing and objective construction.
+///
+/// Identities bind parsed numerical curves, not raw recordings. This gain is
+/// not emitted playback gain, SPL calibration, or a claim about later conditioning.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct InputNormalizationEvidence {
+    pub input_curve_identity: String,
+    pub normalized_curve_identity: String,
+    /// Scalar added to input dB levels; subtracting the reference gives a negative gain.
+    pub applied_gain_db: f64,
+    pub reference_policy: NormalizationReferencePolicy,
+    /// Active correction bounds, not necessarily the reference-estimation band.
+    pub correction_band_hz: [f64; 2],
+    /// Target used to derive a limited-band reference, when applicable.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_target_identity: Option<String>,
+}
+
+/// Population whose actual objective curves were normalized.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NormalizationPopulation {
+    AlignedMeasurements,
+    RirPrototype,
+    BootstrapResamples,
+    BootstrapOfRirPrototype,
+}
+
+/// Normalization records in the same order as the prepared multi-objective bank.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct MultiInputNormalizationEvidence {
+    pub population: NormalizationPopulation,
+    pub objectives: Vec<InputNormalizationEvidence>,
+}
+
 /// Structured evidence for one optimizer invocation.
 ///
 /// Backends retain their historical tuple API, but callers should use this
@@ -95,6 +142,12 @@ const fn default_true() -> bool {
 /// "not converged" is classified as best-effort rather than success.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerRunEvidence {
+    /// Per-objective conditioning; objective indices are not authenticated seat identities.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_input_normalization: Option<MultiInputNormalizationEvidence>,
+    /// Absent means conditioning was not recorded by this producer, not zero gain.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_normalization: Option<InputNormalizationEvidence>,
     pub algorithm: String,
     pub termination: OptimizerTermination,
     pub converged: bool,
@@ -161,6 +214,12 @@ pub struct MixedPhaseCorrectionReport {
     pub estimated_delay_ms: f64,
     /// Number of coefficients in the generated excess-phase FIR.
     pub fir_taps: usize,
+    /// Causal FIR centering delay in milliseconds, when the realization is known.
+    ///
+    /// This is distinct from acoustic propagation and frequency-dependent
+    /// excess group delay. It excludes backend buffering and other DSP stages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub causal_center_delay_ms: Option<f64>,
     /// Minimum residual excess phase after delay removal.
     pub residual_excess_phase_min_deg: f64,
     /// Maximum residual excess phase after delay removal.
@@ -198,6 +257,7 @@ impl MixedPhaseCorrectionReport {
         Self {
             estimated_delay_ms,
             fir_taps,
+            causal_center_delay_ms: None,
             residual_excess_phase_min_deg: minimum,
             residual_excess_phase_max_deg: maximum,
             residual_excess_phase_rms_deg: rms,

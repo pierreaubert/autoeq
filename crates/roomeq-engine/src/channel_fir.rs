@@ -8,7 +8,9 @@ mod spatial_realized;
 mod tests;
 
 use autoeq_core::{AutoeqError, Result, response};
-use autoeq_optim::optim::{OptimProgressCallback, OptimizerRunEvidence};
+use autoeq_optim::optim::{
+    COMPOSITE_COMPARISON_EPS_DB, OptimProgressCallback, OptimizerRunEvidence, envelope_bound_at,
+};
 use log::{debug, info, warn};
 use math_audio_iir_fir::Biquad;
 use ndarray::Array1;
@@ -47,6 +49,150 @@ pub struct FirChannelRequest<'a> {
     pub eq_resources: &'a EqResources,
     pub sidecar_reference: ConvolutionSidecarReference,
     pub callback: Option<OptimProgressCallback>,
+}
+
+/// Realized electrical gain of emitted FIR taps against the configured
+/// correction ceiling.
+///
+/// PEQ envelope projection is not a substitute for FIR verification: the
+/// spatial bank searches template weights, so the emitted taps are checked
+/// directly on the objective grid (C04 item 5). Only the boost side is
+/// judged; FIR attenuation is headroom-safe and covered by the separate
+/// output-headroom acceptance.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct RealizedFirCeiling {
+    /// Realized gain at the bin with the smallest ceiling margin, in dB.
+    pub peak_db: f64,
+    /// Frequency of the smallest ceiling margin in Hz.
+    pub peak_freq_hz: f64,
+    /// Ceiling at that same frequency in dB.
+    pub bound_db: f64,
+    /// True when every evaluated bin stays within its local ceiling.
+    pub within_ceiling: bool,
+}
+
+/// Check realized FIR taps against the configured correction ceiling: the
+/// `max_boost_envelope` knots interpolated in log frequency when present,
+/// else the flat `max_db`. Fail-closed: non-finite taps or an empty grid
+/// (no evidence) breach.
+pub(super) fn check_realized_fir_ceiling(
+    coefficients: &[f64],
+    grids: &[Array1<f64>],
+    sample_rate: f64,
+    optimizer: &OptimizerConfig,
+) -> RealizedFirCeiling {
+    let invalid = || RealizedFirCeiling {
+        peak_db: f64::INFINITY,
+        peak_freq_hz: 0.0,
+        bound_db: optimizer.max_db,
+        within_ceiling: false,
+    };
+    if coefficients.is_empty()
+        || coefficients.iter().any(|value| !value.is_finite())
+        || !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || !optimizer.max_db.is_finite()
+        || grids.is_empty()
+    {
+        return invalid();
+    }
+    if let Some(knots) = optimizer
+        .max_boost_envelope
+        .as_deref()
+        .filter(|knots| !knots.is_empty())
+        && autoeq_optim::optim::validate_envelope_knots(knots, "FIR boost ceiling", false).is_err()
+    {
+        return invalid();
+    }
+    let mut peak_db = f64::NEG_INFINITY;
+    let mut peak_freq_hz = 0.0;
+    let mut bound_db = optimizer.max_db;
+    let mut worst_excess_db = f64::NEG_INFINITY;
+    for grid in grids {
+        if grid.is_empty()
+            || grid
+                .iter()
+                .any(|f| !f.is_finite() || *f <= 0.0 || *f > sample_rate / 2.0)
+            || grid.iter().zip(grid.iter().skip(1)).any(|(a, b)| a >= b)
+        {
+            return invalid();
+        }
+        let transfer = response::compute_fir_complex_response(coefficients, grid, sample_rate);
+        for (frequency, h) in grid.iter().zip(transfer.iter()) {
+            if !h.re.is_finite() || !h.im.is_finite() || !h.norm().is_finite() {
+                return invalid();
+            }
+            let gain_db = 20.0 * h.norm().max(1e-20).log10();
+            let local_bound_db = match optimizer.max_boost_envelope.as_deref() {
+                Some(knots) if !knots.is_empty() => envelope_bound_at(knots, *frequency),
+                _ => optimizer.max_db,
+            };
+            if !local_bound_db.is_finite() {
+                return invalid();
+            }
+            let excess_db = gain_db - local_bound_db;
+            if excess_db > worst_excess_db {
+                worst_excess_db = excess_db;
+                peak_db = gain_db;
+                peak_freq_hz = *frequency;
+                bound_db = local_bound_db;
+            }
+        }
+    }
+    if !peak_db.is_finite() {
+        return RealizedFirCeiling {
+            peak_db: f64::INFINITY,
+            peak_freq_hz,
+            bound_db: optimizer.max_db,
+            within_ceiling: false,
+        };
+    }
+    RealizedFirCeiling {
+        peak_db,
+        peak_freq_hz,
+        bound_db,
+        within_ceiling: worst_excess_db <= COMPOSITE_COMPARISON_EPS_DB,
+    }
+}
+
+/// Enforce the realized ceiling on one spatial FIR emission: the winning
+/// taps pass through untouched when within ceiling, otherwise emission
+/// reverts to the neutral (near-identity) design with a recorded reason,
+/// and refuses explicitly when even the neutral design breaches.
+///
+/// Returns the emitted taps and an optional revert reason for the evidence
+/// status.
+pub(super) fn enforce_realized_fir_ceiling(
+    candidate_id: &str,
+    coefficients: Vec<f64>,
+    neutral_coefficients: Vec<f64>,
+    grids: &[Array1<f64>],
+    sample_rate: f64,
+    optimizer: &OptimizerConfig,
+) -> Result<(Vec<f64>, Option<String>)> {
+    let fail = |message: String| AutoeqError::OptimizationFailed { message };
+    let report = check_realized_fir_ceiling(&coefficients, grids, sample_rate, optimizer);
+    if report.within_ceiling {
+        return Ok((coefficients, None));
+    }
+    let reason = format!(
+        "{candidate_id} realized FIR peak {peak:.2} dB at {freq:.1} Hz breaches the {bound:.2} dB correction ceiling; reverted to neutral",
+        peak = report.peak_db,
+        freq = report.peak_freq_hz,
+        bound = report.bound_db,
+    );
+    log::warn!("{reason}");
+    let neutral = check_realized_fir_ceiling(&neutral_coefficients, grids, sample_rate, optimizer);
+    if !neutral.within_ceiling {
+        return Err(fail(format!(
+            "{candidate_id} refused: realized FIR peak {peak:.2} dB at {freq:.1} Hz breaches the {bound:.2} dB ceiling and the neutral fallback breaches too ({neutral_peak:.2} dB)",
+            peak = report.peak_db,
+            freq = report.peak_freq_hz,
+            bound = report.bound_db,
+            neutral_peak = neutral.peak_db,
+        )));
+    }
+    Ok((neutral_coefficients, Some(reason)))
 }
 
 pub(super) enum FirOptimizerOutput {
@@ -90,7 +236,10 @@ pub fn process_fir_channel(request: FirChannelRequest<'_>) -> Result<ChannelProc
 
 fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
     info!("  Generating FIR filter...");
-    let input_curve = subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
+    let usable_curve = request
+        .prepared
+        .usable_curve(&request.preprocessed.curve_for_optim)?;
+    let input_curve = subtract_target_tilt(&usable_curve, request.target);
     let design_target = crate::fir::prepared_fir_target_curve(
         &input_curve,
         request.optimizer,
@@ -120,8 +269,10 @@ fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcess
 
 fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
     let progress = progress::FirProgress::new(request.callback.take());
-    let optimization_curve =
-        subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
+    let usable_curve = request
+        .prepared
+        .usable_curve(&request.preprocessed.curve_for_optim)?;
+    let optimization_curve = subtract_target_tilt(&usable_curve, request.target);
     if request
         .optimizer
         .fir
@@ -225,8 +376,10 @@ fn process_hybrid(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessin
 }
 
 fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
-    let optimization_curve =
-        subtract_target_tilt(&request.preprocessed.curve_for_optim, request.target);
+    let usable_curve = request
+        .prepared
+        .usable_curve(&request.preprocessed.curve_for_optim)?;
+    let optimization_curve = subtract_target_tilt(&usable_curve, request.target);
     let eq_result = crate::channel_optimizer::optimize_maybe_multi(
         request.channel_name,
         request.prepared,
@@ -251,12 +404,9 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
             phase_smoothing_octaves: config.phase_smoothing_octaves,
         })
         .unwrap_or_default();
-    let spatial_depth = spatial_depth(&request);
-    let generated = if request.preprocessed.curve_for_optim.phase.is_some() {
-        match crate::mixed_phase::decompose_phase(
-            &request.preprocessed.curve_for_optim,
-            &mixed_config,
-        ) {
+    let spatial_depth = spatial_depth(&request)?;
+    let generated = if usable_curve.phase.is_some() {
+        match crate::mixed_phase::decompose_phase(&usable_curve, &mixed_config) {
             Ok((_minimum_phase, _excess_phase, delay_ms, residual)) => {
                 info!(
                     "  Mixed-phase: delay={:.2} ms, generating excess phase FIR...",
@@ -264,8 +414,8 @@ fn process_mixed_phase(mut request: FirChannelRequest<'_>) -> Result<ChannelProc
                 );
                 if let Some((coefficients, applied_depth, max_magnitude_deviation_db)) =
                     generate_magnitude_safe_excess_phase_fir(
-                        &request.preprocessed.curve_for_optim.freq,
-                        &request.preprocessed.curve_for_optim.spl,
+                        &usable_curve.freq,
+                        &usable_curve.spl,
                         &residual,
                         &mixed_config,
                         request.sample_rate,
@@ -420,18 +570,27 @@ fn max_phase_only_magnitude_deviation_db(
         .fold(0.0_f64, f64::max)
 }
 
-fn spatial_depth(request: &FirChannelRequest<'_>) -> Option<Array1<f64>> {
+fn spatial_depth(request: &FirChannelRequest<'_>) -> Result<Option<Array1<f64>>> {
     if !request
         .prepared
         .measurements()
         .is_multi_measurement_source()
     {
-        return None;
+        return Ok(None);
     }
     let curves = request.prepared.measurements().individual();
     if curves.len() <= 1 {
-        return None;
+        return Ok(None);
     }
+    let curves = curves
+        .iter()
+        .map(|curve| {
+            request
+                .prepared
+                .usable_curve(curve)
+                .map(|curve| curve.into_owned())
+        })
+        .collect::<Result<Vec<_>>>()?;
     let config = request
         .room_config
         .optimizer
@@ -454,7 +613,7 @@ fn spatial_depth(request: &FirChannelRequest<'_>) -> Option<Array1<f64>> {
         .as_ref()
         .and_then(|config| config.weights.as_deref());
     match roomeq_analysis::spatial_robustness::analyze_spatial_robustness_weighted(
-        curves, &config, weights,
+        &curves, &config, weights,
     ) {
         Ok(analysis) => {
             info!(
@@ -462,11 +621,11 @@ fn spatial_depth(request: &FirChannelRequest<'_>) -> Option<Array1<f64>> {
                 analysis.correction_depth.iter().sum::<f64>()
                     / analysis.correction_depth.len() as f64
             );
-            Some(analysis.correction_depth)
+            Ok(Some(analysis.correction_depth))
         }
         Err(error) => {
             warn!("  Spatial robustness analysis skipped: {error}");
-            None
+            Ok(None)
         }
     }
 }

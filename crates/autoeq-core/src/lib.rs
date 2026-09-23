@@ -8,9 +8,12 @@ pub use math_audio_iir_fir as iir;
 
 pub mod alignment;
 pub mod auditory_frequency;
+pub mod capture_arrival;
+pub mod capture_provenance;
 pub mod constraint_envelope;
 pub mod curve;
 pub mod curve_transforms;
+pub mod direct_sound;
 pub mod dsp_conventions;
 pub mod error;
 pub mod evidence;
@@ -46,8 +49,8 @@ pub use evidence::{
     EvidenceEnvelope, Uncertainty, UncertaintyKind,
 };
 pub use measurement_contracts::{
-    InlineMeasurement, MeasurementMultiple, MeasurementRef, MeasurementSingle, MeasurementSource,
-    SpinoramaBundle,
+    InlineMeasurement, MeasurementMultiple, MeasurementProvenance, MeasurementRef,
+    MeasurementSingle, MeasurementSource, ProvenanceCaptureKind, SpinoramaBundle,
 };
 pub use measurement_quality::{
     MeasurementQuality, MeasurementQualityReport, assess_measurement_quality,

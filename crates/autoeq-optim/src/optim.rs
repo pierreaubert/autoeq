@@ -72,12 +72,15 @@ pub use algorithm_info::*;
 pub use clamp::*;
 pub use compute::*;
 pub use constraint_envelope::{
-    COMPOSITE_COMPARISON_EPS_DB, ClassifiedOutcome, CompositeBreach, ConstrainedCandidate,
-    ConstraintDiagnostic, ConstraintKind, ConstraintSpec, GainAdjustment, OptimizationOutcomeKind,
-    ParetoFeasibility, QAdjustment, VALIDATED_SUBDIVISIONS_PER_BIN, check_composite_gain_envelope,
-    check_pareto_feasibility, classify_outcome, constrain_candidate, enforce_local_q_at_centers,
-    enforce_local_q_envelope_at_centers, envelope_bound_at, is_peq_layout_loss,
+    BudgetBreach, COMPOSITE_COMPARISON_EPS_DB, ClassifiedOutcome, CompositeBreach,
+    ConstrainedCandidate, ConstraintDiagnostic, ConstraintKind, ConstraintSpec, FinalizedCandidate,
+    GainAdjustment, JudgedParetoFront, JudgedParetoMember, OptimizationOutcomeKind,
+    OwnedConstraintSpec, ParetoFeasibility, QAdjustment, VALIDATED_SUBDIVISIONS_PER_BIN,
+    check_composite_gain_envelope, check_pareto_feasibility, classify_outcome, constrain_candidate,
+    enforce_local_q_at_centers, enforce_local_q_envelope_at_centers, envelope_bound_at,
+    finalize_candidate, is_peq_layout_loss, judge_pareto_members, policy_local_q_knots,
     project_gains_onto_envelopes, validate_envelope_knots, validated_composite_grid,
+    verify_joint_budgets,
 };
 pub use objective_data::*;
 pub use objective_data_builder::*;

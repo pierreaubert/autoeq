@@ -20,61 +20,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::eligibility::OperationContext;
 
-/// Version pin for [`QuasiAnechoicPolicy`].
-pub const QUASI_ANECHOIC_POLICY_VERSION: &str = "quasi-anechoic-v1";
-
-/// Explicit assessment budgets; never universal acoustic thresholds.
-///
-/// Fixtures supply these values. Absent policy is not representable:
-/// callers pass [`QuasiAnechoicPolicy::v1`] or a tuned equivalent.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct QuasiAnechoicPolicy {
-    /// Policy version; must equal [`QUASI_ANECHOIC_POLICY_VERSION`].
-    pub version: String,
-    /// Full cycles required inside the gate for the valid band.
-    pub cycles_for_valid_band: f64,
-    /// Minimum off-axis angles to authorize detail correction.
-    pub min_off_axis_count: usize,
-    /// Minimum absolute angle in degrees counting as off-axis.
-    pub min_off_axis_abs_deg: f64,
-}
-
-impl QuasiAnechoicPolicy {
-    /// Fixture baseline: two cycles, two off-axis angles at 15 degrees.
-    pub fn v1() -> Self {
-        Self {
-            version: QUASI_ANECHOIC_POLICY_VERSION.to_string(),
-            cycles_for_valid_band: 2.0,
-            min_off_axis_count: 2,
-            min_off_axis_abs_deg: 15.0,
-        }
-    }
-
-    /// Reject unknown versions and nonpositive budgets.
-    ///
-    /// # Errors
-    ///
-    /// Returns a reason for a version mismatch or a nonpositive budget.
-    pub fn validate(&self) -> Result<(), String> {
-        if self.version != QUASI_ANECHOIC_POLICY_VERSION {
-            return Err(format!(
-                "unknown quasi-anechoic policy version '{}'",
-                self.version
-            ));
-        }
-        if !self.cycles_for_valid_band.is_finite() || self.cycles_for_valid_band <= 0.0 {
-            return Err(String::from(
-                "cycles_for_valid_band must be positive and finite",
-            ));
-        }
-        if !self.min_off_axis_abs_deg.is_finite() || self.min_off_axis_abs_deg < 0.0 {
-            return Err(String::from(
-                "min_off_axis_abs_deg must be finite and nonnegative",
-            ));
-        }
-        Ok(())
-    }
-}
+#[doc(inline)]
+pub use autoeq_core::direct_sound::{QUASI_ANECHOIC_POLICY_VERSION, QuasiAnechoicPolicy};
 
 /// Capture facts assessed by [`validate_quasi_anechoic`].
 ///
@@ -147,7 +94,9 @@ pub enum GateLabel {
 /// `None`, label contaminated. The bound itself labels reflection-free.
 pub fn gate_label_for(valid_lower_hz: Option<f64>, freq_hz: f64) -> GateLabel {
     match (valid_lower_hz, freq_hz.is_finite()) {
-        (Some(bound), true) if freq_hz >= bound => GateLabel::ReflectionFree,
+        (Some(bound), true) if bound.is_finite() && bound > 0.0 && freq_hz >= bound => {
+            GateLabel::ReflectionFree
+        }
         _ => GateLabel::ReflectionContaminated,
     }
 }
@@ -194,25 +143,19 @@ pub fn validate_quasi_anechoic(
     policy.validate()?;
     let mut reasons: Vec<String> = Vec::new();
 
-    let interval = match (
-        input.direct_path_m,
-        input.first_reflection_path_m,
-        input.sound_speed_m_s,
-    ) {
-        (Some(direct), Some(reflection), speed)
-            if direct.is_finite()
-                && reflection.is_finite()
-                && speed.is_finite()
-                && speed > 0.0
-                && reflection > direct =>
-        {
-            Some((reflection - direct) / speed)
-        }
-        _ => {
-            reasons.push(String::from("unknown_geometry"));
-            None
-        }
-    };
+    let interval = input
+        .direct_path_m
+        .zip(input.first_reflection_path_m)
+        .and_then(|(direct, reflection)| {
+            autoeq_core::direct_sound::reflection_free_interval_s(
+                direct,
+                reflection,
+                input.sound_speed_m_s,
+            )
+        });
+    if interval.is_none() {
+        reasons.push(String::from("unknown_geometry"));
+    }
 
     let gate = input.gate_s.filter(|gate| gate.is_finite() && *gate > 0.0);
     if gate.is_none() {
@@ -228,7 +171,9 @@ pub fn validate_quasi_anechoic(
     };
 
     let valid_lower_hz = match (gate, fits) {
-        (Some(gate), true) => Some(policy.cycles_for_valid_band / gate),
+        (Some(gate), true) => {
+            autoeq_core::direct_sound::valid_lower_bound_hz(gate, policy.cycles_for_valid_band)
+        }
         _ => None,
     };
     let valid_upper_hz = input.requested_band_hz.map(|band| band[1]);
@@ -241,7 +186,11 @@ pub fn validate_quasi_anechoic(
         reasons.push(String::from("no_direct_sound_capture"));
     }
 
-    let phase_source = if has_direct_capture && !input.moving_microphone_average && fits {
+    let phase_source = if has_direct_capture
+        && !input.moving_microphone_average
+        && fits
+        && valid_lower_hz.is_some()
+    {
         PhaseSourceVerdict::Supported
     } else {
         if input.moving_microphone_average {
@@ -254,11 +203,10 @@ pub fn validate_quasi_anechoic(
         PhaseSourceVerdict::Refused
     };
 
-    let off_axis_count = input
-        .angles_deg
-        .iter()
-        .filter(|angle| angle.is_finite() && angle.abs() >= policy.min_off_axis_abs_deg)
-        .count();
+    let off_axis_count = autoeq_core::direct_sound::AngularCoverage {
+        angles_deg: input.angles_deg.clone(),
+    }
+    .off_axis_count(policy.min_off_axis_abs_deg);
     let angular_adequate = off_axis_count >= policy.min_off_axis_count;
     if has_direct_capture && !angular_adequate {
         reasons.push(String::from("missing_angular_coverage"));

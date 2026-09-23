@@ -187,6 +187,8 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                 pre_ringing_threshold_db: -30.0,
                 min_spatial_depth: 0.5,
                 phase_smoothing_octaves: 1.0 / 6.0,
+                assessment: Default::default(),
+                max_correction_latency_ms: None,
             });
         }
         OptionOverride::DecomposedCorrection => {
@@ -234,6 +236,8 @@ pub(super) fn apply_option_override(config: &mut RoomConfig, option: &OptionOver
                         pre_ringing_threshold_db: -30.0,
                         min_spatial_depth: 0.5,
                         phase_smoothing_octaves: 1.0 / 6.0,
+                        assessment: Default::default(),
+                        max_correction_latency_ms: None,
                     });
                 }
                 _ => {}

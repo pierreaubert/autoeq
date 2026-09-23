@@ -27,6 +27,7 @@ fn structural_validation_report_cannot_claim_production_readiness() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path("left.csv".into()),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
 
@@ -47,6 +48,7 @@ fn structural_validation_rejects_missing_system_speaker_reference() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path("left.csv".into()),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     config.system = Some(SystemConfig {
@@ -76,6 +78,7 @@ fn structural_validation_rejects_unsupported_crossover_type() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path("left.csv".into()),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     config.crossovers = Some(HashMap::from([(
@@ -109,6 +112,7 @@ fn structural_validation_rejects_invalid_gain_envelopes() {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path("left.csv".into()),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     config.optimizer.max_boost_envelope = Some(vec![(20.0, 6.0), (200.0, 3.0), (200.0, 2.0)]);
@@ -405,14 +409,19 @@ fn music_policy_fills_perceptual_defaults() {
 }
 
 #[test]
-fn high_frequency_guard_caps_default_q_but_preserves_explicit_q() {
+fn roadmap_correction_high_frequency_guard_preserves_global_q() {
     let mut default_q = OptimizerConfig {
         max_freq: 8_000.0,
         high_frequency_correction: Some(HighFrequencyCorrectionConfig::default()),
         ..Default::default()
     };
+    let original_max_q = default_q.max_q;
     default_q.apply_high_frequency_correction_defaults(false);
-    assert_eq!(default_q.max_q, default_high_freq_guard_max_q());
+    assert_eq!(default_q.max_q, original_max_q);
+    assert_eq!(
+        default_q.high_frequency_correction.unwrap().max_q,
+        default_high_freq_guard_max_q()
+    );
     assert_eq!(
         default_q.psychoacoustic_smoothing.unwrap().high_freq_n,
         default_high_freq_smoothing_n()
@@ -428,7 +437,10 @@ fn high_frequency_guard_caps_default_q_but_preserves_explicit_q() {
     assert_eq!(explicit_q.max_q, 4.5);
 
     explicit_q.apply_high_frequency_correction_defaults(true);
-    assert_eq!(explicit_q.max_q, default_high_freq_guard_max_q());
+    assert_eq!(explicit_q.max_q, 4.5);
+    explicit_q.max_q = 0.5;
+    explicit_q.apply_high_frequency_correction_defaults(true);
+    assert_eq!(explicit_q.max_q, 0.5);
 }
 
 #[test]

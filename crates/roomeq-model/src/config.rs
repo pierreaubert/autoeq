@@ -40,6 +40,7 @@ mod optimizer_config;
 mod optimizer_config_builder;
 mod perceptual_policy_config;
 mod phase_alignment_config;
+mod phase_assessment_config;
 mod policy;
 mod provenance_config;
 mod pruning_evaluation;
@@ -100,6 +101,7 @@ pub use optimizer_config::*;
 pub use optimizer_config_builder::*;
 pub use perceptual_policy_config::*;
 pub use phase_alignment_config::*;
+pub use phase_assessment_config::*;
 pub use provenance_config::*;
 #[doc(inline)]
 pub use pruning_evaluation::{PruningEvaluation, PruningEvaluationVersion, PruningProgramme};

@@ -22,34 +22,40 @@ pub struct CamillaDspDelayRealization {
 
 pub(super) fn report(graph: &roomeq_model::DspGraph, rate: f64) -> CamillaDspDelayRealization {
     let mut groups = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-    if let Some(routing) = super::camilladsp_routing_graph(graph).filter(|r| !r.routes.is_empty()) {
-        let (inputs, outputs) = super::routed_channel_names(graph, &routing);
-        groups[1] = inputs
-            .iter()
-            .map(|name| {
-                total_delay(&super::plugins_for_stage(
-                    &graph.channels[name],
-                    "pre_route",
-                ))
-            })
-            .collect();
-        groups[2] = routing.routes.iter().map(|route| route.delay_ms).collect();
-        groups[3] = outputs
-            .iter()
-            .map(|name| {
-                total_delay(&super::plugins_for_stage(
-                    &graph.channels[name],
-                    "post_route",
-                ))
-            })
-            .collect();
-    } else {
-        groups[0] = graph
-            .channels
-            .values()
-            .map(|chain| total_delay(&chain.plugins))
-            .collect();
-    }
+    groups[0] = graph
+        .channels
+        .values()
+        .map(|chain| total_delay(&chain.plugins))
+        .collect();
+    summarize(groups, rate)
+}
+
+pub(super) fn report_routed(
+    routing: &super::conformance::CamillaDspPhysicalRouting,
+    rate: f64,
+) -> CamillaDspDelayRealization {
+    let mut groups = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    groups[1] = routing
+        .physical
+        .inputs
+        .iter()
+        .map(|port| total_delay(&port.plugins))
+        .collect();
+    groups[2] = routing
+        .graph
+        .routes
+        .iter()
+        .map(|route| route.delay_ms)
+        .collect();
+    groups[3] = routing
+        .post_plugins
+        .iter()
+        .map(|plugins| total_delay(plugins))
+        .collect();
+    summarize(groups, rate)
+}
+
+fn summarize(groups: [Vec<f64>; 4], rate: f64) -> CamillaDspDelayRealization {
     let fractional = groups.iter().flatten().any(|ms| {
         let samples = ms * rate / 1000.0;
         (samples - samples.round()).abs() > 1e-9

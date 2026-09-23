@@ -25,6 +25,100 @@ pub(crate) fn seat_labels(source: &MeasurementSource) -> Option<Vec<String>> {
     }
 }
 
+/// Derive common timing scopes from labeled stationary acquisition records.
+///
+/// Returns no authorization for unknown, moving-microphone, mismatched, or
+/// unlabeled captures. Matrix axes match the loader: `[sub][seat]`.
+pub(crate) fn multisub_reference_scope(
+    group: &MultiSubGroup,
+    band_hz: [f64; 2],
+) -> Option<Vec<Vec<String>>> {
+    multisub_source_reference_scope(&group.subwoofers, band_hz)
+}
+
+pub(crate) fn multisub_source_reference_scope(
+    sources: &[MeasurementSource],
+    band_hz: [f64; 2],
+) -> Option<Vec<Vec<String>>> {
+    use autoeq_core::ProvenanceCaptureKind;
+    let mut expected_labels: Option<Vec<String>> = None;
+    let mut expected_reference: Option<String> = None;
+    let mut scopes = Vec::with_capacity(sources.len());
+    if !band_hz[0].is_finite()
+        || !band_hz[1].is_finite()
+        || band_hz[0] <= 0.0
+        || band_hz[0] >= band_hz[1]
+    {
+        return None;
+    }
+    for source in sources {
+        let provenance = source.provenance();
+        if !matches!(
+            provenance.capture_kind,
+            ProvenanceCaptureKind::StationaryIr | ProvenanceCaptureKind::DirectSound
+        ) {
+            return None;
+        }
+        if let Some([lo, hi]) = provenance.valid_band_hz
+            && (!lo.is_finite()
+                || !hi.is_finite()
+                || lo <= 0.0
+                || lo >= hi
+                || lo > band_hz[0]
+                || hi < band_hz[1])
+        {
+            return None;
+        }
+        if provenance.capture_kind == ProvenanceCaptureKind::DirectSound
+            || provenance.direct_sound.is_some()
+        {
+            let report = crate::evidence_intake::assess_direct_capture(
+                &provenance,
+                band_hz,
+                &crate::evidence_intake::source_measurement_id(source),
+            )
+            .ok()?;
+            if report.phase_source
+                != roomeq_engine::analysis::quasi_anechoic::PhaseSourceVerdict::Supported
+                || report.valid_lower_hz.is_none_or(|lo| lo > band_hz[0])
+                || report.valid_upper_hz.is_none_or(|hi| hi < band_hz[1])
+            {
+                return None;
+            }
+        }
+        if let Some(capture) = &provenance.capture {
+            capture
+                .coherent_reference_at_frequency(capture.takes.len(), band_hz[1])
+                .ok()?;
+        }
+        let reference = provenance.timing_reference_id?;
+        if reference.trim().is_empty() || reference.trim().eq_ignore_ascii_case("unknown") {
+            return None;
+        }
+        let labels = seat_labels(source)?;
+        if labels.is_empty()
+            || labels.iter().any(|label| label.trim().is_empty())
+            || labels
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != labels.len()
+            || expected_labels
+                .as_ref()
+                .is_some_and(|expected| expected != &labels)
+            || expected_reference
+                .as_ref()
+                .is_some_and(|expected| expected != &reference)
+        {
+            return None;
+        }
+        scopes.push(vec![reference.clone(); labels.len()]);
+        expected_labels = Some(labels);
+        expected_reference = Some(reference);
+    }
+    (!scopes.is_empty()).then_some(scopes)
+}
+
 /// Load and validate per-subwoofer seat measurements before engine execution.
 pub fn load_multisub_seat_measurements(group: &MultiSubGroup) -> Result<Option<Vec<Vec<Curve>>>> {
     load_multisub_seat_measurements_with_frequency_samples(group, crate::DEFAULT_FREQUENCY_SAMPLES)
@@ -151,6 +245,7 @@ mod tests {
         MeasurementSource::Multiple(MeasurementMultiple {
             measurements: names.iter().map(|name| named_inline(name)).collect(),
             speaker_name: None,
+            provenance: Default::default(),
         })
     }
 
@@ -160,7 +255,69 @@ mod tests {
             speaker_name: None,
             subwoofers: sources,
             allpass_optimization: false,
+            joint_optimization: false,
         }
+    }
+
+    #[test]
+    fn roadmap_correction_joint_scope_comes_from_stationary_capture_provenance() {
+        let stationary = |reference: &str| {
+            let mut source = named_multiple(&["seat-a", "seat-b", "seat-c"]);
+            if let MeasurementSource::Multiple(multiple) = &mut source {
+                multiple.provenance.capture_kind = autoeq_core::ProvenanceCaptureKind::StationaryIr;
+                multiple.provenance.timing_reference_id = Some(reference.to_string());
+            }
+            source
+        };
+        let mut group = group_of(vec![stationary("clock-a"), stationary("clock-a")]);
+        let scope = multisub_reference_scope(&group, [20.0, 200.0])
+            .expect("declared common capture reference");
+        assert_eq!(scope, vec![vec!["clock-a".to_string(); 3]; 2]);
+        if let MeasurementSource::Multiple(multiple) = &mut group.subwoofers[1] {
+            multiple.provenance.capture_kind = autoeq_core::ProvenanceCaptureKind::DirectSound;
+        }
+        assert!(
+            multisub_reference_scope(&group, [20.0, 200.0]).is_none(),
+            "direct capture needs facts, not only a timing ID"
+        );
+        if let MeasurementSource::Multiple(multiple) = &mut group.subwoofers[1] {
+            multiple.provenance.direct_sound =
+                Some(autoeq_core::direct_sound::DirectSoundEvidence {
+                    facts: autoeq_core::direct_sound::DirectSoundCaptureFacts {
+                        gate_s: Some(0.002),
+                        direct_path_m: Some(1.0),
+                        first_reflection_path_m: Some(40.0),
+                        averaging: autoeq_core::direct_sound::AveragingMethod::Stationary,
+                        capture_kind: autoeq_core::evidence::CaptureKind::DirectSound,
+                        sample_rate_hz: Some(48_000.0),
+                        ..Default::default()
+                    },
+                    policy: Some(autoeq_core::direct_sound::QuasiAnechoicPolicy::v1()),
+                });
+        }
+        assert!(
+            multisub_reference_scope(&group, [20.0, 200.0]).is_none(),
+            "2 ms does not support coherent bass optimization"
+        );
+        assert!(
+            multisub_reference_scope(&group, [1000.0, 2000.0]).is_some(),
+            "same phase capture supports its actual band without angular detail claims"
+        );
+        group.subwoofers[1] = stationary("clock-b");
+        assert!(multisub_reference_scope(&group, [20.0, 200.0]).is_none());
+        group.subwoofers[1] = stationary("clock-a");
+        if let MeasurementSource::Multiple(multiple) = &mut group.subwoofers[1] {
+            multiple.provenance.capture_kind = autoeq_core::ProvenanceCaptureKind::SpatialMagnitude;
+        }
+        assert!(
+            multisub_reference_scope(&group, [20.0, 200.0]).is_none(),
+            "MMM cannot authorize timing"
+        );
+        group.subwoofers[1] = named_multiple(&["seat-a", "seat-b", "seat-c"]);
+        assert!(
+            multisub_reference_scope(&group, [20.0, 200.0]).is_none(),
+            "unknown provenance stays unknown"
+        );
     }
 
     #[test]
@@ -173,6 +330,7 @@ mod tests {
                 MeasurementSource::InMemoryMultiple(vec![curve()]),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         let error = load_multisub_seat_measurements(&group).unwrap_err();
         assert!(error.to_string().contains("inconsistent seat counts"));
@@ -188,6 +346,7 @@ mod tests {
                 MeasurementSource::InMemoryMultiple(vec![curve()]),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         assert!(load_multisub_seat_measurements(&group).unwrap().is_none());
     }

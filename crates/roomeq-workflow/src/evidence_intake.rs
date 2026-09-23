@@ -29,13 +29,20 @@
 //! `roomeq_engine::analysis` before workflow can call it per take. Until
 //! then this module is the boundary owner and mirrors its verdict semantics.
 
+use autoeq_core::{MeasurementProvenance, MeasurementSource, ProvenanceCaptureKind};
 use autoeq_measurements::{MatrixKey, Take, TakeDecision, TakeMatrix};
 use roomeq_model::decision_ledger::CaptureKind;
 use roomeq_model::eligibility::{
-    CorrectionOperation, EligibilityRecord, EligibilityVerdict, EvidencePolicy,
+    ChannelOperationGate, CorrectionOperation, EligibilityRecord, EligibilityVerdict,
+    EvidencePolicy,
 };
 use roomeq_model::{AppliedThreshold, AssessmentRecord};
 use serde::{Deserialize, Serialize};
+
+mod conditioning_report;
+pub(crate) use conditioning_report::{
+    attach_measurement_conditioning, attach_optimizer_conditioning,
+};
 
 /// Intake policy version pinned by this workflow lane.
 pub const INTAKE_POLICY_VERSION: &str = "workflow-intake-v1";
@@ -137,6 +144,19 @@ pub struct AlignmentLedgerEntry {
 pub struct ConditioningLedger {
     pub gains: Vec<GainLedgerEntry>,
     pub alignments: Vec<AlignmentLedgerEntry>,
+    /// Calibration applications, keyed by target and calibration identity.
+    pub calibrations: Vec<CalibrationLedgerEntry>,
+}
+
+/// One calibration application, recorded so duplicates are rejected.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CalibrationLedgerEntry {
+    /// Take or channel the calibration was applied to.
+    pub target_id: String,
+    /// Calibration identity applied.
+    pub calibration_id: String,
+    /// Why the calibration was applied.
+    pub reason: String,
 }
 
 impl ConditioningLedger {
@@ -179,6 +199,39 @@ impl ConditioningLedger {
             target_id: target_id.into(),
             delay_ms,
             recenter_offset_ms,
+            reason: reason.into(),
+        });
+        Ok(())
+    }
+
+    /// Record one calibration application. Applying the same calibration
+    /// identity twice to the same target is rejected: double application
+    /// would silently square the correction.
+    pub fn record_calibration(
+        &mut self,
+        target_id: impl Into<String>,
+        calibration_id: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Result<(), String> {
+        let target_id = target_id.into();
+        let calibration_id = calibration_id.into();
+        if calibration_id.trim().is_empty() {
+            return Err(format!(
+                "conditioning calibration for '{target_id}' needs a calibration identity"
+            ));
+        }
+        if self
+            .calibrations
+            .iter()
+            .any(|entry| entry.target_id == target_id && entry.calibration_id == calibration_id)
+        {
+            return Err(format!(
+                "calibration '{calibration_id}' already applied to '{target_id}': refusing duplicate application"
+            ));
+        }
+        self.calibrations.push(CalibrationLedgerEntry {
+            target_id,
+            calibration_id,
             reason: reason.into(),
         });
         Ok(())
@@ -325,10 +378,15 @@ pub fn apply_operation_boundary(
         // reference, so magnitude analysis is possible but coherent and
         // excess-phase claims are unsupported — even when the broadband
         // median quality looks good.
-        if evidence.capture_kind == CaptureKind::SpatialMagnitude && !evidence.has_timing_ref {
+        if evidence.capture_kind == CaptureKind::SpatialMagnitude {
             return unsupported(vec![String::from(
-                "spatial magnitude capture without stationary timing reference: \
+                "spatial magnitude capture cannot supply stationary phase: \
                  magnitude analysis possible, coherent/excess-phase claims unsupported",
+            )]);
+        }
+        if evidence.capture_kind == CaptureKind::Unknown {
+            return unknown(vec![String::from(
+                "capture kind unknown; a timing-reference declaration alone does not establish stationary phase",
             )]);
         }
         if !evidence.has_timing_ref {
@@ -590,11 +648,933 @@ impl WorkflowOutcome {
     }
 }
 
+/// Boundary budgets pinned by the intake policy version.
+///
+/// These are fixture-grade limits for operation-boundary checks run without
+/// measured band SNR or decay range; bands without those measurements stay
+/// unknown regardless of these values. Traceable to
+/// [`INTAKE_POLICY_VERSION`], never a universal acoustic threshold.
+pub const INTAKE_BOUNDARY_BUDGETS: BoundaryBudgets = BoundaryBudgets {
+    min_band_snr_db: 10.0,
+    min_decay_noise_range_db: 10.0,
+};
+
+/// Declared provenance mapped onto the model capture vocabulary.
+///
+/// This is an explicit adapter between the loader declaration and the K2
+/// lane: a moving-microphone average declares `SpatialMagnitude`, and only
+/// that declaration (never data shape) selects the spatial-magnitude rules.
+pub fn provenance_capture_kind(kind: ProvenanceCaptureKind) -> CaptureKind {
+    match kind {
+        ProvenanceCaptureKind::StationaryIr => CaptureKind::StationaryIr,
+        ProvenanceCaptureKind::SpatialMagnitude => CaptureKind::SpatialMagnitude,
+        ProvenanceCaptureKind::DirectSound => CaptureKind::DirectSound,
+        ProvenanceCaptureKind::SimulatedBackend => CaptureKind::SimulatedBackend,
+        ProvenanceCaptureKind::Unknown => CaptureKind::Unknown,
+    }
+}
+
+/// Stable measurement identity derived from a source declaration.
+pub fn source_measurement_id(source: &MeasurementSource) -> String {
+    match source {
+        MeasurementSource::Single(single) => match single.measurement.original() {
+            autoeq_core::MeasurementRef::Loaded { .. } => {
+                unreachable!("original removes snapshot wrappers")
+            }
+            autoeq_core::MeasurementRef::Path(path) => path.to_string_lossy().into_owned(),
+            autoeq_core::MeasurementRef::Named { path, name } => format!(
+                "{}#{}",
+                path.to_string_lossy(),
+                name.as_deref().unwrap_or("unnamed")
+            ),
+            autoeq_core::MeasurementRef::Inline(inline) => inline
+                .name
+                .clone()
+                .unwrap_or_else(|| String::from("inline")),
+        },
+        MeasurementSource::Multiple(_) => String::from("multi-take-set"),
+        MeasurementSource::InMemory(_) => String::from("in-memory"),
+        MeasurementSource::InMemoryMultiple(_) => String::from("in-memory-set"),
+    }
+}
+
+/// Per-channel evidence assembled from declared provenance and the loaded grid.
+///
+/// The valid band is the declared gate-limited band intersected with the
+/// measured grid support; undeclared bands default to the full support.
+/// In-memory curves carry no declaration, so their valid band is the full
+/// support with unknown kind: unknown kind never authorizes phase work.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChannelEvidence {
+    /// Logical channel name.
+    pub channel: String,
+    /// Stable measurement identifier.
+    pub measurement_id: String,
+    /// Declared acquisition provenance.
+    pub provenance: MeasurementProvenance,
+    /// Measured grid support in Hz.
+    pub support_hz: [f64; 2],
+    /// Retained sample support inside the declared band, not operation permission.
+    pub valid_band_hz: [f64; 2],
+    /// Whether the loaded curve carries phase data.
+    pub has_phase_data: bool,
+}
+
+/// Assemble channel evidence from a source declaration and loaded grid.
+///
+/// # Errors
+///
+/// Returns a reason when the grid has fewer than two finite strictly
+/// increasing bins, or when a declared valid band is incoherent
+/// (nonfinite, unordered, or containing fewer than two loaded samples).
+pub fn build_channel_evidence(
+    channel: impl Into<String>,
+    source: &MeasurementSource,
+    freq_hz: &[f64],
+    has_phase_data: bool,
+) -> Result<ChannelEvidence, String> {
+    let channel = channel.into();
+    if freq_hz.len() < 2 {
+        return Err(format!(
+            "channel '{channel}' grid needs at least two bins for evidence"
+        ));
+    }
+    let mut previous = 0.0_f64;
+    for frequency in freq_hz {
+        if !frequency.is_finite() || *frequency <= previous {
+            return Err(format!(
+                "channel '{channel}' grid must be finite, positive and strictly increasing"
+            ));
+        }
+        previous = *frequency;
+    }
+    let support_hz = [freq_hz[0], freq_hz[freq_hz.len() - 1]];
+    let provenance = source.provenance();
+    let valid_band_hz = match provenance.valid_band_hz {
+        None => support_hz,
+        Some([lo, hi]) => {
+            if !lo.is_finite() || !hi.is_finite() || lo <= 0.0 || hi <= lo {
+                return Err(format!(
+                    "channel '{channel}' declared valid band must satisfy 0 < lo < hi with finite bounds"
+                ));
+            }
+            let first = freq_hz.partition_point(|frequency| *frequency < lo);
+            let end = freq_hz.partition_point(|frequency| *frequency <= hi);
+            if end - first < 2 {
+                return Err(format!(
+                    "channel '{channel}' declared valid band [{lo}, {hi}] needs at least two loaded samples; measured support is [{}, {}]",
+                    support_hz[0], support_hz[1]
+                ));
+            }
+            [freq_hz[first], freq_hz[end - 1]]
+        }
+    };
+    Ok(ChannelEvidence {
+        channel,
+        measurement_id: source_measurement_id(source),
+        provenance,
+        support_hz,
+        valid_band_hz,
+        has_phase_data,
+    })
+}
+
+fn channel_band_evidence(evidence: &ChannelEvidence, band_hz: [f64; 2]) -> BandEvidence {
+    BandEvidence {
+        measurement_id: evidence.measurement_id.clone(),
+        seat_ids: Vec::new(),
+        band_hz,
+        capture_kind: provenance_capture_kind(evidence.provenance.capture_kind),
+        has_timing_ref: evidence
+            .provenance
+            .timing_reference_id
+            .as_ref()
+            .is_some_and(|id| !id.trim().is_empty()),
+        snr_db: None,
+        decay_noise_range_db: None,
+        has_measured_spl: evidence.provenance.has_measured_spl,
+        evidence_refs: vec![evidence.measurement_id.clone()],
+    }
+}
+
+/// Assess declared direct-sound capture facts on their usable band.
+///
+/// A short gate narrows the assessed band before detail eligibility is
+/// evaluated. Neither the legacy angular boolean nor a declared valid band
+/// can stand in for geometry, averaging, capture rate, or explicit policy.
+/// Ordinary stationary room IRs without direct-sound claims use their own
+/// timing evidence instead of this quasi-anechoic assessment.
+///
+/// # Errors
+/// Returns a reason for absent/contradictory facts, invalid policy or rate,
+/// or no usable intersection of gate, declared band, and acquisition support.
+pub fn assess_direct_capture(
+    provenance: &MeasurementProvenance,
+    band_hz: [f64; 2],
+    measurement_id: &str,
+) -> Result<roomeq_engine::analysis::quasi_anechoic::QuasiAnechoicReport, String> {
+    use autoeq_core::direct_sound::AveragingMethod;
+    use autoeq_core::evidence::CaptureKind as CoreCaptureKind;
+    use roomeq_engine::analysis::quasi_anechoic::{QuasiAnechoicInput, validate_quasi_anechoic};
+
+    if !band_hz[0].is_finite()
+        || !band_hz[1].is_finite()
+        || band_hz[0] <= 0.0
+        || band_hz[0] >= band_hz[1]
+    {
+        return Err(String::from("invalid_direct_assessment_band"));
+    }
+    let direct = provenance
+        .direct_sound
+        .as_ref()
+        .ok_or_else(|| String::from("missing_direct_sound_capture_facts"))?;
+    let policy = direct
+        .policy
+        .as_ref()
+        .ok_or_else(|| String::from("missing_quasi_anechoic_policy"))?;
+    policy.validate()?;
+    let facts = &direct.facts;
+    let kind_matches = matches!(
+        (provenance.capture_kind, facts.capture_kind),
+        (
+            ProvenanceCaptureKind::DirectSound,
+            CoreCaptureKind::DirectSound
+        ) | (
+            ProvenanceCaptureKind::StationaryIr,
+            CoreCaptureKind::StationaryIr
+        )
+    );
+    if !kind_matches {
+        return Err(String::from(
+            "contradictory_or_unsupported_direct_capture_kind",
+        ));
+    }
+    if facts.averaging == AveragingMethod::Unknown {
+        return Err(String::from("unknown_direct_capture_averaging"));
+    }
+    let sample_rate = facts
+        .sample_rate_hz
+        .filter(|rate| rate.is_finite() && *rate > 0.0)
+        .ok_or_else(|| String::from("missing_or_invalid_direct_capture_sample_rate"))?;
+    let mut supported = band_hz;
+    if let Some([lo, hi]) = provenance.valid_band_hz {
+        if !lo.is_finite() || !hi.is_finite() || lo <= 0.0 || lo >= hi {
+            return Err(String::from("invalid_declared_direct_band"));
+        }
+        supported = [supported[0].max(lo), supported[1].min(hi)];
+    }
+    supported[1] = supported[1].min(sample_rate / 2.0);
+    if let Some(lower) = facts.valid_lower_bound_hz(policy.cycles_for_valid_band) {
+        supported[0] = supported[0].max(lower);
+    }
+    if !supported[0].is_finite()
+        || !supported[1].is_finite()
+        || supported[0] <= 0.0
+        || supported[0] >= supported[1]
+    {
+        return Err(String::from("no_usable_direct_capture_band"));
+    }
+    let mut report = validate_quasi_anechoic(
+        &QuasiAnechoicInput {
+            record_id: format!("direct-capture-{measurement_id}"),
+            gate_s: facts.gate_s,
+            direct_path_m: facts.direct_path_m,
+            first_reflection_path_m: facts.first_reflection_path_m,
+            sound_speed_m_s: facts.sound_speed_m_s,
+            capture_kind: facts.capture_kind,
+            moving_microphone_average: facts.averaging == AveragingMethod::MovingMicrophone,
+            angles_deg: facts.angular.angles_deg.clone(),
+            requested_band_hz: Some(supported),
+            seat_ids: Vec::new(),
+            evidence_refs: vec![measurement_id.to_string()],
+        },
+        policy,
+    )?;
+    // The gate-derived lower bound must not enlarge declared/grid support.
+    report.valid_lower_hz = report.valid_lower_hz.map(|lower| lower.max(supported[0]));
+    if supported != band_hz {
+        report
+            .reason_codes
+            .push(String::from("direct_capture_band_limited"));
+    }
+    Ok(report)
+}
+
+fn unsupported_record(
+    channel: &str,
+    measurement_id: &str,
+    operation: CorrectionOperation,
+    band_hz: [f64; 2],
+    observation: String,
+) -> EligibilityRecord {
+    EligibilityRecord {
+        record_id: format!(
+            "intake-{channel}-{operation:?}-{:.0}-{:.0}",
+            band_hz[0], band_hz[1]
+        ),
+        operation,
+        verdict: EligibilityVerdict::Unsupported,
+        measurement_id: measurement_id.to_string(),
+        seat_ids: Vec::new(),
+        band_hz: Some(band_hz),
+        observations: vec![observation],
+        policy_limits: Vec::new(),
+        evidence_refs: vec![measurement_id.to_string()],
+        assessment: AssessmentRecord::default(),
+    }
+}
+
+/// Resolve a pipeline channel key to its declared measurement source.
+///
+/// Channels may be keyed by role (`"L"`) rather than speaker (`"left"`); the
+/// system role map is consulted before falling back to a direct speaker
+/// lookup. Anything else yields `None` and degrades to unknown provenance.
+pub fn resolve_channel_source<'a>(
+    config: &'a roomeq_model::RoomConfig,
+    channel: &str,
+) -> Option<&'a MeasurementSource> {
+    if let Some(roomeq_model::SpeakerConfig::Single(source)) = config.speakers.get(channel) {
+        return Some(source);
+    }
+    let speaker = config.system.as_ref()?.speakers.get(channel)?;
+    match config.speakers.get(speaker) {
+        Some(roomeq_model::SpeakerConfig::Single(source)) => Some(source),
+        _ => None,
+    }
+}
+
+/// Validate declared capture timing for every source in a main/sub alignment.
+///
+/// Physical sub outputs use their speaker mapping, not their output ID.
+/// Grouped sources must all carry stationary, matching references. Derived
+/// curves and apparent phase coherence cannot supply missing provenance.
+///
+/// # Errors
+///
+/// Returns a refusal for missing sources, nonstationary or mismatched capture
+/// references, or declared frequency support that excludes the overlap band.
+pub(crate) fn crossover_timing_reference(
+    config: &roomeq_model::RoomConfig,
+    main_roles: &[String],
+    band_hz: [f64; 2],
+) -> Result<String, String> {
+    use roomeq_model::SpeakerConfig;
+
+    if main_roles.is_empty()
+        || !band_hz[0].is_finite()
+        || !band_hz[1].is_finite()
+        || band_hz[0] <= 0.0
+        || band_hz[1] <= band_hz[0]
+    {
+        return Err("missing mains or invalid crossover support".into());
+    }
+    let system = config
+        .system
+        .as_ref()
+        .ok_or("missing system source mapping")?;
+    let subs = system
+        .subwoofers
+        .as_ref()
+        .ok_or("missing subwoofer source mapping")?;
+    if subs.outputs.is_empty() {
+        return Err("no declared physical subwoofer sources".into());
+    }
+    let mut keys = Vec::new();
+    for role in main_roles {
+        let key = system
+            .speakers
+            .get(role)
+            .map(String::as_str)
+            .unwrap_or(role.as_str());
+        keys.push(key);
+    }
+    keys.extend(subs.outputs.iter().map(|output| output.speaker.as_str()));
+    let mut reference: Option<String> = None;
+    for key in keys {
+        let speaker = config
+            .speakers
+            .get(key)
+            .ok_or_else(|| format!("missing source '{key}'"))?;
+        let sources: Vec<&MeasurementSource> = match speaker {
+            SpeakerConfig::Single(source) => vec![source],
+            SpeakerConfig::Group(group) => group.measurements.iter().collect(),
+            SpeakerConfig::Topology(topology) => topology
+                .drivers
+                .iter()
+                .map(|driver| &driver.measurement)
+                .collect(),
+            SpeakerConfig::MultiSub(group) => group.subwoofers.iter().collect(),
+            SpeakerConfig::Dba(group) => group.front.iter().chain(&group.rear).collect(),
+            SpeakerConfig::Cardioid(group) => vec![&group.front, &group.rear],
+            SpeakerConfig::SupportingSource(group) => vec![&group.primary, &group.support],
+        };
+        if sources.is_empty() {
+            return Err(format!("source '{key}' has no captures"));
+        }
+        for source in sources {
+            let provenance = source.provenance();
+            if !matches!(
+                provenance.capture_kind,
+                ProvenanceCaptureKind::StationaryIr | ProvenanceCaptureKind::DirectSound
+            ) {
+                return Err(format!("source '{key}' lacks stationary timing evidence"));
+            }
+            if let Some(capture) = &provenance.capture {
+                capture.coherent_reference_at_frequency(capture.takes.len(), band_hz[1])?;
+            }
+            let declared = provenance
+                .timing_reference_id
+                .as_deref()
+                .filter(|id| !id.trim().is_empty())
+                .ok_or_else(|| format!("source '{key}' lacks a timing reference"))?;
+            if reference
+                .as_ref()
+                .is_some_and(|expected| expected != declared)
+            {
+                return Err(format!(
+                    "source '{key}' has an incompatible timing reference"
+                ));
+            }
+            if let Some(valid) = provenance.valid_band_hz
+                && (!valid[0].is_finite()
+                    || !valid[1].is_finite()
+                    || valid[0] <= 0.0
+                    || valid[1] <= valid[0]
+                    || valid[0] > band_hz[0]
+                    || valid[1] < band_hz[1])
+            {
+                return Err(format!(
+                    "source '{key}' does not support the crossover overlap band"
+                ));
+            }
+            if provenance.capture_kind == ProvenanceCaptureKind::DirectSound
+                || provenance.direct_sound.is_some()
+            {
+                let report =
+                    assess_direct_capture(&provenance, band_hz, &source_measurement_id(source))?;
+                if report.phase_source
+                    != roomeq_engine::analysis::quasi_anechoic::PhaseSourceVerdict::Supported
+                    || report.valid_lower_hz.is_none_or(|lo| lo > band_hz[0])
+                    || report.valid_upper_hz.is_none_or(|hi| hi < band_hz[1])
+                {
+                    return Err(format!(
+                        "source '{key}' lacks quasi-anechoic support across the crossover overlap: {:?}",
+                        report.reason_codes
+                    ));
+                }
+            }
+            reference = Some(declared.to_string());
+        }
+    }
+    reference.ok_or_else(|| "no capture reference available".into())
+}
+
+/// One channel's intake input for cross-channel gating.
+pub struct ChannelGateInput<'a> {
+    /// Logical channel name.
+    pub channel: &'a str,
+    /// Declared single measurement source, if the channel has one.
+    ///
+    /// Group/topology routings, in-memory curves, and missing speakers pass
+    /// `None` and degrade to unknown provenance, which never authorizes
+    /// phase-critical work.
+    pub source: Option<&'a MeasurementSource>,
+    /// Loaded curve grid in Hz.
+    pub freq_hz: &'a [f64],
+    /// Whether the loaded curve carries phase data.
+    pub has_phase_data: bool,
+}
+
+/// Evaluate operation boundaries for every channel with cross-channel scope.
+///
+/// Excess-phase authorization is per-channel: one stationary source with its
+/// own timing reference is self-consistent. Coherent summation additionally
+/// requires every gated channel to share one timing-reference identity;
+/// mismatched or missing references refuse the coherent operation while
+/// per-channel excess-phase verdicts stand on their own evidence. Evidence
+/// that fails to build yields a refused gate recording the reason instead of
+/// an error: the pipeline keeps running the supported magnitude path while
+/// phase work stays refused.
+pub fn gate_all_channels(
+    inputs: &[ChannelGateInput<'_>],
+    policy: Option<&EvidencePolicy>,
+) -> Vec<ChannelOperationGate> {
+    let mut timing_ids: Vec<String> = Vec::new();
+    let mut all_stated = !inputs.is_empty();
+    for input in inputs {
+        match input.source {
+            Some(source) => {
+                let provenance = source.provenance();
+                match provenance.timing_reference_id {
+                    Some(id) => {
+                        if !timing_ids.contains(&id) {
+                            timing_ids.push(id);
+                        }
+                    }
+                    None => all_stated = false,
+                }
+            }
+            None => all_stated = false,
+        }
+    }
+    let coherent_matched = all_stated && timing_ids.len() == 1;
+    inputs
+        .iter()
+        .map(|input| gate_one_channel(input, policy, coherent_matched))
+        .collect()
+}
+
+fn gate_one_channel(
+    input: &ChannelGateInput<'_>,
+    policy: Option<&EvidencePolicy>,
+    coherent_matched: bool,
+) -> ChannelOperationGate {
+    let measurement_id = input
+        .source
+        .map(source_measurement_id)
+        .unwrap_or_else(|| input.channel.to_string());
+    let refused = |reason: String| ChannelOperationGate {
+        channel: input.channel.to_string(),
+        measurement_id: measurement_id.clone(),
+        records: vec![unsupported_record(
+            input.channel,
+            &measurement_id,
+            CorrectionOperation::ExcessPhaseCorrection,
+            [20.0, 20_000.0],
+            reason,
+        )],
+    };
+    let source = match input.source {
+        Some(source) => source,
+        None => {
+            return refused(String::from(
+                "no single measurement source declares provenance for this channel; phase-critical work refused without declared evidence",
+            ));
+        }
+    };
+    let evidence =
+        match build_channel_evidence(input.channel, source, input.freq_hz, input.has_phase_data) {
+            Ok(evidence) => evidence,
+            Err(reason) => return refused(reason),
+        };
+    // Single-channel excess-phase work is self-consistent with its own
+    // timing reference; coherent summation needs the cross-channel match.
+    let mut gate = gate_channel_operations(
+        &evidence,
+        policy,
+        &INTAKE_BOUNDARY_BUDGETS,
+        evidence.provenance.timing_reference_id.is_some(),
+    );
+    if !coherent_matched {
+        gate.records
+            .retain(|record| record.operation != CorrectionOperation::CoherentSummation);
+        gate.records.push(unsupported_record(
+            &evidence.channel,
+            &evidence.measurement_id,
+            CorrectionOperation::CoherentSummation,
+            evidence.valid_band_hz,
+            String::from(
+                "coherent summation refused: gated channels do not share one timing-reference identity",
+            ),
+        ));
+    }
+    gate
+}
+
+/// Evaluate operation boundaries for one channel from its evidence.
+///
+/// Phase-critical operations additionally require loaded phase data, run on
+/// the evidence-authorized valid band, and record an explicit refusal for
+/// any measured support outside that band. Direct-sound detail requires
+/// assessed gate/geometry and angular coverage beyond the capture kind. Magnitude, decay, and
+/// loudness verdicts are assessment records: they never authorize operations
+/// on their own, and unknown never passes a gate.
+pub fn gate_channel_operations(
+    evidence: &ChannelEvidence,
+    policy: Option<&EvidencePolicy>,
+    budgets: &BoundaryBudgets,
+    common_reference_matched: bool,
+) -> ChannelOperationGate {
+    use roomeq_engine::analysis::quasi_anechoic::{DetailVerdict, PhaseSourceVerdict};
+
+    let direct_required = evidence.provenance.capture_kind == ProvenanceCaptureKind::DirectSound
+        || evidence.provenance.direct_sound.is_some();
+    let direct = assess_direct_capture(
+        &evidence.provenance,
+        evidence.valid_band_hz,
+        &evidence.measurement_id,
+    );
+    let direct_phase_supported = direct
+        .as_ref()
+        .is_ok_and(|report| report.phase_source == PhaseSourceVerdict::Supported);
+    let valid_band_hz = direct
+        .as_ref()
+        .ok()
+        .filter(|report| report.phase_source == PhaseSourceVerdict::Supported)
+        .and_then(|report| report.valid_lower_hz.zip(report.valid_upper_hz))
+        .map_or(evidence.valid_band_hz, |(lo, hi)| [lo, hi]);
+    let direct_note = match &direct {
+        Ok(report) => format!(
+            "quasi-anechoic assessment: detail={:?}, phase={:?}, reflection_free_interval_s={:?}, valid_band_hz={:?}, reasons={:?}; policy={:?}",
+            report.detail,
+            report.phase_source,
+            report.reflection_free_interval_s,
+            [report.valid_lower_hz, report.valid_upper_hz],
+            report.reason_codes,
+            evidence
+                .provenance
+                .direct_sound
+                .as_ref()
+                .and_then(|direct| direct.policy.as_ref()),
+        ),
+        Err(reason) => format!(
+            "direct-sound assessment unavailable: {reason}; broad restrained magnitude shaping remains separately assessed"
+        ),
+    };
+    let mut records = Vec::new();
+    let record_id = |operation: CorrectionOperation, band: [f64; 2]| {
+        format!(
+            "intake-{}-{operation:?}-{:.0}-{:.0}",
+            evidence.channel, band[0], band[1]
+        )
+    };
+    // Phase-critical operations on the authorized valid band.
+    for operation in [
+        CorrectionOperation::ExcessPhaseCorrection,
+        CorrectionOperation::CoherentSummation,
+    ] {
+        if direct_required && !direct_phase_supported {
+            records.push(unsupported_record(
+                &evidence.channel,
+                &evidence.measurement_id,
+                operation,
+                evidence.support_hz,
+                direct_note.clone(),
+            ));
+            continue;
+        }
+        if let Some(capture) = &evidence.provenance.capture
+            && let Err(reason) =
+                capture.coherent_reference_at_frequency(capture.takes.len(), valid_band_hz[1])
+        {
+            records.push(unsupported_record(
+                &evidence.channel,
+                &evidence.measurement_id,
+                operation,
+                valid_band_hz,
+                reason,
+            ));
+            continue;
+        }
+        if !evidence.has_phase_data {
+            records.push(unsupported_record(
+                &evidence.channel,
+                &evidence.measurement_id,
+                operation,
+                valid_band_hz,
+                String::from(
+                    "no phase data loaded; phase-critical work refused without measured phase",
+                ),
+            ));
+            continue;
+        }
+        let mut record = apply_operation_boundary(
+            record_id(operation, valid_band_hz),
+            operation,
+            &channel_band_evidence(evidence, valid_band_hz),
+            policy,
+            budgets,
+            common_reference_matched,
+        );
+        if direct_required {
+            record.observations.push(direct_note.clone());
+        }
+        records.push(record);
+    }
+    // Measured support outside the authorized band is explicitly refused.
+    if valid_band_hz != evidence.support_hz {
+        for operation in [
+            CorrectionOperation::ExcessPhaseCorrection,
+            CorrectionOperation::CoherentSummation,
+            CorrectionOperation::DirectSoundSpeakerCorrection,
+        ] {
+            if evidence.support_hz[0] < valid_band_hz[0] {
+                records.push(unsupported_record(
+                    &evidence.channel,
+                    &evidence.measurement_id,
+                    operation,
+                    [evidence.support_hz[0], valid_band_hz[0]],
+                    String::from(
+                        "band outside the gate-limited valid band; short-gate evidence authorizes its valid band only",
+                    ),
+                ));
+            }
+            if valid_band_hz[1] < evidence.support_hz[1] {
+                records.push(unsupported_record(
+                    &evidence.channel,
+                    &evidence.measurement_id,
+                    operation,
+                    [valid_band_hz[1], evidence.support_hz[1]],
+                    String::from(
+                        "band outside the gate-limited valid band; short-gate evidence authorizes its valid band only",
+                    ),
+                ));
+            }
+        }
+    }
+    // Direct-sound detail on the authorized band with angular discipline.
+    let mut detail = apply_operation_boundary(
+        record_id(
+            CorrectionOperation::DirectSoundSpeakerCorrection,
+            valid_band_hz,
+        ),
+        CorrectionOperation::DirectSoundSpeakerCorrection,
+        &channel_band_evidence(evidence, valid_band_hz),
+        policy,
+        budgets,
+        common_reference_matched,
+    );
+    if detail.verdict == EligibilityVerdict::Eligible
+        && !direct
+            .as_ref()
+            .is_ok_and(|report| report.detail == DetailVerdict::DetailEligible)
+    {
+        detail.verdict = EligibilityVerdict::Unknown;
+    }
+    detail.observations.push(direct_note);
+    records.push(detail);
+    // These assessments use declared usable support, not the potentially
+    // narrower direct-sound phase/detail band from the gate assessment.
+    for operation in [
+        CorrectionOperation::MagnitudeCorrection,
+        CorrectionOperation::DecayAnalysis,
+        CorrectionOperation::AbsoluteLoudnessAnalysis,
+    ] {
+        records.push(apply_operation_boundary(
+            record_id(operation, evidence.valid_band_hz),
+            operation,
+            &channel_band_evidence(evidence, evidence.valid_band_hz),
+            policy,
+            budgets,
+            common_reference_matched,
+        ));
+        for band in [
+            [evidence.support_hz[0], evidence.valid_band_hz[0]],
+            [evidence.valid_band_hz[1], evidence.support_hz[1]],
+        ]
+        .into_iter()
+        .filter(|band| band[0] < band[1])
+        {
+            records.push(unsupported_record(
+                &evidence.channel,
+                &evidence.measurement_id,
+                operation,
+                band,
+                String::from("band outside the declared usable measurement band"),
+            ));
+        }
+    }
+    ChannelOperationGate {
+        channel: evidence.channel.clone(),
+        measurement_id: evidence.measurement_id.clone(),
+        records,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use autoeq_measurements::AverageKind;
     use ndarray::Array1;
+
+    #[test]
+    fn capture_phase_gate_respects_frequency_without_narrowing_magnitude() {
+        let takes: Vec<_> = (0..2)
+            .map(|index| {
+                serde_json::json!({
+                    "microphone_id": format!("mic-{index}"), "device_id": "aggregate",
+                    "offset_samples": 100.0, "skew_ppm": 10.0,
+                    "residual_uncertainty_us": 40.0, "correction_applied": "resampled",
+                    "timing_reference_id": "fixed-emitter", "calibration_id": "frozen-cal",
+                    "gain_db": 0.0, "calibration_orientation": "on_axis",
+                    "position_m": [index as f64 * 0.06, 0.0, 0.0],
+                    "position_uncertainty_mm": 0.5, "preserves_acoustic_delay": true,
+                    "quality_passed": true,
+                })
+            })
+            .collect();
+        let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+            "measurements": [{"path": "seat-a.csv", "name": "seat-a"}, {"path": "seat-b.csv", "name": "seat-b"}],
+            "provenance": {"capture_kind": "stationary_ir",
+                "timing_reference_id": "fixed-emitter",
+                "capture": {"geometry": "compact", "takes": takes}}
+        })).unwrap();
+        for (upper_hz, supported) in [(500.0, true), (20_000.0, false)] {
+            let evidence =
+                build_channel_evidence("left", &source, &[20.0, upper_hz], true).unwrap();
+            let gate = gate_channel_operations(&evidence, None, &INTAKE_BOUNDARY_BUDGETS, true);
+            for operation in [
+                CorrectionOperation::ExcessPhaseCorrection,
+                CorrectionOperation::CoherentSummation,
+            ] {
+                let record = gate
+                    .records
+                    .iter()
+                    .find(|record| record.operation == operation)
+                    .unwrap();
+                if supported {
+                    assert_eq!(record.verdict, EligibilityVerdict::Eligible);
+                } else {
+                    assert_eq!(record.verdict, EligibilityVerdict::Unsupported);
+                    assert!(
+                        record
+                            .observations
+                            .iter()
+                            .any(|reason| reason.contains("timing bound"))
+                    );
+                }
+            }
+            let magnitude = gate
+                .records
+                .iter()
+                .find(|record| record.operation == CorrectionOperation::MagnitudeCorrection)
+                .unwrap();
+            assert_eq!(magnitude.band_hz, Some([20.0, upper_hz]));
+            assert_eq!(magnitude.verdict, EligibilityVerdict::Unknown);
+            assert_eq!(
+                crate::group_measurements::multisub_source_reference_scope(
+                    &[source.clone()],
+                    [20.0, upper_hz]
+                )
+                .is_some(),
+                supported
+            );
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_crossover_checks_grouped_physical_output_sources() {
+        use roomeq_model::{
+            MultiSubGroup, RoomConfig, SpeakerConfig, SubwooferOutput, SubwooferStrategy,
+            SubwooferSystemConfig, SystemConfig,
+        };
+        let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+            "path": "not-loaded.csv",
+            "provenance": {"capture_kind": "stationary_ir", "timing_reference_id": "clock-a"}
+        }))
+        .unwrap();
+        let mut config = RoomConfig {
+            speakers: std::collections::HashMap::from([
+                ("left-source".into(), SpeakerConfig::Single(source.clone())),
+                (
+                    "sub-group".into(),
+                    SpeakerConfig::MultiSub(MultiSubGroup {
+                        name: "subs".into(),
+                        speaker_name: None,
+                        subwoofers: vec![source.clone(), source],
+                        allpass_optimization: false,
+                        joint_optimization: true,
+                    }),
+                ),
+            ]),
+            system: Some(SystemConfig {
+                speakers: std::collections::HashMap::from([("L".into(), "left-source".into())]),
+                subwoofers: Some(SubwooferSystemConfig {
+                    config: SubwooferStrategy::Single,
+                    crossover: None,
+                    routing: Default::default(),
+                    outputs: vec![SubwooferOutput {
+                        id: "physical-out".into(),
+                        speaker: "sub-group".into(),
+                    }],
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mains = vec!["L".into()];
+        assert_eq!(
+            crossover_timing_reference(&config, &mains, [40.0, 160.0]).unwrap(),
+            "clock-a"
+        );
+        let SpeakerConfig::MultiSub(group) = config.speakers.get_mut("sub-group").unwrap() else {
+            panic!("fixture group");
+        };
+        let MeasurementSource::Single(second) = &mut group.subwoofers[1] else {
+            panic!("fixture capture");
+        };
+        second.provenance.timing_reference_id = Some("clock-b".into());
+        assert!(
+            crossover_timing_reference(&config, &mains, [40.0, 160.0])
+                .unwrap_err()
+                .contains("incompatible")
+        );
+        let SpeakerConfig::MultiSub(group) = config.speakers.get_mut("sub-group").unwrap() else {
+            unreachable!();
+        };
+        let MeasurementSource::Single(second) = &mut group.subwoofers[1] else {
+            unreachable!();
+        };
+        second.provenance.timing_reference_id = Some("clock-a".into());
+        second.provenance.valid_band_hz = Some([40.0, 100.0]);
+        assert!(
+            crossover_timing_reference(&config, &mains, [40.0, 160.0])
+                .unwrap_err()
+                .contains("overlap band")
+        );
+        let SpeakerConfig::MultiSub(group) = config.speakers.get_mut("sub-group").unwrap() else {
+            unreachable!();
+        };
+        let MeasurementSource::Single(second) = &mut group.subwoofers[1] else {
+            unreachable!();
+        };
+        second.provenance.valid_band_hz = None;
+        second.provenance.capture_kind = ProvenanceCaptureKind::DirectSound;
+        assert!(
+            crossover_timing_reference(&config, &mains, [40.0, 160.0])
+                .unwrap_err()
+                .contains("missing_direct_sound")
+        );
+        let SpeakerConfig::MultiSub(group) = config.speakers.get_mut("sub-group").unwrap() else {
+            unreachable!();
+        };
+        let MeasurementSource::Single(second) = &mut group.subwoofers[1] else {
+            unreachable!();
+        };
+        second.provenance.direct_sound = Some(autoeq_core::direct_sound::DirectSoundEvidence {
+            facts: autoeq_core::direct_sound::DirectSoundCaptureFacts {
+                gate_s: Some(0.002),
+                direct_path_m: Some(1.0),
+                first_reflection_path_m: Some(40.0),
+                averaging: autoeq_core::direct_sound::AveragingMethod::Stationary,
+                capture_kind: autoeq_core::evidence::CaptureKind::DirectSound,
+                sample_rate_hz: Some(48_000.0),
+                ..Default::default()
+            },
+            policy: Some(autoeq_core::direct_sound::QuasiAnechoicPolicy::v1()),
+        });
+        assert!(
+            crossover_timing_reference(&config, &mains, [40.0, 160.0]).is_err(),
+            "short gate cannot authorize bass overlap"
+        );
+        let SpeakerConfig::MultiSub(group) = config.speakers.get_mut("sub-group").unwrap() else {
+            unreachable!();
+        };
+        let MeasurementSource::Single(second) = &mut group.subwoofers[1] else {
+            unreachable!();
+        };
+        second
+            .provenance
+            .direct_sound
+            .as_mut()
+            .unwrap()
+            .facts
+            .gate_s = Some(0.1);
+        assert_eq!(
+            crossover_timing_reference(&config, &mains, [40.0, 160.0]).unwrap(),
+            "clock-a"
+        );
+    }
 
     fn test_curve(first_hz: f64, last_hz: f64, points: usize, level_db: f64) -> autoeq_core::Curve {
         autoeq_core::Curve {
@@ -1350,6 +2330,259 @@ mod tests {
             false,
         );
         assert_eq!(unknown_direct.verdict, EligibilityVerdict::Unknown);
+    }
+
+    fn inline_single(provenance: MeasurementProvenance) -> MeasurementSource {
+        MeasurementSource::Single(autoeq_core::MeasurementSingle {
+            measurement: autoeq_core::MeasurementRef::Inline(autoeq_core::InlineMeasurement {
+                frequencies: vec![20.0, 100.0, 1000.0, 8000.0, 20000.0],
+                magnitude_db: vec![80.0; 5],
+                phase_deg: Some(vec![0.0; 5]),
+                name: Some(String::from("left")),
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: None,
+            provenance,
+        })
+    }
+
+    #[test]
+    fn roadmap_correction_unknown_timing_label_cannot_authorize_phase() {
+        for reference in ["unknown", " UnKnOwN ", "", " "] {
+            let source = inline_single(MeasurementProvenance {
+                capture_kind: ProvenanceCaptureKind::StationaryIr,
+                timing_reference_id: Some(reference.into()),
+                ..Default::default()
+            });
+            let evidence = build_channel_evidence(
+                "left",
+                &source,
+                &[20.0, 100.0, 1000.0, 8000.0, 20000.0],
+                true,
+            )
+            .unwrap();
+            let gate = gate_channel_operations(&evidence, None, &INTAKE_BOUNDARY_BUDGETS, true);
+            for operation in [
+                CorrectionOperation::ExcessPhaseCorrection,
+                CorrectionOperation::CoherentSummation,
+            ] {
+                let record = gate
+                    .records
+                    .iter()
+                    .find(|record| record.operation == operation)
+                    .unwrap();
+                assert_ne!(
+                    record.verdict,
+                    EligibilityVerdict::Eligible,
+                    "{reference:?}: {operation:?}"
+                );
+            }
+            assert!(gate.records.iter().any(|record| record.operation
+                == CorrectionOperation::MagnitudeCorrection
+                && record.verdict != EligibilityVerdict::Unsupported));
+            assert!(
+                crate::group_measurements::multisub_source_reference_scope(
+                    &[source],
+                    [20.0, 100.0]
+                )
+                .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_assessments_respect_declared_usable_band() {
+        for (declared_band, expected_band) in [
+            (None, [20.0, 20000.0]),
+            (Some([100.0, 8000.0]), [100.0, 8000.0]),
+            (Some([1.0, 8000.0]), [20.0, 8000.0]),
+            (Some([50.0, 10000.0]), [100.0, 8000.0]),
+        ] {
+            let source = inline_single(MeasurementProvenance {
+                capture_kind: ProvenanceCaptureKind::StationaryIr,
+                valid_band_hz: declared_band,
+                has_measured_spl: true,
+                ..Default::default()
+            });
+            let evidence = build_channel_evidence(
+                "left",
+                &source,
+                &[20.0, 100.0, 1000.0, 8000.0, 20000.0],
+                true,
+            )
+            .unwrap();
+            assert_eq!(evidence.valid_band_hz, expected_band);
+            let gate = gate_channel_operations(&evidence, None, &INTAKE_BOUNDARY_BUDGETS, false);
+            for operation in [
+                CorrectionOperation::MagnitudeCorrection,
+                CorrectionOperation::DecayAnalysis,
+                CorrectionOperation::AbsoluteLoudnessAnalysis,
+            ] {
+                let records: Vec<_> = gate
+                    .records
+                    .iter()
+                    .filter(|record| record.operation == operation)
+                    .collect();
+                let assessed = records
+                    .iter()
+                    .find(|record| record.verdict != EligibilityVerdict::Unsupported)
+                    .expect("usable band retains its assessment");
+                assert_eq!(
+                    assessed.band_hz,
+                    Some(evidence.valid_band_hz),
+                    "{operation:?}"
+                );
+                assert_eq!(
+                    assessed.verdict,
+                    if operation == CorrectionOperation::AbsoluteLoudnessAnalysis {
+                        EligibilityVerdict::Eligible
+                    } else {
+                        EligibilityVerdict::Unknown
+                    }
+                );
+                for band in [
+                    [evidence.support_hz[0], evidence.valid_band_hz[0]],
+                    [evidence.valid_band_hz[1], evidence.support_hz[1]],
+                ]
+                .into_iter()
+                .filter(|band| band[0] < band[1])
+                {
+                    let refused = records
+                        .iter()
+                        .find(|record| record.band_hz == Some(band))
+                        .expect("unusable measured band must be explicitly refused");
+                    assert_eq!(refused.verdict, EligibilityVerdict::Unsupported);
+                    assert!(
+                        refused
+                            .observations
+                            .iter()
+                            .any(|reason| reason.contains("declared usable"))
+                    );
+                }
+                assert!(records.iter().all(|record| record.validate().is_ok()));
+            }
+            let serialized = serde_json::to_value(&gate).unwrap();
+            let restored: ChannelOperationGate = serde_json::from_value(serialized).unwrap();
+            assert_eq!(restored, gate);
+            if declared_band.is_some() {
+                let config = room_config(
+                    HashMap::from([("left".into(), SpeakerConfig::Single(source))]),
+                    None,
+                );
+                let result = optimize_room(&config, 48_000.0, None, None).unwrap();
+                let gates = result
+                    .metadata
+                    .operation_gates
+                    .as_ref()
+                    .expect("public workflow must retain operation assessments");
+                let delivered = gates
+                    .iter()
+                    .find(|gate| gate.channel == "left")
+                    .expect("left channel assessment");
+                for operation in [
+                    CorrectionOperation::MagnitudeCorrection,
+                    CorrectionOperation::DecayAnalysis,
+                    CorrectionOperation::AbsoluteLoudnessAnalysis,
+                ] {
+                    let expected: Vec<_> = gate
+                        .records
+                        .iter()
+                        .filter(|r| r.operation == operation)
+                        .collect();
+                    let actual: Vec<_> = delivered
+                        .records
+                        .iter()
+                        .filter(|r| r.operation == operation)
+                        .collect();
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
+    /// Duplicate calibration application on one target is rejected, while
+    /// gain/alignment offsets stay traceable per target with reasons.
+    #[test]
+    fn roadmap_correction_conditioning_ledger_rejects_duplicates() {
+        let mut ledger = ConditioningLedger::default();
+        ledger
+            .record_gain("left", 3.0, "display_normalization")
+            .unwrap();
+        ledger
+            .record_alignment("left", 1.5, 0.25, "arrival_recenter")
+            .unwrap();
+        ledger
+            .record_calibration("left", "spl-cal-94db", "acquisition")
+            .unwrap();
+        let error = ledger
+            .record_calibration("left", "spl-cal-94db", "reapply")
+            .expect_err("duplicate calibration refused");
+        assert!(error.contains("already applied"), "{error}");
+        // Same calibration on another target is a separate application.
+        ledger
+            .record_calibration("right", "spl-cal-94db", "acquisition")
+            .unwrap();
+        // Offsets stay traceable: every entry names its target and reason.
+        assert_eq!(ledger.gains.len(), 1);
+        assert_eq!(ledger.alignments.len(), 1);
+        assert_eq!(ledger.calibrations.len(), 2);
+        assert!(
+            ledger
+                .gains
+                .iter()
+                .all(|entry| !entry.target_id.is_empty() && !entry.reason.is_empty())
+        );
+        assert!(
+            ledger
+                .alignments
+                .iter()
+                .all(|entry| !entry.target_id.is_empty() && !entry.reason.is_empty())
+        );
+        // Raw arrival offsets are kept: alignment stores delay and recenter
+        // separately instead of collapsing them.
+        assert_eq!(ledger.alignments[0].delay_ms, 1.5);
+        assert_eq!(ledger.alignments[0].recenter_offset_ms, 0.25);
+    }
+
+    /// The loader declaration selects the K2 rules: only the declaration,
+    /// never data shape, maps a moving-microphone average to spatial rules.
+    #[test]
+    fn roadmap_correction_provenance_adapter_maps_kinds() {
+        use autoeq_core::ProvenanceCaptureKind;
+        assert_eq!(
+            provenance_capture_kind(ProvenanceCaptureKind::SpatialMagnitude),
+            CaptureKind::SpatialMagnitude
+        );
+        assert_eq!(
+            provenance_capture_kind(ProvenanceCaptureKind::Unknown),
+            CaptureKind::Unknown
+        );
+    }
+
+    /// Incoherent grids and valid bands fail evidence assembly with reasons.
+    #[test]
+    fn roadmap_correction_incoherent_evidence_rejected() {
+        let source = inline_single(MeasurementProvenance::default());
+        assert!(build_channel_evidence("left", &source, &[100.0], true).is_err());
+        assert!(build_channel_evidence("left", &source, &[200.0, 100.0], true).is_err());
+        let mut bad_band = MeasurementProvenance::default();
+        bad_band.valid_band_hz = Some([9000.0, 1000.0]);
+        let source = inline_single(bad_band);
+        assert!(build_channel_evidence("left", &source, &[20.0, 20000.0], true).is_err());
+        for band in [[90.0, 110.0], [110.0, 900.0]] {
+            let source = inline_single(MeasurementProvenance {
+                valid_band_hz: Some(band),
+                ..Default::default()
+            });
+            let error =
+                build_channel_evidence("left", &source, &[20.0, 100.0, 1000.0], true).unwrap_err();
+            assert!(error.contains("at least two loaded samples"), "{error}");
+        }
+        let mut disjoint = MeasurementProvenance::default();
+        disjoint.valid_band_hz = Some([30000.0, 40000.0]);
+        let source = inline_single(disjoint);
+        assert!(build_channel_evidence("left", &source, &[20.0, 20000.0], true).is_err());
     }
 
     #[test]

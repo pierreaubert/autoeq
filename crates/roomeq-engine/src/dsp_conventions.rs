@@ -136,6 +136,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
             target_curve: None,
         }
     }
@@ -168,8 +169,140 @@ mod tests {
         );
     }
 
-    /// Reproduction: a Kautz pole at or above Nyquist is rejected instead of
-    /// aliasing into the realization (pole/ROC discipline at the boundary).
+    /// Zero basis coefficients preserve the playback consumer's unity dry path.
+    #[test]
+    fn roadmap_correction_kautz_zero_weights_preserve_dry_playback() {
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            let chain = chain(vec![kautz_eq_plugin(&[
+                (60.0, 4.0, 0.0),
+                (103.0, 8.0, 0.0),
+            ])]);
+            for frequency in [20.0, 60.0, 103.0, 1000.0, 0.49 * rate] {
+                assert_eq!(
+                    realized_response(&chain, rate, frequency),
+                    Complex64::new(1.0, 0.0)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_kautz_realization_matches_dry_plus_streamed_bank() {
+        use math_audio_iir_fir::KautzFilter;
+        // The playback consumer's KautzRuntime::process is x + bank.process(x).
+        // Compare the serialized evaluator with that actual bank recurrence,
+        // not a second call to its complex_response formula. This is not a
+        // complete plugin-host execution or evidence that gain fitting works.
+        let sections = [(60.0, 4.0, -0.5), (103.0, 8.0, 0.25)];
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            let mut bank = KautzFilter::from_room_modes(&[(60.0, 4.0), (103.0, 8.0)], rate);
+            for (section, (_, _, gain)) in bank.sections.iter_mut().zip(sections) {
+                section.gain = gain;
+            }
+            // More than fifty decay time constants at the slowest fixture pole,
+            // keeping finite-tail error far below the complex comparison budget.
+            let impulse: Vec<_> = (0..131_072)
+                .map(|index| {
+                    let input = if index == 0 { 1.0 } else { 0.0 };
+                    input + bank.process(input)
+                })
+                .collect();
+            let serialized = serde_json::to_vec(&chain(vec![kautz_eq_plugin(&sections)])).unwrap();
+            let chain: ChannelDspChain = serde_json::from_slice(&serialized).unwrap();
+            for frequency in [20.0, 60.0, 80.0, 103.0, 200.0, 1000.0, 5000.0] {
+                let step = Complex64::from_polar(1.0, -std::f64::consts::TAU * frequency / rate);
+                let mut phase = Complex64::new(1.0, 0.0);
+                let mut measured = Complex64::new(0.0, 0.0);
+                for sample in &impulse {
+                    measured += phase * sample;
+                    phase *= step;
+                }
+                let realized = realized_response(&chain, rate, frequency);
+                assert!(
+                    (realized - measured).norm() < 1e-8,
+                    "{rate} Hz / {frequency} Hz: {realized} vs {measured}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_kautz_legacy_single_section_matches_playback() {
+        let reference = chain(vec![kautz_eq_plugin(&[(60.0, 4.0, -0.5)])]);
+        for explicit_empty in [false, true] {
+            let mut filter = serde_json::json!({"topology": "kautz_filter", "filter_type": "peak",
+                "freq": 60.0, "q": 4.0, "db_gain": -0.5});
+            if explicit_empty {
+                filter["kautz_sections"] = serde_json::json!([]);
+            }
+            let legacy = chain(vec![PluginConfigWrapper {
+                plugin_type: "eq".into(),
+                parameters: serde_json::json!({"filters": [filter]}),
+            }]);
+            for frequency in [20.0, 60.0, 5000.0] {
+                assert_eq!(
+                    realized_response(&legacy, 48_000.0, frequency),
+                    realized_response(&reference, 48_000.0, frequency)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_kautz_aliases_defaults_and_malformed_values() {
+        let original = kautz_eq_plugin(&[(60.0, 4.0, -0.5)]);
+        let expected = realized_response(&chain(vec![original.clone()]), 48_000.0, 80.0);
+        for sections_key in ["kautz_sections", "sections"] {
+            for frequency_key in ["pole_freq", "freq", "frequency", "pole_freq_hz"] {
+                let mut plugin = original.clone();
+                let filter = &mut plugin.parameters["filters"][0];
+                let mut sections = filter
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("kautz_sections")
+                    .unwrap();
+                let frequency = sections[0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("pole_freq")
+                    .unwrap();
+                sections[0][frequency_key] = frequency;
+                filter[sections_key] = sections;
+                assert_eq!(
+                    realized_response(&chain(vec![plugin.clone()]), 48_000.0, 80.0),
+                    expected
+                );
+                plugin.parameters["filters"][0][sections_key][0]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("gain");
+                assert_eq!(
+                    realized_response(&chain(vec![plugin]), 48_000.0, 80.0),
+                    Complex64::new(1.0, 0.0)
+                );
+            }
+        }
+        for invalid in 0..4 {
+            let mut plugin = original.clone();
+            let filter = &mut plugin.parameters["filters"][0];
+            match invalid {
+                0 => filter["kautz_sections"] = serde_json::Value::Null,
+                1 => filter["sections"] = filter["kautz_sections"].clone(),
+                2 => filter["kautz_sections"][0]["freq"] = serde_json::json!(60.0),
+                _ => filter["kautz_sections"][0]["gain"] = serde_json::Value::Null,
+            }
+            let chain = chain(vec![plugin]);
+            let mut provider = NoConvolutionIr;
+            assert!(
+                RealizedDsp::new(&chain, 48_000.0, &mut provider)
+                    .unwrap()
+                    .response_at(80.0)
+                    .is_err(),
+                "case {invalid}"
+            );
+        }
+    }
+
     #[test]
     fn kautz_pole_above_nyquist_rejected() {
         let chain = chain(vec![kautz_eq_plugin(&[(30_000.0, 4.0, 6.0)])]);
@@ -197,9 +330,10 @@ mod tests {
         let response = RealizedDsp::new(&chain, 48_000.0, &mut provider)
             .unwrap()
             .response_at(100.0);
-        // An empty section list realizes as unity only through the audited
-        // empty-product path; it must at least evaluate finitely.
-        assert!(response.unwrap().is_finite());
+        assert!(
+            response.is_err(),
+            "missing sections and fallback parameters are malformed"
+        );
     }
 
     /// Delay is preserved in seconds across sample rates: the same delay

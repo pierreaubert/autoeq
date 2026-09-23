@@ -7,6 +7,13 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct FinalizationConfig {
+    /// Optional operator-declared steady-sine physical limits, checked on final routes.
+    /// Absence does not establish hardware capacity; this is not a dynamic safety gate.
+    pub physical_drive: Option<crate::physical_drive::PhysicalDrivePolicy>,
+    /// Optional final-candidate cost per squared worst declared demand/limit ratio.
+    /// Added to mean seat target error in dB; zero preserves acoustic-only ranking.
+    /// Positive values require physical declarations and never relax safety gates.
+    pub physical_drive_weight: f64,
     /// Peak bound for logical inputs without a named override, relative to full scale.
     pub default_input_peak: f64,
     /// Independently phased logical-input sinusoid peaks relative to full scale.
@@ -28,6 +35,8 @@ pub struct FinalizationConfig {
 impl Default for FinalizationConfig {
     fn default() -> Self {
         Self {
+            physical_drive: None,
+            physical_drive_weight: 0.0,
             default_input_peak: 1.0,
             input_peak_limits: BTreeMap::new(),
             output_ceiling_dbfs: 0.0,
@@ -40,6 +49,15 @@ impl Default for FinalizationConfig {
 
 impl FinalizationConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if !self.physical_drive_weight.is_finite() || self.physical_drive_weight < 0.0 {
+            return Err("finalization.physical_drive_weight must be finite and nonnegative".into());
+        }
+        if self.physical_drive_weight > 0.0 && self.physical_drive.is_none() {
+            return Err("physical_drive_weight requires declared physical_drive limits".into());
+        }
+        if let Some(policy) = &self.physical_drive {
+            policy.validate()?;
+        }
         if self.subwoofer_limiter && self.output_ceiling_dbfs < -20.0 {
             return Err("subwoofer limiter supports output ceilings from -20 to 0 dBFS".into());
         }
@@ -78,6 +96,16 @@ impl FinalizationConfig {
 #[cfg(test)]
 mod tests {
     use super::FinalizationConfig;
+
+    #[test]
+    fn physical_drive_ranking_requires_explicit_valid_evidence_and_weight() {
+        let mut config: FinalizationConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.physical_drive_weight, 0.0);
+        for weight in [1.0, -1.0, f64::NAN, f64::INFINITY] {
+            config.physical_drive_weight = weight;
+            assert!(config.validate().is_err());
+        }
+    }
 
     #[test]
     fn useful_output_budget_is_independent_and_validated() {

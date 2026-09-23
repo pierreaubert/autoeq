@@ -91,6 +91,7 @@ fn load_source_single_path_errors_when_missing() {
     let source = MeasurementSource::Single(super::measurement_single::MeasurementSingle {
         measurement: MeasurementRef::Path(PathBuf::from("/nonexistent/file.csv")),
         speaker_name: None,
+        provenance: Default::default(),
     });
     assert!(load_source(&source).is_err());
 }
@@ -176,6 +177,7 @@ fn load_source_individual_single() {
             csv_path: None,
         }),
         speaker_name: None,
+        provenance: Default::default(),
     });
     let curves = load_source_individual(&source).unwrap();
     assert_eq!(curves.len(), 1);
@@ -200,6 +202,7 @@ fn load_source_individual_multiple_empty_errors() {
     let source = MeasurementSource::Multiple(super::types::MeasurementMultiple {
         measurements: vec![],
         speaker_name: None,
+        provenance: Default::default(),
     });
     assert!(load_source_individual(&source).is_err());
 }
@@ -258,6 +261,7 @@ fn measurement_source_speaker_name_and_resolve_paths() {
     let single = MeasurementSource::Single(super::measurement_single::MeasurementSingle {
         measurement: MeasurementRef::Path(PathBuf::from("spk.csv")),
         speaker_name: Some("Genelec".to_string()),
+        provenance: Default::default(),
     });
     assert_eq!(single.speaker_name(), Some("Genelec"));
 
@@ -297,6 +301,7 @@ fn measurement_single_serializes_and_deserializes() {
     let single = super::measurement_single::MeasurementSingle {
         measurement: MeasurementRef::Path(PathBuf::from("a.csv")),
         speaker_name: Some("X".to_string()),
+        provenance: Default::default(),
     };
     let json = serde_json::to_value(&single).unwrap();
     assert_eq!(json["path"], "a.csv");

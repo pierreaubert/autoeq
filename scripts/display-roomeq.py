@@ -119,8 +119,28 @@ Examples:
         type=Path,
         help="Base RoomEQ config; prints its diff against metadata.effective_config",
     )
+    parser.add_argument(
+        "--smoothed-octave",
+        type=float,
+        default=1.0,
+        help="Fractional-octave smoothing for the Section 2 smoothed-response "
+        "overlays (default: 1.0 per reviews/feat-report.md)",
+    )
 
+    parser.add_argument(
+        "--capture-verification", type=Path, metavar="JSON",
+        help="Render matched raw IR/step diagnostics from a verification report; use -o for a new HTML file",
+    )
     args = parser.parse_args()
+
+    if args.capture_verification:
+        if args.compare or args.output_json or args.html_output or args.base_config:
+            parser.error("--capture-verification cannot be mixed with optimization/comparison inputs")
+        from src.capture_views import create_capture_report
+        destination = args.output or args.capture_verification.with_name(args.capture_verification.stem + "_captures.html")
+        create_capture_report(args.capture_verification, destination)
+        print(f"Capture diagnostics written to: {destination}")
+        return
 
     # --- Comparison mode ---
     if args.compare:
@@ -215,7 +235,10 @@ Examples:
     if not has_curves:
         print("Warning: No curve data found. The JSON may not contain frequency response data.")
 
-    create_html_report(data, html_output_path, output_json_path)
+    create_html_report(
+        data, html_output_path, output_json_path,
+        smoothed_octaves=args.smoothed_octave,
+    )
 
 
 if __name__ == "__main__":

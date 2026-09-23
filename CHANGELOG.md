@@ -1,5 +1,405 @@
 # Unreleased
 
+- Add `autoeq-qa`: Wolfram Engine cross-validation harness mirroring
+  `math-qa` (oracle `.wls` + versioned golden + comparison test +
+  manifest + `QA_RESULT:` record). Initial smoke cases cover catalogue
+  families C01 (PEQ/FIR complex transfer), C03 (log-frequency
+  interpolation) and C06 (ERB quadrature and timing conversion), with a
+  strict missing-reference gate that fails instead of passing zero
+  comparisons. Recipes: `just qa-wolfram[-smoke|-contract|-goldens]`.
+- Require shared labeled stationary timing provenance before legacy MSO can
+  optimize phase-dependent sub delays. Unknown-timing phase arrays now use
+  gain-only optimization and cannot supply invented coherent shared-EQ seats;
+  explicit advisories identify both limitations. Unchanged routed safety
+  gates pass all five canonical synthetic MSO seeds, and a public workflow
+  regression checks delivered zero-delay physical routes.
+- Cover 5 and 10 ms PhaseLinear FIR channel designs with a fast direct
+  coefficient-response check and required convolution sidecar assertions.
+- Split synthetic parameter QA into explicit full-scale structural-headroom
+  refusal cases and a separately declared −20 dBFS input-peak processing
+  matrix, preserving the 12 dB safety-attenuation limit and output ceiling.
+  Phase-bearing analytic fixtures now declare and replay a common stationary
+  timing reference, allowing automatic crossover processing on aligned grids.
+- Compose all emitted serial FIR resources for temporal analysis instead of
+  selecting a single retained or longest kernel. Missing convolution evidence
+  no longer masquerades as safe IIR-only timing; parallel splits are not
+  incorrectly multiplied as serial FIR stages.
+- Add opt-in per-driver phase refusal handling that retains existing magnitude
+  processing and records insufficient evidence without generating phase FIRs.
+  Invalid capture timing, malformed inputs, and operational failures still abort.
+- Preserve configured physical-output aliases during calibrated joint-sub gain
+  refinement, validating their positional group mapping and canonical routing.
+  Apply refinement trims after the routing matrix without rewriting stage history.
+- Reopen nonreference joint-sub gains during opt-in calibrated full-graph
+  candidate selection. Evaluate bounded alternatives through the existing
+  electrical, physical, target, and protected-seat gates against a frozen
+  baseline; retain rejected trials and historical joint-stage diagnostics.
+- Keep final phase-decision FIR references synchronized with collision-safe
+  export sidecar names, including physical-driver bindings. Preserve original
+  provisional history and unrelated capture evidence.
+- Carry joint physical-FIR target/phase decisions through workflow assembly
+  into final reconciliation. Report the selected phase strength, keeping zero
+  selection unresolved rather than labeling it applied. Verify every referenced
+  FIR and its branch assignment before retaining a delivered phase claim.
+- Apply source-bound direct-sound target policy before joint physical-driver
+  excess-phase FIR design, checking all contributors including DBA cabinets.
+  Room-only upper-band requests refuse before sidecar writes or chain mutation;
+  independently selected magnitude-only design remains separate.
+- Require supported excess-phase assessment for every physical-driver capture
+  before mixed-phase or Kirkeby excess-phase FIR design. Use the assessed
+  correction target instead of an unassessed phase decomposition; missing or
+  inadequate SNR, poor coherence, and smoothing-sensitive phase refuse before
+  sidecar writes. Magnitude-only modes retain their separate behavior.
+- Preserve measured noise-floor and coherence arrays through `CurveData`
+  serialization and reconstruction, including physical-driver captures used
+  by FIR null protection. Legacy curves keep missing quality evidence absent.
+- Enforce shared source timing before joint per-driver FIR design and artifact
+  writes, reusing the report admission gate. Phase arrays without a compatible
+  acquisition/source mapping no longer authorize coherent filter generation.
+- Resolve main-role and sub-output aliases for waveform timing checks; cover
+  cardioid branches and every contributing DBA source behind its two aggregate
+  branches. Conflicting aliases or incorrect branch identities withhold the view.
+- Gate parallel-driver waveform reports on mapped source timing, matching seat
+  labels, and full-view band support. Missing evidence clears the summed
+  prediction and records a reason without discarding independent kernel metrics.
+- Treat blank and case-insensitive `unknown` timing-reference labels as absent
+  during measurement admission, matching joint-array timing requirements while
+  preserving the original serialized declaration for diagnostics.
+- Reject malformed or incomplete waveform diagnostic inventories in HTML reports
+  with an unavailable explanation instead of crashing or silently omitting views.
+- Persist per-channel waveform availability and failure reasons in stage outcomes,
+  replacing stale diagnostics on refresh. Main and comparison HTML reports show
+  these reasons separately from acoustic acceptance and recorded playback.
+- Replay non-FIR parallel waveform reports through each physical capture and
+  serialized branch/common processing, replacing the PEQ-summary shortcut.
+  Missing branch phase withholds the prediction instead of fabricating a trace.
+- Use one uncorrected peak reference for physical-driver FIR pre/post waveform
+  plots, preserving gain changes and polarity instead of normalizing them away.
+- Reject physical-driver coherent replay when any capture lacks valid phase,
+  instead of inventing zero phase. Failed replay clears the predicted post-IR
+  and logs the affected driver; independently valid reference/kernel views remain.
+- Preserve each output's sample rate when comparison reports reconstruct EQ;
+  summarize emitted EQ sections (including driver-local and zero-weight Kautz
+  sections) rather than counting each Kautz bank as a single PEQ.
+- Evaluate Python report EQ using serialized Kautz/warped topology, including
+  the Kautz unity path and ordered linear weights. Channel EQ figures use the
+  output sample rate; advanced-filter labels no longer present Kautz as PEQ dB.
+- Stop exposing Kautz linear weights as synthetic PEQ `Biquad` dB gains in
+  engine/workflow result caches. Serialized Kautz sections remain unchanged;
+  advanced-mode QA counts emitted sections rather than PEQ cache entries.
+- Reconstruct serial-channel waveform reports from the serialized complex DSP
+  transfer, including Kautz/warped topology, gain, and delay, instead of PEQ
+  summaries. Failed replay or missing phase clears the view; both waveforms
+  retain the same uncorrected peak reference.
+- Scale Kautz correction strength through its linear bank weights rather than
+  the unused top-level dB placeholder. Zero strength now realizes unity; poles,
+  section ordering, aliases, and the dry path remain intact.
+- Fit Kautz linear weights against the actual dry-plus-complex-bank magnitude,
+  honoring prepared targets and sampled composite gain bounds. The unchanged
+  multirate budget canary now passes; its unshifted modal quality result remains
+  slightly worse, so this is not a demonstrated correction-quality improvement.
+- Bound Kautz pole selection by the requested section count, correction band,
+  Nyquist, and supported Q range before fitting. Keep low-weight sections so
+  later allpass basis functions do not change after fitting.
+- Include the playback consumer's unity dry path in serialized Kautz evaluation;
+  zero-weight sections now remain unity. Preserve legacy section aliases and
+  single-section defaults, and reject malformed declarations.
+- Add separate hash-bound silent-playback noise capture and numeric pressure
+  calibration to capture diagnostics. Retain Welch PSD units, octave bin support,
+  calibration limitations, and unavailable states; protect both raw resources
+  against overwrite. Noise plots never promote acoustic acceptance.
+- Connect optional matched capture decay diagnostics through CLI import and HTML
+  reports: common-reference and normalized octave tails, explicit noise windows,
+  configurable fit budgets, and unavailable reasons. Fits remain finite-window
+  playback diagnostics, not passive-room RT, safety, or listening evidence.
+- Continue the opt-in parameter matrix after processing failures, retaining
+  per-row failure artifacts and all later results. Any failed row still makes
+  the command fail; safety limits and successful-output requirements are unchanged.
+- Publish an explicitly unverified structural baseline for routed main/sub
+  inputs without the phase needed for final coherent replay, matching the
+  existing grouped-driver fallback. Missing phase never passes acoustic validation.
+- Reject invalid directly constructed joint-sub weights and nonfinite derived
+  objective components, including arithmetic overflow, before accepting a score.
+
+- Restrict joint multi-sub search and its reported objective components to the
+  configured correction band. Preserve full-response protected-seat checks and
+  reject insufficient in-band support before running the optimizer.
+
+- Stop the backend-contract launcher's process group on timeout/interruption
+  and preserve partial timeout diagnostics in the failed QA artifact.
+
+- Make seven prerequisite-dependent CamillaDSP PCM tests explicitly ignored in
+  ordinary suites instead of passing without execution. Required-backend QA
+  opts them in, and explicit runs fail if the backend variable is missing.
+
+- Check final per-position conditioning identities, not just reachable hashes.
+  Missing positions, stale intermediate hashes, unsupported operation versions
+  and invalid attribution cannot pass the preparation stage.
+
+- Bind ordinary-channel conditioning roots to frozen parsed measurements in
+  source order, including logical channel mapping. Reordered roots and missing
+  snapshot attribution degrade the report; source files are not reopened.
+
+- Verify conditioning-ledger dependencies against loader-recorded native curve
+  roots; broken links, unreachable outputs and legacy missing roots degrade the
+  preparation report. Keep capture authentication and operation replay separate.
+- Synchronize output-schema capture-field compatibility and multi-sub timing
+  descriptions with the authoritative models and passing input baseline.
+
+- Record canonical hash-linked receipts for detailed source alignment,
+  spatial/coherent averaging, and ordinary-channel dense-grid preparation.
+  Prepared engine inputs and ordinary channel results retain the receipts;
+  final output includes a structural preparation stage with input-identity checks
+  and the opening explanation summarizes recorded operations. Unrecorded paths
+  remain explicitly unknown; these records do not authenticate acquisition.
+
+- Continue measurement-derived target-slope fallback past loadable sources
+  without regression support, instead of treating missing estimates as flat.
+  Keep genuine zero slopes, bed-channel priority, subwoofer exclusion, and
+  explicit overrides unchanged.
+
+- Bound intake assessment records by retained samples inside declared usable
+  bands, including declarations whose edges fall between bins. Reject fewer
+  than two retained samples; preserve the declaration separately from the
+  assessed range and keep excluded edge regions explicitly unsupported.
+
+- Isolate declared usable measurement bands before workflow dense-grid
+  reduction, smoothing, and phase reconstruction. Retain conditioned outer
+  response data for reporting and keep phase/coherence/noise arrays aligned.
+  Source loaders also align usable samples independently before spatial or
+  coherent averaging, rejecting sparse/disjoint usable support while preserving
+  native snapshots and loaded outer responses.
+
+- Honor declared usable bands when deriving shared room level and measured
+  target slope. Shared level comparisons require common loaded sample support;
+  disjoint or sparse overlap yields no shared reference.
+
+- Exclude loaded samples outside declared usable support from ordinary-channel
+  level/passband analysis and IIR/FIR design, including spatial objectives.
+  Retain raw curves for replay/reporting, slice measured metadata consistently,
+  and reject usable bands containing fewer than two loaded samples.
+
+- Scope magnitude, decay, and absolute-loudness intake assessments to declared
+  usable measurement support; report excluded measured bands as unsupported
+  without promoting unknown SNR or decay evidence into permission.
+
+- Carry declared measurement `valid_band_hz` into ordinary channel preparation
+  and intersect correction bounds with it; reject invalid or disjoint bands
+  while retaining the raw measurement and requested configuration.
+
+- Reject uncited direct-sound claims and malformed or mismatched phase
+  permission records before standalone FIR application; preserve magnitude
+  processing and report the refusal without claiming acquisition authentication.
+
+- Reject blank and case-insensitive unknown timing labels before joint MSO
+  search, using the same structural reference check as all-pass admission.
+
+- Require shared timing-reference evidence for measurement-backed all-pass MSO
+  in direct source-loading and grouped dispatch paths.
+
+- Refuse selected joint MSO when its seat matrix or timing evidence is missing;
+  do not bypass that refusal by running the detailed optimizer instead.
+
+- Preserve MSO gain-only fallback explanations through routed preprocessing
+  instead of dropping the engine's missing-phase advisory.
+
+- Preserve configured-primary-seat phase in home-cinema cancellation baselines
+  instead of using phase-free spatial averages. Reject unavailable seat indices;
+  keep magnitude averaging and final per-seat safety checks separate.
+
+- Publish validation bundles after final provenance and decision-ledger
+  attachment, so their playback snapshot matches the delivered result.
+- Rebuild retained serial biquad coefficients when final selection scales EQ
+  strength, keeping pruning/report metadata consistent with emitted filters.
+- Give the 5.1.4 throughput benchmark an explicit ten-input peak budget;
+  acoustic satellite rolloff is not electrical bass-bus attenuation.
+
+- Keep high-frequency Q guardrails local: applying guard or perceptual-policy
+  defaults no longer lowers the global bass Q cap. Existing optimizer bounds
+  and returned-candidate checks retain the treble cap and stricter global limits.
+
+- Reject target chains that place preference tilt or level compensation before
+  measured calibration. Preserve valid calibration-first chains and target
+  identities; this does not enable the outstanding magnitude-policy integration.
+
+- Add matched 500–4000 Hz capture ETC diagnostics over 0–40 ms using finite
+  analytic filters and linear convolution. Preserve common baseline references,
+  document analysis spreading/floors, refuse unsupported views, and render the
+  bound results without promoting them into acoustic or perceptual acceptance.
+
+- Import explicitly matched baseline IR captures for canonical before/after
+  raw IR/step diagnostics. Bind graph/settings/file identities, preserve synthetic
+  labels, refuse mismatches and raw-file overwrite, and render integrity-checked
+  capture views with `display-roomeq.py --capture-verification`.
+
+- Add opt-in final-graph physical-drive ranking from replayed declared demand,
+  with separately reported acoustic and utilization components. Positive weights
+  require physical declarations and cannot bypass electrical or acoustic gates.
+
+- Preserve actual per-objective normalization receipts for multi-measurement PEQ
+  and spatial linear/minimum-phase/Kirkeby FIR optimization. Retain objective
+  population labels through canonical workflow conditioning reports and update
+  the optional output schema; analysis offsets do not imply playback gain or SPL.
+
+- Shared single-channel EQ preparation now records its actual analysis
+  normalization offset, reference policy, and pre/post-normalization curve
+  identities. Ordinary/adaptive optimizer reports carry this evidence into a
+  canonical conditioning ledger. These are historical analysis gains, not DSP
+  playback trims or SPL calibration; unrecorded paths remain explicitly unknown.
+
+- The public RoomEQ workflow now freezes configured numerical measurement
+  responses before processing and reuses them for optimization and final replay.
+  Full curve fields and original metadata/provenance survive the internal
+  snapshot handoff; changing a source CSV mid-run cannot change its loaded data.
+  Malformed inline phase is rejected before freezing. Associated WAV/CEA/target
+  assets and subsequent conditioning are not covered by this snapshot contract.
+
+- Finalized results now retain native parsed final-seat inputs in a structural
+  `final_seat_input_retention` receipt, with separate training/held-out partitions,
+  response identities, declared provenance, and explicit acquisition limitations.
+  Timing declarations do not become shared timing/gain references, and these
+  receipts do not claim optimizer-wide conditioning or authenticated recordings.
+
+- Final-seat replay now retains each loaded response's native frequency grid,
+  support, levels, and auxiliary evidence before physical-branch summation.
+  Differently sampled seats are no longer pre-aligned or clipped during capture
+  retention. This does not authenticate raw recording or calibration provenance.
+
+- Final correction selection now includes declared physical-drive limits in
+  output/common/spectral attenuation candidates and structural fallback checks.
+  Candidates remain subject to the existing attenuation and acoustic-output
+  budgets; terminal sub limiters are preserved and never credited as linear
+  physical-demand reduction. The final post-pruning physical gate remains.
+
+- Final decision ledgers now explain delivered headroom and channel-alignment
+  gain stages on their actual input-to-physical-output branches. The report
+  retains signed dB values and distinguishes serialized DSP facts from acoustic
+  benefit or net parallel-path gain. Re-finalization rejects altered/stale
+  generated records and does not duplicate unchanged records.
+
+- Added opt-in `optimizer.finalization.physical_drive` declarations for sampled
+  steady-sine RMS voltage/current and peak excursion. The delivered serialized
+  graph is replayed after routed pruning, with independent-input peak bounds
+  and route gains counted once. Over-limit, out-of-linear-range, incomplete,
+  or incompatible declarations refuse delivery. Saved stage evidence retains
+  units, demand, limits, calibration/reference conditions, and scope. This is
+  not authenticated hardware evidence or transient/thermal/program capacity;
+  the joint optimizer's output-loss proxy is still not a physical-drive objective.
+
+- Final decision ledgers now retain joint-array and shared-EQ rejection history
+  per physical sub output. Single/comparison reports explain those decisions
+  immediately after the playback verdict, with assessed frequency support,
+  stage correction limits, and explicitly positional seat references. These
+  historical refusals are not promoted into final-route or playback approval.
+
+- Joint-sub shared EQ now checks each retained seat against the optimizer's
+  frozen target and level reference before graph construction. Rejected shared
+  filters are removed, identity loss is recomputed, and the stage diagnostics
+  retain `shared_eq_rejection_reason`. Target-grid alignment is explicit; seats
+  are never independently normalized for this guard.
+
+- Joint-sub array acceptance now checks every retained seat with the existing
+  runtime ERB-weighted target-error policy. A better aggregate objective cannot
+  authorize a regressing seat: the array controls and metrics revert together,
+  with `array_rejection_reason` retained in serialized stage diagnostics. This
+  does not certify later shared EQ, routed processing, or physical drive capacity.
+
+- Generated capture-prediction bundles now bind their processing graph, plans,
+  provenance, settings, and resource hashes with the existing typed SHA-256 codec.
+  Import rejects stale/edited bindings and contradictory evidence labels. Bundle
+  graph identity excludes decision metadata, matching finalization. Numerical
+  reports record the exact plan-file hash and refuse every occupied destination,
+  including hard-link aliases of raw recordings. Integrity is not acquisition
+  authentication or an acoustic/safety certificate.
+
+- RoomEQ can generate IR comparison predictions from an explicit hashed
+  physical-output-by-seat transfer matrix with `--verification-prediction-inputs`.
+  `--verification-graph` uses saved native DSP without another optimization run.
+  Existing path expansion handles independent/driver and bass-managed routes;
+  coherent trials retain declared signed input gains. Calibration, capture plane,
+  support, timing-grid/work budgets, and complete matrix coverage are checked.
+  Synthetic plant data cannot become recorded-playback approval. Bundle creation
+  never overwrites an existing destination and is not a playback/safety verdict.
+
+- Verification bundles sum all serial channel delay plugins instead of retaining
+  only the first. Delay checks reject stale snapshots, unknown ledger channels,
+  malformed/overflowing delays, and branch-local delays that cannot be represented
+  by a scalar channel snapshot. This does not measure FIR or routed-system latency.
+
+- Finalized RoomEQ output now carries independently bound acceptance diagnostics
+  in the decision ledger. Reports show computed 1/12- and 1/24-octave retained
+  magnitude predictions, serialized DSP controls, and explicit missing-capture,
+  noise, and physical-headroom reasons. Export packages attach diagnostics to
+  the rendered artifact's SHA-256 and reject mismatched analysis/export rates.
+  Resource renaming regenerates view identities. These are diagnostic views,
+  not recorded-playback or complete routed acoustic/safety acceptance.
+- Final response rebuilding now saves the exact pre-correction input alongside
+  its realized output, avoiding mismatched extended grids and normalization
+  metadata in before/after diagnostics.
+
+- Acceptance-bundle validation rejects malformed traces, mismatched provenance,
+  incomplete declared output coverage, blank calibration identities, and
+  non-finite computed headroom margins. DSP dispositions compose polarity
+  inversions and reject stale graph identity or overflowed controls. Acceptance
+  view binding now verifies actual payload digests and rejects duplicate names
+  and mixed graphs; legacy hash-only inputs remain readable but cannot bind.
+  These are internal validation improvements, not completed production
+  acceptance-view/report integration or acoustic certification.
+
+- Direct-sound intake now assesses gate/geometry, averaging, distinct angular
+  coverage, and acquisition bandwidth against an explicit quasi-anechoic policy.
+  A legacy angular boolean no longer authorizes detailed correction. Short gates
+  narrow phase/detail eligibility; missing or contradictory facts refuse those
+  claims while preserving independently supported magnitude processing. Coherent
+  crossover and joint-sub reference admission also check the requested band.
+
+- Successfully realized standalone phase FIRs now produce provisional target/phase
+  decisions with requested-band, evidence, magnitude, and latency observations.
+  Finalization detects FIR removal even before its processing snapshot: attempts
+  remain history with a bound phase reversion; replacement resources require
+  reassessment. No acoustic/perceptual success is inferred from FIR application.
+
+- Final decision ledgers now carry a portable payload digest, independently
+  recomputed by Python reports along with existing FIR resource hashes. Stale
+  or unbound records cannot become applied-delivery claims or green playback
+  banners. Export packaging rejects stale source claims before rebinding;
+  plot-only FIR caches no longer change serialized graph contents.
+
+- Capture verification now compares explicitly declared calibrated mono IRs
+  against source/seat predictions and numerical budgets through the CLI.
+  Incomplete metrics, mixed synthetic/acoustic evidence, or a failed required
+  route cannot become acoustic approval. Reports cannot replace input manifests
+  or comparison plans. Automatic prediction-plan generation remains pending.
+
+- Public RoomEQ workflow results now carry automatically finalized decision
+  ledgers. Ordinary selected PEQ stages produce records with objective scores
+  and requested frequency limits. Changed processing invalidates candidate
+  claims, and later payload mutations invalidate stored delivery bindings.
+
+- Standalone phase refusals now reach the workflow decision ledger, retaining
+  evidence scope, assessment reasons, and observed/configured phase budgets.
+  Failed FIR writes no longer append a convolution plugin or change predicted
+  responses. Identity fallback records say `reverted`, not `already_acceptable`.
+
+- Joint-sub diagnostics now survive generic and routed MSO output, retaining
+  per-seat stage responses, unnormalized levels, objective components, and
+  physical-output gain applications. Later control changes invalidate the
+  current-processing binding without discarding stage history. Fixed routed
+  joint dispatch/provenance transport, duplicate model-name output IDs, and
+  silent omission of small optimized multi-sub gains/delays.
+
+- RoomEQ audit corrections: explicit joint-sub selection now takes precedence
+  over legacy multi-seat dispatch; main/sub alignment and coherent route
+  searches require declared matching stationary capture references, including
+  grouped sub outputs. Main-sum cancellation is no longer labeled a missing
+  timing reference.
+
+- RoomEQ audit corrections: require continuous direct-evidence coverage for a
+  proposed phase band; bind perceptual reference approval to registry-owned
+  metric, tolerance, and coverage; enforce standalone phase latency against
+  generated FIR centering rather than acoustic propagation. These fixes do
+  not mark the broader roadmap complete.
+
 - RoomEQ roadmap `reviews/next-20260921.md` steps 1–9 (all changes uncommitted):
   - Step 1: graded direct-sound evidence (capture facts, reflection-free
     interval, valid-band bound, angular coverage; moving-microphone average

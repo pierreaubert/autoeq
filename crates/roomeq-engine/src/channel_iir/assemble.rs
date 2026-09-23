@@ -44,8 +44,8 @@ pub(super) fn assemble_iir_result(
         optimizer_output,
         IirOptimizerOutput::KautzModal { .. } | IirOptimizerOutput::WarpedIir { .. }
     ) {
-        // PEQ parameters summarize these topologies but do not realize their
-        // transfer. Report and score the same serialized sections that will play.
+        // Warped PEQ parameters do not realize the warped transfer; Kautz has
+        // no PEQ representation. Report and score the serialized playback.
         let neutral_plugins: Vec<_> = dsp
             .plugins
             .iter()
@@ -66,7 +66,7 @@ pub(super) fn assemble_iir_result(
     let score_curve = if let Some(tilt_curve) = &request.target.target_tilt_curve {
         Curve {
             freq: final_curve.freq.clone(),
-            spl: &final_curve.spl - &tilt_curve.spl,
+            spl: &final_curve.spl - &interpolate_log_space(&final_curve.freq, tilt_curve).spl,
             phase: final_curve.phase.clone(),
             ..Curve::default()
         }
@@ -102,6 +102,7 @@ pub(super) fn assemble_iir_result(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
         target_curve,
     };
 
@@ -139,6 +140,7 @@ fn realized_iir_curve(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     };
     let mut convolution = crate::dsp_realization::NoConvolutionIr;
     crate::dsp_realization::RealizedDsp::new(&chain, sample_rate, &mut convolution)?
@@ -258,6 +260,7 @@ fn display_target_curve(
         spl: spl.to_vec(),
         phase: None,
         norm_range,
+        ..Default::default()
     }
 }
 

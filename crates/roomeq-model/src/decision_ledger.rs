@@ -316,6 +316,13 @@ impl DecisionRecord {
 /// Ordered set of decision records with a pinned ledger version.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct CorrectionDecisionLedger {
+    /// Supplemental quality views, independently bound to this ledger's graph.
+    /// Absent in legacy outputs; never promotes a correction or playback verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acceptance_evidence: Option<crate::acceptance_evidence::AcceptanceEvidence>,
+    /// Recomputable payload binding for report consumers; absent in legacy files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload_binding: Option<crate::payload_binding::PayloadBinding>,
     /// Ledger version; must equal [`DECISION_LEDGER_VERSION`].
     #[serde(default = "decision_ledger_version_default")]
     pub ledger_version: String,
@@ -338,14 +345,22 @@ impl CorrectionDecisionLedger {
                 self.ledger_version, DECISION_LEDGER_VERSION
             ));
         }
+        if let Some(evidence) = &self.acceptance_evidence {
+            let graph = self
+                .payload_binding
+                .as_ref()
+                .map_or(evidence.binding.graph_identity.as_str(), |binding| {
+                    binding.graph_identity.as_str()
+                });
+            if !evidence.matches(graph) {
+                return Err("acceptance evidence payload or graph binding is stale".into());
+            }
+        }
         let mut seen = std::collections::BTreeSet::new();
         for decision in &self.decisions {
             decision.validate()?;
             if !seen.insert(decision.decision_id.clone()) {
-                return Err(format!(
-                    "duplicate decision_id '{}'",
-                    decision.decision_id
-                ));
+                return Err(format!("duplicate decision_id '{}'", decision.decision_id));
             }
         }
         Ok(())
@@ -541,6 +556,99 @@ pub struct ListeningEvidenceDescriptor {
     pub result: ListeningResult,
 }
 
+/// Immutable delivered-payload identity: canonical JSON plus a compact
+/// fingerprint.
+///
+/// Object keys are sorted before serialization, so two payloads with
+/// identical content share one identity regardless of insertion order.
+/// This is the workflow-local binding target until the export lane
+/// publishes the canonical X1 graph hash (handoff); the comparison
+/// semantics (exact canonical equality) already match that contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct GraphIdentity {
+    /// Canonical (key-order-stable) JSON of the delivered payload.
+    pub canonical_json: String,
+    /// FNV-1a 64-bit fingerprint of the canonical JSON, hex-encoded.
+    pub fingerprint: String,
+}
+
+impl GraphIdentity {
+    /// Whether this identity binds the given graph.
+    pub fn binds(&self, graph: &crate::DspGraph) -> bool {
+        canonical_graph_identity(graph) == *self
+    }
+}
+
+fn sort_canonical(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let sorted: std::collections::BTreeMap<String, serde_json::Value> = map
+                .into_iter()
+                .map(|(key, value)| (key, sort_canonical(value)))
+                .collect();
+            serde_json::Value::Object(sorted.into_iter().collect())
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(sort_canonical).collect())
+        }
+        scalar => scalar,
+    }
+}
+
+fn fnv1a_hex(input: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in input.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+/// Compute the immutable identity of any delivered JSON value.
+///
+/// The caller binds the DSP content, never the ledger itself: compute
+/// over the payload with its ledger attachment cleared.
+pub fn canonical_value_identity(value: &serde_json::Value) -> GraphIdentity {
+    let canonical_json =
+        serde_json::to_string(&sort_canonical(value.clone())).expect("canonical JSON");
+    let fingerprint = fnv1a_hex(&canonical_json);
+    GraphIdentity {
+        canonical_json,
+        fingerprint,
+    }
+}
+
+/// Compute the immutable identity of a delivered graph.
+pub fn canonical_graph_identity(graph: &crate::DspGraph) -> GraphIdentity {
+    let value = serde_json::to_value(graph).expect("DspGraph serializes");
+    canonical_value_identity(&value)
+}
+
+/// Rebind a carried ledger to repackaged bytes.
+///
+/// Reference rewriting (package-local sidecar names) changes the shipped
+/// JSON without changing the processing the ledger accepted. Carried
+/// Final rows are rebound to the repackaged payload instead of shipping
+/// a stale fingerprint; rows without a binding (provisional history)
+/// are untouched.
+///
+/// # Errors
+///
+/// Returns a reason when the rebound ledger does not validate.
+pub fn rebind_ledger_to_repackaged_graph(
+    ledger: &mut CorrectionDecisionLedger,
+    repackaged_identity: &GraphIdentity,
+) -> Result<(), String> {
+    // The packaging caller must bind its exact rewritten payload again.
+    ledger.payload_binding = None;
+    for record in &mut ledger.decisions {
+        if record.is_final_claim() {
+            record.final_graph_identity = Some(repackaged_identity.fingerprint.clone());
+        }
+    }
+    ledger.validate()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -567,6 +675,8 @@ mod tests {
             assert!(back.is_final_claim(), "final claim {status:?}");
         }
         let ledger = CorrectionDecisionLedger {
+            acceptance_evidence: None,
+            payload_binding: None,
             ledger_version: DECISION_LEDGER_VERSION.to_string(),
             decisions: DecisionStatus::ALL.map(final_record).into_iter().collect(),
         };
@@ -704,9 +814,11 @@ mod tests {
         assert_eq!(reverted.decisions.len(), 2);
         assert_eq!(reverted.decisions[0].stage, DecisionStage::Provisional);
         assert_eq!(reverted.decisions[1].status, DecisionStatus::Reverted);
-        assert!(reverted.decisions[1].supersedes_ids.contains(
-            &reverted.decisions[0].decision_id.clone()
-        ));
+        assert!(
+            reverted.decisions[1]
+                .supersedes_ids
+                .contains(&reverted.decisions[0].decision_id.clone())
+        );
 
         let gap = fixture_ledger("per_seat_gap.json");
         assert_eq!(gap.decisions.len(), 2);
@@ -726,8 +838,16 @@ mod tests {
         let remainder = &partial.decisions[1];
         assert_eq!(applied.status, DecisionStatus::Applied);
         assert_eq!(remainder.status, DecisionStatus::Constrained);
-        assert!(applied.related_decision_ids.contains(&remainder.decision_id));
-        assert!(remainder.related_decision_ids.contains(&applied.decision_id));
+        assert!(
+            applied
+                .related_decision_ids
+                .contains(&remainder.decision_id)
+        );
+        assert!(
+            remainder
+                .related_decision_ids
+                .contains(&applied.decision_id)
+        );
 
         let _ = fixture_ledger("insufficient_evidence.json");
     }
@@ -745,9 +865,7 @@ mod tests {
             ),
             (
                 "contradictory_final",
-                include_str!(
-                    "../test-data/decision_ledger/malformed/contradictory_final.json"
-                ),
+                include_str!("../test-data/decision_ledger/malformed/contradictory_final.json"),
             ),
         ] {
             let ledger: CorrectionDecisionLedger = serde_json::from_str(contents).unwrap();
@@ -756,11 +874,69 @@ mod tests {
     }
 
     #[test]
+    fn canonical_identity_is_key_order_stable() {
+        let left = serde_json::json!({"b": 1, "a": {"y": 2, "x": 1}});
+        let right = serde_json::json!({"a": {"x": 1, "y": 2}, "b": 1});
+        assert_eq!(
+            canonical_value_identity(&left),
+            canonical_value_identity(&right)
+        );
+        let changed = serde_json::json!({"a": {"x": 1, "y": 2}, "b": 2});
+        assert_ne!(
+            canonical_value_identity(&changed).fingerprint,
+            canonical_value_identity(&left).fingerprint
+        );
+    }
+
+    /// Rebinding refreshes Final rows to the repackaged fingerprint and
+    /// leaves provisional history untouched.
+    #[test]
+    fn rebind_refreshes_final_rows_only() {
+        let mut ledger = fixture_ledger("accepted.json");
+        let flown: Vec<(String, DecisionStage, Option<String>)> = ledger
+            .decisions
+            .iter()
+            .map(|record| {
+                (
+                    record.decision_id.clone(),
+                    record.stage,
+                    record.final_graph_identity.clone(),
+                )
+            })
+            .collect();
+        assert!(
+            flown
+                .iter()
+                .any(|(_, stage, _)| *stage == DecisionStage::Final),
+            "fixture needs a Final row"
+        );
+        let repackaged = GraphIdentity {
+            canonical_json: String::from("{}"),
+            fingerprint: String::from("abc123abc123abc1"),
+        };
+        rebind_ledger_to_repackaged_graph(&mut ledger, &repackaged).unwrap();
+        assert!(ledger.validate().is_ok());
+        for (id, stage, _) in &flown {
+            let record = ledger
+                .decisions
+                .iter()
+                .find(|record| &record.decision_id == id)
+                .unwrap();
+            assert_eq!(&record.stage, stage);
+            if record.is_final_claim() {
+                assert_eq!(
+                    record.final_graph_identity.as_deref(),
+                    Some("abc123abc123abc1")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn dsp_graph_legacy_output_fixture_reads_without_decisions() {
         // Legacy outputs carry no decision metadata: they deserialize with
         // `correction_decisions` absent and serialize without the field.
-        let contents =
-            include_str!("../test-data/decision_ledger/legacy_output.json");
+        let contents = include_str!("../test-data/decision_ledger/legacy_output.json");
         let graph: crate::DspGraph = serde_json::from_str(contents).unwrap();
         assert!(graph.correction_decisions.is_none());
         assert!(graph.validate().is_ok());

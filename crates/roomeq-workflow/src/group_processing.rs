@@ -230,13 +230,24 @@ pub fn process_multisub_group_with_callback_and_frequency_samples(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let prepared = PreparedMultiSubGroup {
+    let mut prepared = PreparedMultiSubGroup {
         subwoofers,
         seat_measurements: load_multisub_seat_measurements_with_frequency_samples(
             group,
             frequency_samples,
         )?,
+        reference_scope: None,
     };
+    let band_curves = prepared
+        .seat_measurements
+        .as_ref()
+        .map(|seats| seats.iter().flatten().cloned().collect::<Vec<_>>())
+        .unwrap_or_else(|| prepared.subwoofers.clone());
+    let bounded = engine::sub_optimizer_config(&band_curves, &room_config.optimizer);
+    prepared.reference_scope = crate::group_measurements::multisub_reference_scope(
+        group,
+        [bounded.min_freq, bounded.max_freq],
+    );
     let resources = prepare_resources(room_config, true)?;
     let flat_resources = prepare_resources(room_config, false)?;
     engine::process_multisub_group_with_callback(

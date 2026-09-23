@@ -17,14 +17,12 @@ use roomeq_model::{Curve, MeasurementSource};
 use std::collections::HashMap;
 
 #[test]
+#[ignore = "requires ROOMEQ_CAMILLADSP_BIN; run scripts/run_camilladsp_backend_contracts.py"]
 fn tool_contract_camilladsp_fractional_gd_matches_exported_response() {
     use num_complex::Complex64;
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let Ok(binary) = std::env::var("ROOMEQ_CAMILLADSP_BIN") else {
-        eprintln!("skipping optional PCM backend contract; set ROOMEQ_CAMILLADSP_BIN");
-        return;
-    };
+    let binary = std::env::var("ROOMEQ_CAMILLADSP_BIN").expect("CamillaDSP backend is required");
     let amplitude = 1_i32 << 28;
     let impulse_offset = 128;
     for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
@@ -234,6 +232,7 @@ fn fractional_gd_sidecars_match_reported_transfer_and_shared_latency() {
             );
         }
         let mut room = roomeq_engine::room_result::RoomOptimizationResult {
+            finalized_decisions: None,
             channels: chains,
             channel_results: results,
             deployed_source_curves: HashMap::new(),
@@ -406,6 +405,7 @@ fn flat_curve(n: usize) -> Curve {
 fn channel_result(name: &str, delay_ms: f64) -> ChannelOptimizationResult {
     let curve = measurement_curve_with_delay(32, delay_ms, 0.0);
     ChannelOptimizationResult {
+        measurement_conditioning: None,
         name: name.to_string(),
         pre_score: 0.0,
         post_score: 0.0,
@@ -432,6 +432,7 @@ fn dsp_chain(name: &str) -> ChannelDspChain {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     }
 }
 

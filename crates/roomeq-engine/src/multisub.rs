@@ -15,10 +15,12 @@ mod seat_response;
 #[cfg(test)]
 mod tests;
 mod types;
+pub(crate) use joint_objective::{joint_sub_diagnostics, process_joint_sub_group_detailed};
 
 pub use joint_objective::{
     BassGainEntry, BassGainLedger, BassGainStage, JointSubRequest, JointSubResult,
     UnnormalizedOutputView, apply_shared_eq_to_residual, optimize_joint_sub_array,
+    process_joint_sub_group,
 };
 pub use optimize::*;
 pub use seat_response::render_mso_seat_responses;

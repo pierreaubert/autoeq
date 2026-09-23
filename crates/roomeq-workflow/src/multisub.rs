@@ -74,13 +74,30 @@ pub fn optimize_multisub_detailed_with_frequency_samples(
         .as_ref()
         .map(|multi_seat| multi_seat.primary_seat)
         .unwrap_or(0);
-    let curves = load_primary_measurements_with_frequency_samples(
+    let mut curves = load_primary_measurements_with_frequency_samples(
         measurements,
         primary_seat,
         frequency_samples,
     )?;
+    let timing_verified = crate::group_measurements::multisub_source_reference_scope(
+        measurements,
+        config.active_correction_band(),
+    )
+    .is_some();
+    if !timing_verified {
+        // A phase array alone does not establish a shared time zero across
+        // physical subs. Preserve gain-only optimization, but do not let
+        // unknown relative timing select deployable delays.
+        for curve in &mut curves {
+            curve.phase = None;
+            curve.coherence = None;
+        }
+    }
     let mut result =
         roomeq_engine::multisub::optimize_multisub_detailed(&curves, config, sample_rate)?;
+    if !timing_verified {
+        result.advisories.push("unverified_timing_gain_only".into());
+    }
     if let Some(primary) = result.combined_response.primary_seat_complex.as_mut() {
         primary.coherence = conservative_coherence(&curves, &primary.freq);
     }
@@ -133,6 +150,14 @@ pub fn optimize_multisub_with_allpass_and_frequency_samples(
     sample_rate: f64,
     frequency_samples: usize,
 ) -> Result<MultiSubAllPassResult, Box<dyn Error>> {
+    if crate::group_measurements::multisub_source_reference_scope(
+        measurements,
+        [config.min_freq, config.max_freq],
+    )
+    .is_none()
+    {
+        return Err("all-pass multi-sub processing requires a shared timing reference and labeled stationary captures; no alternate optimizer was run".into());
+    }
     let primary_seat = config
         .multi_seat
         .as_ref()
@@ -161,6 +186,25 @@ pub fn optimize_multisub_with_allpass_and_frequency_samples(
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn source_allpass_refuses_unknown_timing_before_optimization() {
+        let source = MeasurementSource::InMemory(Curve {
+            freq: Array1::from_vec(vec![20.0, 200.0]),
+            spl: Array1::from_vec(vec![80.0, 80.0]),
+            phase: Some(Array1::zeros(2)),
+            ..Default::default()
+        });
+        let error = optimize_multisub_with_allpass_and_frequency_samples(
+            &[source.clone(), source],
+            &OptimizerConfig::default(),
+            48_000.0,
+            16,
+        )
+        .err()
+        .expect("phase arrays alone cannot authorize all-pass fitting");
+        assert!(error.to_string().contains("timing reference"), "{error}");
+    }
 
     #[test]
     fn source_adapter_returns_owned_prepared_curves() {

@@ -32,6 +32,8 @@ pub struct SubPreprocessResult {
     pub shared_eq_seats: Option<Vec<Curve>>,
     /// Dedicated spatial/global sub EQ already ran before routed integration.
     pub common_eq_complete: bool,
+    /// Retained joint array/shared-EQ stage report before routed processing.
+    pub joint_sub: Option<roomeq_model::JointSubDiagnostics>,
     pub advisories: Vec<String>,
     pub optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
     /// Combined curve (for crossover optimization and shared post-EQ)

@@ -317,6 +317,7 @@ pub(super) fn realize_plugins_on_curve(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     };
     crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
         &chain,
@@ -1386,7 +1387,37 @@ fn physical_sub_speaker_config(
         speaker_name: None,
         subwoofers: measurements,
         allpass_optimization: false,
+        // Physical-output grouping, not a user joint request: the
+        // detailed mode stays authoritative here.
+        joint_optimization: false,
     })))
+}
+
+// Coherent predictions need an actual capture, never a spatial power average.
+// A single capture retains the existing single-position workflow semantics.
+fn load_primary_crossover_curve(
+    source: &MeasurementSource,
+    primary_seat: usize,
+    frequency_samples: usize,
+    channel: &str,
+) -> Result<Curve> {
+    let individual = load_source_individual_with_frequency_samples(source, frequency_samples)
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+            message: error.to_string(),
+        })?;
+    let index = if individual.len() == 1 {
+        0
+    } else {
+        primary_seat
+    };
+    individual.get(index).cloned().ok_or_else(|| {
+        AutoeqError::InvalidConfiguration {
+            message: format!(
+                "primary seat {primary_seat} unavailable for home-cinema channel '{channel}' with {} measurement(s)",
+                individual.len()
+            ),
+        }
+    })
 }
 
 fn capture_crossover_cancellation_baseline(
@@ -1405,6 +1436,11 @@ fn capture_crossover_cancellation_baseline(
     let Some(subs) = &system.subwoofers else {
         return Ok(context);
     };
+    let primary_seat = config
+        .optimizer
+        .multi_seat
+        .as_ref()
+        .map_or(0, |seat| seat.primary_seat);
     // Automatic searches start at the configured range's geometric centre.
     let mut baseline_config = config.clone();
     if let Some(crossovers) = baseline_config.crossovers.as_mut() {
@@ -1428,16 +1464,8 @@ fn capture_crossover_cancellation_baseline(
         if let Some(SpeakerConfig::Cardioid(c)) = config.speakers.get(&output.speaker) {
             outputs.insert(
                 output.id.clone(),
-                preprocess_cardioid_with_frequency_samples(
-                    c,
-                    frequency_samples,
-                    config
-                        .optimizer
-                        .multi_seat
-                        .as_ref()
-                        .map_or(0, |seat| seat.primary_seat),
-                )?
-                .combined_curve,
+                preprocess_cardioid_with_frequency_samples(c, frequency_samples, primary_seat)?
+                    .combined_curve,
             );
             continue;
         }
@@ -1445,10 +1473,12 @@ fn capture_crossover_cancellation_baseline(
             let mut branches = Vec::new();
             for (sources, rear) in [(&d.front, false), (&d.rear, true)] {
                 for source in sources {
-                    let raw = load_source_with_frequency_samples(source, frequency_samples)
-                        .map_err(|e| AutoeqError::InvalidMeasurement {
-                            message: e.to_string(),
-                        })?;
+                    let raw = load_primary_crossover_curve(
+                        source,
+                        primary_seat,
+                        frequency_samples,
+                        &output.id,
+                    )?;
                     let mut curve = apply_delay_and_polarity_to_curve(
                         &raw,
                         if rear { 10.0 } else { 0.0 },
@@ -1487,11 +1517,7 @@ fn capture_crossover_cancellation_baseline(
         let raw: Vec<Curve> = sources
             .into_iter()
             .map(|source| {
-                load_source_with_frequency_samples(source, frequency_samples).map_err(|e| {
-                    AutoeqError::InvalidMeasurement {
-                        message: e.to_string(),
-                    }
-                })
+                load_primary_crossover_curve(source, primary_seat, frequency_samples, &output.id)
             })
             .collect::<Result<_>>()?;
         if raw.is_empty() || !raw.iter().all(curve_has_usable_phase) {
@@ -1546,7 +1572,9 @@ fn capture_crossover_cancellation_baseline(
     else {
         return Ok(context);
     };
-    for (role, raw) in mains {
+    for role in mains.keys() {
+        let source = resolve_single_source(role, config, system)?;
+        let raw = load_primary_crossover_curve(source, primary_seat, frequency_samples, role)?;
         let Some(route) = graph
             .routes
             .iter()
@@ -1557,12 +1585,12 @@ fn capture_crossover_cancellation_baseline(
         let Some(xo) = route.high_pass_hz else {
             continue;
         };
-        let mut support = vec![raw];
+        let mut support = vec![&raw];
         support.extend(outputs.values());
         let Some(grid) = roomeq_engine::topology::shared_measurement_grid(&support) else {
             continue;
         };
-        let raw = autoeq_core::curve_transforms::interpolate_log_space(&grid, raw);
+        let raw = autoeq_core::curve_transforms::interpolate_log_space(&grid, &raw);
         let mut main =
             apply_crossover_response_to_curve(&raw, &route.crossover_type, xo, fs, false);
         main = apply_delay_and_polarity_to_curve(&main, route.delay_ms, route.polarity_inverted);
@@ -1779,6 +1807,7 @@ fn canonical_main_roles(sys: &SystemConfig, sub_role: &str) -> Vec<String> {
 
 fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationResult {
     RoomOptimizationResult {
+        finalized_decisions: None,
         channels: HashMap::new(),
         channel_results: HashMap::new(),
         deployed_source_curves: HashMap::new(),
@@ -1815,6 +1844,8 @@ fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationRe
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+            provisional_decisions: Vec::new(),
         },
     }
 }
@@ -1924,6 +1955,7 @@ fn optimize_home_cinema_no_sub(
         ),
     );
     Ok(RoomOptimizationResult {
+        finalized_decisions: None,
         channels: channel_chains,
         channel_results,
         deployed_source_curves: HashMap::new(),
@@ -1960,6 +1992,8 @@ fn optimize_home_cinema_no_sub(
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+            provisional_decisions: Vec::new(),
         },
     })
 }
@@ -2558,22 +2592,12 @@ fn optimize_home_cinema_with_sub(
         .iter()
         .map(|role| {
             let source = resolve_single_source(role, config, sys)?;
-            let individual = load_source_individual_with_frequency_samples(
+            let mut curve = load_primary_crossover_curve(
                 source,
+                primary_seat,
                 assembly.frequency_samples,
-            )
-                .map_err(|error| AutoeqError::InvalidMeasurement {
-                    message: error.to_string(),
-                })?;
-            let index = if individual.len() == 1 { 0 } else { primary_seat };
-            let mut curve = individual.get(index).cloned().ok_or_else(|| {
-                AutoeqError::InvalidConfiguration {
-                    message: format!(
-                        "primary seat {primary_seat} unavailable for home-cinema channel '{role}' with {} measurement(s)",
-                        individual.len()
-                    ),
-                }
-            })?;
+                role,
+            )?;
             let gain = *gains.get(role).unwrap_or(&0.0);
             curve.spl.mapv_inplace(|spl| spl + gain);
             Ok(autoeq_measurements::read::interpolate_log_space(
@@ -2591,10 +2615,28 @@ fn optimize_home_cinema_with_sub(
     let measured_grid_available = all_curves_share_frequency_grid(&measured_phase_check_refs);
     let processed_grid_available = all_curves_share_frequency_grid(&phase_check_refs);
     let shared_grid_available = measured_grid_available && processed_grid_available;
-    let phase_available =
-        measured_phase_available && processed_phase_available && shared_grid_available;
+    let overlap_factor = 2.0_f64.powf(crate::crossover_summation::OVERLAP_BAND_HALF_OCTAVES);
+    let timing_reference = crate::evidence_intake::crossover_timing_reference(
+        config,
+        main_roles,
+        [
+            (min_xo / overlap_factor).max(crossover_grid.first().copied().unwrap_or(f64::NAN)),
+            (max_xo * overlap_factor).min(crossover_grid.last().copied().unwrap_or(f64::NAN)),
+        ],
+    );
+    let phase_available = measured_phase_available
+        && processed_phase_available
+        && shared_grid_available
+        && timing_reference.is_ok();
     let mut optimization_advisories = sub_preprocess.advisories.clone();
     optimization_advisories.extend(phase_quality_advisories);
+    if let Err(reason) = &timing_reference {
+        optimization_advisories.push(format!("crossover_timing_reference_refused:{reason}"));
+    } else if let Ok(reference) = &timing_reference {
+        optimization_advisories.push(format!(
+            "crossover_declared_common_timing_reference:{reference}"
+        ));
+    }
     if !measured_phase_available || !processed_phase_available {
         optimization_advisories.push("missing_phase_crossover_alignment_skipped".to_string());
         let mut missing_roles: Vec<_> = main_roles
@@ -2687,6 +2729,59 @@ fn optimize_home_cinema_with_sub(
         } else {
             (0.0, 0.0, 0.0, 0.0, false, est_xo)
         };
+    // C06: the overlap-band summation search selects polarity/delay/gain
+    // against measured phase and reconciles with the optimizer candidate.
+    // The search wins only on strict full-band improvement; refusals and
+    // ties keep the optimizer values with explicit reason codes. The
+    // reconciled gain feeds the single downstream application (with the
+    // separate LFE gain and the headroom limit), so no gain applies twice.
+    // Adopted selections also emit provisional ledger rows (C08); retained
+    // or refused searches leave only advisory reason codes, never Applied
+    // rows for numbers that were not emitted.
+    let mut crossover_provisional = Vec::new();
+    let (main_delay_raw, sub_delay_raw, sub_gain_raw, sub_inverted) = if phase_available {
+        let reconciled = crate::crossover_summation::reconcile_main_sub_summation(
+            &main_refs,
+            sub_curve,
+            final_xo_freq,
+            sample_rate,
+            &crate::crossover_summation::MainSubOptimizerValues {
+                main_delay_ms: main_delay_raw,
+                sub_delay_ms: sub_delay_raw,
+                sub_gain_db: sub_gain_raw,
+                sub_inverted,
+            },
+            timing_reference.as_deref().ok(),
+        );
+        optimization_advisories.extend(reconciled.advisories.iter().cloned());
+        if let Some(report) = &reconciled.report
+            && reconciled
+                .advisories
+                .iter()
+                .any(|advisory| advisory.contains("search_selected"))
+        {
+            let mut measurement_refs = main_roles.to_vec();
+            measurement_refs.push(sub_role.clone());
+            crossover_provisional.extend(
+                crate::crossover_summation::reconcile_summation_decisions(
+                    report,
+                    &main_roles.join("+"),
+                    sub_role.as_str(),
+                    measurement_refs,
+                    Vec::new(),
+                    None,
+                ),
+            );
+        }
+        (
+            reconciled.main_delay_ms,
+            reconciled.sub_delay_ms,
+            reconciled.sub_gain_db,
+            reconciled.sub_inverted,
+        )
+    } else {
+        (main_delay_raw, sub_delay_raw, sub_gain_raw, sub_inverted)
+    };
     let (main_delay_post, sub_delay_post) =
         normalize_crossover_delays(main_delay_raw, sub_delay_raw);
     let sub_gain_post = sub_gain_raw;
@@ -2865,7 +2960,9 @@ fn optimize_home_cinema_with_sub(
             .as_ref()
             .map(|bm| bm.config.optimize_groups)
             .unwrap_or(true);
-    let baseline_reason = if !phase_available {
+    let baseline_reason = if timing_reference.is_err() {
+        "source_route_optimizer_skipped_unverified_timing"
+    } else if !phase_available {
         "source_route_optimizer_skipped_missing_phase"
     } else if !optimize_source_routes {
         "source_route_optimization_disabled"
@@ -3677,6 +3774,7 @@ fn optimize_home_cinema_with_sub(
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
             target_curve: routed_target_curves
                 .get(role)
                 .cloned()
@@ -3883,6 +3981,7 @@ fn optimize_home_cinema_with_sub(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: sub_preprocess.joint_sub.clone(),
         target_curve: pre_eq_target_curves.get(&sub_role).cloned(),
     };
     channel_chains.insert(sub_role.clone(), sub_chain);
@@ -3942,6 +4041,7 @@ fn optimize_home_cinema_with_sub(
         channel_results.insert(
             role.clone(),
             ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: role.clone(),
                 pre_score,
                 post_score,
@@ -3970,6 +4070,7 @@ fn optimize_home_cinema_with_sub(
         channel_results.insert(
             sub_role.clone(),
             ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: sub_role.clone(),
                 pre_score,
                 post_score,
@@ -4234,6 +4335,7 @@ fn optimize_home_cinema_with_sub(
     }
 
     Ok(RoomOptimizationResult {
+        finalized_decisions: None,
         channels: channel_chains,
         channel_results,
         deployed_source_curves,
@@ -4315,6 +4417,8 @@ fn optimize_home_cinema_with_sub(
             },
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+            provisional_decisions: crossover_provisional,
         },
     })
 }
@@ -4453,6 +4557,7 @@ mod post_dsp_level_tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
             target_curve: None,
         }
     }
@@ -5175,12 +5280,102 @@ mod post_dsp_level_tests {
         )]));
         let mut main = curve(80.0);
         main.phase.as_mut().unwrap().fill(180.0);
+        config.speakers.insert(
+            "left".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemory(main.clone())),
+        );
         let mains = HashMap::from([("L".into(), main)]);
         let baseline =
             super::capture_crossover_cancellation_baseline(&config, &mains, 48000.0, 256).unwrap();
         assert_eq!(baseline.limit_db, 5.0);
         assert!(baseline.sources.contains_key("L"));
         let frozen = baseline.sources["L"].cancellation_db.clone();
+        // A spatial power average has no phase. The baseline must instead
+        // select the same primary seat for every physical source.
+        let mut multiseat = config.clone();
+        multiseat.optimizer.multi_seat = Some(MultiSeatConfig {
+            primary_seat: 1,
+            ..Default::default()
+        });
+        multiseat.speakers.insert(
+            "left".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+                curve(40.0),
+                mains["L"].clone(),
+            ])),
+        );
+        multiseat.speakers.insert(
+            "sub".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+                curve(60.0),
+                curve(80.0),
+            ])),
+        );
+        let mut averaged_main = curve(70.0);
+        averaged_main.phase = None;
+        let averaged = HashMap::from([("L".into(), averaged_main)]);
+        let selected =
+            super::capture_crossover_cancellation_baseline(&multiseat, &averaged, 48000.0, 256)
+                .unwrap();
+        assert_eq!(
+            selected
+                .sources
+                .get("L")
+                .map(|source| &source.cancellation_db),
+            Some(&frozen),
+            "primary-seat baseline must equal the same-seat single-capture reference"
+        );
+        multiseat.speakers.insert(
+            "sub".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+                curve(110.0),
+                curve(80.0),
+            ])),
+        );
+        multiseat.speakers.insert(
+            "left".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+                curve(120.0),
+                mains["L"].clone(),
+            ])),
+        );
+        let changed_other_seat =
+            super::capture_crossover_cancellation_baseline(&multiseat, &averaged, 48000.0, 256)
+                .unwrap();
+        assert_eq!(changed_other_seat.sources["L"].cancellation_db, frozen);
+        multiseat
+            .optimizer
+            .multi_seat
+            .as_mut()
+            .unwrap()
+            .primary_seat = 2;
+        assert!(
+            super::capture_crossover_cancellation_baseline(&multiseat, &averaged, 48000.0, 256,)
+                .is_err(),
+            "an unavailable primary seat must not fall back to another seat"
+        );
+        multiseat
+            .optimizer
+            .multi_seat
+            .as_mut()
+            .unwrap()
+            .primary_seat = 1;
+        let mut magnitude_only = curve(80.0);
+        magnitude_only.phase = None;
+        multiseat.speakers.insert(
+            "sub".into(),
+            SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
+                curve(80.0),
+                magnitude_only,
+            ])),
+        );
+        assert!(
+            super::capture_crossover_cancellation_baseline(&multiseat, &averaged, 48000.0, 256,)
+                .unwrap()
+                .sources
+                .is_empty(),
+            "phase at an unselected seat cannot justify a coherent baseline"
+        );
         config.system.as_mut().unwrap().bass_management = Some(BassManagementConfig {
             sub_trim_db: -6.0,
             ..Default::default()
@@ -5662,6 +5857,7 @@ mod tests {
                     2
                 ],
                 allpass_optimization: true,
+                joint_optimization: false,
             }),
         );
         let mut system = roomeq_model::SystemConfig {
@@ -5838,13 +6034,37 @@ mod tests {
         HashMap::from([
             (
                 "left".to_string(),
-                SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+                SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
             ),
             (
                 "right".to_string(),
-                SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+                SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
             ),
         ])
+    }
+
+    fn stationary_fixture_source(curves: &[roomeq_model::Curve]) -> MeasurementSource {
+        let measurements: Vec<_> = curves
+            .iter()
+            .enumerate()
+            .map(|(seat, curve)| {
+                serde_json::json!({"inline": {
+                    "name": format!("seat-{seat}"),
+                    "frequencies": curve.freq.to_vec(),
+                    "magnitude_db": curve.spl.to_vec(),
+                    "phase_deg": curve.phase.as_ref().map(|phase| phase.to_vec())
+                }})
+            })
+            .collect();
+        let mut source = if measurements.len() == 1 {
+            measurements[0].clone()
+        } else {
+            serde_json::json!({"measurements": measurements.iter().map(|entry| entry["inline"].clone()).collect::<Vec<_>>()})
+        };
+        source["provenance"] = serde_json::json!({
+            "capture_kind": "stationary_ir", "timing_reference_id": "fixture-common-clock"
+        });
+        serde_json::from_value(source).expect("declared stationary fixture")
     }
 
     fn home_cinema_sys_with_sub() -> SystemConfig {
@@ -5996,7 +6216,7 @@ mod tests {
         let mut speakers = stereo_speakers_with_phase();
         speakers.insert(
             "sub".to_string(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+            SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
         );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2_000.0;
@@ -6228,7 +6448,7 @@ mod tests {
         let mut speakers = stereo_speakers_with_phase();
         speakers.insert(
             "sub".to_string(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+            SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
         );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2_000.0;
@@ -6277,7 +6497,7 @@ mod tests {
         let mut speakers = stereo_speakers_with_phase();
         speakers.insert(
             "sub".to_string(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+            SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
         );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2_000.0;
@@ -6327,7 +6547,7 @@ mod tests {
         let mut speakers = stereo_speakers_with_phase();
         speakers.insert(
             "sub".to_string(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+            SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
         );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2_000.0;
@@ -6370,7 +6590,7 @@ mod tests {
         let mut speakers = stereo_speakers_with_phase();
         speakers.insert(
             "sub".to_string(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+            SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
         );
         let mut crossovers = HashMap::new();
         crossovers.insert(
@@ -6493,7 +6713,7 @@ mod tests {
         let mut speakers = stereo_speakers_with_phase();
         speakers.insert(
             "sub".to_string(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(flat_curve_with_phase())),
+            SpeakerConfig::Single(stationary_fixture_source(&[flat_curve_with_phase()])),
         );
         let mut optimizer = tiny_optimizer();
         optimizer.max_freq = 2_000.0;
@@ -6536,10 +6756,7 @@ mod tests {
         for name in ["left", "right", "sub"] {
             speakers.insert(
                 name.into(),
-                SpeakerConfig::Single(MeasurementSource::InMemoryMultiple(vec![
-                    first.clone(),
-                    second.clone(),
-                ])),
+                SpeakerConfig::Single(stationary_fixture_source(&[first.clone(), second.clone()])),
             );
         }
         let mut optimizer = tiny_optimizer();
@@ -6771,6 +6988,7 @@ mod splice_revert_tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
             target_curve: None,
         }
     }

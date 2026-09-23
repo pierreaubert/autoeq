@@ -15,8 +15,8 @@
 use ndarray::Array1;
 
 use crate::auditory_frequency::erb_rate_weighted_rms;
-use crate::curve_transforms::{create_log_frequency_grid, interpolate};
 use crate::curve::Curve;
+use crate::curve_transforms::{create_log_frequency_grid, interpolate};
 use crate::evidence::EvidenceBand;
 
 fn band(id: &str, low_hz: f64, high_hz: f64) -> EvidenceBand {
@@ -68,9 +68,7 @@ fn psycho_fast_a04_invalid_axis_never_silent_zero() {
     unsorted.swap(10, 40);
     assert!(erb_rate_weighted_rms(&Array1::from(unsorted), &values).is_none());
     // Empty input.
-    assert!(
-        erb_rate_weighted_rms(&Array1::from(Vec::<f64>::new()), &[]).is_none()
-    );
+    assert!(erb_rate_weighted_rms(&Array1::from(Vec::<f64>::new()), &[]).is_none());
     // Non-finite value poisons the result instead of scoring as good.
     let mut nonfinite = values.clone();
     nonfinite[30] = f64::NAN;
@@ -140,7 +138,10 @@ fn psycho_fast_a05_refined_grid_brackets_narrow_feature() {
         })
         .expect("nonempty grid");
     let position = grid.iter().position(|f| f == nearest).expect("member");
-    assert!(position > 0 && position + 1 < grid.len(), "center bracketed");
+    assert!(
+        position > 0 && position + 1 < grid.len(),
+        "center bracketed"
+    );
     let half_bin = 0.25 * (grid[position + 1] - grid[position - 1]);
     assert!(
         (*nearest - center).abs() <= half_bin + 1e-9,

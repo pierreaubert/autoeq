@@ -7,6 +7,7 @@
 
 use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
 use super::compute::compute_ceiling_violation_into;
+use super::constraint_envelope::{ConstraintSpec, OwnedConstraintSpec, judge_pareto_members};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
 use super::{
@@ -122,9 +123,39 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                 } else {
                     &report.pareto_front
                 };
-                let Some(best) = choose_compromise(front, objective.as_ref()) else {
+                if front.is_empty() {
                     return Err((
                         format!("{} produced an empty population", self.name),
+                        f64::INFINITY,
+                    ));
+                }
+                // Judge every eligible member through the shared envelopes
+                // before selection so an infeasible member can never win the
+                // compromise pick on a score its repaired form cannot keep.
+                let owned = match OwnedConstraintSpec::from_params(params) {
+                    Ok(owned) => owned,
+                    Err(reason) => {
+                        return Err((
+                            format!(
+                                "{} cannot honor the constraint contract: {}",
+                                self.name, reason
+                            ),
+                            f64::INFINITY,
+                        ));
+                    }
+                };
+                let judged = match judge_front_members(
+                    self.name,
+                    front,
+                    objective.as_ref(),
+                    &owned.as_spec(),
+                ) {
+                    Ok(judged) => judged,
+                    Err(reason) => return Err((reason, f64::INFINITY)),
+                };
+                let Some(best) = choose_compromise(&judged, objective.as_ref()) else {
+                    return Err((
+                        format!("{} produced an empty judged front", self.name),
                         f64::INFINITY,
                     ));
                 };
@@ -132,11 +163,11 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                 if best.x.len() == x.len() {
                     x.copy_from_slice(best.x.as_slice().unwrap());
                 }
-                log_pareto_front(self.name, front, best);
+                log_pareto_front(self.name, &judged, best);
                 if let Some(front_report) = build_nsga_front_report(
                     self.name,
                     &cfg,
-                    front,
+                    &judged,
                     objective.as_ref(),
                     report.nfev,
                     report.nit,
@@ -149,10 +180,10 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                     let loss = compute_fitness_penalties_ref(x, objective.as_ref());
                     return Ok((
                         format!(
-                            "AutoEQ {}: {} Pareto points, selected compromise scalar loss {:.6} \
+                            "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6} \
                              (compromise #{} of {}, scalar-best #{} by {})",
                             variant_label(self.variant),
-                            report.pareto_front.len(),
+                            judged.len(),
                             loss,
                             front_report.selection.selected_index + 1,
                             front_report.points.len(),
@@ -165,9 +196,9 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                 let loss = compute_fitness_penalties_ref(x, objective.as_ref());
                 Ok((
                     format!(
-                        "AutoEQ {}: {} Pareto points, selected compromise scalar loss {:.6}",
+                        "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6}",
                         variant_label(self.variant),
-                        report.pareto_front.len(),
+                        judged.len(),
                         loss
                     ),
                     loss,
@@ -224,6 +255,57 @@ fn compromise_distances(front: &[ParetoSolution], frame: &CompromiseFrame) -> Ve
         .collect()
 }
 
+/// Judge every front member through the shared envelope choke-point before
+/// any selection. Feasible members keep their rank/crowding identity but
+/// carry the repaired parameters with per-axis objectives re-evaluated at
+/// those parameters, so the reported score describes the projected
+/// candidate. Infeasible members are refused (never selected); an empty
+/// judged front is an explicit error, not a silent fallback.
+///
+/// # Errors
+///
+/// Returns a description when the spec or a member vector is invalid, or
+/// when no member survives the envelopes.
+fn judge_front_members(
+    backend_name: &str,
+    front: &[ParetoSolution],
+    objective: &ObjectiveData,
+    spec: &ConstraintSpec<'_>,
+) -> Result<Vec<ParetoSolution>, String> {
+    let xs: Vec<Vec<f64>> = front
+        .iter()
+        .enumerate()
+        .map(|(index, member)| {
+            member.x.as_slice().map(<[f64]>::to_vec).ok_or_else(|| {
+                format!("{backend_name} front member {index} has no parameter vector")
+            })
+        })
+        .collect::<Result<_, _>>()?;
+    let judged = judge_pareto_members(backend_name, &xs, objective, spec)?;
+    if judged.refused > 0 {
+        log::info!(
+            "{} judged {} front member(s): {} feasible, {} refused",
+            backend_name,
+            judged.submitted,
+            judged.members.len(),
+            judged.refused
+        );
+    }
+    Ok(judged
+        .members
+        .into_iter()
+        .map(|member| {
+            let source = &front[member.index];
+            ParetoSolution {
+                x: Array1::from(member.params),
+                objectives: member.objectives,
+                rank: source.rank,
+                crowding_distance: source.crowding_distance,
+            }
+        })
+        .collect())
+}
+
 /// Normalised-compromise selection: the front point closest to the ideal
 /// point after per-axis ideal/nadir normalisation.
 ///
@@ -232,6 +314,9 @@ fn compromise_distances(front: &[ParetoSolution], frame: &CompromiseFrame) -> Ve
 /// before choosing, while the compromise policy picks the balanced tradeoff
 /// inside the Pareto geometry. [`build_nsga_front_report`] records both
 /// choices side by side so callers can compare their quality.
+///
+/// Callers must pass the judged (feasible, repaired, re-evaluated) front
+/// from [`judge_front_members`], never the raw search front.
 fn choose_compromise<'a>(
     front: &'a [ParetoSolution],
     objective: &ObjectiveData,

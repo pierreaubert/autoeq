@@ -213,6 +213,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         optimizer_evidence,
         audibility_veto,
         veto_adjudication,
+        measurement_conditioning,
     ) = processed;
 
     // Prepend the alignment gain plugin without touching the inner chain's
@@ -235,6 +236,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         post_ir: raw_chain.post_ir,
         fir_temporal_masking: raw_chain.fir_temporal_masking,
         direct_early_late_correction: raw_chain.direct_early_late_correction,
+        joint_sub: raw_chain.joint_sub,
         target_curve: raw_chain.target_curve,
     };
 
@@ -249,6 +251,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         optimizer_evidence,
         audibility_veto,
         veto_adjudication,
+        measurement_conditioning,
     };
 
     Ok((

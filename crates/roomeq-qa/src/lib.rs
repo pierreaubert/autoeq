@@ -236,16 +236,12 @@ fn append_seed_record_at_rate(value: &serde_json::Value, sample_rate: f64) -> an
     append_seed_record(&record)
 }
 
-fn record_seed_distribution<E>(
+fn prepare_seed_distribution(
     config: &RoomConfig,
     result: &mut RoomOptimizationResult,
     selected_seed: u64,
     scores: &[QaSeedOutcome],
-    mut record: E,
-) -> anyhow::Result<()>
-where
-    E: FnMut(&serde_json::Value) -> anyhow::Result<()>,
-{
+) -> serde_json::Value {
     let details = scores
         .iter()
         .map(|outcome| {
@@ -290,7 +286,7 @@ where
     // artifact as well as in the returned DSP metadata.
     let mut channels: Vec<_> = result.channels.keys().collect();
     channels.sort();
-    record(&serde_json::json!({
+    let record = serde_json::json!({
         "status": "completed",
         "phase": "selected_artifact_run",
         "safe_output_scope": "correction_policy_acceptance_not_electrical_or_native_safety",
@@ -311,9 +307,9 @@ where
         "timestamp": result.metadata.timestamp,
         "channels": channels,
         "seed_distribution": &distribution,
-    }))?;
+    });
     result.metadata.qa_seed_distribution = Some(distribution);
-    Ok(())
+    record
 }
 
 fn seed_distribution(selected_seed: u64, outcomes: &[QaSeedOutcome]) -> QaSeedDistribution {
@@ -356,13 +352,50 @@ where
     });
     match result {
         Ok(mut result) => {
-            record_seed_distribution(
-                config,
-                &mut result,
-                selected_seed,
-                scores,
-                &mut record_outcome,
-            )?;
+            // Validate the selected processing payload before QA adds descriptive
+            // seed metadata. Never rebind an already stale processing claim.
+            let selected_output = result.to_dsp_chain_output();
+            let carried = selected_output.correction_decisions.clone();
+            if carried.is_some() {
+                roomeq_engine::room_result::FinalizedDecisions::from_output(&selected_output)
+                    .map_err(anyhow::Error::msg)?;
+            }
+            let completion = prepare_seed_distribution(config, &mut result, selected_seed, scores);
+            if let Some(mut ledger) = carried {
+                let mut output = result.to_dsp_chain_output();
+                output.correction_decisions = None;
+                let value = serde_json::to_value(&output)?;
+                let identity = roomeq_model::decision_ledger::canonical_value_identity(&value);
+                if let Some(evidence) = &ledger.acceptance_evidence {
+                    let sample_rate = evidence
+                        .payload
+                        .get("sample_rate_hz")
+                        .and_then(serde_json::Value::as_f64)
+                        .ok_or_else(|| {
+                            anyhow::anyhow!("QA acceptance diagnostics lack their sample rate")
+                        })?;
+                    ledger.acceptance_evidence = Some(
+                        roomeq_quality::graph_acceptance_evidence(&output, sample_rate)
+                            .map_err(anyhow::Error::msg)?,
+                    );
+                }
+                roomeq_model::decision_ledger::rebind_ledger_to_repackaged_graph(
+                    &mut ledger,
+                    &identity,
+                )
+                .map_err(anyhow::Error::msg)?;
+                ledger.payload_binding = Some(roomeq_model::payload_binding::PayloadBinding::new(
+                    &value,
+                    &identity.fingerprint,
+                ));
+                output.correction_decisions = Some(ledger);
+                result.finalized_decisions = Some(
+                    roomeq_engine::room_result::FinalizedDecisions::from_output(&output)
+                        .map_err(anyhow::Error::msg)?,
+                );
+            }
+            // The success artifact is emitted only after the returned graph is bound.
+            record_outcome(&completion)?;
             Ok(result)
         }
         Err(error) => {
@@ -469,6 +502,7 @@ mod tests {
 
     fn seed_fixture(post_score: f64) -> RoomOptimizationResult {
         RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::new(),
             channel_results: HashMap::new(),
             deployed_source_curves: HashMap::new(),
@@ -480,6 +514,61 @@ mod tests {
             }))
             .unwrap(),
         }
+    }
+
+    #[test]
+    fn selected_seed_metadata_keeps_final_payload_binding() {
+        use roomeq_engine::room_result::FinalizedDecisions;
+        use roomeq_workflow::final_ledger::{ReconciliationEvents, finalize_output_ledger};
+
+        let mut selected = seed_fixture(1.5);
+        let mut output = selected.to_dsp_chain_output();
+        finalize_output_ledger(&mut output, &[], &ReconciliationEvents::default()).unwrap();
+        let evidence = roomeq_quality::graph_acceptance_evidence(&output, 48_000.0).unwrap();
+        output
+            .correction_decisions
+            .as_mut()
+            .unwrap()
+            .acceptance_evidence = Some(evidence);
+        selected.finalized_decisions = Some(FinalizedDecisions::from_output(&output).unwrap());
+        let config = RoomConfig::default();
+        let (_, scores) =
+            super::select_median_seed_recording(&config, |_| Ok(seed_fixture(1.0)), |_| Ok(()))
+                .unwrap();
+
+        let result =
+            super::finish_selected_seed(&config, 42, &scores, Ok(selected), |_| Ok(())).unwrap();
+        assert!(result.metadata.qa_seed_distribution.is_some());
+        let delivered = result.to_dsp_chain_output();
+        assert!(FinalizedDecisions::from_output(&delivered).is_ok());
+        assert!(
+            delivered
+                .correction_decisions
+                .as_ref()
+                .unwrap()
+                .payload_binding
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn stale_selected_seed_cannot_emit_completion_record() {
+        use roomeq_engine::room_result::FinalizedDecisions;
+        use roomeq_workflow::final_ledger::{ReconciliationEvents, finalize_output_ledger};
+
+        let mut selected = seed_fixture(1.5);
+        let mut output = selected.to_dsp_chain_output();
+        finalize_output_ledger(&mut output, &[], &ReconciliationEvents::default()).unwrap();
+        selected.finalized_decisions = Some(FinalizedDecisions::from_output(&output).unwrap());
+        selected.metadata.iterations += 1;
+        let mut records = Vec::new();
+        let result =
+            super::finish_selected_seed(&RoomConfig::default(), 42, &[], Ok(selected), |record| {
+                records.push(record.clone());
+                Ok(())
+            });
+        assert!(result.is_err());
+        assert!(records.is_empty());
     }
 
     #[test]
@@ -739,6 +828,7 @@ mod tests {
                     },
                 }];
                 Ok(RoomOptimizationResult {
+                    finalized_decisions: None,
                     channels: HashMap::new(),
                     channel_results: HashMap::new(),
                     deployed_source_curves: HashMap::new(),
@@ -778,6 +868,7 @@ mod tests {
             }))
             .unwrap();
             Ok(RoomOptimizationResult {
+                finalized_decisions: None,
                 channels: HashMap::new(),
                 channel_results: HashMap::new(),
                 deployed_source_curves: HashMap::new(),

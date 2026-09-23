@@ -21,12 +21,13 @@ const CHANNELS_5_1_4: [(&str, &str); 10] = [
     ("TRR", "top_rear_right"),
 ];
 
-/// Index of the LFE channel in [`CHANNELS_5_1_4`]. The LFE keeps full-range
-/// content by design; the nine satellites below are high-passed so their
-/// mutually coherent low ends cannot pile ~+21 dB into the sub bus and trip
-/// the structural safety gate. Crossover attenuation itself is covered by
-/// topology fixtures, not by this throughput benchmark.
+/// Index of the full-range LFE measurement in [`CHANNELS_5_1_4`].
+/// Satellite acoustic rolloff does not attenuate redirected electrical inputs.
 const LFE_CHANNEL_INDEX: usize = 3;
+// Bound the sum of ten simultaneous programme inputs to unit peak before
+// route/filter gain. Final electrical checks still enforce the actual graph's
+// output ceiling and the unchanged default maximum safety attenuation.
+const INPUT_PEAK: f64 = 1.0 / CHANNELS_5_1_4.len() as f64;
 /// Satellites carry no useful content below this corner in the fixture.
 const SATELLITE_HIGHPASS_HZ: f64 = 80.0;
 /// Rolloff applied below the satellite corner (24 dB per octave).
@@ -122,6 +123,10 @@ fn config_5_1_4(threads: usize) -> RoomConfig {
             refine: false,
             seed: Some(42),
             parallel_threads: Some(threads),
+            finalization: roomeq_model::FinalizationConfig {
+                default_input_peak: INPUT_PEAK,
+                ..Default::default()
+            },
             ..Default::default()
         },
         provenance: Default::default(),

@@ -838,6 +838,209 @@ pub fn constrain_candidate(
     })
 }
 
+/// Encode a [`FrequencyQPolicy`](super::params::FrequencyQPolicy) as
+/// center-evaluation knots for [`enforce_local_q_at_centers`].
+///
+/// Bound-time conservatism caps whole frequency intervals; center
+/// evaluation caps each filter at its own center. The faithful center
+/// rule steps at the lower hinge: centers below it cap low, centers at or
+/// above it cap high, because centers at or above the lower hinge can
+/// reach the guarded band. Single-sided policies step against the finite
+/// global cap. The step is a one-ulp transition: knot validation needs
+/// strictly increasing frequencies, and a one-ulp sliver interpolates
+/// instead of stepping only for centers inside it.
+///
+/// Returns `None` when the policy declares nothing (global cap only).
+///
+/// # Errors
+///
+/// Returns a description when a declared hinge or cap is incoherent, or
+/// when a single-sided policy meets an infinite global cap it cannot step
+/// against: dropping a declared cap silently would be worse than refusing.
+pub fn policy_local_q_knots(
+    policy: &super::params::FrequencyQPolicy,
+    global_max_q: f64,
+) -> Result<Option<Vec<(f64, f64)>>, String> {
+    let hinge = |freq: Option<f64>,
+                 cap: Option<f64>,
+                 name: &str|
+     -> Result<Option<(f64, f64)>, String> {
+        match (freq, cap) {
+            (None, None) => Ok(None),
+            (Some(frequency), Some(limit)) => {
+                if !frequency.is_finite() || frequency <= 0.0 || !limit.is_finite() || limit <= 0.0
+                {
+                    return Err(format!(
+                        "local-Q policy {name} needs a finite positive hinge and cap"
+                    ));
+                }
+                Ok(Some((frequency, limit)))
+            }
+            _ => Err(format!(
+                "local-Q policy {name} needs both hinge and cap, or neither"
+            )),
+        }
+    };
+    let low = hinge(policy.schroeder_hz, policy.low_max_q, "low")?;
+    let high = hinge(policy.high_start_hz, policy.high_max_q, "high")?;
+    let step = |hinge_hz: f64, below: f64, above: f64| -> Result<Vec<(f64, f64)>, String> {
+        let knots = vec![(hinge_hz, below), (hinge_hz.next_up(), above)];
+        validate_envelope_knots(&knots, "local_q", true)?;
+        Ok(knots)
+    };
+    match (low, high) {
+        (None, None) => Ok(None),
+        (Some((schroeder_hz, low_max_q)), Some((high_start_hz, high_max_q))) => {
+            step(schroeder_hz.min(high_start_hz), low_max_q, high_max_q).map(Some)
+        }
+        (Some((schroeder_hz, low_max_q)), None) => {
+            if !global_max_q.is_finite() || global_max_q <= 0.0 {
+                return Err(String::from(
+                    "local-Q policy declares only a low cap under an unbounded global cap: no faithful knots exist",
+                ));
+            }
+            step(schroeder_hz, low_max_q, global_max_q).map(Some)
+        }
+        (None, Some((high_start_hz, high_max_q))) => {
+            if !global_max_q.is_finite() || global_max_q <= 0.0 {
+                return Err(String::from(
+                    "local-Q policy declares only a high cap under an unbounded global cap: no faithful knots exist",
+                ));
+            }
+            step(high_start_hz, global_max_q, high_max_q).map(Some)
+        }
+    }
+}
+
+/// Owned constraint spec built from optimizer params and objective envelopes.
+///
+/// [`ConstraintSpec`] borrows its knots; this owner carries the
+/// policy-derived local-Q knots so dispatchers and engine emission share
+/// one spec-building path instead of drifting apart.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct OwnedConstraintSpec {
+    /// Global Q cap applied with the local envelope (`+inf` disables).
+    pub global_max_q: f64,
+    /// Local Q caps as owned `(frequency_hz, max_q)` knots.
+    pub local_q_knots: Option<Vec<(f64, f64)>>,
+    /// Dense-grid subdivisions per coarse bin.
+    pub subdivisions_per_bin: usize,
+}
+
+impl OwnedConstraintSpec {
+    /// Build the enforcement spec from optimizer params.
+    ///
+    /// The global cap is `params.max_q`; local caps come from the
+    /// frequency-Q policy when declared. Composite knots fall back to the
+    /// objective's own gain envelopes inside [`constrain_candidate`], so an
+    /// absent envelope everywhere keeps legacy results.
+    ///
+    /// # Errors
+    ///
+    /// Returns a description when the global cap or the policy knots are
+    /// incoherent.
+    pub fn from_params(params: &crate::OptimParams) -> Result<Self, String> {
+        if !(params.max_q > 0.0) && params.max_q != f64::INFINITY {
+            return Err(format!(
+                "constraint spec needs a finite positive global_max_q or +inf (got {})",
+                params.max_q
+            ));
+        }
+        let local_q_knots = match &params.frequency_q_policy {
+            Some(policy) => policy_local_q_knots(policy, params.max_q)?,
+            None => None,
+        };
+        Ok(Self {
+            global_max_q: params.max_q,
+            local_q_knots,
+            subdivisions_per_bin: VALIDATED_SUBDIVISIONS_PER_BIN,
+        })
+    }
+
+    /// Borrow this owner as a [`ConstraintSpec`].
+    pub fn as_spec(&self) -> ConstraintSpec<'_> {
+        ConstraintSpec {
+            global_max_q: self.global_max_q,
+            local_q_knots: self.local_q_knots.as_deref(),
+            boost_knots: None,
+            cut_knots: None,
+            subdivisions_per_bin: self.subdivisions_per_bin,
+        }
+    }
+}
+
+/// One candidate after shared finalization.
+///
+/// `params` are the repaired parameters actually emitted; `loss` is the
+/// scalar fitness re-verified at those parameters, never the stale winner
+/// loss. `constrained` carries the per-filter adjustments and the
+/// feasibility evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FinalizedCandidate {
+    /// Candidate identity carried through finalization.
+    pub candidate_id: String,
+    /// Repaired parameters actually emitted.
+    pub params: Vec<f64>,
+    /// Scalar fitness re-verified at the repaired parameters.
+    pub loss: f64,
+    /// Projection adjustments and feasibility evidence.
+    pub constrained: ConstrainedCandidate,
+}
+
+/// Finalize one optimizer winner through the shared envelope choke-point.
+///
+/// Gains project onto their envelopes, Q projects onto the global and
+/// local caps, and the composite response is checked on the validated
+/// grid. Repairs re-verify the scalar fitness at the repaired parameters;
+/// composite breaches refuse with the breach evidence instead of emitting
+/// a violating candidate under a stale loss.
+///
+/// # Errors
+///
+/// Returns the refusal reason when envelopes are incoherent or the
+/// repaired response still breaches the composite envelope.
+pub fn finalize_candidate(
+    candidate_id: &str,
+    x: &[f64],
+    data: &ObjectiveData,
+    spec: &ConstraintSpec<'_>,
+) -> Result<FinalizedCandidate, String> {
+    let constrained = constrain_candidate(candidate_id, x, data, spec)?;
+    if !constrained.feasible {
+        let mut breaches: Vec<String> = constrained
+            .composite_breaches
+            .iter()
+            .take(4)
+            .map(|breach| {
+                format!(
+                    "{:.1} Hz: {:.2} dB vs {:.2} dB {}",
+                    breach.frequency_hz,
+                    breach.observed_db,
+                    breach.bound_db,
+                    if breach.boost { "boost" } else { "cut" }
+                )
+            })
+            .collect();
+        if constrained.composite_breaches.len() > breaches.len() {
+            breaches.push(format!(
+                "and {} more",
+                constrained.composite_breaches.len() - breaches.len()
+            ));
+        }
+        return Err(format!(
+            "candidate '{candidate_id}' refused: composite gain envelope breached at {}",
+            breaches.join("; ")
+        ));
+    }
+    let loss = super::compute::compute_fitness_penalties_ref(&constrained.params, data);
+    Ok(FinalizedCandidate {
+        candidate_id: String::from(candidate_id),
+        params: constrained.params.clone(),
+        loss,
+        constrained,
+    })
+}
+
 /// Feasibility of one Pareto front member under the shared rules.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ParetoFeasibility {
@@ -878,6 +1081,155 @@ pub fn check_pareto_feasibility(
             })
         })
         .collect()
+}
+
+/// One Pareto member judged feasible through the shared choke-point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JudgedParetoMember {
+    /// Position within the submitted front.
+    pub index: usize,
+    /// Repaired parameters (bit-identical input when already feasible).
+    pub params: Vec<f64>,
+    /// Per-axis objectives re-evaluated at `params`, so selection judges
+    /// the score the repaired candidate actually keeps.
+    pub objectives: Vec<f64>,
+}
+
+/// Outcome of judging one submitted Pareto front before selection.
+#[derive(Debug, Clone, PartialEq)]
+pub struct JudgedParetoFront {
+    /// Feasible members in submitted order.
+    pub members: Vec<JudgedParetoMember>,
+    /// Submitted member count.
+    pub submitted: usize,
+    /// Refused (infeasible) member count.
+    pub refused: usize,
+}
+
+/// Judge every submitted Pareto vector through the shared choke-point
+/// before selection.
+///
+/// Feasible members carry the repaired parameters with per-axis objectives
+/// re-evaluated at those parameters. Infeasible members are refused and
+/// excluded from selection; an empty judged front is an explicit error, not
+/// a silent fallback. Non-PEQ layouts pass through untouched (feasible),
+/// matching [`constrain_candidate`].
+///
+/// # Errors
+///
+/// Returns a description when the spec or a member vector is invalid, or
+/// when no member survives the envelopes.
+pub fn judge_pareto_members(
+    backend_name: &str,
+    xs: &[Vec<f64>],
+    data: &ObjectiveData,
+    spec: &ConstraintSpec<'_>,
+) -> Result<JudgedParetoFront, String> {
+    let mut members = Vec::with_capacity(xs.len());
+    let mut refused = 0_usize;
+    for (index, raw) in xs.iter().enumerate() {
+        let constrained = constrain_candidate(&format!("{backend_name}-{index}"), raw, data, spec)?;
+        if !constrained.feasible {
+            refused += 1;
+            continue;
+        }
+        let objectives = super::compute::compute_pareto_objectives(&constrained.params, data);
+        members.push(JudgedParetoMember {
+            index,
+            params: constrained.params,
+            objectives,
+        });
+    }
+    if members.is_empty() {
+        return Err(format!(
+            "{backend_name} refused all {} front member(s): no feasible candidate under the envelopes",
+            xs.len()
+        ));
+    }
+    Ok(JudgedParetoFront {
+        members,
+        submitted: xs.len(),
+        refused,
+    })
+}
+
+/// One out-of-budget joint control (gain, delay, crossover, or all-pass
+/// parameter) at acceptance.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BudgetBreach {
+    /// Position within the candidate vector.
+    pub index: usize,
+    /// Emitted value.
+    pub observed: f64,
+    /// Configured lower budget.
+    pub lower: f64,
+    /// Configured upper budget.
+    pub upper: f64,
+}
+
+/// Verify a joint/gain candidate against its configured budgets at
+/// acceptance: every control finite and inside its bound.
+///
+/// PEQ layouts are judged by [`constrain_candidate`]; driver, multi-sub,
+/// delay, and all-pass layouts carry gains/delays/crossovers rather than
+/// filter triplets, so acceptance checks the budgets the search was given.
+/// Refuses with the breaching controls instead of emitting an out-of-budget
+/// winner. Backend searches must respect their bounds; a breach reports
+/// backend misbehavior, never a verdict about the room.
+///
+/// # Errors
+///
+/// Returns a description when the vector and bounds disagree in length, a
+/// control is non-finite, or any control leaves its budget.
+pub fn verify_joint_budgets(
+    candidate_id: &str,
+    x: &[f64],
+    lower: &[f64],
+    upper: &[f64],
+) -> Result<(), String> {
+    if x.len() != lower.len() || x.len() != upper.len() {
+        return Err(format!(
+            "candidate '{candidate_id}' budget check needs matching lengths: x={}, lower={}, upper={}",
+            x.len(),
+            lower.len(),
+            upper.len()
+        ));
+    }
+    let mut breaches: Vec<BudgetBreach> = Vec::new();
+    for index in 0..x.len() {
+        let (value, lo, hi) = (x[index], lower[index], upper[index]);
+        if !value.is_finite() || !lo.is_finite() || !hi.is_finite() || value < lo || value > hi {
+            breaches.push(BudgetBreach {
+                index,
+                observed: value,
+                lower: lo,
+                upper: hi,
+            });
+        }
+    }
+    if breaches.is_empty() {
+        return Ok(());
+    }
+    let detail = breaches
+        .iter()
+        .take(4)
+        .map(|breach| {
+            format!(
+                "[{}]: {:.4} outside [{:.4}, {:.4}]",
+                breach.index, breach.observed, breach.lower, breach.upper
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    let more = if breaches.len() > 4 {
+        format!(" and {} more", breaches.len() - 4)
+    } else {
+        String::new()
+    };
+    Err(format!(
+        "candidate '{candidate_id}' refused: {} joint budget breach(es): {detail}{more}",
+        breaches.len()
+    ))
 }
 
 /// Outcome of one bounded optimization run.
@@ -1443,5 +1795,168 @@ mod constraint_envelope_tests {
         let infeasible = classify_outcome(&converged, &stacked);
         assert!(!infeasible.diagnostics.is_empty());
         assert!(!infeasible.detail.is_empty());
+    }
+
+    fn breaching_objective() -> ObjectiveData {
+        // Tight composite boost envelope: a +6 dB peak at 1 kHz breaches.
+        ObjectiveDataBuilder::new(
+            Array1::from_vec(log_grid()),
+            Array1::zeros(200),
+            Array1::from_elem(200, 5.0),
+            48_000.0,
+            PeqModel::Pk,
+            LossType::SpeakerFlat,
+        )
+        .max_db(12.0)
+        .min_db(0.0)
+        .freq_range(20.0, 20_000.0)
+        .max_boost_envelope(vec![(20.0, 1.0), (20_000.0, 1.0)])
+        .build()
+        .expect("valid test objective")
+    }
+
+    /// A3 regression: a candidate breaching its composite envelope must be
+    /// refused at finalization, never emitted with the stale winner loss.
+    #[test]
+    fn roadmap_correction_finalize_refuses_composite_breach() {
+        let data = breaching_objective();
+        // Two stacked +6 dB peaks at 1 kHz: per-filter repair clamps each to
+        // +1 dB, but the summed composite still breaches the +1 dB envelope.
+        let x = vec![1000.0_f64.log10(), 2.0, 6.0, 1000.0_f64.log10(), 2.0, 6.0];
+        let spec = ConstraintSpec::unconstrained();
+        let error = finalize_candidate("breach", &x, &data, &spec).expect_err("breach refused");
+        assert!(error.contains("composite"), "{error}");
+    }
+
+    /// Repair projects gains onto envelopes and re-verifies the loss at the
+    /// repaired parameters; compliant candidates pass through untouched.
+    #[test]
+    fn roadmap_correction_finalize_repairs_and_reverifies() {
+        let data = breaching_objective();
+        // Small boost inside the envelope: no repair, loss re-verified.
+        let x = vec![1000.0_f64.log10(), 2.0, 0.5];
+        let finalized =
+            finalize_candidate("compliant", &x, &data, &ConstraintSpec::unconstrained())
+                .expect("compliant candidate finalizes");
+        assert_eq!(finalized.params, x);
+        let expected = super::super::compute::compute_fitness_penalties_ref(&x, &data);
+        assert!(
+            (finalized.loss - expected).abs() < 1e-12,
+            "loss re-verified"
+        );
+        // Over-boost repaired onto the envelope with a fresh loss.
+        let tight = ObjectiveDataBuilder::new(
+            Array1::from_vec(log_grid()),
+            Array1::zeros(200),
+            Array1::from_elem(200, 5.0),
+            48_000.0,
+            PeqModel::Pk,
+            LossType::SpeakerFlat,
+        )
+        .max_db(12.0)
+        .min_db(0.0)
+        .freq_range(20.0, 20_000.0)
+        .max_boost_envelope(vec![(20.0, 1.0), (20_000.0, 1.0)])
+        .min_cut_envelope(vec![(20.0, -12.0), (20_000.0, -12.0)])
+        .build()
+        .expect("valid test objective");
+        // Per-filter repair clamps the peak to the envelope; the composite
+        // of one clamped +6 dB peak still breaches +1 dB, so this refuses.
+        // Use a barely-over peak instead: +1.5 dB clamps to +1 dB and the
+        // composite passes, proving repair-then-accept.
+        let barely = vec![1000.0_f64.log10(), 2.0, 1.5];
+        let finalized = finalize_candidate(
+            "repaired",
+            &barely,
+            &tight,
+            &ConstraintSpec::unconstrained(),
+        )
+        .expect("repaired candidate finalizes");
+        assert!(
+            finalized.constrained.gain_adjustments.len() == 1,
+            "one gain repair recorded"
+        );
+        let expected =
+            super::super::compute::compute_fitness_penalties_ref(&finalized.params, &tight);
+        assert!(
+            (finalized.loss - expected).abs() < 1e-12,
+            "loss matches repaired params"
+        );
+    }
+
+    /// Local-Q policy knots mirror bound-time conservatism at centers.
+    #[test]
+    fn roadmap_correction_policy_knots_mirror_bounds() {
+        use super::super::params::FrequencyQPolicy;
+        // Both sides declared: below-Schroeder caps low, guard band caps high.
+        let policy = FrequencyQPolicy {
+            schroeder_hz: Some(200.0),
+            low_max_q: Some(8.0),
+            high_start_hz: Some(1000.0),
+            high_max_q: Some(2.0),
+        };
+        let knots = policy_local_q_knots(&policy, 12.0)
+            .expect("valid policy knots")
+            .expect("policy declares knots");
+        assert!((envelope_bound_at(&knots, 100.0) - 8.0).abs() < 1e-9);
+        assert!((envelope_bound_at(&knots, 500.0) - 2.0).abs() < 1e-9);
+        assert!((envelope_bound_at(&knots, 5000.0) - 2.0).abs() < 1e-9);
+        // Overlapping declarations step at the lower hinge: centers that can
+        // reach the guard still cap high.
+        let overlap = policy_local_q_knots(
+            &FrequencyQPolicy {
+                schroeder_hz: Some(1000.0),
+                low_max_q: Some(8.0),
+                high_start_hz: Some(200.0),
+                high_max_q: Some(2.0),
+            },
+            12.0,
+        )
+        .expect("overlapping policy still encodes")
+        .expect("overlap declares knots");
+        assert!((envelope_bound_at(&overlap, 100.0) - 8.0).abs() < 1e-9);
+        assert!((envelope_bound_at(&overlap, 500.0) - 2.0).abs() < 1e-9);
+        // Single-sided policies step against the finite global cap.
+        let low_only = policy_local_q_knots(
+            &FrequencyQPolicy {
+                schroeder_hz: Some(200.0),
+                low_max_q: Some(8.0),
+                high_start_hz: None,
+                high_max_q: None,
+            },
+            12.0,
+        )
+        .expect("low-only policy encodes")
+        .expect("low-only declares knots");
+        assert!((envelope_bound_at(&low_only, 100.0) - 8.0).abs() < 1e-9);
+        assert!((envelope_bound_at(&low_only, 5000.0) - 12.0).abs() < 1e-9);
+        // No policy: no local knots, global cap only.
+        assert!(
+            policy_local_q_knots(
+                &FrequencyQPolicy {
+                    schroeder_hz: None,
+                    low_max_q: None,
+                    high_start_hz: None,
+                    high_max_q: None,
+                },
+                12.0
+            )
+            .expect("empty policy is valid")
+            .is_none()
+        );
+        // A single-sided policy under an infinite global cap cannot encode:
+        // refuse instead of silently dropping the declared cap.
+        assert!(
+            policy_local_q_knots(
+                &FrequencyQPolicy {
+                    schroeder_hz: Some(200.0),
+                    low_max_q: Some(8.0),
+                    high_start_hz: None,
+                    high_max_q: None,
+                },
+                f64::INFINITY
+            )
+            .is_err()
+        );
     }
 }

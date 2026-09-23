@@ -412,6 +412,86 @@ fn phase_linear_returns_required_sidecar_and_in_memory_coefficients() {
 }
 
 #[test]
+fn short_phase_linear_firs_realize_broad_correction() {
+    let frequency = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 160);
+    let spl: Vec<f64> = frequency
+        .iter()
+        .map(|frequency| {
+            80.0 + 4.0 * (-0.5 * (frequency.ln() - 300.0_f64.ln()).powi(2) / 0.7_f64.powi(2)).exp()
+        })
+        .collect();
+    let curve = Curve {
+        freq: frequency,
+        spl: Array1::from(spl),
+        ..Curve::default()
+    };
+    let prepared = prepared(curve.clone());
+    let features = preprocessed(&curve);
+    let resources = EqResources::default();
+    for duration_ms in [5_u64, 10] {
+        let mut room_config = config();
+        let taps = duration_ms as usize * 48;
+        room_config.optimizer.fir.as_mut().unwrap().taps = taps;
+        room_config.optimizer.max_freq = 1_000.0;
+        let target = build_target_context("left", &room_config, &curve, None);
+        let result = process_fir_channel(FirChannelRequest {
+            mode: FirChannelMode::PhaseLinear,
+            channel_name: "left",
+            prepared: &prepared,
+            room_config: &room_config,
+            sample_rate: 48_000.0,
+            target: &target,
+            preprocessed: &features,
+            optimizer: &room_config.optimizer,
+            eq_resources: &resources,
+            sidecar_reference: reference("short_fir.wav"),
+            callback: None,
+        })
+        .unwrap();
+        let coefficients = result.fir_coeffs.as_ref().unwrap();
+        assert_eq!(coefficients.len(), taps, "{duration_ms} ms");
+        assert!(
+            result
+                .convolution_sidecar
+                .as_ref()
+                .is_some_and(|sidecar| sidecar.required)
+        );
+        assert!(
+            result
+                .channel
+                .plugins
+                .iter()
+                .any(|plugin| plugin.plugin_type == "convolution")
+        );
+        let peak_index = curve
+            .freq
+            .iter()
+            .enumerate()
+            .min_by(|(_, left), (_, right)| {
+                (*left - 300.0).abs().total_cmp(&(*right - 300.0).abs())
+            })
+            .unwrap()
+            .0;
+        let frequency = curve.freq[peak_index];
+        let (real, imaginary) = coefficients.iter().enumerate().fold(
+            (0.0, 0.0),
+            |(real, imaginary), (index, coefficient)| {
+                let angle = -std::f64::consts::TAU * frequency * index as f64 / 48_000.0;
+                (
+                    real + coefficient * angle.cos(),
+                    imaginary + coefficient * angle.sin(),
+                )
+            },
+        );
+        let correction_db = 20.0 * real.hypot(imaginary).log10();
+        assert!(
+            correction_db.is_finite() && correction_db < -0.5,
+            "{duration_ms} ms: {correction_db} dB"
+        );
+    }
+}
+
+#[test]
 fn hybrid_returns_iir_filters_and_required_residual_sidecar() {
     let curve = curve(false);
     let prepared = prepared(curve.clone());
@@ -1435,6 +1515,8 @@ fn mixed_phase_with_phase_data_returns_optional_sidecar() {
         pre_ringing_threshold_db: -30.0,
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 1.0 / 6.0,
+        assessment: Default::default(),
+        max_correction_latency_ms: None,
     });
     let resources = EqResources::default();
     let target = build_target_context("left", &room_config, &curve, None);
@@ -1513,4 +1595,287 @@ fn mixed_phase_adapts_depth_to_preserve_phase_only_magnitude() {
 
     assert!(applied_depth > 0.0 && applied_depth < 1.0);
     assert!(deviation <= MAX_PHASE_ONLY_MAGNITUDE_DEVIATION_DB);
+}
+
+fn ceiling_optimizer(max_db: f64) -> OptimizerConfig {
+    OptimizerConfig {
+        max_db,
+        max_boost_envelope: None,
+        ..OptimizerConfig::default()
+    }
+}
+
+fn ceiling_grid() -> Array1<f64> {
+    Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 64)
+}
+
+#[test]
+fn roadmap_correction_fir_checks_ceiling_away_from_response_peak() {
+    let grid = Array1::from_vec(vec![100.0, 12_000.0]);
+    let mut optimizer = ceiling_optimizer(6.0);
+    optimizer.max_boost_envelope = Some(vec![(100.0, 6.0), (12_000.0, 0.0)]);
+    // This two-tap FIR peaks at +3.52 dB in bass, but its smaller
+    // +1.85 dB treble response violates the local 0 dB ceiling.
+    let report = check_realized_fir_ceiling(&[1.2, 0.3], &[grid], 48_000.0, &optimizer);
+    assert!(
+        !report.within_ceiling,
+        "every bin must respect its local bound"
+    );
+    assert_eq!(report.peak_freq_hz, 12_000.0);
+    assert_eq!(report.bound_db, 0.0);
+}
+
+#[test]
+fn roadmap_correction_fir_rejects_invalid_evaluation_support() {
+    let optimizer = ceiling_optimizer(6.0);
+    for grid in [
+        Array1::from_vec(vec![100.0, f64::NAN]),
+        Array1::from_vec(vec![100.0, 30_000.0]),
+        Array1::from_vec(vec![100.0, 50.0]),
+    ] {
+        assert!(!check_realized_fir_ceiling(&[1.0], &[grid], 48_000.0, &optimizer).within_ceiling);
+    }
+    assert!(
+        !check_realized_fir_ceiling(&[], &[ceiling_grid()], 48_000.0, &optimizer).within_ceiling
+    );
+}
+
+#[test]
+fn realized_fir_ceiling_catches_overshoot() {
+    let grid = ceiling_grid();
+    let optimizer = ceiling_optimizer(4.0);
+    // Unity tap: 0 dB everywhere, within the 4 dB ceiling.
+    let flat = check_realized_fir_ceiling(&[1.0], &[grid.clone()], 48_000.0, &optimizer);
+    assert!(flat.within_ceiling, "identity FIR must pass: {flat:?}");
+    assert!(flat.peak_db.abs() < 1e-9, "{}", flat.peak_db);
+    // x2 gain: +6.02 dB everywhere, over the 4 dB ceiling.
+    let hot = check_realized_fir_ceiling(&[2.0], &[grid.clone()], 48_000.0, &optimizer);
+    assert!(!hot.within_ceiling, "overshooting FIR must breach");
+    assert!((hot.peak_db - 6.0206).abs() < 1e-3, "{}", hot.peak_db);
+    assert_eq!(hot.bound_db, 4.0);
+    // A configured envelope overrides the flat ceiling.
+    let mut enveloped = ceiling_optimizer(12.0);
+    enveloped.max_boost_envelope = Some(vec![(20.0, 1.0), (20_000.0, 1.0)]);
+    let breach = check_realized_fir_ceiling(&[1.5], &[grid.clone()], 48_000.0, &enveloped);
+    assert!(!breach.within_ceiling, "+3.5 dB over a 1 dB envelope");
+    assert!((breach.bound_db - 1.0).abs() < 1e-9, "{}", breach.bound_db);
+    // Fail closed on non-finite taps.
+    let invalid = check_realized_fir_ceiling(&[1.0, f64::NAN], &[grid], 48_000.0, &optimizer);
+    assert!(!invalid.within_ceiling, "non-finite taps must breach");
+}
+
+#[test]
+fn realized_fir_ceiling_reverts_to_neutral_with_reason() {
+    let grid = ceiling_grid();
+    let optimizer = ceiling_optimizer(4.0);
+    let (taps, note) = enforce_realized_fir_ceiling(
+        "test",
+        vec![2.0],
+        vec![1.0],
+        &[grid.clone()],
+        48_000.0,
+        &optimizer,
+    )
+    .expect("neutral fallback saves the emission");
+    assert_eq!(taps, vec![1.0]);
+    let reason = note.expect("revert must be recorded");
+    assert!(reason.contains("reverted to neutral"), "{reason}");
+    assert!(reason.contains("breaches"), "{reason}");
+    // A clean winner passes through untouched with no note.
+    let (taps, note) = enforce_realized_fir_ceiling(
+        "test",
+        vec![1.0],
+        vec![1.0],
+        &[grid.clone()],
+        48_000.0,
+        &optimizer,
+    )
+    .expect("clean winner");
+    assert_eq!(taps, vec![1.0]);
+    assert!(note.is_none());
+    // A breaching neutral refuses explicitly instead of emitting.
+    let error =
+        enforce_realized_fir_ceiling("test", vec![2.0], vec![2.0], &[grid], 48_000.0, &optimizer)
+            .expect_err("double breach must refuse");
+    assert!(error.to_string().contains("refused"), "{error}");
+}
+
+#[test]
+fn hybrid_linear_fir_emission_respects_ceiling() {
+    use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
+    // Deep narrow dip: a full correction needs ~+12 dB, far over the 2 dB
+    // ceiling. The regularized bank designs stay under it here, so this
+    // pins the emission invariant: whatever wins, the emitted taps respect
+    // the ceiling and the evidence carries the re-verified objective.
+    let frequency = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 96);
+    let spl = frequency.mapv(|f| 80.0 - 12.0 * (-((f - 120.0) / 8.0).powi(2)).exp());
+    let dip = Curve {
+        freq: frequency,
+        spl,
+        ..Curve::default()
+    };
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(dip.clone(), vec![dip.clone(), dip.clone()], true),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
+    );
+    let mut room_config = config();
+    room_config.optimizer.algorithm = "autoeq:cobyla".into();
+    room_config.optimizer.max_iter = 60;
+    room_config.optimizer.seed = Some(7);
+    room_config.optimizer.max_db = 2.0;
+    room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+        strategy: MultiMeasurementStrategy::WeightedSum,
+        weights: Some(vec![0.5, 0.5]),
+        ..Default::default()
+    });
+    let target = build_target_context("left", &room_config, &dip, None);
+    let features = preprocessed(&dip);
+    let resources = EqResources::default();
+    let request = FirChannelRequest {
+        mode: FirChannelMode::Hybrid,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room_config.optimizer,
+        eq_resources: &resources,
+        sidecar_reference: reference("ceiling.wav"),
+        callback: None,
+    };
+    let mut representative = vec![0.0; 64];
+    representative[32] = 1.0;
+    let progress = progress::FirProgress::new(None);
+    let (coefficients, _evidence) =
+        spatial_linear::optimize(&request, &dip, &[], representative, &progress)
+            .expect("bank search succeeds");
+    let check = check_realized_fir_ceiling(
+        &coefficients,
+        &[dip.freq.clone()],
+        48_000.0,
+        &room_config.optimizer,
+    );
+    assert!(
+        check.within_ceiling,
+        "emitted taps respect the ceiling: {check:?}"
+    );
+}
+
+#[test]
+fn roadmap_correction_fir_records_objective_normalization() {
+    use roomeq_model::{MultiMeasurementConfig, NormalizationPopulation};
+
+    for phase in ["linear", "minimum", "kirkeby"] {
+        let mut first = curve(true);
+        first.spl.fill(80.0);
+        let mut second = first.clone();
+        second.spl.fill(86.0);
+        let prepared = PreparedChannelInput::new(
+            PreparedChannelMeasurements::new(first.clone(), vec![first.clone(), second], true),
+            None,
+            PreparedCea2034::default(),
+            EqResources::default(),
+        );
+        let mut room = config();
+        room.optimizer.algorithm = "autoeq:cobyla".into();
+        room.optimizer.seed = Some(7);
+        room.optimizer.multi_measurement = Some(MultiMeasurementConfig::default());
+        room.optimizer.fir.as_mut().unwrap().phase = phase.into();
+        let target = build_target_context("left", &room, &first, None);
+        let features = preprocessed(&first);
+        let resources = EqResources::default();
+        let request = FirChannelRequest {
+            mode: FirChannelMode::Hybrid,
+            channel_name: "left",
+            prepared: &prepared,
+            room_config: &room,
+            sample_rate: 48_000.0,
+            target: &target,
+            preprocessed: &features,
+            optimizer: &room.optimizer,
+            eq_resources: &resources,
+            sidecar_reference: reference("normalization.wav"),
+            callback: None,
+        };
+        let progress = progress::FirProgress::new(None);
+        let (_, evidence) = if phase == "linear" {
+            let mut neutral = vec![0.0; 64];
+            neutral[32] = 1.0;
+            spatial_linear::optimize(&request, &first, &[], neutral, &progress)
+        } else {
+            spatial_realized::optimize(&request, &first, &[], &progress)
+        }
+        .unwrap();
+        let receipt = evidence
+            .multi_input_normalization
+            .as_ref()
+            .expect("actual FIR objective preparation must retain its normalization");
+        assert_eq!(
+            receipt.population,
+            NormalizationPopulation::AlignedMeasurements
+        );
+        assert_eq!(receipt.objectives.len(), 2);
+        for (record, expected) in receipt.objectives.iter().zip([-80.0, -86.0]) {
+            assert!(
+                (record.applied_gain_db - expected).abs() < 1e-9,
+                "{phase}: {record:?}"
+            );
+            assert!(!record.input_curve_identity.is_empty());
+            assert!(!record.normalized_curve_identity.is_empty());
+        }
+        assert_ne!(
+            receipt.objectives[0].input_curve_identity,
+            receipt.objectives[1].input_curve_identity
+        );
+    }
+}
+
+#[test]
+fn hybrid_linear_fir_impossible_ceiling_refuses_explicitly() {
+    use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
+    // A -40 dB ceiling no non-silent FIR can meet: the winner breaches and
+    // so does the neutral fallback, so emission must refuse explicitly.
+    // Removing the realized-ceiling call would return Ok and fail this test.
+    let dip = curve(false);
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(dip.clone(), vec![dip.clone(), dip.clone()], true),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
+    );
+    let mut room_config = config();
+    room_config.optimizer.algorithm = "autoeq:cobyla".into();
+    room_config.optimizer.max_iter = 60;
+    room_config.optimizer.seed = Some(7);
+    room_config.optimizer.max_db = -40.0;
+    room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+        strategy: MultiMeasurementStrategy::WeightedSum,
+        weights: Some(vec![0.5, 0.5]),
+        ..Default::default()
+    });
+    let target = build_target_context("left", &room_config, &dip, None);
+    let features = preprocessed(&dip);
+    let resources = EqResources::default();
+    let request = FirChannelRequest {
+        mode: FirChannelMode::Hybrid,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room_config.optimizer,
+        eq_resources: &resources,
+        sidecar_reference: reference("impossible_ceiling.wav"),
+        callback: None,
+    };
+    let mut representative = vec![0.0; 64];
+    representative[32] = 1.0;
+    let progress = progress::FirProgress::new(None);
+    let error = spatial_linear::optimize(&request, &dip, &[], representative, &progress)
+        .expect_err("impossible ceiling must refuse");
+    assert!(error.to_string().contains("refused"), "{error}");
 }

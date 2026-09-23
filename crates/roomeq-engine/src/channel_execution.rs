@@ -35,7 +35,9 @@ pub fn prepare_channel_execution(
     sample_rate: f64,
     shared_mean_spl: Option<f64>,
 ) -> Result<PreparedChannelExecution> {
-    let curve = prepared.measurements().representative();
+    let raw_curve = prepared.measurements().representative();
+    let usable = prepared.usable_curve(raw_curve)?;
+    let curve = usable.as_ref();
     if curve.freq.is_empty() || curve.spl.is_empty() {
         return Err(AutoeqError::InvalidMeasurement {
             message: format!("Empty measurement for channel '{channel_name}'"),
@@ -48,10 +50,37 @@ pub fn prepare_channel_execution(
     );
     warn_if_optimizer_bounds_exceed_data(channel_name, curve, &room_config.optimizer);
 
+    // Keep the requested target on the original reporting grid. Only measured
+    // slope inference is restricted; level and score are recomputed below.
+    let mut target_config = std::borrow::Cow::Borrowed(room_config);
+    if prepared.valid_band_hz().is_some()
+        && room_config
+            .optimizer
+            .from_measurement_slope_override
+            .is_none()
+        && room_config
+            .optimizer
+            .target_response
+            .as_ref()
+            .is_some_and(|target| target.shape == roomeq_model::TargetShape::FromMeasurement)
+        && !roomeq_model::home_cinema::role_for_channel(channel_name).is_sub_or_lfe()
+    {
+        target_config
+            .to_mut()
+            .optimizer
+            .from_measurement_slope_override = Some(
+            roomeq_analysis::slope::estimate_slope_db_per_octave(
+                curve,
+                roomeq_analysis::slope::DEFAULT_SLOPE_MIN_FREQ,
+                roomeq_analysis::slope::DEFAULT_SLOPE_MAX_FREQ,
+            )
+            .unwrap_or(0.0),
+        );
+    }
     let mut target = build_target_context_with_prepared_target(
         channel_name,
-        room_config,
-        curve,
+        &target_config,
+        raw_curve,
         shared_mean_spl,
         prepared.eq_resources().target.as_ref(),
     )?;
@@ -61,6 +90,10 @@ pub fn prepare_channel_execution(
     // warning that such filters will be "ignored" does not make them harmless.
     target.min_freq = target.min_freq.max(curve.freq[0]);
     target.max_freq = target.max_freq.min(curve.freq[curve.freq.len() - 1]);
+    if let Some([low, high]) = prepared.valid_band_hz() {
+        target.min_freq = target.min_freq.max(low);
+        target.max_freq = target.max_freq.min(high);
+    }
     if target.min_freq >= target.max_freq {
         return Err(AutoeqError::InvalidMeasurement {
             message: format!(
@@ -75,7 +108,7 @@ pub fn prepare_channel_execution(
         sample_rate,
         shared_mean_spl,
         &mut target,
-    );
+    )?;
     let optimizer = build_clamped_optimizer(
         channel_name,
         room_config,
@@ -402,6 +435,159 @@ mod tests {
             crate::PreparedCea2034::default(),
             EqResources::default(),
         )
+    }
+
+    #[test]
+    fn declared_band_excludes_unusable_samples_from_channel_level_reference() {
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 50.0;
+        config.optimizer.max_freq = 200.0;
+        let mut references = Vec::new();
+        for unusable_level in [60.0, 100.0] {
+            let curve = Curve {
+                freq: ndarray::array![
+                    20.0, 50.0, 100.0, 200.0, 300.0, 500.0, 1000.0, 2000.0, 4000.0
+                ],
+                spl: ndarray::array![
+                    unusable_level,
+                    80.0,
+                    85.0,
+                    80.0,
+                    80.0,
+                    unusable_level,
+                    unusable_level,
+                    unusable_level,
+                    unusable_level
+                ],
+                ..Default::default()
+            };
+            let prepared = PreparedChannelInput::from_measurements(
+                crate::PreparedChannelMeasurements::new(curve.clone(), vec![curve], false),
+            )
+            .with_valid_band_hz([50.0, 300.0])
+            .unwrap();
+            let execution =
+                prepare_channel_execution("left", &prepared, &config, 48_000.0, None).unwrap();
+            references.push(execution.target.mean_spl);
+        }
+        assert!(
+            (references[0] - references[1]).abs() < 1e-10,
+            "unusable samples changed the reference: {references:?}"
+        );
+    }
+
+    #[test]
+    fn declared_band_keeps_delivered_correction_independent_of_unusable_samples() {
+        for mode in [
+            ProcessingMode::LowLatency,
+            ProcessingMode::PhaseLinear,
+            ProcessingMode::Hybrid,
+        ] {
+            for multiple in [false, true] {
+                let mut config = RoomConfig::default();
+                config.optimizer.processing_mode = mode.clone();
+                config.optimizer.min_freq = 50.0;
+                config.optimizer.max_freq = 200.0;
+                config.optimizer.num_filters = 1;
+                config.optimizer.max_iter = 10;
+                config.optimizer.population = 6;
+                config.optimizer.refine = false;
+                config.optimizer.seed = Some(19);
+                config.optimizer.parallel_threads = Some(1);
+                config.optimizer.fir = Some(roomeq_model::FirConfig {
+                    taps: 64,
+                    phase: "linear".into(),
+                    ..Default::default()
+                });
+                config.optimizer.target_response = Some(roomeq_model::TargetResponseConfig {
+                    shape: roomeq_model::TargetShape::Custom,
+                    slope_db_per_octave: -0.5,
+                    broadband_precorrection: true,
+                    ..Default::default()
+                });
+                if multiple {
+                    config.optimizer.multi_measurement = Some(Default::default());
+                }
+                let mut outputs = Vec::new();
+                for unusable_level in [60.0, 100.0] {
+                    let curve = Curve {
+                        freq: ndarray::array![
+                            20.0, 50.0, 75.0, 100.0, 150.0, 200.0, 300.0, 500.0, 1000.0, 2000.0,
+                            4000.0
+                        ],
+                        spl: ndarray::array![
+                            unusable_level,
+                            80.0,
+                            83.0,
+                            85.0,
+                            83.0,
+                            80.0,
+                            80.0,
+                            unusable_level,
+                            unusable_level,
+                            unusable_level,
+                            unusable_level
+                        ],
+                        ..Default::default()
+                    };
+                    let mut second = curve.clone();
+                    second.spl += 2.0;
+                    let prepared = PreparedChannelInput::from_measurements(
+                        crate::PreparedChannelMeasurements::new(
+                            curve.clone(),
+                            if multiple {
+                                vec![curve, second]
+                            } else {
+                                vec![curve]
+                            },
+                            multiple,
+                        ),
+                    )
+                    .with_valid_band_hz([50.0, 300.0])
+                    .unwrap();
+                    let execution =
+                        prepare_channel_execution("left", &prepared, &config, 48_000.0, None)
+                            .unwrap();
+                    assert_eq!(
+                        execution.target.target_tilt_curve.as_ref().unwrap().freq,
+                        prepared.measurements().representative().freq
+                    );
+                    let result = execute_prepared_channel(
+                        "left",
+                        &prepared,
+                        &config,
+                        48_000.0,
+                        &execution,
+                        prepared.eq_resources(),
+                        Some(ConvolutionSidecarReference::new("left.wav").unwrap()),
+                        None,
+                    )
+                    .unwrap();
+                    assert_eq!(result.raw_pre_eq_curve.freq.len(), 11);
+                    assert_eq!(result.raw_post_eq_curve.freq.len(), 11);
+                    assert_eq!(result.raw_pre_eq_curve.spl[0], unusable_level);
+                    if mode == ProcessingMode::LowLatency {
+                        assert!(
+                            !result.filters.is_empty(),
+                            "witness must exercise actual PEQ design"
+                        );
+                    } else {
+                        assert!(
+                            result
+                                .fir_coeffs
+                                .as_ref()
+                                .is_some_and(|taps| taps.len() == 64)
+                        );
+                    }
+                    outputs.push((
+                        serde_json::to_value(&result.channel.plugins).unwrap(),
+                        result.fir_coeffs,
+                        result.mean_spl,
+                    ));
+                }
+                assert_eq!(outputs[0], outputs[1], "{mode:?}, multiple={multiple}");
+            }
+        }
     }
 
     #[test]

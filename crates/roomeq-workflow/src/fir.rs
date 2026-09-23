@@ -12,6 +12,7 @@ pub(crate) fn resolve_fir_target_curve(
     let resources = roomeq_engine::eq::EqResources {
         target: crate::prepare_eq_target(target_config)?,
         impulse_response: None,
+        capture: None,
     };
     Ok(roomeq_engine::fir::prepared_fir_target_curve(
         measurement,

@@ -169,29 +169,150 @@ fn load_aligned_curves(curves: &[Curve], context: &str) -> Result<AlignedCurves,
 /// the physical overlap, the original per-curve supports, and the validity
 /// mask. Other crates should prefer this when they need to constrain
 /// downstream output (e.g. optimiser grids) to real support.
+/// Declared usable bands are aligned independently before aggregation. Outer
+/// loaded samples remain available but do not establish correction eligibility.
+///
+/// # Errors
+/// Rejects invalid measurements or bands, insufficient usable samples, and
+/// disjoint measured or usable support.
 pub fn load_source_individual_with_support(
     source: &MeasurementSource,
 ) -> Result<AlignedCurves, Box<dyn Error>> {
-    match source {
+    let curves = load_source_unaligned(source)?;
+    align_source_curves(&curves, source.provenance().valid_band_hz)
+}
+
+fn align_source_curves(
+    curves: &[Curve],
+    valid_band: Option<[f64; 2]>,
+) -> Result<AlignedCurves, Box<dyn Error>> {
+    let Some(band) = valid_band else {
+        return load_aligned_curves(curves, "measurement");
+    };
+    let usable: Vec<_> = curves
+        .iter()
+        .map(|curve| curve.select_frequency_band(band))
+        .collect::<Result<_, _>>()?;
+    let usable = load_aligned_curves(&usable, "usable measurement")?;
+    let mut full = load_aligned_curves(curves, "measurement")?;
+    let [low, high] = band;
+    // Both aligned sets share a grid internally. Merge by the same index map
+    // for every seat and every measured field, never interpolating across the
+    // declared boundary. Bins inside the declaration but outside common usable
+    // sample support are omitted, not synthesized from excluded neighbors.
+    let mut indices: Vec<_> = full.curves[0]
+        .freq
+        .iter()
+        .enumerate()
+        .filter_map(|(i, f)| (*f < low || *f > high).then_some((false, i)))
+        .chain((0..usable.curves[0].freq.len()).map(|i| (true, i)))
+        .collect();
+    let frequency = |(inside, i): &(bool, usize)| {
+        if *inside {
+            usable.curves[0].freq[*i]
+        } else {
+            full.curves[0].freq[*i]
+        }
+    };
+    indices.sort_by(|a, b| frequency(a).total_cmp(&frequency(b)));
+    for (outer, inner) in full.curves.iter_mut().zip(&usable.curves) {
+        let merge = |outside: &Array1<f64>, inside: &Array1<f64>| {
+            Array1::from_iter(indices.iter().map(
+                |(usable, i)| {
+                    if *usable { inside[*i] } else { outside[*i] }
+                },
+            ))
+        };
+        let merge_optional = |outside: Option<&Array1<f64>>,
+                              inside: Option<&Array1<f64>>|
+         -> Result<Option<Array1<f64>>, Box<dyn Error>> {
+            match (outside, inside) {
+                (Some(outside), Some(inside)) => Ok(Some(merge(outside, inside))),
+                (None, None) => Ok(None),
+                _ => Err("usable alignment changed measurement metadata availability".into()),
+            }
+        };
+        *outer = Curve {
+            freq: merge(&outer.freq, &inner.freq),
+            spl: merge(&outer.spl, &inner.spl),
+            phase: merge_optional(outer.phase.as_ref(), inner.phase.as_ref())?,
+            coherence: merge_optional(outer.coherence.as_ref(), inner.coherence.as_ref())?,
+            noise_floor_db: merge_optional(
+                outer.noise_floor_db.as_ref(),
+                inner.noise_floor_db.as_ref(),
+            )?,
+            // A global decomposition is not valid for this piecewise view.
+            ..Default::default()
+        };
+        outer.validate("usable-band aligned measurement")?;
+    }
+    full.validity_mask = vec![vec![true; indices.len()]; full.curves.len()];
+    Ok(full)
+}
+
+/// Load validated individual responses without changing their native grids or levels.
+///
+/// Unlike [`load_source_individual_with_support`], this does not intersect
+/// support, interpolate, average, or normalize the individual responses.
+/// Parsed response data does not establish raw recording provenance.
+///
+/// # Errors
+/// Rejects unreadable or malformed measurements and empty measurement sets.
+pub fn load_source_unaligned(source: &MeasurementSource) -> Result<Vec<Curve>, Box<dyn Error>> {
+    let curves = match source {
         MeasurementSource::Single(s) => {
             let curve = load_measurement(&s.measurement)?;
-            load_aligned_curves(std::slice::from_ref(&curve), "measurement")
+            vec![curve]
         }
         MeasurementSource::InMemory(curve) => {
-            curve.validate("in-memory measurement")?;
-            load_aligned_curves(std::slice::from_ref(curve), "in-memory measurement")
+            vec![curve.clone()]
         }
-        MeasurementSource::InMemoryMultiple(curves) => {
-            load_aligned_curves(curves, "in-memory measurement")
-        }
+        MeasurementSource::InMemoryMultiple(curves) => curves.clone(),
         MeasurementSource::Multiple(m) => {
             if m.measurements.is_empty() {
                 return Err("Measurement list is empty".into());
             }
-            let curves = load_measurements_strict(&m.measurements)?;
-            load_aligned_curves(&curves, "measurement")
+            load_measurements_strict(&m.measurements)?
         }
+    };
+    if curves.is_empty() {
+        return Err("Measurement list is empty".into());
     }
+    for (index, curve) in curves.iter().enumerate() {
+        curve.validate(&format!("measurement {index}"))?;
+    }
+    Ok(curves)
+}
+
+/// Freeze parsed source responses while preserving original metadata and provenance.
+///
+/// Numerical loaders use the frozen full curves, not the original paths. This
+/// does not freeze associated recording WAVs or authenticate acquisition facts.
+/// In-memory sources are already snapshots and retain their unknown provenance.
+///
+/// # Errors
+/// Rejects invalid responses, including malformed inline phase arrays, unreadable
+/// source files, and empty sources. No partially frozen source is returned.
+pub fn snapshot_source(source: &MeasurementSource) -> Result<MeasurementSource, Box<dyn Error>> {
+    let freeze = |reference: &MeasurementRef| -> Result<MeasurementRef, Box<dyn Error>> {
+        let loaded_response = load_measurement_strict(reference)?;
+        Ok(MeasurementRef::Loaded {
+            original: Box::new(reference.original().clone()),
+            loaded_response: Box::new(loaded_response),
+        })
+    };
+    let mut snapshot = source.clone();
+    match &mut snapshot {
+        MeasurementSource::Single(single) => single.measurement = freeze(&single.measurement)?,
+        MeasurementSource::Multiple(multiple) => {
+            for reference in &mut multiple.measurements {
+                *reference = freeze(reference)?;
+            }
+        }
+        MeasurementSource::InMemory(_) | MeasurementSource::InMemoryMultiple(_) => {}
+    }
+    load_source_unaligned(&snapshot)?;
+    Ok(snapshot)
 }
 
 /// Load a single measurement from a file or inline data.
@@ -219,6 +340,9 @@ pub fn load_measurement_with_policy(
     strict_phase: bool,
 ) -> Result<Curve, Box<dyn Error>> {
     let curve = match measurement {
+        MeasurementRef::Loaded {
+            loaded_response, ..
+        } => loaded_response.as_ref().clone(),
         MeasurementRef::Path(path) => {
             read_curve_from_csv(path).map_err(|error| -> Box<dyn Error> {
                 format!("Failed to load measurement '{}': {error}", path.display()).into()
@@ -365,6 +489,14 @@ impl Default for CoherentAverageContract {
 ///   caller passes a [`CoherentAverageContract`] that all seats satisfy.
 #[derive(Debug, Clone)]
 pub struct DetailedLoad {
+    /// Canonical loaded-curve identities before source alignment, in input order.
+    /// These identify parsed numerical content, not authenticated capture bytes.
+    pub native_identities: Vec<String>,
+    /// Executed source conditioning, hash-linked to native and returned curves.
+    ///
+    /// These records cover source alignment and aggregation only, not acquisition,
+    /// calibration, workflow dense-grid conditioning, or subsequent optimization.
+    pub conditioning: Vec<crate::LedgerEntry>,
     pub spatial_rms: Curve,
     pub primary_seat: Curve,
     pub coherent: Option<Curve>,
@@ -602,7 +734,34 @@ pub fn load_source_detailed(
     source: &MeasurementSource,
     coherent_contract: Option<&CoherentAverageContract>,
 ) -> Result<DetailedLoad, Box<dyn Error>> {
-    let aligned = load_source_individual_with_support(source)?;
+    let native = load_source_unaligned(source)?;
+    let band = source.provenance().valid_band_hz;
+    let aligned = align_source_curves(&native, band)?;
+    let native_hashes = native
+        .iter()
+        .map(Curve::content_hash)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut conditioning = Vec::new();
+    for (index, curve) in aligned.curves.iter().enumerate() {
+        let output_hash = curve.content_hash()?;
+        if output_hash != native_hashes[index] {
+            conditioning.push(source_conditioning_entry(
+                "source_overlap_alignment",
+                native_hashes.clone(),
+                output_hash,
+                serde_json::json!({
+                    "source_index": index,
+                    "declared_valid_band_hz": band,
+                    "grid_policy": "sorted_union_inside_common_support",
+                    "declared_band_policy": "align_retained_native_samples_independently_then_merge_outer_response",
+                    "interpolation": "autoeq_core::interpolate_log_space",
+                    "input_bins": native[index].freq.len(),
+                    "output_bins": curve.freq.len(),
+                    "acquisition_validated": false
+                }),
+            )?);
+        }
+    }
     let seats = seats_for_aligned(source, &aligned.curves);
     let spatial_rms = if aligned.curves.len() == 1 {
         aligned.curves[0].clone()
@@ -613,8 +772,43 @@ pub fn load_source_detailed(
     let coherent = coherent_contract
         .map(|contract| coherent_average_measurement(&aligned.curves, contract))
         .transpose()?;
+    let aligned_hashes = aligned
+        .curves
+        .iter()
+        .map(Curve::content_hash)
+        .collect::<Result<Vec<_>, _>>()?;
+    if aligned.curves.len() > 1 {
+        conditioning.push(source_conditioning_entry(
+            "source_spatial_power_rms",
+            aligned_hashes.clone(),
+            spatial_rms.content_hash()?,
+            serde_json::json!({"weights": "equal", "phase": "absent", "normalization": "none"}),
+        )?);
+    }
+    if let (Some(curve), Some(contract)) = (&coherent, coherent_contract) {
+        conditioning.push(source_conditioning_entry(
+            "source_coherent_pressure_mean",
+            aligned_hashes,
+            curve.content_hash()?,
+            serde_json::json!({
+                "weights": "equal",
+                "normalization": "none",
+                "min_phase_confidence": contract.min_phase_confidence,
+                "require_calibration": contract.require_calibration,
+                "contract_seats": contract.seats.iter().map(|seat| serde_json::json!({
+                    "seat_id": seat.seat_id,
+                    "calibration_id": seat.calibration_id,
+                    "delay_ms": seat.delay_ms,
+                    "phase_confidence": seat.phase_confidence
+                })).collect::<Vec<_>>(),
+                "contract_claims_authenticated": false
+            }),
+        )?);
+    }
     let validity_mask = aligned.validity_mask.first().cloned().unwrap_or_default();
     Ok(DetailedLoad {
+        native_identities: native_hashes,
+        conditioning,
         spatial_rms,
         primary_seat,
         coherent,
@@ -623,6 +817,29 @@ pub fn load_source_detailed(
         overlap_hz: aligned.overlap_hz,
         support_hz: aligned.support_hz,
         validity_mask,
+    })
+}
+
+fn source_conditioning_entry(
+    operation: &str,
+    input_hashes: Vec<String>,
+    output_hash: String,
+    parameters: serde_json::Value,
+) -> Result<crate::LedgerEntry, Box<dyn Error>> {
+    Ok(crate::LedgerEntry {
+        operation: operation.into(),
+        version: 1,
+        parameters: serde_json::from_value(parameters)?,
+        input_hashes,
+        output_hash,
+        lossy: true,
+        executed_at: None,
+        tool: Some(crate::ToolIdentity {
+            application: Some("autoeq-measurements".into()),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+            ..Default::default()
+        }),
+        determinism: Some(crate::Determinism::PlatformSensitive),
     })
 }
 
@@ -682,6 +899,72 @@ mod tests {
             phase: None,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn snapshot_source_preserves_full_curve_metadata_and_roundtrip_without_reopening() {
+        let mut curve = Curve {
+            freq: vec![40.0, 80.0, 160.0].into(),
+            spl: vec![80.0, 84.0, 80.0].into(),
+            phase: Some(vec![0.0, -10.0, -20.0].into()),
+            coherence: Some(vec![0.9; 3].into()),
+            noise_floor_db: Some(vec![20.0; 3].into()),
+            ..Default::default()
+        };
+        let provenance = autoeq_core::MeasurementProvenance {
+            capture_kind: autoeq_core::ProvenanceCaptureKind::StationaryIr,
+            calibration_id: Some("declared-cal".into()),
+            timing_reference_id: Some("declared-time".into()),
+            ..Default::default()
+        };
+        for multiple in [false, true] {
+            let reference = MeasurementRef::Loaded {
+                original: Box::new(MeasurementRef::Named {
+                    path: "/Volumes/home_tmp/tmp/absent-snapshot-source.csv".into(),
+                    name: Some("seat-label".into()),
+                }),
+                loaded_response: Box::new(curve.clone()),
+            };
+            let source = if multiple {
+                MeasurementSource::Multiple(MeasurementMultiple {
+                    measurements: vec![reference],
+                    speaker_name: Some("speaker".into()),
+                    provenance: provenance.clone(),
+                })
+            } else {
+                MeasurementSource::Single(MeasurementSingle {
+                    measurement: reference,
+                    speaker_name: Some("speaker".into()),
+                    provenance: provenance.clone(),
+                })
+            };
+            let frozen = snapshot_source(&source).unwrap();
+            let encoded = serde_json::to_value(&frozen).unwrap();
+            let decoded: MeasurementSource = serde_json::from_value(encoded.clone()).unwrap();
+            assert_eq!(decoded.provenance(), provenance);
+            assert_eq!(decoded.speaker_name(), Some("speaker"));
+            assert_eq!(
+                serde_json::to_value(load_source_unaligned(&decoded).unwrap()[0].clone()).unwrap(),
+                serde_json::to_value(&curve).unwrap()
+            );
+            assert_eq!(
+                serde_json::to_value(snapshot_source(&decoded).unwrap()).unwrap(),
+                encoded
+            );
+            curve.spl[1] += 1.0;
+        }
+    }
+
+    #[test]
+    fn snapshot_source_refuses_malformed_phase_before_freezing() {
+        let mut inline = sample_inline();
+        inline.phase_deg = Some(vec![0.0]);
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(inline),
+            speaker_name: None,
+            provenance: Default::default(),
+        });
+        assert!(snapshot_source(&source).is_err());
     }
 
     #[test]
@@ -779,6 +1062,7 @@ mod tests {
         let source = MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Inline(sample_inline()),
             speaker_name: Some("L".to_string()),
+            provenance: Default::default(),
         });
         let curve = load_source(&source).unwrap();
         assert_eq!(curve.freq.len(), 3);
@@ -819,6 +1103,228 @@ mod tests {
         let expected =
             10.0 * ((10.0_f64.powf(80.0 / 10.0) + 10.0_f64.powf(83.0 / 10.0)) / 2.0).log10();
         assert!((representative.spl[0] - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn declared_band_alignment_cannot_interpolate_from_excluded_samples() {
+        let mut outputs = Vec::new();
+        for outside in [40.0, 120.0] {
+            let measurements: Vec<_> = [
+                vec![500.0, 1000.0, 1500.0, 2000.0, 2500.0],
+                vec![500.0, 990.0, 1100.0, 1600.0, 1900.0, 2010.0, 2500.0],
+            ]
+            .into_iter()
+            .map(|frequencies| {
+                let magnitude_db: Vec<_> = frequencies
+                    .iter()
+                    .map(|f| {
+                        if (1000.0..=2000.0).contains(f) {
+                            80.0
+                        } else {
+                            outside
+                        }
+                    })
+                    .collect();
+                serde_json::json!({"frequencies": frequencies, "magnitude_db": magnitude_db})
+            })
+            .collect();
+            let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+                "measurements": measurements,
+                "provenance": {"valid_band_hz": [1000.0, 2000.0]}
+            }))
+            .unwrap();
+            let native = load_source_unaligned(&source).unwrap();
+            assert_eq!(native[0].freq.len(), 5);
+            assert_eq!(native[1].freq.len(), 7);
+            let loaded = load_source_detailed(&source, None).unwrap();
+            let mut known: std::collections::HashSet<_> = native
+                .iter()
+                .map(|curve| curve.content_hash().unwrap())
+                .collect();
+            assert!(
+                loaded
+                    .conditioning
+                    .iter()
+                    .any(|entry| entry.operation == "source_overlap_alignment")
+            );
+            for entry in &loaded.conditioning {
+                assert!(entry.input_hashes.iter().all(|hash| known.contains(hash)));
+                known.insert(entry.output_hash.clone());
+            }
+            assert_eq!(
+                loaded.conditioning.last().unwrap().output_hash,
+                loaded.spatial_rms.content_hash().unwrap()
+            );
+            let encoded = serde_json::to_value(&loaded.conditioning).unwrap();
+            let restored: Vec<crate::LedgerEntry> = serde_json::from_value(encoded).unwrap();
+            assert_eq!(restored, loaded.conditioning);
+            assert_eq!(
+                loaded.conditioning,
+                load_source_detailed(&source, None).unwrap().conditioning
+            );
+            let (representative, individual) = load_source_with_individual(&source).unwrap();
+            assert_eq!(representative.freq, loaded.spatial_rms.freq);
+            assert_eq!(representative.spl, loaded.spatial_rms.spl);
+            assert_eq!(individual.len(), native.len());
+            for (actual, expected) in individual.iter().zip(&loaded.individual) {
+                assert_eq!(actual.freq, expected.freq);
+                assert_eq!(actual.spl, expected.spl);
+            }
+            assert!(loaded.spatial_rms.freq[0] < 1000.0);
+            assert!(*loaded.spatial_rms.freq.last().unwrap() > 2000.0);
+            let usable = loaded
+                .spatial_rms
+                .select_frequency_band([1000.0, 2000.0])
+                .unwrap();
+            assert!(
+                usable.spl.iter().all(|spl| (spl - 80.0).abs() < 1e-9),
+                "excluded samples contaminated usable magnitudes: {:?}",
+                usable.spl
+            );
+            assert_eq!(usable.freq[0], 1100.0);
+            assert_eq!(*usable.freq.last().unwrap(), 1900.0);
+            outputs.push(usable);
+        }
+        assert_eq!(outputs[0].freq, outputs[1].freq);
+        assert_eq!(outputs[0].spl, outputs[1].spl);
+    }
+
+    fn source_with_declared_band(curves: &[Curve], band: [f64; 2]) -> MeasurementSource {
+        MeasurementSource::Multiple(MeasurementMultiple {
+            measurements: curves
+                .iter()
+                .enumerate()
+                .map(|(index, curve)| MeasurementRef::Loaded {
+                    original: Box::new(MeasurementRef::Named {
+                        path: format!("seat-{index}.csv").into(),
+                        name: Some(format!("seat-{index}")),
+                    }),
+                    loaded_response: Box::new(curve.clone()),
+                })
+                .collect(),
+            speaker_name: None,
+            provenance: autoeq_core::MeasurementProvenance {
+                valid_band_hz: Some(band),
+                ..Default::default()
+            },
+        })
+    }
+
+    #[test]
+    fn declared_band_alignment_preserves_measured_fields_and_native_snapshots() {
+        let mut outputs = Vec::new();
+        for outside in [40.0, 120.0] {
+            let curves: Vec<_> = [
+                vec![500.0, 1000.0, 1500.0, 2000.0, 2500.0],
+                vec![500.0, 990.0, 1100.0, 1600.0, 1900.0, 2010.0, 2500.0],
+            ]
+            .into_iter()
+            .map(|frequencies| {
+                let freq = Array1::from_vec(frequencies);
+                Curve {
+                    spl: freq.mapv(|f| {
+                        if (1000.0..=2000.0).contains(&f) {
+                            80.0
+                        } else {
+                            outside
+                        }
+                    }),
+                    phase: Some(freq.mapv(|f| {
+                        if (1000.0..=2000.0).contains(&f) {
+                            -30.0
+                        } else {
+                            outside
+                        }
+                    })),
+                    coherence: Some(freq.mapv(|f| {
+                        if (1000.0..=2000.0).contains(&f) {
+                            0.9
+                        } else {
+                            outside / 200.0
+                        }
+                    })),
+                    noise_floor_db: Some(freq.mapv(|f| {
+                        if (1000.0..=2000.0).contains(&f) {
+                            -60.0
+                        } else {
+                            -outside
+                        }
+                    })),
+                    freq,
+                    ..Default::default()
+                }
+            })
+            .collect();
+            let source = source_with_declared_band(&curves, [1000.0, 2000.0]);
+            let before = serde_json::to_value(&source).unwrap();
+            let aligned = load_source_individual_with_support(&source).unwrap();
+            assert_eq!(serde_json::to_value(&source).unwrap(), before);
+            assert_eq!(
+                serde_json::to_value(load_source_unaligned(&source).unwrap()).unwrap(),
+                serde_json::to_value(&curves).unwrap()
+            );
+            for (curve, original) in aligned.curves.iter().zip(&curves) {
+                curve.validate("piecewise alignment test").unwrap();
+                assert_eq!(curve.freq[0], original.freq[0]);
+                assert_eq!(curve.spl[0], original.spl[0]);
+                assert!(curve.min_phase.is_none() && curve.excess_phase.is_none());
+                let usable = curve.select_frequency_band([1000.0, 2000.0]).unwrap();
+                assert!(
+                    usable
+                        .phase
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .all(|p| (p + 30.0).abs() < 1e-9)
+                );
+                assert!(
+                    usable
+                        .coherence
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .all(|c| (c - 0.9).abs() < 1e-9)
+                );
+                assert!(
+                    usable
+                        .noise_floor_db
+                        .as_ref()
+                        .unwrap()
+                        .iter()
+                        .all(|n| (n + 60.0).abs() < 1e-9)
+                );
+                outputs.push(usable);
+            }
+            assert!(
+                aligned
+                    .validity_mask
+                    .iter()
+                    .all(|mask| mask.len() == aligned.curves[0].freq.len())
+            );
+        }
+        assert_eq!(outputs[0].phase, outputs[2].phase);
+        assert_eq!(outputs[1].phase, outputs[3].phase);
+    }
+
+    #[test]
+    fn declared_band_alignment_rejects_sparse_or_disjoint_usable_support() {
+        let curve = |frequencies: Vec<f64>| Curve {
+            spl: Array1::from_elem(frequencies.len(), 80.0),
+            freq: Array1::from_vec(frequencies),
+            ..Default::default()
+        };
+        for second in [
+            vec![500.0, 1500.0, 2500.0],
+            vec![500.0, 1800.0, 1900.0, 2500.0],
+        ] {
+            let source = source_with_declared_band(
+                &[curve(vec![500.0, 1100.0, 1200.0, 2500.0]), curve(second)],
+                [1000.0, 2000.0],
+            );
+            assert!(load_source_unaligned(&source).is_ok());
+            assert!(load_source_individual_with_support(&source).is_err());
+            assert!(load_source_detailed(&source, None).is_err());
+        }
     }
 
     #[test]
@@ -1118,6 +1624,13 @@ mod tests {
             require_calibration: true,
         };
         let detailed = load_source_detailed(&source, Some(&contract)).unwrap();
+        let receipt = detailed.conditioning.last().unwrap();
+        assert_eq!(receipt.operation, "source_coherent_pressure_mean");
+        assert_eq!(
+            receipt.output_hash,
+            detailed.coherent.as_ref().unwrap().content_hash().unwrap()
+        );
+        assert_eq!(receipt.parameters["contract_claims_authenticated"], false);
         let coherent = detailed.coherent.expect("contract satisfied");
         assert!(coherent.phase.is_some());
         // Nearly aligned but distinct seat angles: the coherent magnitude is
@@ -1159,10 +1672,12 @@ mod tests {
         let forward = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![inline(&c1.freq, &c1.spl), inline(&c2.freq, &c2.spl)],
             speaker_name: None,
+            provenance: Default::default(),
         });
         let backward = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![inline(&c2.freq, &c2.spl), inline(&c1.freq, &c1.spl)],
             speaker_name: None,
+            provenance: Default::default(),
         });
         // Physical intersection is [120, 9000]; the shared grid is the
         // sorted union clipped to it — identical for both curve orders.
@@ -1356,10 +1871,12 @@ mod tests {
                 MeasurementRef::Path(path_b.clone()),
             ],
             speaker_name: None,
+            provenance: Default::default(),
         });
         let reversed = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![MeasurementRef::Path(path_b), MeasurementRef::Path(path_a)],
             speaker_name: None,
+            provenance: Default::default(),
         });
         for source in [source, reversed] {
             let loaded = load_source_individual(&source).unwrap();
@@ -1384,6 +1901,7 @@ mod tests {
         let source = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![MeasurementRef::Path(low), MeasurementRef::Path(high)],
             speaker_name: None,
+            provenance: Default::default(),
         });
         let error = load_source_individual(&source).unwrap_err();
         assert!(
@@ -1413,6 +1931,7 @@ mod tests {
         let source = MeasurementSource::Multiple(MeasurementMultiple {
             measurements: vec![],
             speaker_name: None,
+            provenance: Default::default(),
         });
         assert!(load_source_individual(&source).is_err());
     }
@@ -1425,6 +1944,7 @@ mod tests {
                 MeasurementRef::Path(std::path::PathBuf::from("/tmp/missing.csv")),
             ],
             speaker_name: None,
+            provenance: Default::default(),
         });
         for error in [
             load_source(&source).unwrap_err(),

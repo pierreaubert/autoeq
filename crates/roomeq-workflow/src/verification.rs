@@ -47,6 +47,12 @@ pub enum TrialLevel {
 }
 
 impl TrialLevel {
+    /// Machine-readable trial label shared with operator manifests:
+    /// small-signal and limiter trials never merge into one claim.
+    pub fn as_label(self) -> &'static str {
+        self.processing_state()
+    }
+
     fn playback_level(self) -> PlaybackLevel {
         match self {
             TrialLevel::SmallSignal => PlaybackLevel::SmallSignal,
@@ -89,7 +95,7 @@ pub struct ChannelSnapshot {
     pub plugin_kinds: Vec<String>,
     /// `(ir_file, taps)` for every convolution plugin, in order.
     pub fir_tails: Vec<(String, usize)>,
-    /// Bulk delay in ms when the chain carries a delay plugin.
+    /// Sum of serial channel delay plugins, in milliseconds; excludes FIR/driver latency.
     pub delay_ms: Option<f64>,
 }
 
@@ -183,16 +189,7 @@ impl VerificationBundle {
                     fir_tails.push((ir_file.to_string(), taps));
                 }
             }
-            let delay_ms = chain.plugins.iter().find_map(|plugin| {
-                if plugin.plugin_type == "delay" {
-                    plugin
-                        .parameters
-                        .get("delay_ms")
-                        .and_then(|value| value.as_f64())
-                } else {
-                    None
-                }
-            });
+            let delay_ms = channel_delay_ms(&chain.plugins)?;
             channels.push(ChannelSnapshot {
                 channel: name.clone(),
                 plugin_kinds,
@@ -413,41 +410,105 @@ pub enum PlaybackStatus {
     Unassessed,
     SimulatedPass,
     Verified,
+    /// At least one required comparison lacks complete, compatible evidence.
+    InsufficientEvidence,
+    /// At least one required assessed comparison failed its declared budget.
+    Failed,
 }
 
 /// Advance playback status from one capture assessment.
 ///
 /// Only an assessed, passing, acoustic capture verifies the room. Simulated
 /// or backend-rendered passes record software behavior (`SimulatedPass`) and
-/// never verify the room; unassessed evidence never moves the status.
+/// never verify the room. Failed/incomplete comparisons are sticky within a
+/// batch, so a later passing seat cannot erase a required-seat failure. Begin
+/// a new independent verification batch with `Unassessed`.
 pub fn update_playback_status(
     current: PlaybackStatus,
     assessment: &CaptureAssessment,
     evidence_kind: PlaybackEvidenceKind,
 ) -> PlaybackStatus {
-    match assessment {
-        CaptureAssessment::Assessed(report) if report.passed && report.assessed => {
-            match evidence_kind {
-                PlaybackEvidenceKind::Acoustic => PlaybackStatus::Verified,
-                PlaybackEvidenceKind::Simulated | PlaybackEvidenceKind::BackendRendered => {
-                    if current == PlaybackStatus::Verified {
-                        current
-                    } else {
-                        PlaybackStatus::SimulatedPass
-                    }
-                }
-            }
-        }
-        _ => current,
+    if current == PlaybackStatus::Failed {
+        return current;
     }
+    let CaptureAssessment::Assessed(report) = assessment else {
+        return PlaybackStatus::InsufficientEvidence;
+    };
+    if report.evidence_class != evidence_kind.as_str() {
+        return PlaybackStatus::InsufficientEvidence;
+    }
+    if report
+        .metric_outcomes
+        .iter()
+        .any(|metric| metric.assessed && !metric.passed)
+    {
+        return PlaybackStatus::Failed;
+    }
+    if !report.is_complete_pass() || current == PlaybackStatus::InsufficientEvidence {
+        return PlaybackStatus::InsufficientEvidence;
+    }
+    if evidence_kind == PlaybackEvidenceKind::Acoustic && current != PlaybackStatus::SimulatedPass {
+        PlaybackStatus::Verified
+    } else {
+        // A batch containing any software-only route cannot verify all acoustic
+        // routes, even when another route has a passing microphone capture.
+        PlaybackStatus::SimulatedPass
+    }
+}
+
+// This is only explicit channel delay, not the frequency-dependent group delay
+// or latency of FIRs, drivers, limiters, and routed parallel branches.
+fn channel_delay_ms(plugins: &[roomeq_model::PluginConfigWrapper]) -> Result<Option<f64>, String> {
+    let mut total = None;
+    let mut in_split = false;
+    for plugin in plugins {
+        match plugin.plugin_type.as_str() {
+            "band_split" if !in_split => in_split = true,
+            "band_merge" if in_split => in_split = false,
+            "band_split" | "band_merge" => {
+                return Err("invalid or nested band split in delay snapshot".into());
+            }
+            "delay" => {
+                if in_split {
+                    return Err(
+                        "branch-local delay cannot be represented by a channel delay snapshot"
+                            .into(),
+                    );
+                }
+                let delay = plugin
+                    .parameters
+                    .get("delay_ms")
+                    .and_then(serde_json::Value::as_f64)
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+                    .ok_or_else(|| {
+                        "channel delay must be finite, nonnegative milliseconds".to_string()
+                    })?;
+                let sum = total.unwrap_or(0.0) + delay;
+                if !sum.is_finite() {
+                    return Err("channel delay sum overflows".into());
+                }
+                total = Some(sum);
+            }
+            _ => {}
+        }
+    }
+    if in_split {
+        return Err("unclosed band split in delay snapshot".into());
+    }
+    Ok(total)
 }
 
 /// Keep exact FIR tails and the delay ledger intact to the exported chain.
 ///
 /// Every bundle FIR tail must resolve to a convolution `ir_file` in the
-/// exported graph with the same tap count and content hash, and every delay
-/// ledger entry must match the exported delay plugin value. Tails are never
-/// truncated and delays never re-derived here.
+/// exported graph with the same declared resource tap count, and every delay
+/// ledger entry must match the sum of serial channel delay plugins. Tails are
+/// never truncated. Resource bytes must be checked separately by the importer;
+/// this function has no file access and cannot authenticate content hashes.
+///
+/// # Errors
+/// Returns an error for missing resources/channels, malformed delay values,
+/// branch-local delays, or inconsistent snapshot and ledger delays.
 pub fn verify_fir_tails_and_delays(
     bundle: &VerificationBundle,
     graph: &DspGraph,
@@ -456,6 +517,17 @@ pub fn verify_fir_tails_and_delays(
     graph
         .validate()
         .map_err(|message| format!("exported graph invalid: {message}"))?;
+    for (name, delay) in delay_ledger_ms {
+        if !delay.is_finite()
+            || *delay < 0.0
+            || !bundle
+                .channels
+                .iter()
+                .any(|channel| &channel.channel == name)
+        {
+            return Err(format!("invalid or unknown delay ledger channel '{name}'"));
+        }
+    }
     for channel in &bundle.channels {
         let chain = graph.channels.get(&channel.channel).ok_or_else(|| {
             format!(
@@ -463,6 +535,22 @@ pub fn verify_fir_tails_and_delays(
                 channel.channel
             )
         })?;
+        let exported_ms = channel_delay_ms(&chain.plugins)?;
+        // The 1e-9 ms tolerance is for serialization arithmetic,
+        // not an acoustic timing acceptance budget.
+        let delays_match = |left: Option<f64>, right: Option<f64>| match (left, right) {
+            (None, None) => true,
+            (Some(a), Some(b)) => {
+                a.is_finite() && b.is_finite() && a >= 0.0 && b >= 0.0 && (a - b).abs() <= 1e-9
+            }
+            _ => false,
+        };
+        if !delays_match(channel.delay_ms, exported_ms) {
+            return Err(format!(
+                "delay snapshot for '{}' does not match the exported chain",
+                channel.channel
+            ));
+        }
         for (ir_file, taps) in &channel.fir_tails {
             let resource = bundle
                 .resources
@@ -492,16 +580,6 @@ pub fn verify_fir_tails_and_delays(
         }
         for (ledger_channel, ledger_ms) in delay_ledger_ms {
             if ledger_channel == &channel.channel {
-                let exported_ms = chain.plugins.iter().find_map(|plugin| {
-                    if plugin.plugin_type == "delay" {
-                        plugin
-                            .parameters
-                            .get("delay_ms")
-                            .and_then(|value| value.as_f64())
-                    } else {
-                        None
-                    }
-                });
                 match exported_ms {
                     Some(exported_ms) if (exported_ms - ledger_ms).abs() <= 1e-9 => {}
                     _ => {
@@ -522,6 +600,73 @@ mod tests {
     use super::*;
     use ndarray::Array1;
     use roomeq_model::contracts::Plugin;
+
+    #[test]
+    fn roadmap_correction_capture_batch_cannot_hide_failed_or_missing_seats() {
+        let binding = binding_fixture("graph-test");
+        let mut prediction = flat_curve(20.0, 20_000.0, 64, 80.0);
+        prediction.phase = Some(prediction.freq.mapv(|_| 0.0));
+        let (declared, tolerances) = tolerances_fixture();
+        let assess = |level: f64, kind| {
+            let mut curve = prediction.clone();
+            curve.spl.fill(level);
+            assess_imported_capture(
+                &binding,
+                Some(&ImportedCapture {
+                    binding: binding.clone(),
+                    curve,
+                    evidence_kind: kind,
+                }),
+                &prediction,
+                &declared,
+                &tolerances,
+                [40.0, 4000.0],
+            )
+            .unwrap()
+        };
+        let good = assess(80.0, PlaybackEvidenceKind::Acoustic);
+        let failed = assess(70.0, PlaybackEvidenceKind::Acoustic);
+        let missing = CaptureAssessment::Unassessed {
+            reason: "missing required seat".to_owned(),
+        };
+        for (bad, expected) in [
+            (&failed, PlaybackStatus::Failed),
+            (&missing, PlaybackStatus::InsufficientEvidence),
+        ] {
+            for sequence in [[&good, bad], [bad, &good]] {
+                let status =
+                    sequence
+                        .into_iter()
+                        .fold(PlaybackStatus::Unassessed, |status, assessment| {
+                            update_playback_status(
+                                status,
+                                assessment,
+                                PlaybackEvidenceKind::Acoustic,
+                            )
+                        });
+                assert_eq!(status, expected);
+            }
+        }
+        let simulated = assess(80.0, PlaybackEvidenceKind::Simulated);
+        let status = update_playback_status(
+            PlaybackStatus::Verified,
+            &simulated,
+            PlaybackEvidenceKind::Simulated,
+        );
+        assert_eq!(status, PlaybackStatus::SimulatedPass);
+        assert_eq!(
+            update_playback_status(status, &good, PlaybackEvidenceKind::Acoustic),
+            PlaybackStatus::SimulatedPass
+        );
+        assert_eq!(
+            update_playback_status(
+                PlaybackStatus::Unassessed,
+                &simulated,
+                PlaybackEvidenceKind::Acoustic
+            ),
+            PlaybackStatus::InsufficientEvidence
+        );
+    }
 
     fn fingerprint_graph(channels: &[&str]) -> (DspGraph, GraphIdentity) {
         let mut graph = DspGraph::new("test");
@@ -683,7 +828,8 @@ mod tests {
         // unassessed. No promotion, no scored comparison.
         let (bundle, _) = bundle_fixture();
         let expected = binding_fixture(&bundle.candidate_graph);
-        let prediction = flat_curve(20.0, 20_000.0, 64, 80.0);
+        let mut prediction = flat_curve(20.0, 20_000.0, 64, 80.0);
+        prediction.phase = Some(prediction.freq.mapv(|_| 0.0));
         let (declared, tolerances) = tolerances_fixture();
         for (label, mutate) in [
             (
@@ -742,7 +888,7 @@ mod tests {
                     &assessment,
                     PlaybackEvidenceKind::Acoustic
                 ),
-                PlaybackStatus::Unassessed,
+                PlaybackStatus::InsufficientEvidence,
                 "{label}"
             );
         }
@@ -750,7 +896,7 @@ mod tests {
         // the identical backend-rendered pass does not.
         let capture = ImportedCapture {
             binding: expected.clone(),
-            curve: flat_curve(20.0, 20_000.0, 64, 80.0),
+            curve: prediction.clone(),
             evidence_kind: PlaybackEvidenceKind::Acoustic,
         };
         let assessment = assess_imported_capture(
@@ -811,8 +957,90 @@ mod tests {
                 &assessment,
                 PlaybackEvidenceKind::Acoustic
             ),
-            PlaybackStatus::Unassessed
+            PlaybackStatus::InsufficientEvidence
         );
+    }
+
+    #[test]
+    fn roadmap_correction_verification_cascaded_delays() {
+        let (bundle, mut graph) = bundle_fixture();
+        graph
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .plugins
+            .push(roomeq_model::PluginConfigWrapper {
+                plugin_type: "delay".into(),
+                parameters: serde_json::json!({"delay_ms": 0.65}),
+            });
+        let identity = crate::final_ledger::canonical_graph_identity(&graph);
+        let rebuilt = VerificationBundle::build(
+            &identity,
+            &identity,
+            &graph,
+            bundle.manifest.source_ids.clone(),
+            bundle.manifest.seat_ids.clone(),
+            bundle.manifest.held_out_seats.clone(),
+            bundle.manifest.sample_rate_hz,
+            bundle.manifest.calibration_id.clone(),
+            bundle.manifest.stimulus_hash.clone(),
+            bundle.manifest.comparison_policy_version.clone(),
+            bundle.trial_level,
+            bundle.resources.clone(),
+        )
+        .unwrap();
+        assert_eq!(
+            rebuilt
+                .channels
+                .iter()
+                .find(|c| c.channel == "left")
+                .unwrap()
+                .delay_ms,
+            Some(1.0)
+        );
+        assert!(verify_fir_tails_and_delays(&rebuilt, &graph, &[("left".into(), 1.0)]).is_ok());
+        assert!(verify_fir_tails_and_delays(&rebuilt, &graph, &[("left".into(), 0.35)]).is_err());
+        // An omitted external ledger must not hide a changed snapshot delay.
+        assert!(verify_fir_tails_and_delays(&bundle, &graph, &[]).is_err());
+    }
+
+    #[test]
+    fn roadmap_correction_verification_invalid_delay_is_not_absent() {
+        for parameters in [
+            serde_json::json!({}),
+            serde_json::json!({"delay_ms": "1"}),
+            serde_json::json!({"delay_ms": -1.0}),
+            serde_json::json!({"delay_ms": null}),
+        ] {
+            let (bundle, mut graph) = bundle_fixture();
+            graph.channels.get_mut("left").unwrap().plugins.push(
+                roomeq_model::PluginConfigWrapper {
+                    plugin_type: "delay".into(),
+                    parameters,
+                },
+            );
+            assert!(verify_fir_tails_and_delays(&bundle, &graph, &[]).is_err());
+        }
+        let delay = roomeq_model::PluginConfigWrapper {
+            plugin_type: "delay".into(),
+            parameters: serde_json::json!({"delay_ms": f64::MAX}),
+        };
+        assert!(channel_delay_ms(&[delay.clone(), delay]).is_err());
+        let split = roomeq_model::PluginConfigWrapper {
+            plugin_type: "band_split".into(),
+            parameters: serde_json::json!({}),
+        };
+        let delay = roomeq_model::PluginConfigWrapper {
+            plugin_type: "delay".into(),
+            parameters: serde_json::json!({"delay_ms": 1.0}),
+        };
+        assert!(channel_delay_ms(&[split, delay]).is_err());
+    }
+
+    #[test]
+    fn roadmap_correction_verification_unknown_delay_channel() {
+        let (bundle, graph) = bundle_fixture();
+        assert!(verify_fir_tails_and_delays(&bundle, &graph, &[("missing".into(), 1.0)]).is_err());
     }
 
     #[test]

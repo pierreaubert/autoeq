@@ -46,6 +46,7 @@ members = [
     "crates/roomeq-analysis",
     "crates/roomeq-synthetic",
     "crates/roomeq-workflow",
+    "crates/autoeq-qa",
 ]
 [workspace.package]
 version = "0.5.74"
@@ -254,14 +255,37 @@ tokio = { workspace = true }
 [lints]
 workspace = true
 
+[profile.dev]
+opt-level = 0
+# Line tables only: gives file:line stack traces, but skips 10GB+ of variable/type DWARF info that chokes the linker.
+debug = "line-tables-only"
+
+# Keep debug symbols in separate .dwo files so the linker never touches them
+split-debuginfo = "unpacked"
+
+# Do NOT strip; backtraces will still work
+strip = "none"
+
+# -------------------------------------------------------------------
+# 2. DEPENDENCY OVERRIDES (The Secret Weapon)
+# Heavily optimize external dependencies (tokio, serde, etc.) in dev mode.
+# They take time to compile ONCE, but sccache caches them forever,
+# and your 50 binaries will run 10x faster during QA/tests.
+# -------------------------------------------------------------------
+[profile.dev.package."*"]
+opt-level = 3
+
 [profile.release]
 # `release` is the everyday optimised profile — used by CI, `just prod-*`,
 # benchmarks, and local release iteration. Thin LTO keeps cross-crate inlining
 # without the serial bottleneck of fat LTO, and 14 codegen units balance
 # parallelism with optimiser visibility.
+opt0level = 3
 lto = "thin"
 codegen-units = 14
-panic = "unwind"
+panic = "abort"           # Removes unwind tables, saving ~15% binary size and link work
+debug = false             # Omit debug symbols in release binaries
+strip = "debuginfo"       # Strip debug symbols, keep symbol table
 
 # `dist` is the "cut a release" profile. Inherits everything from `release`
 # and tightens for maximum runtime performance at the cost of much longer

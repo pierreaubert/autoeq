@@ -6,7 +6,8 @@
 
 use num_complex::Complex64;
 use roomeq_engine::quality::electrical_headroom::{
-    ElectricalPath, SampledElectricalOutputPeak, evaluate_sampled_electrical_headroom,
+    ElectricalPath, SampledElectricalAssessment, SampledElectricalOutputPeak,
+    evaluate_sampled_electrical_assessment,
 };
 use roomeq_model::{AutoeqError, ChannelDspChain, Result};
 use std::{
@@ -25,6 +26,101 @@ pub struct ExpandedElectricalPath {
     pub input: String,
     pub output: String,
     pub stages: Vec<ChannelDspChain>,
+}
+
+/// Assess declared physical amplitudes on the actual serialized final routes.
+///
+/// No physical calibration is inferred from microphone SPL. Only declared
+/// steady-sine samples are assessed; missing policy returns no assessments.
+///
+/// # Errors
+/// Rejects incomplete output coverage, incompatible declarations, unsupported
+/// routes/resources, or physical samples outside the digital replay support.
+pub fn assess_final_graph_physical_drive(
+    graph: &roomeq_model::DspGraph,
+    sample_rate_hz: f64,
+    sidecar_dir: &Path,
+    policy: &roomeq_model::FinalizationConfig,
+) -> Result<Vec<roomeq_engine::quality::physical_drive::PhysicalDriveAssessment>> {
+    let Some(physical) = &policy.physical_drive else {
+        return Ok(Vec::new());
+    };
+    policy
+        .validate()
+        .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
+    let expanded = if let Some(routing) = canonical_electrical_routing(graph)? {
+        expand_routed_electrical_paths(&graph.channels, routing)?
+    } else {
+        expand_independent_electrical_paths(
+            &graph.channels,
+            &independent_graph_output_ports(&graph.channels),
+        )?
+    };
+    let stages: Vec<Vec<_>> = expanded
+        .iter()
+        .map(|path| path.stages.iter().collect())
+        .collect();
+    let paths: Vec<_> = expanded
+        .iter()
+        .zip(&stages)
+        .map(|(path, stages)| SerializedElectricalPath {
+            input: &path.input,
+            output: &path.output,
+            stages,
+        })
+        .collect();
+    let mut limits: BTreeMap<_, _> = expanded
+        .iter()
+        .map(|path| (path.input.clone(), policy.default_input_peak))
+        .collect();
+    if let Some(routing) = canonical_electrical_routing(graph)? {
+        for input in &routing.input_channels {
+            limits
+                .entry(input.clone())
+                .or_insert(policy.default_input_peak);
+        }
+    }
+    for (input, peak) in &policy.input_peak_limits {
+        *limits
+            .get_mut(input)
+            .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                message: format!(
+                    "physical_drive input peak override names unknown input '{input}'"
+                ),
+            })? = *peak;
+    }
+    let mut frequencies: Vec<_> = physical
+        .outputs
+        .values()
+        .flatten()
+        .flat_map(|envelope| envelope.frequencies_hz.iter().copied())
+        .collect();
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup();
+    // Bound path-by-grid memory/work; this is an engineering resource budget.
+    if expanded
+        .len()
+        .checked_mul(frequencies.len())
+        .is_none_or(|work| work > 16_777_216)
+    {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "physical_drive replay exceeds the path/sample budget".into(),
+        });
+    }
+    let assessment = replay_sampled_electrical_assessment(
+        &paths,
+        &frequencies,
+        sample_rate_hz,
+        &limits,
+        sidecar_dir,
+        &HashMap::new(),
+    )?;
+    roomeq_engine::quality::physical_drive::assess_declared_physical_drive(
+        physical,
+        &frequencies,
+        &assessment.amplitudes_by_output,
+    )
+    .map_err(|message| AutoeqError::InvalidConfiguration { message })
 }
 
 /// Evaluate the small-signal final graph under explicitly configured input peaks.
@@ -360,6 +456,7 @@ pub fn expand_routed_electrical_paths(
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             })
             .collect();
             ExpandedElectricalPath {
@@ -379,6 +476,29 @@ pub fn replay_sampled_electrical_headroom(
     sidecar_dir: &Path,
     embedded_irs: &HashMap<String, Vec<f64>>,
 ) -> Result<Vec<SampledElectricalOutputPeak>> {
+    replay_sampled_electrical_assessment(
+        paths,
+        frequencies_hz,
+        sample_rate_hz,
+        input_peak_limits,
+        sidecar_dir,
+        embedded_irs,
+    )
+    .map(|assessment| assessment.outputs)
+}
+
+/// Replay serialized paths and retain the canonical frequency-dependent electrical envelopes.
+///
+/// # Errors
+/// Rejects unsupported DSP, incomplete physical paths, invalid grids, and unavailable resources.
+pub fn replay_sampled_electrical_assessment(
+    paths: &[SerializedElectricalPath<'_>],
+    frequencies_hz: &[f64],
+    sample_rate_hz: f64,
+    input_peak_limits: &BTreeMap<String, f64>,
+    sidecar_dir: &Path,
+    embedded_irs: &HashMap<String, Vec<f64>>,
+) -> Result<SampledElectricalAssessment> {
     let invalid = |message: &str| AutoeqError::InvalidMeasurement {
         message: message.into(),
     };
@@ -459,7 +579,7 @@ pub fn replay_sampled_electrical_headroom(
             transfer,
         })
         .collect();
-    evaluate_sampled_electrical_headroom(
+    evaluate_sampled_electrical_assessment(
         frequencies_hz,
         sample_rate_hz,
         &realized,
@@ -800,6 +920,34 @@ mod tests {
         )
         .unwrap();
         assert!((output[0].required_attenuation_db - 9.020599913).abs() < 1e-6);
+        // Opposite polarities on independent inputs cannot erase amplifier demand.
+        let electrical = replay_sampled_electrical_assessment(
+            &paths,
+            &[20.0, 20000.0],
+            48000.0,
+            &BTreeMap::from([("L".into(), 0.01), ("R".into(), 0.01)]),
+            Path::new("."),
+            &HashMap::new(),
+        )
+        .unwrap();
+        let physical = serde_json::from_value(serde_json::json!({"outputs":{"sub":[{
+            "quantity":"current_rms", "calibration_id":"synthetic-current-probe",
+            "reference_conditions_id":"load", "limit_conditions_id":"load",
+            "sine_duration_seconds":1.0, "reference_output_peak":0.1,
+            "linear_valid_output_peak":1.0, "frequencies_hz":[20.0,20000.0],
+            "demand_at_reference":[1.0,1.0], "limits":[0.2,0.2]
+        }]}}))
+        .unwrap();
+        let checked = roomeq_engine::quality::physical_drive::assess_declared_physical_drive(
+            &physical,
+            &[20.0, 20000.0],
+            &electrical.amplitudes_by_output,
+        )
+        .unwrap();
+        let expected_amperes = 0.2 * 10.0_f64.powf(3.0 / 20.0);
+        assert!((checked[0].demands[0] - expected_amperes).abs() < 1e-12);
+        assert!(!checked[0].passes_declared_samples);
+        assert_eq!(checked[0].unit, "A RMS");
         graph.routes[0].gain_linear *= 2.0;
         assert!(expand_routed_electrical_paths(&channels, &graph).is_err());
         graph.routes[0].gain_linear /= 2.0;

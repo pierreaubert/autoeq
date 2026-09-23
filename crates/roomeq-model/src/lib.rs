@@ -27,10 +27,19 @@ pub mod home_cinema;
 pub use crossover_cancellation::*;
 pub mod home_cinema_resolution;
 pub mod ir_waveform;
+pub mod joint_sub_report;
+pub mod physical_drive;
+#[doc(inline)]
+pub use joint_sub_report::{
+    JointSubDiagnostics, JointSubGainApplication, JointSubObjectiveReport, JointSubSeatReport,
+};
+pub mod acceptance_evidence;
 pub mod optimizer_settings;
 pub mod output;
+pub mod payload_binding;
 pub mod physical_routing;
 pub mod preset;
+pub mod reference_registry;
 pub mod report_contracts;
 pub mod rir_prototype_config;
 pub mod target_tilt;

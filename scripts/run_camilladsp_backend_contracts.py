@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import subprocess
 
 
@@ -15,8 +16,34 @@ REQUIRED_TESTS = {
     "tests::conformance::tool_contract_camilladsp_pcm_matches_linkwitz_riley_crossover_gain",
     "tests::conformance::tool_contract_camilladsp_pcm_matches_peaking_filter_gain",
     "tests::conformance::tool_contract_camilladsp_pcm_preserves_routed_channel_matrix",
+    "tests::conformance::tool_contract_camilladsp_pcm_realizes_hierarchical_sub_controls",
     "tests::realized_transfer::tool_contract_camilladsp_multisub_coherent_peak_at_all_rates",
 }
+
+
+def run_contracts(command, *, cwd, env, timeout=180):
+    """Bound execution and stop the launched process group on timeout/cancel."""
+    process = subprocess.Popen(command, cwd=cwd, env=env, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True,
+                               start_new_session=(os.name == "posix"))
+    try:
+        output, _ = process.communicate(timeout=timeout)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt) as error:
+        if os.name == "posix":
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        elif os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           capture_output=True, timeout=10, check=False)
+        else:
+            process.kill()
+        output, _ = process.communicate(timeout=10)
+        if isinstance(error, subprocess.TimeoutExpired):
+            raise subprocess.TimeoutExpired(command, timeout, output=output) from error
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, output)
 
 
 def main():
@@ -35,10 +62,10 @@ def main():
         record.update(binary=binary, version=version.stdout.strip())
         environment = dict(os.environ, ROOMEQ_CAMILLADSP_BIN=binary)
         command = ["cargo", "test", "-p", "roomeq-export", "-p", "roomeq-workflow", "--lib", "tool_contract_camilladsp",
-                   "--no-default-features", "--", "--nocapture"]
-        completed = subprocess.run(command, cwd=root, env=environment, stdout=subprocess.PIPE,
-                                   stderr=subprocess.STDOUT, text=True, timeout=180)
+                   "--no-default-features", "--", "--include-ignored", "--nocapture"]
         log = artifact.with_suffix(".log")
+        record.update(command=command, log=str(log))
+        completed = run_contracts(command, cwd=root, env=environment)
         log.write_text(completed.stdout)
         record.update(command=command, returncode=completed.returncode, log=str(log))
         print(completed.stdout, end="")
@@ -60,8 +87,13 @@ def main():
         if missing:
             raise RuntimeError(f"required backend tests did not pass: {missing}")
         record.update(status="passed", tests_passed=passed)
-    except Exception as error:
-        record.update(status="failed", error=str(error))
+    except (Exception, KeyboardInterrupt) as error:
+        if isinstance(error, subprocess.TimeoutExpired):
+            output = error.output or ""
+            if isinstance(output, bytes):
+                output = output.decode(errors="replace")
+            artifact.with_suffix(".log").write_text(output)
+        record.update(status="failed", error=str(error) or type(error).__name__)
         raise
     finally:
         artifact.write_text(json.dumps(record, indent=2))

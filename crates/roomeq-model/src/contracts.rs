@@ -82,6 +82,7 @@ impl DspGraph {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         );
     }

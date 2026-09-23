@@ -225,9 +225,12 @@ pub fn take_mixed_phase_reports(
 
 /// Create complete DSP chain output
 pub fn create_dsp_chain_output(
-    channels: HashMap<String, ChannelDspChain>,
+    mut channels: HashMap<String, ChannelDspChain>,
     metadata: Option<OptimizationMetadata>,
 ) -> DspChainOutput {
+    for chain in channels.values_mut() {
+        roomeq_model::joint_sub_report::refresh_joint_sub_binding(chain);
+    }
     let mut global_plugins: Vec<PluginConfigWrapper> = metadata
         .as_ref()
         .and_then(|metadata| metadata.bass_management.as_ref())

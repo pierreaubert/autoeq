@@ -161,12 +161,14 @@ mod tests {
             spl: curve.spl.to_vec(),
             phase: curve.phase.as_ref().map(|p| p.to_vec()),
             norm_range: None,
+            ..Default::default()
         }
     }
 
     fn make_channel(name: &str) -> (ChannelOptimizationResult, ChannelDspChain) {
         let curve = small_curve();
         let ch = ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: name.to_string(),
             pre_score: 0.0,
             post_score: 0.0,
@@ -190,6 +192,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         (ch, chain)
     }

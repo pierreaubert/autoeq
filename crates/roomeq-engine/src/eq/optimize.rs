@@ -13,7 +13,7 @@ use autoeq_optim::loss::LossType;
 use autoeq_optim::optim::setup::setup_objective_data;
 use autoeq_optim::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
 use math_audio_iir_fir::Biquad;
-use roomeq_analysis::rir_prototype::build_weighted_prototype;
+use roomeq_analysis::rir_prototype::build_weighted_prototype_with_capture;
 use roomeq_analysis::spatial_robustness::{self, SpatialRobustnessConfig};
 use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig};
 use std::collections::HashMap;
@@ -148,6 +148,7 @@ fn align_multi_measurement_curves(curves: &[Curve]) -> Result<Vec<Curve>, Box<dy
 
 /// Prepare the shared per-seat objective independently of its PEQ solver.
 /// FIR consumers must evaluate these same targets, masks and risk policy.
+#[cfg(test)]
 pub(crate) fn prepare_multi_measurement_objective(
     curves: &[Curve],
     config: &OptimizerConfig,
@@ -159,6 +160,32 @@ pub(crate) fn prepare_multi_measurement_objective(
         autoeq_optim::optim::ObjectiveData,
         autoeq_optim::OptimParams,
         OptimizerConfig,
+    ),
+    Box<dyn Error>,
+> {
+    let (objective, params, config, _) = prepare_multi_measurement_objective_recorded(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+    )?;
+    Ok((objective, params, config))
+}
+
+/// Prepare objective curves and retain their actual analysis normalization.
+pub(crate) fn prepare_multi_measurement_objective_recorded(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+) -> Result<
+    (
+        autoeq_optim::optim::ObjectiveData,
+        autoeq_optim::OptimParams,
+        OptimizerConfig,
+        roomeq_model::MultiInputNormalizationEvidence,
     ),
     Box<dyn Error>,
 > {
@@ -216,8 +243,16 @@ pub(crate) fn prepare_multi_measurement_objective(
             rir_cfg.distance_mode,
             rir_cfg.directivity,
         );
-        let prototype = build_weighted_prototype(curves, rir_cfg)
-            .map_err(|e| format!("Failed to build RIR prototype: {}", e))?;
+        let prototype = build_weighted_prototype_with_capture(
+            curves,
+            rir_cfg,
+            resources.and_then(|resources| resources.capture.as_ref()),
+        )
+        .map_err(|e| format!("Failed to build RIR prototype: {}", e))?;
+        log::info!(
+            "RIR prototype measured-direction bins per microphone: {:?} (remaining bins use geometric weights)",
+            prototype.measured_direction_bins
+        );
         if matches!(
             multi_config.strategy,
             MultiMeasurementStrategy::SpatialRobustness
@@ -384,6 +419,7 @@ pub(crate) fn prepare_multi_measurement_objective(
 
     // Build one ObjectiveData per curve
     let mut objectives = Vec::with_capacity(curves.len());
+    let mut normalizations = Vec::with_capacity(curves.len());
     // We'll use the first curve to build Args and as the "primary"
     let mut primary_objective: Option<autoeq_optim::optim::ObjectiveData> = None;
 
@@ -404,12 +440,30 @@ pub(crate) fn prepare_multi_measurement_objective(
                 (sum + *level, count + 1)
             });
         let mean_spl = if count > 0 { sum / count as f64 } else { 0.0 };
+        if !mean_spl.is_finite() {
+            return Err("multi-objective normalization reference must be finite".into());
+        }
         let mut normalized_curve = Curve {
             freq: curve.freq.clone(),
             spl: &curve.spl - mean_spl,
             phase: curve.phase.clone(),
             ..Default::default()
         };
+        normalizations.push(roomeq_model::InputNormalizationEvidence {
+            input_curve_identity: roomeq_model::decision_ledger::canonical_value_identity(
+                &serde_json::to_value(curve)?,
+            )
+            .fingerprint,
+            normalized_curve_identity: roomeq_model::decision_ledger::canonical_value_identity(
+                &serde_json::to_value(&normalized_curve)?,
+            )
+            .fingerprint,
+            applied_gain_db: -mean_spl,
+            reference_policy:
+                roomeq_model::NormalizationReferencePolicy::CorrectionBandArithmeticMean,
+            correction_band_hz: [effective_min_freq, effective_max_freq],
+            reference_target_identity: None,
+        });
 
         // Apply psychoacoustic smoothing if enabled
         if config.psychoacoustic {
@@ -574,7 +628,25 @@ pub(crate) fn prepare_multi_measurement_objective(
         peq_model,
     );
 
-    Ok((primary, optim_params, config.clone()))
+    use roomeq_model::NormalizationPopulation;
+    let population = match (
+        multi_config.rir_prototype.is_some(),
+        multi_config.strategy == MultiMeasurementStrategy::MinimaxUncertainty,
+    ) {
+        (false, false) => NormalizationPopulation::AlignedMeasurements,
+        (true, false) => NormalizationPopulation::RirPrototype,
+        (false, true) => NormalizationPopulation::BootstrapResamples,
+        (true, true) => NormalizationPopulation::BootstrapOfRirPrototype,
+    };
+    Ok((
+        primary,
+        optim_params,
+        config.clone(),
+        roomeq_model::MultiInputNormalizationEvidence {
+            population,
+            objectives: normalizations,
+        },
+    ))
 }
 
 fn bootstrap_uncertainty_depth(
@@ -605,6 +677,181 @@ pub struct EqOptimizationResult {
 impl EqOptimizationResult {
     fn into_legacy(self) -> (Vec<Biquad>, f64) {
         (self.filters, self.loss)
+    }
+}
+
+/// Revert shared EQ that regresses any retained seat against its frozen target.
+///
+/// Uses the optimizer's prepared target and normalization, never a separate
+/// normalization per seat. This stage check does not certify later routing.
+///
+/// # Errors
+/// Returns preparation errors or a nonfinite identity objective.
+pub(crate) fn protect_shared_eq_seats(
+    result: &mut EqOptimizationResult,
+    combined: &Curve,
+    seats: &[Curve],
+    config: &OptimizerConfig,
+    resources: &EqResources,
+    sample_rate: f64,
+) -> Result<Option<String>, Box<dyn Error>> {
+    if result.filters.is_empty() {
+        return Ok(None);
+    }
+    let prep = super::prepared_single_channel_eq::prepare_single_channel_eq_with_normalization(
+        combined,
+        config,
+        Some(resources),
+        sample_rate,
+        None,
+    )?;
+    // Preparation uses the canonical optimization grid; assess the retained
+    // measurement bins without inventing calibration or renormalizing seats.
+    // Interpolation is explicit and no endpoint extrapolation is permitted.
+    if combined.freq.first() < prep.acceptance_target.freq.first()
+        || combined.freq.last() > prep.acceptance_target.freq.last()
+    {
+        return Err("shared-EQ target does not cover the retained measurement support".into());
+    }
+    let target = autoeq_core::interpolate_log_space(&combined.freq, &prep.acceptance_target);
+    let post: Vec<_> = seats
+        .iter()
+        .map(|seat| {
+            let transfer = crate::response::compute_peq_complex_response(
+                &result.filters,
+                &seat.freq,
+                sample_rate,
+            );
+            crate::response::apply_complex_response(seat, &transfer)
+        })
+        .collect();
+    let reason =
+        match roomeq_quality::evaluate_multi_seat_acceptance(seats, &post, &[], &[], &target) {
+            Ok(assessment) if assessment.accepted() => return Ok(None),
+            Ok(assessment) => format!(
+                "shared EQ reverted: protected-seat runtime acceptance failed: {:?}",
+                assessment
+                    .training
+                    .seats
+                    .iter()
+                    .filter(|seat| !seat.accepted)
+                    .collect::<Vec<_>>()
+            ),
+            Err(reason) => format!("shared EQ reverted: seat acceptance unavailable: {reason}"),
+        };
+    let identity_loss = recompiled_loss(&[], &prep);
+    if !identity_loss.is_finite() {
+        return Err("shared-EQ identity objective is nonfinite".into());
+    }
+    result.filters.clear();
+    result.loss = identity_loss;
+    result.audibility_veto.clear();
+    result.veto_adjudication = None;
+    log::warn!("{reason}");
+    Ok(Some(reason))
+}
+
+#[cfg(test)]
+mod shared_eq_acceptance_tests {
+    use super::*;
+
+    fn fixture(levels: &[f64]) -> (Curve, Vec<Curve>, EqOptimizationResult, OptimizerConfig) {
+        let freq =
+            ndarray::Array1::from_iter((0..100).map(|i| 20.0 * 25.0_f64.powf(i as f64 / 99.0)));
+        let seats: Vec<_> = levels
+            .iter()
+            .map(|gain| {
+                let filter = Biquad::new(
+                    math_audio_iir_fir::BiquadFilterType::Peak,
+                    65.0,
+                    48_000.0,
+                    2.0,
+                    *gain,
+                );
+                let flat = Curve {
+                    freq: freq.clone(),
+                    spl: ndarray::Array1::from_elem(freq.len(), 80.0),
+                    ..Default::default()
+                };
+                let transfer =
+                    crate::response::compute_peq_complex_response(&[filter], &freq, 48_000.0);
+                crate::response::apply_complex_response(&flat, &transfer)
+            })
+            .collect();
+        let mut combined = seats[0].clone();
+        for i in 0..freq.len() {
+            combined.spl[i] =
+                seats.iter().map(|seat| seat.spl[i]).sum::<f64>() / seats.len() as f64;
+        }
+        let result = EqOptimizationResult {
+            filters: vec![Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Peak,
+                65.0,
+                48_000.0,
+                2.0,
+                -4.0,
+            )],
+            loss: 42.0,
+            optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
+        };
+        let config = OptimizerConfig {
+            min_freq: 30.0,
+            max_freq: 120.0,
+            num_filters: 1,
+            ..Default::default()
+        };
+        (combined, seats, result, config)
+    }
+
+    #[test]
+    fn roadmap_correction_shared_eq_retains_common_improvement() {
+        let (combined, seats, mut result, config) = fixture(&[6.0, 6.0, 6.0]);
+        let reason = protect_shared_eq_seats(
+            &mut result,
+            &combined,
+            &seats,
+            &config,
+            &EqResources::default(),
+            48_000.0,
+        )
+        .unwrap();
+        assert!(reason.is_none(), "{reason:?}");
+        assert_eq!(result.filters.len(), 1);
+        assert_eq!(result.loss, 42.0);
+    }
+
+    #[test]
+    fn roadmap_correction_shared_eq_reverts_and_recomputes_identity_score() {
+        let (combined, seats, mut result, config) = fixture(&[0.0, 6.0, 6.0]);
+        let resources = EqResources::default();
+        let reason = protect_shared_eq_seats(
+            &mut result,
+            &combined,
+            &seats,
+            &config,
+            &resources,
+            48_000.0,
+        )
+        .unwrap();
+        assert!(
+            reason
+                .unwrap()
+                .contains("seat_target_weighted_rms_regressed")
+        );
+        assert!(result.filters.is_empty());
+        let prep =
+            super::super::prepared_single_channel_eq::prepare_single_channel_eq_with_normalization(
+                &combined,
+                &config,
+                Some(&resources),
+                48_000.0,
+                None,
+            )
+            .unwrap();
+        assert_eq!(result.loss, recompiled_loss(&[], &prep));
+        assert_ne!(result.loss, 42.0);
     }
 }
 
@@ -1346,8 +1593,14 @@ fn optimize_channel_eq_multi_inner(
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let (primary, optim_params, effective_config) =
-        prepare_multi_measurement_objective(curves, config, multi_config, resources, sample_rate)?;
+    let (primary, optim_params, effective_config, input_normalization) =
+        prepare_multi_measurement_objective_recorded(
+            curves,
+            config,
+            multi_config,
+            resources,
+            sample_rate,
+        )?;
     let config = &effective_config;
     let final_objective = primary.clone();
 
@@ -1377,7 +1630,7 @@ fn optimize_channel_eq_multi_inner(
         backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
     };
 
-    let global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+    let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -1400,6 +1653,20 @@ fn optimize_channel_eq_multi_inner(
             .into());
         }
     }
+    // Emission-side envelope record: recompute the per-candidate limits from
+    // the same objective data and refuse infeasible winners instead of
+    // emitting them. Dispatchers already finalize production winners; this
+    // attaches the diagnostics and judges mock-backed paths alike.
+    crate::evidence_gate::verify_emission_candidate(
+        "multi-measurement-global",
+        &x,
+        &final_objective,
+        &optim_params,
+        &mut global_evidence,
+    )
+    .map_err(|reason| {
+        format!("multi-measurement global candidate refused at emission: {reason}")
+    })?;
     let global_loss = global_evidence
         .objective
         .ok_or("multi-measurement optimizer did not return a finite objective")?;
@@ -1420,6 +1687,7 @@ fn optimize_channel_eq_multi_inner(
             global_loss
         );
         let x_before_refine = x.to_vec();
+        let refine_snapshot = refine_data.clone();
         let local_result = backend.optimize_filters_with_algo_override(
             &mut x,
             &lower_bounds,
@@ -1443,6 +1711,16 @@ fn optimize_channel_eq_multi_inner(
                 local_evidence.status
             );
         }
+        crate::evidence_gate::verify_emission_candidate(
+            "multi-measurement-refine",
+            &x,
+            &refine_snapshot,
+            &optim_params,
+            &mut local_evidence,
+        )
+        .map_err(|reason| {
+            format!("multi-measurement refine candidate refused at emission: {reason}")
+        })?;
         let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
         let use_local = local_evidence.confidence
             != autoeq_optim::optim::OptimizerConfidence::Unusable
@@ -1487,6 +1765,7 @@ fn optimize_channel_eq_multi_inner(
     };
     let final_loss = autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &final_objective);
     for evidence in &mut optimizer_evidence {
+        evidence.multi_input_normalization = Some(input_normalization.clone());
         if evidence.selected_for_output {
             evidence.objective = Some(final_loss);
         }
@@ -2098,6 +2377,8 @@ mod processing_mode_tests {
             pre_ringing_threshold_db: -30.0,
             min_spatial_depth: 0.5,
             phase_smoothing_octaves: 1.0 / 6.0,
+            assessment: Default::default(),
+            max_correction_latency_ms: None,
         };
         let config = OptimizerConfig {
             processing_mode: ProcessingMode::MixedPhase,
@@ -2553,7 +2834,7 @@ mod multi_eq_tests {
                 }),
                 ..Default::default()
             };
-            let (prepared, _, _) = prepare_multi_measurement_objective(
+            let (prepared, _, _, normalization) = prepare_multi_measurement_objective_recorded(
                 &[first.clone(), second.clone()],
                 &config,
                 &bootstrap,
@@ -2562,6 +2843,17 @@ mod multi_eq_tests {
             )
             .unwrap();
             let bank = prepared.multi_objective.as_ref().unwrap();
+            assert_eq!(
+                normalization.population,
+                roomeq_model::NormalizationPopulation::BootstrapResamples
+            );
+            assert_eq!(normalization.objectives.len(), bank.objectives.len());
+            assert!(
+                normalization
+                    .objectives
+                    .iter()
+                    .all(|record| record.applied_gain_db.is_finite())
+            );
             assert_eq!(
                 bank.objectives.len(),
                 7,
@@ -3114,6 +3406,125 @@ mod multi_eq_tests {
             reported.veto_adjudication.unwrap().f0_reference_id,
             full.veto_adjudication.unwrap().f0_reference_id
         );
+    }
+
+    #[test]
+    fn roadmap_correction_hf_guard_return_preserves_bass_q() {
+        use autoeq_optim::OptimParams;
+        use autoeq_optim::optim::{ObjectiveData, OptimProgressCallback};
+        use math_audio_iir_fir::BiquadFilterType;
+
+        // A deterministic backend isolates returned-candidate enforcement from
+        // convergence. Both proposed filters intentionally have the same Q.
+        struct TwoPeaks;
+        impl OptimizerBackend for TwoPeaks {
+            fn optimize_filters(
+                &self,
+                x: &mut [f64],
+                lower: &[f64],
+                upper: &[f64],
+                objective: ObjectiveData,
+                params: &OptimParams,
+            ) -> Result<(String, f64), (String, f64)> {
+                let peq: Vec<_> = [80.0, 4_000.0]
+                    .into_iter()
+                    .map(|frequency| {
+                        (
+                            1.0,
+                            Biquad::new(
+                                BiquadFilterType::Peak,
+                                frequency,
+                                params.sample_rate,
+                                6.0,
+                                -3.0,
+                            ),
+                        )
+                    })
+                    .collect();
+                x.copy_from_slice(&autoeq_core::x2peq::peq2x(&peq, objective.peq_model));
+                for ((value, low), high) in x.iter_mut().zip(lower).zip(upper) {
+                    *value = value.clamp(*low, *high);
+                }
+                Ok((
+                    "converged".into(),
+                    autoeq_optim::optim::compute_base_fitness(x, &objective),
+                ))
+            }
+            fn optimize_filters_with_callback(
+                &self,
+                _x: &mut [f64],
+                _lower: &[f64],
+                _upper: &[f64],
+                _objective: ObjectiveData,
+                _params: &OptimParams,
+                _callback: OptimProgressCallback,
+            ) -> Result<(String, f64), (String, f64)> {
+                unreachable!("fixture has no callback")
+            }
+            fn optimize_filters_with_algo_override(
+                &self,
+                _x: &mut [f64],
+                _lower: &[f64],
+                _upper: &[f64],
+                _objective: ObjectiveData,
+                _params: &OptimParams,
+                _algorithm: Option<&str>,
+            ) -> Result<(String, f64), (String, f64)> {
+                unreachable!("fixture disables refinement")
+            }
+        }
+        for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
+            for global_q in [8.0, 0.5] {
+                let mut config = OptimizerConfig {
+                    num_filters: 2,
+                    max_freq: 8_000.0,
+                    max_q: global_q,
+                    refine: false,
+                    psychoacoustic: false,
+                    min_filter_improvement: 0.0,
+                    elimination_threshold: 0.0,
+                    high_frequency_correction: Some(roomeq_model::HighFrequencyCorrectionConfig {
+                        start_hz: 1_000.0,
+                        max_q: 1.0,
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                };
+                config.apply_high_frequency_correction_defaults(true);
+                let mut curve = make_simple_room_curve();
+                curve.spl.fill(0.0);
+                for (frequency, q) in [(80.0, global_q.min(6.0)), (4_000.0, global_q.min(1.0))] {
+                    curve.spl +=
+                        &Biquad::new(BiquadFilterType::Peak, frequency, sample_rate, q, 3.0)
+                            .np_log_result(&curve.freq);
+                }
+                let result = optimize_channel_eq_inner(
+                    &curve,
+                    &config,
+                    None,
+                    sample_rate,
+                    Some(0.0),
+                    None,
+                    None,
+                    &TwoPeaks,
+                )
+                .unwrap();
+                assert_eq!(result.filters.len(), 2);
+                for (frequency, expected_q) in
+                    [(80.0, global_q.min(6.0)), (4_000.0, global_q.min(1.0))]
+                {
+                    let filter = result
+                        .filters
+                        .iter()
+                        .find(|filter| (filter.freq - frequency).abs() < 1e-6)
+                        .unwrap();
+                    assert!(
+                        (filter.q - expected_q).abs() < 1e-9,
+                        "fs={sample_rate}, global={global_q}, filter={filter:?}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

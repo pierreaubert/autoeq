@@ -58,7 +58,11 @@ pub(crate) fn optimize_maybe_multi(
             measurements.individual(),
             optimization_curve,
         );
-        let curves = processed_curves.as_slice();
+        let usable_curves = processed_curves
+            .iter()
+            .map(|curve| prepared.usable_curve(curve).map(|curve| curve.into_owned()))
+            .collect::<Result<Vec<_>>>()?;
+        let curves = usable_curves.as_slice();
         info!(
             "  Multi-measurement optimization ({:?}) with {} curves{}",
             multi_config.strategy,

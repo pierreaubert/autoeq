@@ -307,6 +307,7 @@ mod tests {
 
     fn result_with_channel(name: &str, curve: roomeq_model::Curve) -> RoomOptimizationResult {
         let ch = ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: name.to_string(),
             pre_score: 0.5,
             post_score: 0.1,
@@ -319,6 +320,7 @@ mod tests {
             veto_adjudication: None,
         };
         RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::new(),
             channel_results: HashMap::from([(name.to_string(), ch)]),
             deployed_source_curves: HashMap::new(),
@@ -506,11 +508,13 @@ mod tests {
     #[test]
     fn compute_and_correct_icd_disabled_sets_metadata() {
         let mut result = RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::new(),
             channel_results: HashMap::from([
                 (
                     "left".to_string(),
                     ChannelOptimizationResult {
+                        measurement_conditioning: None,
                         name: "left".to_string(),
                         pre_score: 0.5,
                         post_score: 0.1,
@@ -526,6 +530,7 @@ mod tests {
                 (
                     "right".to_string(),
                     ChannelOptimizationResult {
+                        measurement_conditioning: None,
                         name: "right".to_string(),
                         pre_score: 0.5,
                         post_score: 0.1,

@@ -137,6 +137,25 @@ pub fn resolve_physical_routing(
                         {
                             plugins.push(plugin.clone())
                         }
+                        "delay"
+                            if plugin
+                                .parameters
+                                .get("room_eq_correction_delay")
+                                .and_then(|v| v.as_bool())
+                                == Some(true) =>
+                        {
+                            let valid = plugin
+                                .parameters
+                                .get("delay_ms")
+                                .and_then(|v| v.as_f64())
+                                .is_some_and(|delay| delay.is_finite() && delay >= 0.0);
+                            if !valid {
+                                return Err(invalid(
+                                    "correction-owned physical delay must be finite and nonnegative",
+                                ));
+                            }
+                            plugins.push(plugin.clone())
+                        }
                         "gain" | "delay" => (),
                         // Linear residual processing stays after the common sub correction.
                         "eq" | "convolution" | "crossover" | "limiter" => {
@@ -513,6 +532,66 @@ mod tests {
                 .gain_db,
             4.0
         );
+    }
+
+    #[test]
+    fn physical_routing_preserves_correction_owned_output_delay_once() {
+        let (mut channels, graph) = fixture();
+        let baseline = resolve_physical_routing(&channels, &graph).unwrap();
+        channels.get_mut("LFE").unwrap().drivers.as_mut().unwrap()[0]
+            .plugins
+            .push(tagged(
+                "delay",
+                json!({"delay_ms": 0.5, "room_eq_correction_delay": true}),
+                "post_route",
+            ));
+        let physical = resolve_physical_routing(&channels, &graph).unwrap();
+        let owned: Vec<_> = physical.outputs[3]
+            .plugins
+            .iter()
+            .filter(|plugin| {
+                plugin.plugin_type == "delay"
+                    && plugin.parameters["room_eq_correction_delay"] == true
+            })
+            .collect();
+        assert_eq!(owned.len(), 1);
+        assert_eq!(owned[0].parameters["delay_ms"], 0.5);
+        assert!(
+            physical.outputs[4]
+                .plugins
+                .iter()
+                .all(|plugin| plugin.parameters["room_eq_correction_delay"] != true)
+        );
+        assert_eq!(physical.routes[3].delay_ms, graph.routes[3].delay_ms);
+
+        let response = |plugins: &[PluginConfigWrapper]| {
+            let mut chain = channels["LFE"].clone();
+            chain.plugins = plugins.to_vec();
+            chain.drivers = None;
+            let mut sidecars = crate::dsp_realization::NoConvolutionIr;
+            let mut realized =
+                crate::dsp_realization::RealizedDsp::new(&chain, 48_000.0, &mut sidecars).unwrap();
+            realized.response_at(100.0).unwrap()
+        };
+        let before = response(&baseline.outputs[3].plugins);
+        let after = response(&physical.outputs[3].plugins);
+        let expected = num_complex::Complex64::from_polar(
+            1.0,
+            -2.0 * std::f64::consts::PI * 100.0 * 0.5 / 1_000.0,
+        );
+        assert!(((after / before) - expected).norm() < 1e-9);
+
+        for bad_delay in [json!(-0.5), json!("invalid")] {
+            let mut changed = channels.clone();
+            let driver = &mut changed.get_mut("LFE").unwrap().drivers.as_mut().unwrap()[0];
+            driver
+                .plugins
+                .iter_mut()
+                .find(|plugin| plugin.parameters["room_eq_correction_delay"] == true)
+                .unwrap()
+                .parameters["delay_ms"] = bad_delay;
+            assert!(resolve_physical_routing(&changed, &graph).is_err());
+        }
     }
 
     #[test]

@@ -120,6 +120,7 @@ fn channel_chain_with_slopes(
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     }
 }
 
@@ -131,6 +132,7 @@ fn result_with_channel_slopes(
     let initial_curve = curve_with_slope(initial_slope_db_per_octave);
     let final_curve = curve_with_slope(final_slope_db_per_octave);
     let channel = ChannelOptimizationResult {
+        measurement_conditioning: None,
         name: "L".to_string(),
         pre_score: 0.0,
         post_score: 0.0,
@@ -143,6 +145,7 @@ fn result_with_channel_slopes(
         veto_adjudication: None,
     };
     RoomOptimizationResult {
+        finalized_decisions: None,
         channels: HashMap::from([(
             "L".to_string(),
             channel_chain_with_slopes(
@@ -186,6 +189,9 @@ fn result_with_channel_slopes(
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+
+            provisional_decisions: Vec::new(),
         },
     }
 }
@@ -213,6 +219,7 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
         (
             "C".to_string(),
             ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: "C".to_string(),
                 pre_score: 0.0,
                 post_score: 0.0,
@@ -228,6 +235,7 @@ fn result_with_inter_channel_slope(channel_slope_db_per_octave: f64) -> RoomOpti
         (
             "L".to_string(),
             ChannelOptimizationResult {
+                measurement_conditioning: None,
                 name: "L".to_string(),
                 pre_score: 0.0,
                 post_score: 0.0,

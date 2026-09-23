@@ -239,6 +239,20 @@ pub(super) fn channels_for_generic_optimization(
     }
 }
 
+fn load_usable_reference_curve(
+    source: &MeasurementSource,
+    frequency_samples: usize,
+) -> Result<roomeq_model::Curve> {
+    let curve = crate::measurement::load_source_with_frequency_samples(source, frequency_samples)
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+        message: error.to_string(),
+    })?;
+    match source.provenance().valid_band_hz {
+        Some(band) => curve.select_frequency_band(band),
+        None => Ok(curve),
+    }
+}
+
 pub(super) fn compute_shared_mean_spl_with_frequency_samples(
     config: &RoomConfig,
     channels_to_process: &[(String, SpeakerConfig)],
@@ -250,22 +264,14 @@ pub(super) fn compute_shared_mean_spl_with_frequency_samples(
 
     let min_freq = config.optimizer.min_freq;
     let max_freq = config.optimizer.max_freq;
-    let mut channel_means: Vec<f64> = Vec::new();
+    let mut curves = Vec::new();
     let mut excluded_group_count = 0_usize;
 
     for (_name, speaker_config) in channels_to_process {
         if let SpeakerConfig::Single(source) = speaker_config
-            && let Ok(curve) =
-                crate::measurement::load_source_with_frequency_samples(source, frequency_samples)
+            && let Ok(curve) = load_usable_reference_curve(source, frequency_samples)
         {
-            let freqs_f32: Vec<f32> = curve.freq.iter().map(|&f| f as f32).collect();
-            let spl_f32: Vec<f32> = curve.spl.iter().map(|&s| s as f32).collect();
-            let mean = compute_average_response(
-                &freqs_f32,
-                &spl_f32,
-                Some((min_freq as f32, max_freq as f32)),
-            ) as f64;
-            channel_means.push(mean);
+            curves.push(curve);
         } else if !matches!(speaker_config, SpeakerConfig::Single(_)) {
             excluded_group_count += 1;
         }
@@ -278,6 +284,34 @@ pub(super) fn compute_shared_mean_spl_with_frequency_samples(
         );
     }
 
+    let common_low = curves
+        .iter()
+        .filter_map(|curve| curve.freq.first().copied())
+        .fold(min_freq, f64::max);
+    let common_high = curves
+        .iter()
+        .filter_map(|curve| curve.freq.last().copied())
+        .fold(max_freq, f64::min);
+    if curves.len() < 2 || common_low >= common_high {
+        return None;
+    }
+    let mut channel_means = Vec::with_capacity(curves.len());
+    for curve in curves {
+        let curve = curve
+            .select_frequency_band([common_low, common_high])
+            .ok()?;
+        let freqs: Vec<_> = curve.freq.iter().map(|&f| f as f32).collect();
+        let levels: Vec<_> = curve.spl.iter().map(|&s| s as f32).collect();
+        let mean = compute_average_response(
+            &freqs,
+            &levels,
+            Some((common_low as f32, common_high as f32)),
+        ) as f64;
+        if !mean.is_finite() {
+            return None;
+        }
+        channel_means.push(mean);
+    }
     if channel_means.len() > 1 {
         let avg = shared_target_level(&channel_means);
         info!(
@@ -411,7 +445,7 @@ pub(super) fn resolve_from_measurement_slope_with_frequency_samples(
 
     let mut slopes: Vec<f64> = Vec::with_capacity(bed_channels.len());
     for (_, name, source) in &bed_channels {
-        match crate::measurement::load_source_with_frequency_samples(source, frequency_samples) {
+        match load_usable_reference_curve(source, frequency_samples) {
             Ok(curve) => {
                 if let Some(s) = slope::estimate_slope_db_per_octave(
                     &curve,
@@ -450,16 +484,21 @@ pub(super) fn resolve_from_measurement_slope_with_frequency_samples(
     }
 
     // No bed channels usable — fall back to the first non-sub channel
-    // we can load (sorted for determinism).
+    // with a valid slope estimate (sorted for determinism).
     for (name, source) in &other_channels {
-        match crate::measurement::load_source_with_frequency_samples(source, frequency_samples) {
+        match load_usable_reference_curve(source, frequency_samples) {
             Ok(curve) => {
-                let s = slope::estimate_slope_db_per_octave(
+                let Some(s) = slope::estimate_slope_db_per_octave(
                     &curve,
                     slope::DEFAULT_SLOPE_MIN_FREQ,
                     slope::DEFAULT_SLOPE_MAX_FREQ,
-                )
-                .unwrap_or(0.0);
+                ) else {
+                    debug!(
+                        "  FromMeasurement: fallback '{}' produced no valid slope — trying the next channel",
+                        name
+                    );
+                    continue;
+                };
                 info!(
                     "  FromMeasurement: fallback slope = {:.2} dB/octave from non-bed channel '{}'",
                     s, name
@@ -722,6 +761,263 @@ mod tests {
     }
 
     #[test]
+    fn roadmap_shared_references_ignore_declared_unusable_samples() {
+        let mut outputs = Vec::new();
+        let mut delivered = Vec::new();
+        for (multiple, unusable) in [(false, 40.0), (false, 120.0), (true, 40.0), (true, 120.0)] {
+            let source = |level: f64| -> MeasurementSource {
+                let single = autoeq_core::MeasurementSingle {
+                    measurement: autoeq_core::MeasurementRef::Inline(
+                        autoeq_core::InlineMeasurement {
+                            frequencies: vec![100.0, 200.0, 400.0, 800.0, 1600.0, 3200.0, 6400.0],
+                            magnitude_db: vec![
+                                unusable, level, level, level, level, unusable, unusable,
+                            ],
+                            phase_deg: None,
+                            name: None,
+                            wav_path: None,
+                            csv_path: None,
+                        },
+                    ),
+                    speaker_name: None,
+                    provenance: autoeq_core::MeasurementProvenance {
+                        valid_band_hz: Some([200.0, 1600.0]),
+                        ..Default::default()
+                    },
+                };
+                if !multiple {
+                    return MeasurementSource::Single(single);
+                }
+                let second = autoeq_core::MeasurementRef::Inline(autoeq_core::InlineMeasurement {
+                    frequencies: vec![100.0, 190.0, 210.0, 450.0, 900.0, 1550.0, 1650.0, 6400.0],
+                    magnitude_db: vec![
+                        unusable, unusable, level, level, level, level, unusable, unusable,
+                    ],
+                    phase_deg: None,
+                    name: None,
+                    wav_path: None,
+                    csv_path: None,
+                });
+                MeasurementSource::Multiple(autoeq_core::MeasurementMultiple {
+                    measurements: vec![single.measurement, second],
+                    speaker_name: None,
+                    provenance: single.provenance,
+                })
+            };
+            let mut config = room_config_with_speakers(HashMap::from([
+                ("L".into(), SpeakerConfig::Single(source(80.0))),
+                ("R".into(), SpeakerConfig::Single(source(84.0))),
+            ]));
+            config.optimizer.min_freq = 100.0;
+            config.optimizer.max_freq = 6400.0;
+            config.optimizer.num_filters = 1;
+            config.optimizer.max_iter = 10;
+            config.optimizer.population = 6;
+            config.optimizer.parallel_threads = Some(1);
+            config.optimizer.refine = false;
+            config.optimizer.seed = Some(37);
+            config.optimizer.target_response = Some(roomeq_model::TargetResponseConfig {
+                shape: TargetShape::FromMeasurement,
+                ..Default::default()
+            });
+            let channels = channels_for_generic_optimization(&config);
+            let mean =
+                compute_shared_mean_spl_with_frequency_samples(&config, &channels, 128).unwrap();
+            let prepared = prepare_room_config_with_frequency_samples(&config, 128);
+            let slope = prepared.optimizer.from_measurement_slope_override.unwrap();
+            outputs.push((mean, slope));
+            let result = crate::optimize_room(&config, 48_000.0, None, None).unwrap();
+            let snapshot = super::super::input_snapshot::freeze(&config).unwrap();
+            let stage = result
+                .metadata
+                .stage_outcomes
+                .iter()
+                .find(|stage| stage.stage == "measurement_input_conditioning")
+                .expect("public workflow must attach actual preparation receipts");
+            assert_eq!(stage.status, roomeq_model::StageStatus::Applied);
+            assert_eq!(stage.checks.len(), 2);
+            assert!(stage.checks.iter().all(|check| check.passed));
+            let receipt = result.channel_results["L"]
+                .measurement_conditioning
+                .as_ref()
+                .unwrap();
+            assert_eq!(
+                receipt.representative_identity,
+                result.channel_results["L"]
+                    .initial_curve
+                    .content_hash()
+                    .unwrap()
+            );
+            if multiple {
+                assert!(
+                    receipt
+                        .entries
+                        .iter()
+                        .any(|entry| entry.operation == "source_overlap_alignment")
+                );
+                assert!(
+                    receipt
+                        .entries
+                        .iter()
+                        .any(|entry| entry.operation == "source_spatial_power_rms")
+                );
+            }
+            let output = result.to_dsp_chain_output();
+            let restored: roomeq_model::DspChainOutput =
+                serde_json::from_value(serde_json::to_value(&output).unwrap()).unwrap();
+            let output_stage = restored
+                .metadata
+                .as_ref()
+                .unwrap()
+                .stage_outcomes
+                .iter()
+                .find(|stage| stage.stage == "measurement_input_conditioning")
+                .unwrap();
+            assert_eq!(
+                serde_json::to_value(output_stage).unwrap(),
+                serde_json::to_value(stage).unwrap()
+            );
+            if multiple {
+                for mutation in 0..8 {
+                    let mut broken_link = result.clone();
+                    let receipt = broken_link
+                        .channel_results
+                        .get_mut("L")
+                        .unwrap()
+                        .measurement_conditioning
+                        .as_mut()
+                        .unwrap();
+                    match mutation {
+                        0 => receipt.entries[0].input_hashes[0] = "0".repeat(64),
+                        1 => receipt.individual_identities[0] = "0".repeat(64),
+                        2 => {
+                            let mut legacy = serde_json::to_value(&*receipt).unwrap();
+                            legacy.as_object_mut().unwrap().remove("native_identities");
+                            *receipt = serde_json::from_value(legacy).unwrap();
+                            assert!(receipt.native_identities.is_empty());
+                        }
+                        3 => receipt.native_identities.swap(0, 1),
+                        4 => {
+                            receipt.individual_identities[0] = receipt.native_identities[0].clone()
+                        }
+                        5 => {
+                            receipt.individual_identities.pop();
+                        }
+                        6 => {
+                            receipt.entries[0]
+                                .parameters
+                                .insert("source_index".into(), serde_json::json!(999));
+                        }
+                        _ => receipt.entries[0].operation = "unrecognized_operation".into(),
+                    }
+                    crate::evidence_intake::attach_measurement_conditioning(
+                        &mut broken_link,
+                        &snapshot,
+                    )
+                    .unwrap();
+                    let stage = broken_link
+                        .metadata
+                        .stage_outcomes
+                        .iter()
+                        .find(|stage| stage.stage == "measurement_input_conditioning")
+                        .unwrap();
+                    assert_eq!(
+                        stage.status,
+                        roomeq_model::StageStatus::Degraded,
+                        "a correctly shaped hash must not hide a broken producer dependency"
+                    );
+                }
+            }
+            let mut tampered = result.clone();
+            tampered
+                .channel_results
+                .get_mut("L")
+                .unwrap()
+                .measurement_conditioning
+                .as_mut()
+                .unwrap()
+                .representative_identity = "0".repeat(64);
+            crate::evidence_intake::attach_measurement_conditioning(&mut tampered, &snapshot)
+                .unwrap();
+            let rejected = tampered
+                .metadata
+                .stage_outcomes
+                .iter()
+                .find(|stage| stage.stage == "measurement_input_conditioning")
+                .unwrap();
+            assert_eq!(rejected.status, roomeq_model::StageStatus::Degraded);
+            assert!(
+                !rejected
+                    .checks
+                    .iter()
+                    .find(|check| check.id == "measurement-conditioning:L")
+                    .unwrap()
+                    .passed
+            );
+            tampered
+                .channel_results
+                .get_mut("L")
+                .unwrap()
+                .measurement_conditioning = None;
+            crate::evidence_intake::attach_measurement_conditioning(&mut tampered, &snapshot)
+                .unwrap();
+            let missing = tampered
+                .metadata
+                .stage_outcomes
+                .iter()
+                .find(|stage| stage.stage == "measurement_input_conditioning")
+                .unwrap();
+            assert_eq!(missing.status, roomeq_model::StageStatus::Degraded);
+            assert_eq!(missing.checks.len(), 1);
+            delivered.push(serde_json::to_value(&result.channels["L"].plugins).unwrap());
+        }
+        assert!(
+            outputs.iter().all(|(mean, _)| (mean - 82.0).abs() < 1e-5),
+            "{outputs:?}"
+        );
+        assert!(
+            outputs.iter().all(|(_, slope)| slope.abs() < 1e-10),
+            "{outputs:?}"
+        );
+        assert_eq!(delivered[0], delivered[1]);
+        assert_eq!(delivered[2], delivered[3]);
+    }
+
+    #[test]
+    fn roadmap_shared_references_require_common_sample_support() {
+        let source = |freq: Vec<f64>, level| {
+            SpeakerConfig::Single(MeasurementSource::InMemory(roomeq_model::Curve {
+                spl: ndarray::Array1::from_elem(freq.len(), level),
+                freq: ndarray::Array1::from_vec(freq),
+                ..Default::default()
+            }))
+        };
+        let mut config = room_config_with_speakers(HashMap::new());
+        config.optimizer.min_freq = 100.0;
+        config.optimizer.max_freq = 800.0;
+        for (left, right) in [
+            (vec![100.0, 200.0], vec![300.0, 400.0]),
+            (vec![100.0, 200.0], vec![200.0, 400.0]),
+            (vec![100.0, 150.0, 500.0], vec![200.0, 400.0]),
+        ] {
+            let channels = vec![
+                ("L".into(), source(left, 80.0)),
+                ("R".into(), source(right, 84.0)),
+            ];
+            assert!(
+                compute_shared_mean_spl_with_frequency_samples(&config, &channels, 128).is_none()
+            );
+        }
+        let channels = vec![
+            ("L".into(), source(vec![100.0, 200.0, 400.0], 80.0)),
+            ("R".into(), source(vec![200.0, 400.0, 800.0], 84.0)),
+        ];
+        let shared =
+            compute_shared_mean_spl_with_frequency_samples(&config, &channels, 128).unwrap();
+        assert!((shared - 82.0).abs() < 1e-5);
+    }
+
+    #[test]
     fn compute_shared_mean_spl_with_two_channels() {
         let channels = vec![
             ("left".to_string(), SpeakerConfig::Single(single_source())),
@@ -785,6 +1081,106 @@ mod tests {
     }
 
     #[test]
+    fn roadmap_measured_slope_fallback_skips_sources_without_regression_support() {
+        let source = |band, slope: f64| {
+            let frequencies = vec![50.0_f64, 75.0, 100.0, 200.0, 400.0, 800.0, 1600.0];
+            SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Inline(InlineMeasurement {
+                    magnitude_db: frequencies
+                        .iter()
+                        .map(|f| 80.0 + slope * (f / 200.0).log2())
+                        .collect(),
+                    frequencies,
+                    phase_deg: None,
+                    name: None,
+                    wav_path: None,
+                    csv_path: None,
+                }),
+                speaker_name: None,
+                provenance: autoeq_core::MeasurementProvenance {
+                    valid_band_hz: Some(band),
+                    ..Default::default()
+                },
+            }))
+        };
+        let mut config = room_config_with_speakers(HashMap::from([
+            ("TFL".into(), source([50.0, 100.0], 4.0)),
+            ("TFR".into(), source([200.0, 1600.0], -1.5)),
+        ]));
+        config.optimizer.target_response = Some(roomeq_model::TargetResponseConfig {
+            shape: TargetShape::FromMeasurement,
+            ..Default::default()
+        });
+        let resolved = resolve_from_measurement_slope_with_frequency_samples(&config, 128);
+        assert!(
+            (resolved + 1.5).abs() < 1e-10,
+            "next usable source must supply the slope, got {resolved}"
+        );
+        let prepared = prepare_room_config_with_frequency_samples(&config, 128);
+        assert_eq!(
+            prepared.optimizer.from_measurement_slope_override,
+            Some(resolved)
+        );
+        assert!(config.optimizer.from_measurement_slope_override.is_none());
+
+        config.optimizer.min_freq = 50.0;
+        config.optimizer.max_freq = 1600.0;
+        config.optimizer.num_filters = 1;
+        config.optimizer.max_iter = 10;
+        config.optimizer.population = 6;
+        config.optimizer.parallel_threads = Some(1);
+        config.optimizer.refine = false;
+        config.optimizer.seed = Some(37);
+        let measured = crate::optimize_room(&config, 48_000.0, None, None).unwrap();
+        config.optimizer.from_measurement_slope_override = Some(resolved);
+        let explicit = crate::optimize_room(&config, 48_000.0, None, None).unwrap();
+        for channel in ["TFL", "TFR"] {
+            assert_eq!(
+                serde_json::to_value(&measured.channels[channel].plugins).unwrap(),
+                serde_json::to_value(&explicit.channels[channel].plugins).unwrap()
+            );
+        }
+
+        config.optimizer.from_measurement_slope_override = None;
+        config.speakers.remove("TFR");
+        assert_eq!(
+            resolve_from_measurement_slope_with_frequency_samples(&config, 128),
+            0.0
+        );
+        config
+            .speakers
+            .insert("LFE".into(), source([200.0, 1600.0], -6.0));
+        assert_eq!(
+            resolve_from_measurement_slope_with_frequency_samples(&config, 128),
+            0.0
+        );
+        config
+            .speakers
+            .insert("TFR".into(), source([200.0, 1600.0], 0.0));
+        config
+            .speakers
+            .insert("TRL".into(), source([200.0, 1600.0], -3.0));
+        assert_eq!(
+            resolve_from_measurement_slope_with_frequency_samples(&config, 128),
+            0.0
+        );
+        config
+            .speakers
+            .insert("L".into(), source([200.0, 1600.0], -2.0));
+        assert!(
+            (resolve_from_measurement_slope_with_frequency_samples(&config, 128) + 2.0).abs()
+                < 1e-10
+        );
+        config.optimizer.from_measurement_slope_override = Some(-0.5);
+        assert_eq!(
+            prepare_room_config_with_frequency_samples(&config, 128)
+                .optimizer
+                .from_measurement_slope_override,
+            Some(-0.5)
+        );
+    }
+
+    #[test]
     fn identify_acoustic_groups_explicit_speaker_name() {
         let mut speakers = HashMap::new();
         speakers.insert(
@@ -799,6 +1195,7 @@ mod tests {
                     csv_path: None,
                 }),
                 speaker_name: Some("MySpeaker".to_string()),
+                provenance: Default::default(),
             })),
         );
         speakers.insert(
@@ -813,6 +1210,7 @@ mod tests {
                     csv_path: None,
                 }),
                 speaker_name: Some("MySpeaker".to_string()),
+                provenance: Default::default(),
             })),
         );
         let config = room_config_with_speakers(speakers);
@@ -870,6 +1268,7 @@ mod tests {
         let source = MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(path),
             speaker_name: None,
+            provenance: Default::default(),
         });
         let config = room_config_with_speakers(HashMap::from([(
             "left".to_string(),

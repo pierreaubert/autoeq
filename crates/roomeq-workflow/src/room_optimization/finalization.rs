@@ -4,11 +4,15 @@
 //! participates in acoustic replay; it is never normalized into the baseline.
 use super::*;
 use roomeq_model::PluginConfigWrapper;
+mod joint_drive;
+mod kautz;
+mod physical_drive;
 mod sub_output_limiter;
 
 struct PreparedCandidate {
     result: RoomOptimizationResult,
     electrical: Vec<roomeq_engine::quality::electrical_headroom::SampledElectricalOutputPeak>,
+    physical: std::collections::BTreeMap<String, physical_drive::Requirement>,
 }
 
 fn failed(message: impl Into<String>) -> AutoeqError {
@@ -44,6 +48,72 @@ pub(super) fn select(
             Err(error)
         }
     }
+}
+
+pub(super) fn verify_declared_physical_drive(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> Result<Option<f64>> {
+    result
+        .metadata
+        .stage_outcomes
+        .retain(|stage| stage.stage != "final_graph_declared_physical_drive");
+    let assessments = crate::electrical_headroom::assess_final_graph_physical_drive(
+        &result.to_dsp_chain_output(),
+        fs,
+        dir,
+        &config.optimizer.finalization,
+    )?;
+    if assessments.is_empty() {
+        return Ok(None);
+    }
+    if assessments
+        .iter()
+        .any(|assessment| !assessment.passes_declared_samples)
+    {
+        return Err(failed(format!(
+            "declared physical-drive check failed: {}",
+            serde_json::to_string(&assessments).map_err(|e| failed(e.to_string()))?
+        )));
+    }
+    result.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_graph_declared_physical_drive".into(),
+        status: StageStatus::Applied,
+        advisories: vec![
+            "operator_declared_calibration_and_limits_not_authenticated_hardware_evidence".into(),
+            "sampled_steady_sine_only_not_continuous_band_transient_thermal_or_program_capacity"
+                .into(),
+            "all_declared_quantities_checked; undeclared_physical_constraints_remain_unknown"
+                .into(),
+            "independently_phased_input_peak_bounds; nonlinear_protection_not_credited".into(),
+        ],
+        checks: assessments
+            .iter()
+            .map(|assessment| {
+                Ok(StageCheck {
+                    id: format!(
+                        "declared_physical_drive:{}:{:?}",
+                        assessment.output, assessment.declaration.quantity
+                    ),
+                    kind: StageCheckKind::Safety,
+                    passed: assessment.passes_declared_samples,
+                    observed: Some(assessment.max_utilization),
+                    limit: Some(1.0),
+                    diagnostic: Some(
+                        serde_json::to_string(assessment).map_err(|e| failed(e.to_string()))?,
+                    ),
+                })
+            })
+            .collect::<Result<Vec<_>>>()?,
+    });
+    Ok(Some(
+        assessments
+            .iter()
+            .map(|assessment| assessment.max_utilization)
+            .fold(0.0_f64, f64::max),
+    ))
 }
 
 /// Verify realized playback, not the last successful alignment stage's cache.
@@ -168,7 +238,7 @@ fn select_inner(
     // A multi-branch physical replay needs a measured phase for every
     // branch. Magnitude-only driver CSVs still support the magnitude EQ and
     // export path, but they cannot prove coherent crossover summation or
-    // source timing. Keep the optimized graph and report that limitation
+    // source timing. Publish the structural baseline and report that limitation
     // explicitly instead of turning an evidence gap into a failed run (or
     // inventing zero phase).
     if seat_replay::has_unmeasured_multi_branch_phase(captures) {
@@ -206,6 +276,12 @@ fn select_inner(
         if error
             .to_string()
             .contains("insufficient summation evidence")
+            // Routed main/sub branches are not represented as grouped drivers
+            // in captures, so the earlier grouped-driver phase check cannot
+            // detect this case. Publish the same unverified baseline without
+            // inventing phase or treating malformed configuration as evidence.
+            || matches!(&error, AutoeqError::InvalidMeasurement { message }
+                if message == "final-seat coherent replay needs phase for every physical branch")
         {
             return publish_baseline(
                 result,
@@ -251,9 +327,9 @@ fn select_inner(
         .into_iter()
         .flat_map(|strength| {
             [
-                (strength, strength, "output"),
-                (strength, strength, "common"),
-                (strength, strength, "spectral"),
+                (strength, strength, "output", 0.0),
+                (strength, strength, "common", 0.0),
+                (strength, strength, "spectral", 0.0),
             ]
         })
         .collect();
@@ -265,22 +341,73 @@ fn select_inner(
             for sub_strength in strengths {
                 if main_strength != sub_strength {
                     for mode in ["output", "common", "spectral"] {
-                        parameters.push((main_strength, sub_strength, mode));
+                        parameters.push((main_strength, sub_strength, mode, 0.0));
                     }
                 }
             }
         }
     }
+    let policy = &config.optimizer.finalization;
+    if policy.physical_drive_weight > 0.0 && !policy.subwoofer_limiter {
+        // Bounded search samples of the user's existing attenuation budget,
+        // not new permission to lose acoustic output or audibility thresholds.
+        // Include lower-drive alternatives even when every original is safe.
+        for strength in strengths {
+            for fraction in [1.0 / 64.0, 1.0 / 16.0, 0.25, 1.0] {
+                parameters.push((
+                    strength,
+                    strength,
+                    "common",
+                    policy.max_attenuation_db * fraction,
+                ));
+            }
+        }
+    }
+    // Array-stage diagnostics can outlive a safety reversion. Joint control
+    // trials must start from the realized, safety-rebuilt graph rather than
+    // proposing coordinates against historical controls that will be removed.
+    let joint_base = if config.optimizer.finalization.physical_drive_weight > 0.0 {
+        let mut baseline = original.clone();
+        rebuild(&mut baseline, config, held_out, fs, dir)
+            .ok()
+            .map(|()| baseline)
+    } else {
+        None
+    };
+    let joint_trials = joint_base
+        .as_ref()
+        .map(|baseline| joint_drive::proposals(baseline, config))
+        .transpose()?
+        .unwrap_or_default();
+    let parameters: Vec<_> = parameters
+        .into_iter()
+        .map(|(main, sub, mode, cut)| (main, sub, mode, cut, None))
+        .chain(
+            joint_trials
+                .iter()
+                .enumerate()
+                .map(|(index, _)| (1.0, 1.0, "output", 0.0, Some(index))),
+        )
+        .collect();
     let mut prepared_strengths = None;
     let mut prepared = Err(String::new());
-    for &(strength, sub_strength, attenuation_mode) in &parameters {
+    for &(strength, sub_strength, attenuation_mode, drive_cut_db, joint_trial) in &parameters {
         if config.optimizer.finalization.subwoofer_limiter && attenuation_mode != "output" {
             continue;
         }
-        if prepared_strengths != Some((strength, sub_strength)) {
-            prepared_strengths = Some((strength, sub_strength));
+        if prepared_strengths != Some((strength, sub_strength, joint_trial)) {
+            prepared_strengths = Some((strength, sub_strength, joint_trial));
+            let trial_source = joint_trial
+                .map(|index| {
+                    joint_trials[index].apply(
+                        joint_base
+                            .as_ref()
+                            .expect("joint trial requires a rebuilt baseline"),
+                    )
+                })
+                .transpose()?;
             prepared = prepare_candidate(
-                &original,
+                trial_source.as_ref().unwrap_or(&original),
                 (strength, sub_strength),
                 &sub_roles,
                 config,
@@ -294,12 +421,17 @@ fn select_inner(
         // With no required attenuation the three modes produce the same DSP.
         // Evaluate that candidate once, including its final level alignment.
         if attenuation_mode != "output"
+            && drive_cut_db == 0.0
             && prepared.as_ref().is_ok_and(|value| {
-                value.electrical.iter().all(|output| {
-                    output.peak_dbfs.is_none_or(|peak| {
-                        peak <= config.optimizer.finalization.output_ceiling_dbfs + 1e-6
+                value
+                    .physical
+                    .values()
+                    .all(|value| value.attenuation_db == 0.0)
+                    && value.electrical.iter().all(|output| {
+                        output.peak_dbfs.is_none_or(|peak| {
+                            peak <= config.optimizer.finalization.output_ceiling_dbfs + 1e-6
+                        })
                     })
-                })
             })
         {
             continue;
@@ -321,18 +453,23 @@ fn select_inner(
                 .filter(|output| !protected.contains(&output.output))
                 .cloned()
                 .collect();
-            let attenuation = before
-                .iter()
-                .filter_map(|output| output.peak_dbfs)
-                .map(|peak| (peak - policy.output_ceiling_dbfs).max(0.0))
-                .fold(0.0_f64, f64::max);
+            let physical = &prepared
+                .as_ref()
+                .map_err(|error| failed(error.clone()))?
+                .physical;
+            let required = physical_drive::combined_attenuations(
+                &before,
+                physical,
+                policy.output_ceiling_dbfs,
+            );
+            let attenuation = required.values().copied().fold(0.0_f64, f64::max) + drive_cut_db;
             if attenuation > policy.max_attenuation_db + 1e-6 {
                 return Err(failed(format!(
                     "final graph needs {attenuation:.3} dB attenuation beyond {:.3} dB limit",
                     policy.max_attenuation_db
                 )));
             }
-            if attenuation > 1e-6 {
+            if attenuation > 1e-6 || physical.values().any(|value| value.attenuation_db > 0.0) {
                 // A small numerical reserve avoids accepting a positive residue
                 // caused by serializing gain parameters and replaying the chain.
                 if attenuation_mode == "spectral" {
@@ -340,11 +477,7 @@ fn select_inner(
                 } else if attenuation_mode == "common" {
                     install_attenuation(&mut candidate, attenuation + 1e-6)?;
                 } else {
-                    install_output_attenuation(
-                        &mut candidate,
-                        &before,
-                        policy.output_ceiling_dbfs,
-                    )?;
+                    install_output_attenuation_requirements(&mut candidate, &required)?;
                 }
                 refresh_responses(&mut candidate, fs, dir)?;
                 refresh_final_reports(&mut candidate, config, fs, dir);
@@ -412,6 +545,8 @@ fn select_inner(
                     "final electrical replay exceeds configured output ceiling",
                 ));
             }
+            let drive_utilization =
+                verify_declared_physical_drive(&mut candidate, config, fs, dir)?;
             // Do not reuse a pre-attenuation or representative-seat verdict.
             seat_replay::validate_candidate_final_seats(
                 &mut candidate,
@@ -456,7 +591,12 @@ fn select_inner(
                     report.decision = roomeq_model::CorrectionDecision::IdentityFallback;
                     report.refresh_outcome();
                 } else {
-                    return Err(failed("final primary target metric did not improve"));
+                    return Err(failed(format!(
+                        "final primary target metric did not improve: improvement_db={:.9}, correction_rms_db={:.9}, max_abs_correction_db={:.9}",
+                        report.metrics.improvement_db,
+                        report.metrics.correction_rms_db,
+                        report.metrics.max_abs_correction_db,
+                    )));
                 }
             } else if accepted_via_safe_reversion {
                 // The stage reversion is historical: this exact remaining DSP
@@ -491,11 +631,46 @@ fn select_inner(
             if !score.is_finite() {
                 return Err(failed("nonfinite final candidate score"));
             }
+            let acoustic_score = score;
+            let score = physical_drive::candidate_score(
+                acoustic_score,
+                drive_utilization,
+                policy.physical_drive_weight,
+            )
+            .map_err(failed)?;
+            candidate
+                .metadata
+                .stage_outcomes
+                .retain(|stage| stage.stage != "final_candidate_objective");
+            candidate.metadata.stage_outcomes.push(StageOutcome {
+                stage: "final_candidate_objective".into(),
+                status: StageStatus::Applied,
+                checks: vec![StageCheck {
+                    id: "delivered_candidate_score".into(),
+                    kind: StageCheckKind::Quality,
+                    passed: true,
+                    observed: Some(score),
+                    limit: None,
+                    diagnostic: Some(serde_json::json!({
+                        "mean_seat_target_error_db": acoustic_score,
+                        "worst_declared_drive_utilization": drive_utilization,
+                        "physical_drive_weight": policy.physical_drive_weight,
+                        "scope": "historical selection-stage ranking; later pruning may change the graph; declared sampled steady-sine demand, not authenticated hardware capacity or perceptual benefit"
+                    }).to_string()),
+                }],
+                advisories: vec!["all_electrical_physical_and_seat_constraints_remain_hard_gates".into()],
+            });
             record_final_electrical_stage(
                 &mut candidate,
                 &outputs,
                 policy,
-                format!("required_peak_attenuation_db={attenuation:.9}; mode={attenuation_mode}"),
+                format!(
+                    "required_output_attenuation_db={attenuation:.9}; required_physical_attenuation_db={:.9}; mode={attenuation_mode}",
+                    physical
+                        .values()
+                        .map(|value| value.attenuation_db)
+                        .fold(0.0_f64, f64::max)
+                ),
             )?;
             crate::export::bind_final_convolution_artifacts(&mut candidate, dir, store, fs)?;
             refresh_final_reports(&mut candidate, config, fs, dir);
@@ -528,15 +703,19 @@ fn select_inner(
                         / quality.final_seats.len().max(1) as f64
                         <= 0.05
                 });
-            stop_after_trial = (intact_full_correction
-                && (all_seats_improved || !allow_role_refinement))
-                || residual_is_negligible;
+            stop_after_trial = policy.physical_drive_weight == 0.0
+                && ((intact_full_correction && (all_seats_improved || !allow_role_refinement))
+                    || residual_is_negligible);
             Ok(score)
         })();
         trials.push(StageCheck {
-            id: format!(
-                "correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}"
-            ),
+            id: if let Some(index) = joint_trial {
+                joint_trials[index].id()
+            } else if drive_cut_db == 0.0 {
+                format!("correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}")
+            } else {
+                format!("correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}_drive_cut_{drive_cut_db:.5}")
+            },
             // Rejected alternatives are diagnostic search outcomes. The
             // selected graph has separate enforced final safety evidence.
             kind: StageCheckKind::Quality,
@@ -619,13 +798,19 @@ fn publish_baseline(
     // graph. Reconstruct playback before measuring levels; never retain a
     // successful alignment report from a different candidate.
     refresh_responses(&mut baseline, fs, dir)?;
-    let alignment = apply_final_channel_level_alignment(&mut baseline, config, fs, dir)?;
+    let alignment =
+        apply_final_channel_level_alignment(&mut baseline, config, fs, dir).map_err(|error| {
+            failed(format!(
+                "structural fallback channel-level replay failed: {error}"
+            ))
+        })?;
     if alignment.checks.iter().any(|check| !check.passed) {
         return Err(failed("fallback channel-level alignment failed"));
     }
     baseline.metadata.stage_outcomes.retain(|stage| {
         stage.stage != "final_channel_level_alignment"
             && stage.stage != "channel_level_candidate_requires_final_refinement"
+            && stage.stage != "final_candidate_objective"
     });
     baseline.metadata.stage_outcomes.push(alignment);
     let frozen_baseline = baseline.clone();
@@ -643,12 +828,14 @@ fn publish_baseline(
         .filter(|output| !protected.contains(&output.output))
         .cloned()
         .collect();
-    let attenuation = unprotected
-        .iter()
-        .filter_map(|output| output.peak_dbfs)
-        .map(|peak| (peak - policy.output_ceiling_dbfs).max(0.0))
-        .fold(0.0_f64, f64::max);
+    let physical = physical_drive::requirements(&baseline, config, fs, dir)?;
+    let required =
+        physical_drive::combined_attenuations(&unprotected, &physical, policy.output_ceiling_dbfs);
+    let attenuation = required.values().copied().fold(0.0_f64, f64::max);
     if attenuation > policy.max_attenuation_db + 1e-6 {
+        // Preserve the scoped physical failure when no permitted attenuation
+        // can bring even the protected structural baseline into its domain.
+        verify_declared_physical_drive(&mut baseline, config, fs, dir)?;
         let output_peaks = unprotected
             .iter()
             .filter_map(|output| {
@@ -663,12 +850,13 @@ fn publish_baseline(
             policy.max_attenuation_db,
         )));
     }
-    if attenuation > 1e-6 {
+    if attenuation > 1e-6 || physical.values().any(|value| value.attenuation_db > 0.0) {
         // A bass-bus overload must not attenuate unrelated physical mains.
         // Recheck acoustic integration below rather than preserving it by
         // silently lowering every programme input to the worst output's level.
-        install_output_attenuation(&mut baseline, &unprotected, policy.output_ceiling_dbfs)?;
+        install_output_attenuation_requirements(&mut baseline, &required)?;
     }
+    verify_declared_physical_drive(&mut baseline, config, fs, dir)?;
     refresh_responses(&mut baseline, fs, dir)?;
     refresh_final_reports(&mut baseline, config, fs, dir);
     refresh_temporal_ir_evidence(&mut baseline, config, fs, dir);
@@ -756,7 +944,13 @@ fn publish_baseline(
         &mut baseline,
         &outputs,
         policy,
-        format!("required_peak_attenuation_db={attenuation:.9}; mode=structural_fallback"),
+        format!(
+            "required_output_attenuation_db={attenuation:.9}; required_physical_attenuation_db={:.9}; mode=structural_fallback",
+            physical
+                .values()
+                .map(|value| value.attenuation_db)
+                .fold(0.0_f64, f64::max)
+        ),
     )?;
     sanity_check_result(&baseline)?;
     baseline.metadata.stage_outcomes.push(StageOutcome {
@@ -856,7 +1050,12 @@ fn prepare_candidate(
         dir,
         &config.optimizer.finalization,
     )?;
-    Ok(PreparedCandidate { result, electrical })
+    let physical = physical_drive::requirements(&result, config, fs, dir)?;
+    Ok(PreparedCandidate {
+        result,
+        electrical,
+        physical,
+    })
 }
 
 fn same_correction_kernels(
@@ -952,6 +1151,10 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
             dir,
         )?;
         channel.final_curve = realized.clone();
+        // Publish the exact input used by this realization. The old display
+        // curve can be extrapolated to a wider grid and carry normalization
+        // metadata that no longer describes the rebuilt, unnormalized output.
+        chain.initial_curve = Some((&channel.initial_curve).into());
         chain.final_curve = Some((&realized).into());
         chain.eq_response = None;
         // Keep the optimizer's filter metadata synchronized with the
@@ -981,8 +1184,9 @@ pub(super) fn rebuild(
     dir: &Path,
 ) -> Result<()> {
     refresh_responses(result, fs, dir)?;
+    // This also refreshes temporal IR evidence for the safety gate below.
+    // Repeating it before any graph mutation replays the same chain twice.
     refresh_final_reports(result, config, fs, dir);
-    refresh_temporal_ir_evidence(result, config, fs, dir);
     room_optimization_result::apply_final_correction_safety_gate(
         result,
         fs,
@@ -1080,15 +1284,29 @@ fn install_spectral_attenuation(
             dir,
             policy,
         )?;
-        let Some(worst) = outputs
+        let electrical = outputs
             .iter()
             .filter(|output| output.peak_dbfs.is_some())
             .max_by(|a, b| a.peak_dbfs.unwrap().total_cmp(&b.peak_dbfs.unwrap()))
-        else {
+            .map(|worst| {
+                (
+                    worst.peak_dbfs.unwrap() - policy.output_ceiling_dbfs,
+                    worst.peak_frequency_hz,
+                )
+            });
+        let physical = physical_drive::requirements(result, config, fs, dir)?;
+        let worst = electrical
+            .into_iter()
+            .chain(
+                physical
+                    .values()
+                    .map(|value| (value.attenuation_db, value.frequency_hz)),
+            )
+            .max_by(|a, b| a.0.total_cmp(&b.0));
+        let Some((needed, peak_frequency_hz)) = worst else {
             return Ok(());
         };
-        let needed = worst.peak_dbfs.unwrap() - policy.output_ceiling_dbfs;
-        if needed <= 1e-6 {
+        if needed <= 1e-6 && physical.values().all(|value| value.attenuation_db == 0.0) {
             return Ok(());
         }
         let cut = needed + 0.05;
@@ -1106,12 +1324,12 @@ fn install_spectral_attenuation(
         // Out-of-band electrical overload still needs a bound. Shelves are
         // anchored at the measured band edge; no unmeasured acoustic response
         // is invented, and the delivered in-band effect is checked at all seats.
-        let (kind, frequency) = if worst.peak_frequency_hz < lo {
+        let (kind, frequency) = if peak_frequency_hz < lo {
             (BiquadFilterType::Lowshelf, lo)
-        } else if worst.peak_frequency_hz >= hi {
+        } else if peak_frequency_hz >= hi {
             (BiquadFilterType::Highshelf, hi)
         } else {
-            (BiquadFilterType::Peak, worst.peak_frequency_hz)
+            (BiquadFilterType::Peak, peak_frequency_hz)
         };
         let filter = Biquad::new(kind, frequency, fs, 0.7, -cut);
         let mut plugin = roomeq_engine::output::create_eq_plugin(&[filter]);
@@ -1156,6 +1374,7 @@ fn headroom_input_chain<'a>(
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             });
     }
     result
@@ -1188,10 +1407,19 @@ fn install_attenuation(result: &mut RoomOptimizationResult, attenuation: f64) ->
     Ok(())
 }
 
+#[cfg(test)]
 fn install_output_attenuation(
     result: &mut RoomOptimizationResult,
     outputs: &[roomeq_engine::quality::electrical_headroom::SampledElectricalOutputPeak],
     ceiling: f64,
+) -> Result<()> {
+    let required = physical_drive::combined_attenuations(outputs, &Default::default(), ceiling);
+    install_output_attenuation_requirements(result, &required)
+}
+
+fn install_output_attenuation_requirements(
+    result: &mut RoomOptimizationResult,
+    required: &std::collections::BTreeMap<String, f64>,
 ) -> Result<()> {
     let routed = result
         .metadata
@@ -1200,9 +1428,8 @@ fn install_output_attenuation(
         .and_then(|bass| bass.routing_graph.as_ref())
         .is_some();
     let independent = crate::electrical_headroom::independent_graph_output_ports(&result.channels);
-    for output in outputs {
-        let attenuation = (output.peak_dbfs.unwrap_or(f64::NEG_INFINITY) - ceiling).max(0.0);
-        if attenuation <= 1e-6 {
+    for (output, attenuation) in required {
+        if *attenuation <= 0.0 {
             continue;
         }
         let mut gain = roomeq_engine::output::create_gain_plugin(-attenuation - 1e-6);
@@ -1217,24 +1444,23 @@ fn install_output_attenuation(
             if let Some(drivers) = &mut chain.drivers {
                 for driver in drivers {
                     let matches = if routed {
-                        driver.name == output.output
+                        driver.name == *output
                     } else {
-                        independent.get(&(name.clone(), Some(driver.name.clone())))
-                            == Some(&output.output)
+                        independent.get(&(name.clone(), Some(driver.name.clone()))) == Some(output)
                     };
                     if matches {
-                        driver.plugins.push(gain.clone());
+                        insert_gain_before_limiter(&mut driver.plugins, gain.clone());
                         installed = true;
                     }
                 }
             } else {
                 let matches = if routed {
-                    *name == output.output
+                    *name == *output
                 } else {
-                    independent.get(&(name.clone(), None)) == Some(&output.output)
+                    independent.get(&(name.clone(), None)) == Some(output)
                 };
                 if matches {
-                    chain.plugins.push(gain.clone());
+                    insert_gain_before_limiter(&mut chain.plugins, gain.clone());
                     installed = true;
                 }
             }
@@ -1242,11 +1468,19 @@ fn install_output_attenuation(
         if !installed {
             return Err(failed(format!(
                 "missing electrical output owner '{}'",
-                output.output
+                output
             )));
         }
     }
     Ok(())
+}
+
+fn insert_gain_before_limiter(plugins: &mut Vec<PluginConfigWrapper>, gain: PluginConfigWrapper) {
+    // Preserve terminal protection; its nonlinear gain reduction is still
+    // never credited by physical-drive replay.
+    let index =
+        plugins.len() - usize::from(plugins.last().is_some_and(|p| p.plugin_type == "limiter"));
+    plugins.insert(index, gain);
 }
 
 fn scale_correction(
@@ -1288,6 +1522,18 @@ fn scale_correction(
             }
         }
         if let Some(channel) = result.channel_results.get_mut(name) {
+            // Keep the retained common serial filters consistent with the
+            // scaled plugins. Rebuild coefficients, not only their gain labels.
+            // Parallel driver filters do not belong in this common list.
+            for filter in &mut channel.biquads {
+                *filter = math_audio_iir_fir::Biquad::new(
+                    filter.filter_type,
+                    filter.freq,
+                    fs,
+                    filter.q,
+                    filter.db_gain * strength,
+                );
+            }
             // Selected artifacts own their coefficients; old retained taps must
             // never shadow the newly written trial sidecar.
             let firs: Vec<_> = chain
@@ -1336,6 +1582,10 @@ fn scale_plugin(
             .and_then(|v| v.as_array_mut())
             .ok_or_else(|| failed("malformed correction EQ filters"))?;
         for filter in filters {
+            if filter.get("topology").and_then(serde_json::Value::as_str) == Some("kautz_filter") {
+                kautz::scale_weights(filter, strength)?;
+                continue;
+            }
             if let Some(gain) = filter.get("db_gain").and_then(|v| v.as_f64()) {
                 if !gain.is_finite() {
                     return Err(failed("nonfinite correction EQ gain"));
@@ -1604,6 +1854,126 @@ mod tests {
         );
     }
 
+    #[test]
+    fn correction_strength_keeps_retained_biquads_equal_to_emitted_filters() {
+        use math_audio_iir_fir::{Biquad, BiquadFilterType};
+        for fs in [44_100.0, 48_000.0, 96_000.0] {
+            for is_sub in [false, true] {
+                for strength in [0.0, 0.5, 1.0] {
+                    let (mut result, _) = fixture();
+                    let filter = Biquad::new(BiquadFilterType::Peak, 60.0, fs, 3.0, -0.1);
+                    result.channels.get_mut("L").unwrap().plugins =
+                        vec![roomeq_engine::output::create_eq_plugin(&[filter.clone()])];
+                    result.channel_results.get_mut("L").unwrap().biquads = vec![filter];
+                    let subs = if is_sub {
+                        [String::from("L")].into()
+                    } else {
+                        Default::default()
+                    };
+                    let strengths = if is_sub {
+                        (1.0, strength)
+                    } else {
+                        (strength, 1.0)
+                    };
+                    let dir = tempfile::tempdir().unwrap();
+                    let store = autoeq_artifacts::MemoryArtifactStore::new();
+                    scale_correction(
+                        &mut result,
+                        strengths,
+                        &subs,
+                        fs,
+                        dir.path(),
+                        &ProcessingMode::LowLatency,
+                        &store,
+                    )
+                    .unwrap();
+                    let retained = &result.channel_results["L"].biquads[0];
+                    assert_eq!(
+                        roomeq_engine::output::biquad_to_json(retained),
+                        result.channels["L"].plugins[0].parameters["filters"][0],
+                    );
+                    let expected =
+                        Biquad::new(BiquadFilterType::Peak, 60.0, fs, 3.0, -0.1 * strength);
+                    for frequency in [30.0, 60.0, 120.0] {
+                        assert_eq!(
+                            retained.complex_response(frequency),
+                            expected.complex_response(frequency)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn correction_strength_scales_kautz_playback_weights_not_db_placeholder() {
+        use num_complex::Complex64;
+        use roomeq_engine::dsp_realization::{NoConvolutionIr, RealizedDsp};
+        for fs in [44_100.0, 48_000.0, 96_000.0] {
+            for sub in [false, true] {
+                for strength in [0.0, 0.5, 1.0] {
+                    let (mut result, _) = fixture();
+                    let filter = serde_json::json!({
+                        "topology": "kautz_filter", "filter_type": "peak",
+                        "freq": 75.0, "q": 8.0, "db_gain": 0.0,
+                        "kautz_sections": [
+                            {"pole_freq": 75.0, "q": 8.0, "gain": -0.025},
+                            {"pole_freq": 135.0, "q": 10.0, "gain": 0.018}
+                        ]
+                    });
+                    result.channels.get_mut("L").unwrap().plugins = vec![
+                        roomeq_engine::output::create_labeled_eq_plugin_from_filter_configs(
+                            vec![filter],
+                            "kautz_modal",
+                        ),
+                    ];
+                    let original = result.channels["L"].clone();
+                    let mut original_ir = NoConvolutionIr;
+                    let mut before = RealizedDsp::new(&original, fs, &mut original_ir).unwrap();
+                    let dir = tempfile::tempdir().unwrap();
+                    let store = autoeq_artifacts::MemoryArtifactStore::new();
+                    scale_correction(
+                        &mut result,
+                        if sub {
+                            (1.0, strength)
+                        } else {
+                            (strength, 1.0)
+                        },
+                        &if sub {
+                            [String::from("L")].into()
+                        } else {
+                            Default::default()
+                        },
+                        fs,
+                        dir.path(),
+                        &ProcessingMode::KautzModal,
+                        &store,
+                    )
+                    .unwrap();
+                    let mut selected_ir = NoConvolutionIr;
+                    let mut selected =
+                        RealizedDsp::new(&result.channels["L"], fs, &mut selected_ir).unwrap();
+                    for frequency in [0.0, 25.0, 75.0, 100.0, 135.0, 200.0, 1000.0, fs / 2.0] {
+                        let unity = Complex64::new(1.0, 0.0);
+                        let expected =
+                            unity + strength * (before.response_at(frequency).unwrap() - unity);
+                        let actual = selected.response_at(frequency).unwrap();
+                        assert!(
+                            (actual - expected).norm() < 1e-10,
+                            "{fs} Hz, sub={sub}, strength={strength}, f={frequency}: {actual:?} != {expected:?}"
+                        );
+                    }
+                    let sections =
+                        &result.channels["L"].plugins[0].parameters["filters"][0]["kautz_sections"];
+                    assert_eq!(sections[0]["pole_freq"], 75.0);
+                    assert_eq!(sections[0]["q"], 8.0);
+                    assert_eq!(sections[1]["pole_freq"], 135.0);
+                    assert_eq!(sections[1]["q"], 10.0);
+                }
+            }
+        }
+    }
+
     fn run_canonical_seeds(seeds: &[u64]) {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let (mut config, _) = crate::load_merged_config_strict(
@@ -1625,11 +1995,43 @@ mod tests {
             let result = match optimize_room(&config, 48000.0, None, Some(dir.path())) {
                 Ok(result) => result,
                 Err(error) => {
+                    let evidence = root.join(format!(
+                        "target/qa/canonical-mso-finalization-seed-{seed}-rejected.json"
+                    ));
+                    std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
+                    std::fs::write(
+                        &evidence,
+                        serde_json::to_vec_pretty(&serde_json::json!({
+                            "status": "optimization_failed", "seed": seed,
+                            "error": error.to_string(),
+                            "sample_rate_hz": 48000.0,
+                            "config": config,
+                        }))
+                        .unwrap(),
+                    )
+                    .unwrap();
                     eprintln!("canonical seed {seed}: rejected: {error}");
                     failures.push(format!("seed {seed}: {error}"));
                     continue;
                 }
             };
+            // Preserve the delivered graph even if a later assertion fails.
+            // This status is deliberately not a test-pass claim.
+            let evidence = root.join(format!(
+                "target/qa/canonical-mso-finalization-seed-{seed}.json"
+            ));
+            std::fs::create_dir_all(evidence.parent().unwrap()).unwrap();
+            std::fs::write(
+                &evidence,
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "status": "workflow_returned_output", "seed": seed,
+                    "after_final_seat_validation": result.to_dsp_chain_output(),
+                    "sample_rate_hz": 48000.0,
+                    "config": config,
+                }))
+                .unwrap(),
+            )
+            .unwrap();
             let acceptance = result.metadata.correction_acceptance.as_ref().unwrap();
             if !acceptance.accepted {
                 let evidence = root.join(format!(
@@ -1663,15 +2065,35 @@ mod tests {
                     .improvement_median_db
                     > 0.0
             );
-            assert_eq!(
-                acceptance
-                    .acoustic_quality
-                    .as_ref()
-                    .unwrap()
-                    .final_seats
-                    .len(),
-                15
-            );
+            // This fixture declares stereo programme inputs, not native LFE.
+            // Its two physical subs are destinations of L/R redirected bass.
+            // Check identities (including duplicates), not just a row count.
+            let graph = result
+                .metadata
+                .bass_management
+                .as_ref()
+                .and_then(|bass| bass.routing_graph.as_ref())
+                .unwrap();
+            let mut inputs = graph.input_channels.clone();
+            inputs.sort();
+            assert_eq!(inputs, ["L", "R"]);
+            let seats = &acceptance.acoustic_quality.as_ref().unwrap().final_seats;
+            let mut coverage: Vec<_> = seats
+                .iter()
+                .map(|seat| {
+                    (
+                        seat.partition.as_str(),
+                        seat.logical_input.as_str(),
+                        seat.seat_index,
+                    )
+                })
+                .collect();
+            coverage.sort();
+            let expected: Vec<_> = ["L", "R"]
+                .into_iter()
+                .flat_map(|input| (0..5).map(move |seat| ("training", input, seat)))
+                .collect();
+            assert_eq!(coverage, expected);
             let electrical = crate::electrical_headroom::assess_final_graph(
                 &result.to_dsp_chain_output(),
                 48000.0,
@@ -1727,6 +2149,42 @@ mod tests {
             SpeakerConfig::Single(MeasurementSource::InMemory(curve)),
         );
         (result, config)
+    }
+
+    #[test]
+    fn physical_drive_spectral_candidate_replays_samples_and_respects_cut_budget() {
+        let (mut result, mut config) = fixture();
+        result.channels.get_mut("L").unwrap().plugins.clear();
+        config.optimizer.processing_mode = ProcessingMode::LowLatency;
+        config.optimizer.finalization.default_input_peak = 0.1;
+        config.optimizer.finalization.physical_drive = Some(serde_json::from_value(serde_json::json!({
+            "outputs": {"[\"channel\",\"L\"]": [{
+                "quantity":"current_rms", "calibration_id":"synthetic", "reference_conditions_id":"load",
+                "limit_conditions_id":"load", "sine_duration_seconds":1.0,
+                "reference_output_peak":0.1, "linear_valid_output_peak":1.0,
+                "frequencies_hz":[80.0,100.0], "demand_at_reference":[1.0,1.0], "limits":[0.9,0.9]
+            }]}
+        })).unwrap());
+        let original = result.clone();
+        let dir = tempfile::tempdir().unwrap();
+        assert!(
+            verify_declared_physical_drive(&mut result, &config, 48_000.0, dir.path()).is_err()
+        );
+        install_spectral_attenuation(&mut result, &config, 48_000.0, dir.path()).unwrap();
+        verify_declared_physical_drive(&mut result, &config, 48_000.0, dir.path()).unwrap();
+        assert!(
+            result.channels["L"].plugins.iter().any(|plugin| {
+                plugin.parameters["label"] == "final_electrical_headroom_spectral"
+            })
+        );
+        config.optimizer.finalization.max_attenuation_db = 0.1;
+        let error =
+            install_spectral_attenuation(&mut original.clone(), &config, 48_000.0, dir.path())
+                .unwrap_err();
+        assert!(
+            error.to_string().contains("exceeds attenuation budget"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -1979,7 +2437,32 @@ mod tests {
             });
         result.metadata.bass_management =
             roomeq_engine::home_cinema::bass_management_report(&config, None, false);
+        // Matrix construction already bounds its own LFE playback gain. Add
+        // a downstream physical-output gain so this fixture really requires
+        // spectral attenuation while LFE remains an implicit logical input.
+        result
+            .channels
+            .get_mut("Sub1")
+            .unwrap()
+            .plugins
+            .push(PluginConfigWrapper {
+                plugin_type: "gain".into(),
+                parameters: serde_json::json!({"gain_db": 1.0, "room_eq_stage": "post_route"}),
+            });
         let dir = tempfile::tempdir().unwrap();
+        let before = crate::electrical_headroom::assess_final_graph(
+            &result.to_dsp_chain_output(),
+            48000.0,
+            dir.path(),
+            &config.optimizer.finalization,
+        )
+        .unwrap();
+        assert!(
+            before.iter().any(|output| output.peak_dbfs.is_some_and(
+                |peak| peak > config.optimizer.finalization.output_ceiling_dbfs + 1e-6
+            )),
+            "fixture must require headroom correction"
+        );
         install_spectral_attenuation(&mut result, &config, 48000.0, dir.path()).unwrap();
         assert!(!result.channels["LFE"].plugins.is_empty());
         let outputs = crate::electrical_headroom::assess_final_graph(
@@ -2476,6 +2959,35 @@ fn runtime_sub_output_protection_is_terminal_and_keeps_linear_overload_evidence(
             .iter()
             .any(|check| check.id == "runtime_limiter_physical_output:Sub1")
     );
+    install_output_attenuation_requirements(
+        &mut result,
+        &std::collections::BTreeMap::from([("Sub1".to_owned(), 6.0)]),
+    )
+    .unwrap();
+    assert_eq!(
+        sub_output_limiter::protected_outputs(&result, &config.optimizer.finalization).unwrap(),
+        protected
+    );
+    assert_eq!(
+        result.channels["Sub1"].plugins.last().unwrap().plugin_type,
+        "limiter"
+    );
+    let after = crate::electrical_headroom::assess_final_graph(
+        &result.to_dsp_chain_output(),
+        48_000.0,
+        dir.path(),
+        &config.optimizer.finalization,
+    )
+    .unwrap();
+    for (before, after) in outputs.iter().zip(&after) {
+        assert_eq!(before.output, after.output);
+        let expected = if before.output == "Sub1" {
+            6.0 + 1e-6
+        } else {
+            0.0
+        };
+        assert!((before.peak_dbfs.unwrap() - after.peak_dbfs.unwrap() - expected).abs() < 1e-9);
+    }
     result
         .channels
         .get_mut("Sub1")

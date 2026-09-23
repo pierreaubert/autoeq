@@ -6,6 +6,7 @@
 //! backend.
 
 use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
+use super::constraint_envelope::{OwnedConstraintSpec, judge_pareto_members};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
 use super::{
@@ -163,9 +164,50 @@ impl AutoeqBoBackend {
                 } else {
                     &report.pareto_front
                 };
-                let Some(best) = choose_compromise(front, objective.as_ref()) else {
+                if front.is_empty() {
                     return Err((
                         "AutoEQ BO EHVI produced an empty population".into(),
+                        f64::INFINITY,
+                    ));
+                }
+                // Judge every eligible member through the shared envelopes
+                // before selection so an infeasible member can never win the
+                // compromise pick on a score its repaired form cannot keep.
+                let owned = match OwnedConstraintSpec::from_params(params) {
+                    Ok(owned) => owned,
+                    Err(reason) => {
+                        return Err((
+                            format!(
+                                "AutoEQ BO EHVI cannot honor the constraint contract: {reason}"
+                            ),
+                            f64::INFINITY,
+                        ));
+                    }
+                };
+                let xs: Vec<Vec<f64>> = front
+                    .iter()
+                    .map(|member| member.x.as_slice().unwrap_or(&[]).to_vec())
+                    .collect();
+                let judged_front = match judge_pareto_members(
+                    self.name,
+                    &xs,
+                    objective.as_ref(),
+                    &owned.as_spec(),
+                ) {
+                    Ok(judged) => judged,
+                    Err(reason) => return Err((reason, f64::INFINITY)),
+                };
+                let judged: Vec<BayesParetoSolution> = judged_front
+                    .members
+                    .into_iter()
+                    .map(|member| BayesParetoSolution {
+                        x: Array1::from(member.params),
+                        objectives: member.objectives,
+                    })
+                    .collect();
+                let Some(best) = choose_compromise(&judged, objective.as_ref()) else {
+                    return Err((
+                        "AutoEQ BO EHVI produced an empty judged front".into(),
                         f64::INFINITY,
                     ));
                 };
@@ -174,8 +216,8 @@ impl AutoeqBoBackend {
                 }
                 let mut fun = compute_fitness_penalties_ref(x, objective.as_ref());
                 let mut status = format!(
-                    "AutoEQ BO-EHVI: {} Pareto points, selected compromise scalar loss {:.6}",
-                    report.pareto_front.len(),
+                    "AutoEQ BO-EHVI: {} feasible Pareto points, selected compromise scalar loss {:.6}",
+                    judged.len(),
                     fun
                 );
                 if params.refine {

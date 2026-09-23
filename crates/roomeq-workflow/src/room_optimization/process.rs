@@ -48,6 +48,7 @@ fn with_empty_veto(result: Result<GroupProcessingResult>) -> Result<MixedModeRes
                 optimizer_evidence,
                 Vec::new(),
                 None,
+                None,
             )
         },
     )
@@ -178,6 +179,7 @@ pub(super) fn process_generic_channels(
                 optimizer_evidence,
                 audibility_veto,
                 veto_adjudication,
+                measurement_conditioning,
             )) => {
                 send_progress(
                     observer_shared,
@@ -215,6 +217,7 @@ pub(super) fn process_generic_channels(
                     optimizer_evidence,
                     audibility_veto,
                     veto_adjudication,
+                    measurement_conditioning,
                 )));
             }
             Err(e) => {

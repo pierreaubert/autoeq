@@ -18,7 +18,13 @@ fn canonical_mso_candidate_diagnostic() {
         .expect("set ROOMEQ_DIAGNOSTIC_SEED for this diagnostic")
         .parse()
         .expect("diagnostic seed must be an unsigned integer");
-    capture_canonical_mso_output_loss(seed);
+    let error = capture_canonical_mso_output_loss(seed);
+    assert!(
+        error
+            .as_deref()
+            .is_none_or(|message| !message.contains("acceptance report unavailable")),
+        "diagnostic must initialize the production report before final-seat evaluation: {error:?}"
+    );
 }
 
 fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
@@ -51,6 +57,17 @@ fn capture_canonical_mso_output_loss(seed: u64) -> Option<String> {
         None,
         &store,
         crate::DEFAULT_FREQUENCY_SAMPLES,
+    )
+    .unwrap();
+    // The internal optimizer intentionally precedes final report attachment.
+    // Initialize it using the production evaluator, not a fabricated pass,
+    // so seat replay can replace the provisional acoustic score for each trial.
+    validation_scorecard::attach_validation_scorecard(
+        &mut result,
+        &HashMap::new(),
+        48_000.0,
+        None,
+        config.optimizer.processing_mode.clone(),
     )
     .unwrap();
     let pre_validation_graph = result.to_dsp_chain_output();
@@ -802,6 +819,7 @@ fn assemble_workflow_result_observer_stop_on_summary() {
     let config = stereo_2_0_config();
     let sys = config.system.as_ref().unwrap();
     let result = RoomOptimizationResult {
+        finalized_decisions: None,
         channels: HashMap::new(),
         channel_results: HashMap::new(),
         deployed_source_curves: HashMap::new(),
@@ -846,6 +864,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
         post_ir: None,
         fir_temporal_masking: None,
         direct_early_late_correction: None,
+        joint_sub: None,
     };
     let mut channel_chains = HashMap::new();
     channel_chains.insert(left.clone(), chain(&left));
@@ -854,6 +873,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
     channel_results.insert(
         left.clone(),
         ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: left.clone(),
             pre_score: 0.5,
             post_score: 0.9,
@@ -869,6 +889,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
     channel_results.insert(
         right.clone(),
         ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: right.clone(),
             pre_score: 0.4,
             post_score: 0.8,
@@ -891,6 +912,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
     channel_arrivals.insert(left.clone(), 0.0);
     channel_arrivals.insert(right.clone(), 1.0);
     GenericChannelCollection {
+        provisional_decisions: Vec::new(),
         channel_chains,
         channel_results,
         pre_scores: vec![0.5, 0.4],

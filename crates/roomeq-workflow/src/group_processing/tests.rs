@@ -169,6 +169,7 @@ fn multisub_uses_production_multiseat_path_when_subs_have_seat_measurements() {
             ]),
         ],
         allpass_optimization: false,
+        joint_optimization: false,
     };
     let room_config = RoomConfig {
         version: roomeq_model::default_config_version(),
@@ -252,6 +253,7 @@ fn production_multiseat_path_emits_per_sub_and_global_eq_when_enabled() {
             ]),
         ],
         allpass_optimization: false,
+        joint_optimization: false,
     };
     let room_config = RoomConfig {
         version: roomeq_model::default_config_version(),
@@ -618,6 +620,7 @@ mod coverage_tests {
                 MeasurementSource::InMemory(flat_curve()),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         };
         let config = room_config_with_optimizer(sub_optimizer());
         let result = process_multisub_group("LFE", &group, &config, 48000.0, Path::new("."));

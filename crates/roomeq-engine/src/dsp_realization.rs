@@ -351,30 +351,64 @@ fn kautz_response(
     frequency_hz: f64,
     sample_rate: f64,
 ) -> Result<Complex64> {
-    let sections = filter
-        .get("kautz_sections")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| AutoeqError::InvalidConfiguration {
-            message: "serialized Kautz filter has no kautz_sections".to_string(),
-        })?
-        .iter()
-        .map(|section| {
-            let pole_hz = required_frequency(
-                section,
-                "pole_freq",
-                "serialized Kautz section",
-                sample_rate,
-            )?;
-            let q = required_positive_number(section, "q", "serialized Kautz section")?;
-            let gain = required_finite_number(section, "gain", "serialized Kautz section")?;
-            Ok(KautzSection::new(pole_hz, q, gain, sample_rate))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(KautzFilter {
-        sections,
-        srate: sample_rate,
-    }
-    .complex_response(frequency_hz))
+    // Match the EQ consumer's canonical field, legacy alias, and single-section
+    // fallback. A malformed explicit value is not an absent/default section.
+    let values = match (filter.get("kautz_sections"), filter.get("sections")) {
+        (Some(_), Some(_)) => {
+            return Err(malformed(
+                "Kautz filter",
+                "duplicate section fields",
+                filter,
+            ));
+        }
+        (Some(value), None) | (None, Some(value)) => Some(
+            value
+                .as_array()
+                .ok_or_else(|| malformed("Kautz filter", "kautz_sections", filter))?,
+        ),
+        (None, None) => None,
+    };
+    let sections = if let Some(values) = values.filter(|values| !values.is_empty()) {
+        values
+            .iter()
+            .map(|section| {
+                let fields: Vec<_> = ["pole_freq", "freq", "frequency", "pole_freq_hz"]
+                    .into_iter()
+                    .filter(|key| section.get(*key).is_some())
+                    .collect();
+                if fields.len() != 1 {
+                    return Err(malformed("Kautz section", "unique pole frequency", section));
+                }
+                let pole_hz = required_frequency(
+                    section,
+                    fields[0],
+                    "serialized Kautz section",
+                    sample_rate,
+                )?;
+                let q = required_positive_number(section, "q", "serialized Kautz section")?;
+                let gain =
+                    optional_finite_number(section, "gain", 0.0, "serialized Kautz section")?;
+                Ok(KautzSection::new(pole_hz, q, gain, sample_rate))
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        vec![KautzSection::new(
+            required_frequency(filter, "freq", "serialized Kautz fallback", sample_rate)?,
+            required_positive_number(filter, "q", "serialized Kautz fallback")?,
+            optional_finite_number(filter, "db_gain", 0.0, "serialized Kautz fallback")?,
+            sample_rate,
+        )]
+    };
+    // KautzFilter is the correction bank only. The playback EQ consumer's
+    // KautzRuntime processes x + bank(x), so its transfer includes unity.
+    // Section gain is a linear basis weight even in the legacy db_gain field;
+    // neither a PEQ dB conversion nor a magnitude-only sum matches playback.
+    Ok(Complex64::new(1.0, 0.0)
+        + KautzFilter {
+            sections,
+            srate: sample_rate,
+        }
+        .complex_response(frequency_hz))
 }
 
 fn mixed_band_response<P: ConvolutionIrProvider>(
@@ -641,6 +675,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
             target_curve: None,
         }
     }

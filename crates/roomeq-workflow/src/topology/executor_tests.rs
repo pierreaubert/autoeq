@@ -615,6 +615,7 @@ fn stereo_21_l_not_single_errs() {
             speaker_name: None,
             subwoofers: vec![MeasurementSource::InMemory(flat_curve_with_phase())],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     speakers.insert(
@@ -749,6 +750,7 @@ fn stereo_21_multisub_mso_runs() {
                 MeasurementSource::InMemory(flat_curve_with_phase()),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         }),
     );
     let sys = stereo_21_sub_sys(SubwooferStrategy::Mso);

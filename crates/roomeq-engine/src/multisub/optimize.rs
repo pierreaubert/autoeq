@@ -81,6 +81,11 @@ fn optimize_multisub_gains_only(
     } else {
         (initial, pre_objective)
     };
+    // Acceptance-side budget record: the emitted gains must honor the
+    // search budgets even when the backend winner is kept verbatim.
+    let (lower, upper): (Vec<f64>, Vec<f64>) = bounds.iter().copied().unzip();
+    autoeq_optim::optim::verify_joint_budgets("multisub-gains", &gains, &lower, &upper)
+        .map_err(|reason| format!("gain-only multi-sub candidate refused at emission: {reason}"))?;
     Ok(DriverOptimizationResult {
         gains,
         delays,
@@ -351,6 +356,10 @@ pub fn optimize_multisub_with_allpass(
         x = initial_x;
         post_obj = pre_obj;
     }
+    // Acceptance-side budget record: gains, delays, and all-pass parameters
+    // must honor the search budgets on the emitted vector.
+    autoeq_optim::optim::verify_joint_budgets("multisub-allpass", &x, &lower_bounds, &upper_bounds)
+        .map_err(|reason| format!("all-pass multi-sub candidate refused at emission: {reason}"))?;
     let converged = multisub_allpass_converged(opt_result.success);
 
     info!(

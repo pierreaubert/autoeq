@@ -362,6 +362,16 @@ pub fn approve_listening_bundle(
                 "backend simulation only; perceptual diagnostics stay advisory until G7",
             ),
         },
+        PlaybackStatus::Failed => ListeningBundleApproval::Rejected {
+            reason: String::from(
+                "required playback comparison failed; no approved listening bundle",
+            ),
+        },
+        PlaybackStatus::InsufficientEvidence => ListeningBundleApproval::Rejected {
+            reason: String::from(
+                "required playback evidence is incomplete; no approved listening bundle",
+            ),
+        },
         PlaybackStatus::Unassessed => ListeningBundleApproval::Rejected {
             reason: String::from(
                 "final playback validation rejected or never assessed the graph; \
@@ -374,6 +384,16 @@ pub fn approve_listening_bundle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn roadmap_correction_listening_rejects_failed_or_incomplete_playback() {
+        for status in [PlaybackStatus::Failed, PlaybackStatus::InsufficientEvidence] {
+            assert!(matches!(
+                approve_listening_bundle(status, &["bound-stimulus".to_owned()]),
+                ListeningBundleApproval::Rejected { .. }
+            ));
+        }
+    }
 
     fn condition(id: &str, delta_db: f64, weight: f64, held_out: bool) -> ConditionScore {
         ConditionScore {

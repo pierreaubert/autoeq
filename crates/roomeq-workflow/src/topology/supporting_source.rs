@@ -309,6 +309,9 @@ mod tests {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+
+            provisional_decisions: Vec::new(),
         };
 
         process_supporting_source_channels_with_frequency_samples(
@@ -378,6 +381,9 @@ mod tests {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+
+            provisional_decisions: Vec::new(),
         };
 
         process_supporting_source_channels_with_frequency_samples(

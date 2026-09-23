@@ -512,6 +512,7 @@ mod multi_seat_branch_tests {
         let mut final_curve = initial.clone();
         final_curve.spl += final_delta_db;
         ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: name.to_string(),
             pre_score: 0.0,
             post_score: 0.0,

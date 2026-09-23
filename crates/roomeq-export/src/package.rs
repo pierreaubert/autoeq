@@ -208,6 +208,7 @@ pub fn package_convolution_sidecars(
     occupied_names: &BTreeSet<String>,
     reusable_names: &HashMap<String, String>,
 ) -> anyhow::Result<(DspGraph, Vec<ExportPackageMember>)> {
+    validate_source_ledger(graph)?;
     validate_final_convolution_identity(graph, resources)?;
     let resources = resource_map(resources)?;
     let mut packaged_by_reference = HashMap::new();
@@ -301,7 +302,119 @@ pub fn package_convolution_sidecars(
             .map(|(reference, hash)| (packaged_by_reference[reference].clone(), hash.clone()))
             .collect();
     }
+    rewrite_final_phase_references(&mut graph, &packaged_by_reference);
+    rebind_ledger_to_packaged_graph(&mut graph)?;
     Ok((graph, members.into_values().collect()))
+}
+
+/// Preserve final phase resource references through package-local renaming.
+fn rewrite_final_phase_references(
+    graph: &mut DspGraph,
+    packaged_by_reference: &HashMap<String, String>,
+) {
+    let Some(ledger) = graph.correction_decisions.as_mut() else {
+        return;
+    };
+    for record in &mut ledger.decisions {
+        // Provisional rows describe the original assessment, not deployment.
+        if record.stage != roomeq_model::decision_ledger::DecisionStage::Final {
+            continue;
+        }
+        for evidence in &mut record.evidence_refs {
+            let renamed = if let Some(reference) = evidence.strip_prefix("phase-fir:") {
+                packaged_by_reference
+                    .get(reference)
+                    .map(|name| format!("phase-fir:{name}"))
+            } else if let Some((driver, reference)) = evidence
+                .strip_prefix("phase-fir-driver:")
+                .and_then(|binding| binding.split_once(':'))
+            {
+                packaged_by_reference
+                    .get(reference)
+                    .map(|name| format!("phase-fir-driver:{driver}:{name}"))
+            } else {
+                None
+            };
+            // Removed resources and unrelated evidence remain historical facts.
+            if let Some(renamed) = renamed {
+                *evidence = renamed;
+            }
+        }
+    }
+}
+
+/// Rebind a carried decision ledger to the packaged bytes.
+///
+/// Sidecar rewriting renames references without changing the processing
+/// the ledger accepted. Carried Final rows are rebound to the packaged
+/// graph instead of shipping the stale pre-package fingerprint; rows
+/// without a binding (provisional history) are untouched. A graph with
+/// no ledger passes through unchanged.
+fn rebind_ledger_to_packaged_graph(graph: &mut DspGraph) -> anyhow::Result<()> {
+    for chain in graph.channels.values_mut() {
+        roomeq_model::joint_sub_report::refresh_joint_sub_binding(chain);
+    }
+    let Some(mut carried) = graph.correction_decisions.take() else {
+        return Ok(());
+    };
+    let value = serde_json::to_value(&*graph)
+        .map_err(|error| anyhow::anyhow!("packaged graph does not serialize: {error}"))?;
+    let identity = roomeq_model::decision_ledger::canonical_value_identity(&value);
+    if let Some(evidence) = &carried.acceptance_evidence {
+        let sample_rate = evidence
+            .payload
+            .get("sample_rate_hz")
+            .and_then(serde_json::Value::as_f64)
+            .context("acceptance diagnostics lack their analysis sample rate")?;
+        carried.acceptance_evidence = Some(
+            roomeq_engine::quality::graph_acceptance_evidence(graph, sample_rate)
+                .map_err(anyhow::Error::msg)?,
+        );
+    }
+    roomeq_model::decision_ledger::rebind_ledger_to_repackaged_graph(&mut carried, &identity)
+        .map_err(anyhow::Error::msg)?;
+    carried.payload_binding = Some(roomeq_model::payload_binding::PayloadBinding::new(
+        &value,
+        &identity.fingerprint,
+    ));
+    graph.correction_decisions = Some(carried);
+    Ok(())
+}
+
+/// Repackaging can rename resources, but cannot validate a stale source claim.
+pub(crate) fn validate_source_ledger(graph: &DspGraph) -> anyhow::Result<()> {
+    use roomeq_model::decision_ledger::{DecisionStage, canonical_value_identity};
+    let Some(ledger) = &graph.correction_decisions else {
+        return Ok(());
+    };
+    ledger.validate().map_err(anyhow::Error::msg)?;
+    let mut value = serde_json::to_value(graph)?;
+    value
+        .as_object_mut()
+        .expect("graph is a JSON object")
+        .remove("correction_decisions");
+    let identity = canonical_value_identity(&value);
+    if let Some(evidence) = &ledger.acceptance_evidence {
+        anyhow::ensure!(
+            evidence.matches(&identity.fingerprint),
+            "stale source acceptance evidence cannot be rebound by packaging"
+        );
+    }
+    for record in &ledger.decisions {
+        anyhow::ensure!(
+            record.stage != DecisionStage::Final
+                || record.final_graph_identity.as_deref() == Some(identity.fingerprint.as_str()),
+            "stale source decision '{}' cannot be rebound by packaging",
+            record.decision_id
+        );
+    }
+    if let Some(binding) = &ledger.payload_binding {
+        anyhow::ensure!(
+            binding.matches(&value, &identity.fingerprint),
+            "stale source payload binding cannot be refreshed by packaging"
+        );
+    }
+    Ok(())
 }
 
 pub(crate) fn resource_map(
@@ -429,6 +542,7 @@ mod tests {
                 post_ir: None,
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
+                joint_sub: None,
             },
         )
     }
@@ -534,5 +648,223 @@ mod tests {
             .collect();
         assert_eq!(rewritten[0], rewritten[1]);
         assert_ne!(rewritten[0], rewritten[2]);
+    }
+
+    /// A carried ledger survives packaging rebound to the packaged bytes:
+    /// Final rows bind the new fingerprint, provisional history is
+    /// untouched, and the rebound ledger validates.
+    #[test]
+    fn packaged_graph_rebinds_carried_ledger() {
+        use roomeq_model::decision_ledger::{
+            CorrectionDecisionLedger, DECISION_LEDGER_VERSION, DecisionAction, DecisionRecord,
+            DecisionStage, DecisionStatus, canonical_graph_identity,
+        };
+        let impulse: Arc<[u8]> = Arc::from(b"rebind-impulse".as_slice());
+        let mut graph = DspGraph {
+            deployed_source_curves: Default::default(),
+            version: "1.3.0".to_string(),
+            global_plugins: Vec::new(),
+            channels: HashMap::from([convolution_chain("left", "a.wav")]),
+            metadata: None,
+            correction_decisions: None,
+        };
+        // Reference rewriting renames a.wav, so the pre-package binding
+        // would go stale if it were carried forward unchanged.
+        let stale_identity = canonical_graph_identity(&graph);
+        let evidence = roomeq_engine::quality::graph_acceptance_evidence(&graph, 48_000.0).unwrap();
+        let provisional = DecisionRecord {
+            decision_id: "dec-history".to_string(),
+            ledger_version: DECISION_LEDGER_VERSION.to_string(),
+            stage: DecisionStage::Provisional,
+            logical_input: "left".to_string(),
+            physical_output: "left".to_string(),
+            measurement_refs: Vec::new(),
+            seat_refs: Vec::new(),
+            frequency_band_hz: Some([40.0, 400.0]),
+            filter_center_hz: None,
+            action: DecisionAction::Equalize,
+            status: DecisionStatus::InsufficientEvidence,
+            reason_codes: vec!["no_timing_reference".to_string()],
+            observed: Vec::new(),
+            limits: Vec::new(),
+            evidence_refs: Vec::new(),
+            confidence: roomeq_model::AssessmentConfidence::Low,
+            related_decision_ids: Vec::new(),
+            supersedes_ids: Vec::new(),
+            final_graph_identity: None,
+        };
+        let mut applied = provisional.clone();
+        applied.decision_id = "dec-eq-left".to_string();
+        applied.stage = DecisionStage::Final;
+        applied.status = DecisionStatus::Applied;
+        applied.final_graph_identity = Some(stale_identity.fingerprint.clone());
+        graph.correction_decisions = Some(CorrectionDecisionLedger {
+            acceptance_evidence: Some(evidence),
+            payload_binding: None,
+            ledger_version: DECISION_LEDGER_VERSION.to_string(),
+            decisions: vec![applied, provisional],
+        });
+        let resources = vec![ConvolutionResource {
+            reference: "a.wav".to_string(),
+            bytes: Arc::clone(&impulse),
+        }];
+        // Occupy the original member name so packaging must rename the
+        // reference; otherwise the packaged bytes would equal the input.
+        let occupied = BTreeSet::from(["a.wav".to_string()]);
+        let (packaged, _) =
+            package_convolution_sidecars(&graph, &resources, &occupied, &HashMap::new()).unwrap();
+        let ledger = packaged
+            .correction_decisions
+            .as_ref()
+            .expect("packaged graph keeps its ledger");
+        assert!(ledger.validate().is_ok());
+        let fresh = canonical_graph_identity(&{
+            let mut cleared = packaged.clone();
+            cleared.correction_decisions = None;
+            cleared
+        });
+        assert_ne!(fresh.fingerprint, stale_identity.fingerprint);
+        let evidence = ledger.acceptance_evidence.as_ref().unwrap();
+        assert!(evidence.matches(&fresh.fingerprint));
+        assert!(!evidence.matches(&stale_identity.fingerprint));
+        assert_eq!(
+            evidence.payload["channels"]["left"]["bundle"]["disposition"]["channels"][0]["fir_references"]
+                [0],
+            packaged.channels["left"].plugins[0].parameters["ir_file"],
+        );
+        let mut payload = serde_json::to_value(&packaged).unwrap();
+        payload
+            .as_object_mut()
+            .unwrap()
+            .remove("correction_decisions");
+        assert!(
+            ledger
+                .payload_binding
+                .as_ref()
+                .unwrap()
+                .matches(&payload, &fresh.fingerprint)
+        );
+        for record in &ledger.decisions {
+            if record.decision_id == "dec-eq-left" {
+                assert_eq!(record.stage, DecisionStage::Final);
+                assert_eq!(
+                    record.final_graph_identity.as_deref(),
+                    Some(fresh.fingerprint.as_str())
+                );
+            } else {
+                assert_eq!(record.stage, DecisionStage::Provisional);
+                assert!(record.final_graph_identity.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_packaged_phase_references_follow_resources() {
+        use roomeq_model::decision_ledger::{
+            CorrectionDecisionLedger, DECISION_LEDGER_VERSION, DecisionAction, DecisionRecord,
+            DecisionStage, DecisionStatus, canonical_graph_identity,
+        };
+        let mut graph = DspGraph::new("test");
+        let (_, mut chain) = convolution_chain("left", "source/a:phase.wav");
+        chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+            name: "woofer".into(),
+            index: 2,
+            plugins: chain.plugins.clone(),
+            initial_curve: None,
+            measured_band_hz: None,
+        }]);
+        chain.plugins.clear();
+        graph.channels.insert("left".into(), chain);
+        let mut record = DecisionRecord::example(DecisionStatus::Applied);
+        record.action = DecisionAction::PhaseCorrect;
+        record.logical_input = "left".into();
+        record.physical_output = "left".into();
+        record.stage = DecisionStage::Final;
+        record.final_graph_identity = Some(canonical_graph_identity(&graph).fingerprint);
+        record.evidence_refs = vec![
+            "phase-fir:source/a:phase.wav".into(),
+            "phase-fir-driver:2:source/a:phase.wav".into(),
+            "capture:source/a:phase.wav".into(),
+        ];
+        let mut history = record.clone();
+        history.decision_id = "history".into();
+        history.stage = DecisionStage::Provisional;
+        history.final_graph_identity = None;
+        graph.correction_decisions = Some(CorrectionDecisionLedger {
+            ledger_version: DECISION_LEDGER_VERSION.into(),
+            decisions: vec![record, history.clone()],
+            acceptance_evidence: None,
+            payload_binding: None,
+        });
+        let resources = [ConvolutionResource {
+            reference: "source/a:phase.wav".into(),
+            bytes: Arc::from(b"resource-reference-fixture".as_slice()),
+        }];
+        let (packaged, members) = package_convolution_sidecars(
+            &graph,
+            &resources,
+            &BTreeSet::from(["a:phase.wav".into()]),
+            &HashMap::new(),
+        )
+        .unwrap();
+        let filename = packaged.channels["left"].drivers.as_ref().unwrap()[0].plugins[0].parameters
+            ["ir_file"]
+            .as_str()
+            .unwrap();
+        assert_ne!(filename, "source/a:phase.wav");
+        assert_eq!(members[0].relative_path, Path::new(filename));
+        assert_eq!(members[0].bytes.as_ref(), resources[0].bytes.as_ref());
+        let ledger = packaged.correction_decisions.as_ref().unwrap();
+        assert_eq!(
+            ledger.decisions[0].evidence_refs,
+            vec![
+                format!("phase-fir:{filename}"),
+                format!("phase-fir-driver:2:{filename}"),
+                "capture:source/a:phase.wav".into(),
+            ]
+        );
+        assert_eq!(ledger.decisions[1], history);
+        validate_source_ledger(&packaged).unwrap();
+        assert_eq!(
+            graph.correction_decisions.as_ref().unwrap().decisions[0].evidence_refs[0],
+            "phase-fir:source/a:phase.wav"
+        );
+    }
+
+    #[test]
+    fn roadmap_correction_package_cannot_rebind_stale_delivery_claims() {
+        use roomeq_model::decision_ledger::{
+            CorrectionDecisionLedger, DECISION_LEDGER_VERSION, DecisionRecord, DecisionStatus,
+            canonical_graph_identity,
+        };
+        let mut graph = DspGraph::new("test");
+        graph.add_channel("left", Vec::new());
+        let identity = canonical_graph_identity(&graph);
+        let payload = serde_json::to_value(&graph).unwrap();
+        let mut record = DecisionRecord::example(DecisionStatus::Applied);
+        record.stage = roomeq_model::decision_ledger::DecisionStage::Final;
+        record.final_graph_identity = Some(identity.fingerprint.clone());
+        for portable in [false, true] {
+            let mut changed = graph.clone();
+            changed.correction_decisions = Some(CorrectionDecisionLedger {
+                acceptance_evidence: None,
+                payload_binding: portable.then(|| {
+                    roomeq_model::payload_binding::PayloadBinding::new(
+                        &payload,
+                        &identity.fingerprint,
+                    )
+                }),
+                ledger_version: DECISION_LEDGER_VERSION.to_owned(),
+                decisions: vec![record.clone()],
+            });
+            changed.global_plugins.push(PluginConfigWrapper {
+                plugin_type: "gain".to_owned(),
+                parameters: serde_json::json!({"gain_db": 12.0}),
+            });
+            let error =
+                package_convolution_sidecars(&changed, &[], &BTreeSet::new(), &HashMap::new())
+                    .expect_err("packaging must not bless preexisting stale claims");
+            assert!(error.to_string().contains("stale"), "{error}");
+        }
     }
 }

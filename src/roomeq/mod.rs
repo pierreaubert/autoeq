@@ -62,6 +62,8 @@ pub use optimize::{
 // Extracted optimization submodules
 pub use roomeq_engine::crossover;
 pub use roomeq_workflow::{dba, multisub};
+// Final decision-ledger reconciliation for emission points.
+pub use roomeq_workflow::final_ledger;
 pub mod home_cinema;
 pub mod workflows; // Make public to access from optimize.rs or tests
 

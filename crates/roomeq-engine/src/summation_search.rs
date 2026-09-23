@@ -194,6 +194,9 @@ pub fn evaluate_candidate(
 /// Returns the lowest band-error candidate. Gross timing across the band
 /// disambiguates phase-cycle aliases (for example a 20 ms ambiguity at
 /// 50 Hz): aliases agree at one frequency and diverge across the band.
+/// Selection needs at least two grid frequencies in the band; the pure
+/// metric ([`evaluate_candidate`]) still scores a single bin so tests can
+/// demonstrate exactly why one bin alone must never select.
 ///
 /// # Errors
 ///
@@ -209,6 +212,18 @@ pub fn search_summation(
     grid: &SearchGrid,
 ) -> Result<SummationSearchOutcome, String> {
     grid.validate()?;
+    if !band_hz[0].is_finite() || !band_hz[1].is_finite() || band_hz[1] <= band_hz[0] {
+        return Err(String::from("overlap band must satisfy finite lo < hi"));
+    }
+    let band_bins = freqs
+        .iter()
+        .filter(|freq| **freq >= band_hz[0] && **freq <= band_hz[1])
+        .count();
+    if band_bins < 2 {
+        return Err(String::from(
+            "overlap band needs at least two grid frequencies to resolve phase-cycle ambiguity",
+        ));
+    }
     let polarities: &[bool] = if grid.include_polarity_inversion {
         &[false, true]
     } else {

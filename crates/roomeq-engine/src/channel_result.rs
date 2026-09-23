@@ -11,7 +11,7 @@ pub(crate) fn subtract_target_tilt(curve: &Curve, target: &TargetContext) -> Cur
     if let Some(tilt_curve) = &target.target_tilt_curve {
         Curve {
             freq: curve.freq.clone(),
-            spl: &curve.spl - &tilt_curve.spl,
+            spl: &curve.spl - &autoeq_core::interpolate_log_space(&curve.freq, tilt_curve).spl,
             phase: curve.phase.clone(),
             ..Curve::default()
         }
@@ -66,6 +66,11 @@ pub struct ChannelProcessingResult {
     pub post_score: f64,
     pub raw_pre_eq_curve: Curve,
     pub raw_post_eq_curve: Curve,
+    /// PEQ parameter summaries, not a complete serialized playback transfer.
+    ///
+    /// Kautz mode leaves this empty: its linear bank weights live in `channel`
+    /// and cannot be represented as PEQ dB gains. Use the serialized topology
+    /// for section counts, gain constraints, response replay, and export.
     pub filters: Vec<Biquad>,
     pub mean_spl: f64,
     pub arrival_time_ms: Option<f64>,

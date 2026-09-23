@@ -44,6 +44,10 @@ struct AppliedCea2034Correction {
 
 /// Prepare all deterministic curves, filters, and plugin fragments consumed by
 /// channel optimization. No filesystem or source descriptors are accessed.
+///
+/// # Errors
+/// Returns an error if declared usable support contains fewer than two
+/// loaded samples or the measurement arrays are invalid.
 pub fn preprocess_channel(
     channel_name: &str,
     prepared: &PreparedChannelInput,
@@ -51,16 +55,20 @@ pub fn preprocess_channel(
     sample_rate: f64,
     shared_mean_spl: Option<f64>,
     target: &mut TargetContext,
-) -> PreprocessedFeatures {
+) -> autoeq_core::Result<PreprocessedFeatures> {
     let measurement = prepared.measurements().representative();
-    let excursion_filters = generate_excursion_filters(room_config, measurement, sample_rate);
+    let usable_measurement = prepared.usable_curve(measurement)?;
+    let excursion_filters =
+        generate_excursion_filters(room_config, &usable_measurement, sample_rate);
     let curve =
         apply_excursion_filters_to_curve(measurement.clone(), &excursion_filters, sample_rate);
     let cea2034 =
         apply_cea2034_speaker_correction(channel_name, prepared, room_config, curve, sample_rate);
     let curve = cea2034.curve;
-    let (mut norm_range, _) = roomeq_analysis::response_metrics::detect_passband_and_mean(&curve);
-    if curve
+    let usable_curve = prepared.usable_curve(&curve)?;
+    let (mut norm_range, _) =
+        roomeq_analysis::response_metrics::detect_passband_and_mean(&usable_curve);
+    if usable_curve
         .freq
         .last()
         .is_some_and(|frequency| *frequency <= 500.0)
@@ -69,7 +77,7 @@ pub fn preprocess_channel(
         // nulls. Use the final useful tail, not the first peak's threshold
         // crossing, for both the correction ceiling and level reference.
         let bounded = crate::group_processing::sub_optimizer_config(
-            std::slice::from_ref(&curve),
+            std::slice::from_ref(usable_curve.as_ref()),
             &room_config.optimizer,
         );
         norm_range = Some((bounded.min_freq, bounded.max_freq));
@@ -94,7 +102,7 @@ pub fn preprocess_channel(
     target.min_freq = maybe_clamp_min_freq_for_target_tilt(
         channel_name,
         room_config,
-        &curve,
+        &usable_curve,
         target.target_tilt_curve.as_ref(),
         target.min_freq,
         target.max_freq,
@@ -111,23 +119,23 @@ pub fn preprocess_channel(
     let score_min_freq = excursion_hpf_hz.map_or(target.min_freq, |hz| {
         target.min_freq.max(hz).min(target.max_freq)
     });
-    let score_curve = crate::channel_result::subtract_target_tilt(&curve, target);
+    let score_curve = crate::channel_result::subtract_target_tilt(&usable_curve, target);
     let pre_score = flatness_score_in_range(&score_curve, score_min_freq, target.max_freq);
     let reference_target = target
         .target_tilt_curve
         .as_ref()
-        .map(|tilt| autoeq_core::interpolate_log_space(&curve.freq, tilt))
+        .map(|tilt| autoeq_core::interpolate_log_space(&usable_curve.freq, tilt))
         .unwrap_or_else(|| {
-            crate::eq::resources::target_curve(&curve, Some(prepared.eq_resources()))
+            crate::eq::resources::target_curve(&usable_curve, Some(prepared.eq_resources()))
         });
     let channel_mean_spl = spectral_align::limited_correction_target_reference(
-        &curve,
+        &usable_curve,
         &reference_target,
         target.max_freq,
     )
     .unwrap_or_else(|| {
         roomeq_analysis::response_metrics::mean_response_in_range(
-            &curve,
+            &usable_curve,
             target.min_freq,
             target.max_freq,
         )
@@ -141,19 +149,28 @@ pub fn preprocess_channel(
     let [active_min_freq, active_max_freq] = room_config.optimizer.active_correction_band();
     let broadband_min_freq = score_min_freq.max(active_min_freq).min(target.max_freq);
     let broadband_max_freq = target.max_freq.min(active_max_freq);
-    let broadband = apply_broadband_precorrection_with_f3_curve(
+    let mut broadband = apply_broadband_precorrection_with_f3_curve(
         room_config,
-        &curve,
-        measurement,
+        &usable_curve,
+        &usable_measurement,
         mean_spl,
         broadband_min_freq,
         broadband_max_freq,
         sample_rate,
     );
+    if prepared.valid_band_hz().is_some() {
+        // Fit and accept on usable evidence, then replay the selected transfer
+        // on the retained raw grid for reporting and later realized checks.
+        let mut shifted = curve.clone();
+        shifted.spl += broadband.mean_shift;
+        let transfer =
+            response::compute_peq_complex_response(&broadband.biquads, &shifted.freq, sample_rate);
+        broadband.curve_for_optim = response::apply_complex_response(&shifted, &transfer);
+    }
 
     target.pre_score = pre_score;
     target.mean_spl = mean_spl + broadband.mean_shift;
-    PreprocessedFeatures {
+    Ok(PreprocessedFeatures {
         curve,
         curve_for_optim: broadband.curve_for_optim,
         excursion_filters,
@@ -166,7 +183,7 @@ pub fn preprocess_channel(
         broadband_enabled,
         norm_range,
         score_min_freq,
-    }
+    })
 }
 
 pub fn apply_excursion_filters_to_curve(
@@ -612,7 +629,8 @@ mod tests {
             ..RoomConfig::default()
         };
         let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
-        let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        let features =
+            preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target).unwrap();
 
         assert_eq!(features.curve.spl, curve.spl);
         assert!(features.excursion_filters.is_empty());
@@ -650,7 +668,7 @@ mod tests {
             ..Default::default()
         };
         let mut target = crate::channel_target::build_target_context("LFE", &config, &curve, None);
-        preprocess_channel("LFE", &input, &config, 48000.0, None, &mut target);
+        preprocess_channel("LFE", &input, &config, 48000.0, None, &mut target).unwrap();
         assert_eq!(target.max_freq, 130.0);
     }
 
@@ -673,7 +691,7 @@ mod tests {
         };
         let mut target = crate::channel_target::build_target_context("rear", &config, &curve, None);
 
-        preprocess_channel("rear", &prepared, &config, 48_000.0, None, &mut target);
+        preprocess_channel("rear", &prepared, &config, 48_000.0, None, &mut target).unwrap();
 
         assert!(
             (6_000.0..9_000.0).contains(&target.max_freq),
@@ -724,7 +742,8 @@ mod tests {
             ..RoomConfig::default()
         };
         let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
-        let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        let features =
+            preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target).unwrap();
 
         assert!(
             features.score_min_freq > 20.0,
@@ -749,7 +768,8 @@ mod tests {
             ..RoomConfig::default()
         };
         let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
-        let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        let features =
+            preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target).unwrap();
         assert_eq!(features.score_min_freq, 20.0);
     }
 
@@ -851,7 +871,7 @@ mod tests {
             cea2034_active: false,
         };
 
-        preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target).unwrap();
         assert!(
             target.pre_score < 1e-4,
             "tilt-referenced pre-score was {}",
@@ -876,7 +896,8 @@ mod tests {
             ..RoomConfig::default()
         };
         let mut target = crate::channel_target::build_target_context("left", &config, &curve, None);
-        let features = preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target);
+        let features =
+            preprocess_channel("left", &prepared, &config, 48_000.0, None, &mut target).unwrap();
         assert!(features.broadband_enabled);
         assert_eq!(features.curve.freq, curve.freq);
     }

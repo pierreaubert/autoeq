@@ -410,11 +410,11 @@ fn strict_input_schema() -> serde_json::Value {
 )]
 struct Args {
     /// Path to room configuration JSON file
-    #[arg(short, long, required_unless_present_any = ["schema", "convert"])]
+    #[arg(short, long, required_unless_present_any = ["schema", "convert", "verify_captures", "verification_graph"])]
     config: Option<PathBuf>,
 
     /// Output DSP chain JSON file
-    #[arg(short, long, required_unless_present_any = ["schema", "convert"])]
+    #[arg(short, long, required_unless_present_any = ["schema", "convert", "verify_captures", "verification_graph"])]
     output: Option<PathBuf>,
 
     /// Sample rate for filter design (default: 48000 Hz)
@@ -452,6 +452,73 @@ struct Args {
     /// Validate configuration and check measurement files exist, but do not run optimization
     #[arg(long)]
     dry_run: bool,
+
+    /// Write a playback-verification bundle for the finalized graph into DIR
+    /// (runs after optimization and save; bundle covers the saved output).
+    /// Requires --baseline-graph, --calibration-id, --stimulus-hash and
+    /// --verification-seats. Exit codes: 0 approved playback (optimize path
+    /// only), 1 procedure ran without approval, 2 rejected operator input.
+    #[arg(long, value_name = "DIR")]
+    verification_bundle: Option<PathBuf>,
+    /// Generate comparison predictions from a declared physical-output IR matrix.
+    #[arg(long, value_name = "JSON", requires = "verification_bundle")]
+    verification_prediction_inputs: Option<PathBuf>,
+    /// Generate a bundle from saved native DSP JSON without rerunning optimization.
+    /// Exit 0 means bundle creation only, never recorded-playback approval.
+    #[arg(long, value_name = "JSON", requires = "verification_bundle", conflicts_with_all = ["config", "output", "convert", "schema", "verify_captures"])]
+    verification_graph: Option<PathBuf>,
+
+    /// Baseline graph fingerprint the verification bundle compares against
+    /// (16 hex chars from the referenced run; required with
+    /// --verification-bundle, never inferred).
+    #[arg(long, value_name = "FINGERPRINT")]
+    baseline_graph: Option<String>,
+
+    /// Calibration identity the operator will record with (required with
+    /// --verification-bundle, never inferred).
+    #[arg(long, value_name = "ID")]
+    calibration_id: Option<String>,
+
+    /// Stimulus content hash the operator will play (required with
+    /// --verification-bundle, never inferred).
+    #[arg(long, value_name = "HASH")]
+    stimulus_hash: Option<String>,
+
+    /// Comma-separated seat IDs the operator will capture (required with
+    /// --verification-bundle, never inferred).
+    #[arg(long, value_name = "SEATS")]
+    verification_seats: Option<String>,
+
+    /// Verify an operator capture manifest and write a machine-readable
+    /// report (standalone: needs no --config/--output). Never starts
+    /// playback or recording and never overwrites raw takes. A validated
+    /// import without declared IR predictions stays insufficient_evidence.
+    /// A coverage plan with ir_comparisons checks calibrated mono IR WAVs.
+    /// Exit 0 for a complete declared acoustic comparison, 1 for failed,
+    /// incomplete, or synthetic evidence, 2 on rejected input.
+    #[arg(long, value_name = "MANIFEST")]
+    verify_captures: Option<PathBuf>,
+
+    /// Destination for the verification report (required with
+    /// --verify-captures; must differ from every raw take).
+    #[arg(long, value_name = "PATH")]
+    verification_report: Option<PathBuf>,
+
+    /// Expected graph fingerprint for --verify-captures (without it only
+    /// manifest self-consistency is checked; stale graphs then pass
+    /// validation but stay unapproved).
+    #[arg(long, value_name = "FINGERPRINT")]
+    expected_graph: Option<String>,
+
+    /// Expected stimulus hash for --verify-captures.
+    #[arg(long, value_name = "HASH")]
+    expected_stimulus: Option<String>,
+
+    /// Bundle plan (verification-bundle.json) for trial, required
+    /// source/seat coverage, and capture sample-rate checks. Optional
+    /// ir_comparisons entries enable declared calibrated IR comparisons.
+    #[arg(long, value_name = "BUNDLE_JSON")]
+    coverage_plan: Option<PathBuf>,
 }
 
 pub fn run_command() -> Result<()> {
@@ -513,6 +580,80 @@ pub fn run_command() -> Result<()> {
         return Ok(());
     }
 
+    // Standalone capture verification: no optimization runs. Rejections
+    // exit 2; validated-but-unapproved imports exit 1 with their report.
+    if let Some(manifest) = &args.verify_captures {
+        let report = args.verification_report.clone().ok_or_else(|| {
+            anyhow!("--verification-report <PATH> is required with --verify-captures")
+        })?;
+        return run_verify_captures(
+            manifest.clone(),
+            report,
+            args.expected_graph,
+            args.expected_stimulus,
+            args.coverage_plan,
+        );
+    }
+
+    // Bundle generation runs after optimization; fail fast on missing
+    // operator identities before spending the optimization budget.
+    if args.verification_bundle.is_some() {
+        for (flag, value) in [
+            ("--baseline-graph", args.baseline_graph.as_ref()),
+            ("--calibration-id", args.calibration_id.as_ref()),
+            ("--stimulus-hash", args.stimulus_hash.as_ref()),
+        ] {
+            if value.is_none_or(|text| text.trim().is_empty()) {
+                eprintln!("{flag} is required with --verification-bundle");
+                std::process::exit(crate::verification::EXIT_REJECTED_INPUT);
+            }
+        }
+        if args
+            .verification_seats
+            .as_ref()
+            .is_none_or(|seats| seats.split(',').all(|seat| seat.trim().is_empty()))
+        {
+            eprintln!("--verification-seats <SEATS> is required with --verification-bundle");
+            std::process::exit(crate::verification::EXIT_REJECTED_INPUT);
+        }
+    }
+
+    if let Some(graph_path) = &args.verification_graph {
+        let result = (|| -> Result<PathBuf> {
+            let graph: DspChainOutput = serde_json::from_slice(&std::fs::read(graph_path)?)?;
+            crate::verification::generate_verification_bundle(
+                &graph,
+                &crate::verification::BundleRequest {
+                    prediction_manifest: args.verification_prediction_inputs.clone(),
+                    baseline_graph: args.baseline_graph.clone().unwrap_or_default(),
+                    calibration_id: args.calibration_id.clone().unwrap_or_default(),
+                    stimulus_hash: args.stimulus_hash.clone().unwrap_or_default(),
+                    seats: args
+                        .verification_seats
+                        .clone()
+                        .unwrap_or_default()
+                        .split(',')
+                        .map(|s| s.trim().to_owned())
+                        .collect(),
+                    sample_rate_hz: args.sample_rate,
+                },
+                graph_path.parent().unwrap_or(std::path::Path::new(".")),
+                args.verification_bundle
+                    .as_deref()
+                    .ok_or_else(|| anyhow!("Missing verification bundle directory"))?,
+            )
+        })();
+        match result {
+            Ok(path) => {
+                info!("Created prediction bundle {path:?}; playback remains unverified");
+                return Ok(());
+            }
+            Err(error) => {
+                eprintln!("Verification bundle refused: {error:#}");
+                std::process::exit(crate::verification::EXIT_REJECTED_INPUT);
+            }
+        }
+    }
     // Unwrap required args (safe because of required_unless_present)
     let config_path = args
         .config
@@ -539,6 +680,14 @@ pub fn run_command() -> Result<()> {
         args.override_config,
         args.export_format,
         args.export_path,
+        BundleOptions {
+            prediction_manifest: args.verification_prediction_inputs,
+            dest_dir: args.verification_bundle,
+            baseline_graph: args.baseline_graph,
+            calibration_id: args.calibration_id,
+            stimulus_hash: args.stimulus_hash,
+            seats: args.verification_seats,
+        },
     )
 }
 
@@ -575,6 +724,71 @@ fn create_progress_observer() -> Box<dyn PipelineObserver> {
     })
 }
 
+/// Operator identities for post-save verification-bundle generation.
+struct BundleOptions {
+    prediction_manifest: Option<PathBuf>,
+    dest_dir: Option<PathBuf>,
+    baseline_graph: Option<String>,
+    calibration_id: Option<String>,
+    stimulus_hash: Option<String>,
+    seats: Option<String>,
+}
+
+/// Standalone capture verification: import the operator manifest, run
+/// pre-result checks, and write the machine-readable report.
+///
+/// Rejections exit 2; validated-but-unapproved imports exit 1 with their
+/// report. Exit 0 is reserved for approved playback, which needs
+/// prediction comparison against real captures elsewhere.
+fn run_verify_captures(
+    manifest: PathBuf,
+    report: PathBuf,
+    expected_graph: Option<String>,
+    expected_stimulus: Option<String>,
+    coverage_plan: Option<PathBuf>,
+) -> Result<()> {
+    match crate::verification::verify_operator_captures(&crate::verification::VerifyRequest {
+        manifest,
+        report,
+        expected_graph,
+        expected_stimulus,
+        coverage_plan,
+    }) {
+        Ok((written, exit_code)) => {
+            info!("Wrote verification report to {:?}", written);
+            if exit_code == 0 {
+                Ok(())
+            } else {
+                std::process::exit(exit_code);
+            }
+        }
+        Err(error) => {
+            eprintln!("Capture verification rejected: {error:#}");
+            std::process::exit(crate::verification::EXIT_REJECTED_INPUT);
+        }
+    }
+}
+
+/// Bind the native output after all CLI metadata changes.
+fn finalize_native_output(
+    output: &mut DspChainOutput,
+    provisional: &[roomeq_model::decision_ledger::DecisionRecord],
+    events: &roomeq_workflow::final_ledger::ReconciliationEvents,
+    effective_config: Option<&RoomConfig>,
+) -> Result<()> {
+    if let Some(config) = effective_config {
+        let metadata = output
+            .metadata
+            .as_mut()
+            .ok_or_else(|| anyhow!("RoomEQ output is missing optimization metadata"))?;
+        metadata.effective_config = Some(Box::new(config.clone()));
+    }
+    roomeq_workflow::final_ledger::finalize_output_ledger(output, provisional, events)
+        .map_err(|reason| anyhow!("final decision ledger refused delivered output: {reason}"))?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn execute_optimization(
     sample_rate: f64,
     freq_samples: usize,
@@ -583,6 +797,7 @@ fn execute_optimization(
     override_config_path: Option<PathBuf>,
     export_format: Option<ExportFormat>,
     export_path: Option<PathBuf>,
+    bundle_options: BundleOptions,
 ) -> Result<()> {
     let has_override = override_config_path.is_some();
     // Load room configuration
@@ -620,16 +835,54 @@ fn execute_optimization(
     info!("Saving DSP chain to {:?}", output_path);
 
     let mut dsp_output = result.to_dsp_chain_output();
-    if has_override {
-        let metadata = dsp_output
-            .metadata
-            .as_mut()
-            .ok_or_else(|| anyhow!("RoomEQ output is missing optimization metadata"))?;
-        metadata.effective_config = Some(Box::new(room_config.clone()));
+    // C08: reconcile provisional decision records against the exact bytes
+    // being saved and attach the finalized, graph-bound ledger. A run
+    // with no applicable decisions ships an explicitly empty ledger;
+    // reports explain the absence, never a green fill-in.
+    {
+        let events = roomeq_workflow::final_ledger::ReconciliationEvents {
+            final_acceptance: result.metadata.correction_acceptance.clone(),
+            ..Default::default()
+        };
+        finalize_native_output(
+            &mut dsp_output,
+            &result.metadata.provisional_decisions,
+            &events,
+            has_override.then_some(&room_config),
+        )?;
     }
     save_dsp_chain(&dsp_output, &output_path)
         .map_err(|e| anyhow!("{}", e))
         .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
+
+    // C09: verification bundle for the finalized, saved graph. Operator
+    // identities were pre-validated before the optimization budget ran.
+    if let Some(bundle_dir) = &bundle_options.dest_dir {
+        let source_dir = output_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let seats: Vec<String> = bundle_options
+            .seats
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(|seat| seat.trim().to_string())
+            .collect();
+        let bundle_path = crate::verification::generate_verification_bundle(
+            &dsp_output,
+            &crate::verification::BundleRequest {
+                prediction_manifest: bundle_options.prediction_manifest.clone(),
+                baseline_graph: bundle_options.baseline_graph.clone().unwrap_or_default(),
+                calibration_id: bundle_options.calibration_id.clone().unwrap_or_default(),
+                stimulus_hash: bundle_options.stimulus_hash.clone().unwrap_or_default(),
+                seats,
+                sample_rate_hz: sample_rate,
+            },
+            source_dir,
+            bundle_dir,
+        )?;
+        info!("Wrote verification bundle to {:?}", bundle_path);
+    }
 
     if let Err(error) = require_playback_outcome(
         result
@@ -921,6 +1174,7 @@ fn source_kind(measurement: &MeasurementRef) -> &'static str {
         {
             "file"
         }
+        MeasurementRef::Loaded { .. } => "loaded_response",
         MeasurementRef::Inline(_) => "inline",
         MeasurementRef::Path(_) | MeasurementRef::Named { .. } => "file",
     }
@@ -1418,7 +1672,7 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
                 {
                     inline.csv_path.as_deref().map(std::path::PathBuf::from)
                 }
-                MeasurementRef::Inline(_) => None,
+                MeasurementRef::Inline(_) | MeasurementRef::Loaded { .. } => None,
             }
         }
 
@@ -1491,7 +1745,38 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn roadmap_correction_cli_override_preserves_final_ledger_binding() {
+        use roomeq_model::decision_ledger::{CorrectionDecisionLedger, canonical_value_identity};
+        let mut output = roomeq_model::DspChainOutput::new("1.0");
+        output.metadata = Some(
+            serde_json::from_value(serde_json::json!({
+                "pre_score": 1.0, "post_score": 0.0, "algorithm": "fixture",
+                "iterations": 1, "timestamp": "2026-09-22"
+            }))
+            .unwrap(),
+        );
+        let ledger: CorrectionDecisionLedger = serde_json::from_str(include_str!(
+            "../../roomeq-model/test-data/decision_ledger/accepted.json"
+        ))
+        .unwrap();
+        super::finalize_native_output(
+            &mut output,
+            &ledger.decisions,
+            &Default::default(),
+            Some(&Default::default()),
+        )
+        .unwrap();
+        let serialized = serde_json::to_vec(&output).unwrap();
+        let mut saved: roomeq_model::DspChainOutput = serde_json::from_slice(&serialized).unwrap();
+        assert!(saved.metadata.as_ref().unwrap().effective_config.is_some());
+        let bound = saved.correction_decisions.take().unwrap();
+        let identity = canonical_value_identity(&serde_json::to_value(saved).unwrap());
+        roomeq_workflow::final_ledger::verify_final_binding(&bound, &identity)
+            .expect("ledger binds the actual serialized output including CLI overrides");
+    }
 
     use super::{
         Args, RunManifest, acceptance_status_label, duplicate_seats, enabled_phase_controls,
@@ -1501,6 +1786,44 @@ mod tests {
         resolve_seat_sources, run_dry_run, strict_input_schema, summarize_final_decision,
         validate_config_file_with_context, validate_optimizer_resources, write_run_manifest,
     };
+
+    /// Verification flags are registered on the binary: generation and
+    /// import run in the binary help, not only in library helpers.
+    #[test]
+    fn roadmap_correction_verify_options_appear_in_help() {
+        let command = Args::command();
+        let ids: Vec<String> = command
+            .get_arguments()
+            .map(|argument| argument.get_id().to_string())
+            .collect();
+        for expected in [
+            "verification_bundle",
+            "verification_graph",
+            "verification_prediction_inputs",
+            "baseline_graph",
+            "calibration_id",
+            "stimulus_hash",
+            "verification_seats",
+            "verify_captures",
+            "verification_report",
+            "expected_graph",
+            "expected_stimulus",
+            "coverage_plan",
+        ] {
+            assert!(
+                ids.iter().any(|id| id == expected),
+                "CLI flag --{} missing from help; got {ids:?}",
+                expected.replace('_', "-")
+            );
+        }
+        let mut help = Vec::new();
+        Args::command()
+            .write_long_help(&mut help)
+            .expect("help renders");
+        let help = String::from_utf8(help).expect("help is UTF-8");
+        assert!(help.contains("--verification-bundle"), "{help}");
+        assert!(help.contains("--verify-captures"), "{help}");
+    }
 
     #[test]
     fn playback_publication_rejects_failed_or_missing_acoustic_evidence() {
@@ -1666,6 +1989,7 @@ mod tests {
                 csv_path: None,
             }),
             speaker_name: None,
+            provenance: Default::default(),
         }))
     }
 
@@ -1747,6 +2071,7 @@ mod tests {
                 },
             ],
             speaker_name: None,
+            provenance: Default::default(),
         });
         let entries = resolve_seat_sources("R", &SpeakerConfig::Group(group_of(source)));
         let seats: Vec<&str> = entries.iter().map(|entry| entry.seat.as_str()).collect();
@@ -1773,6 +2098,7 @@ mod tests {
                     name: Some(seat.to_string()),
                 },
                 speaker_name: None,
+                provenance: Default::default(),
             })
         };
         let config = SpeakerConfig::Group(group_of_multi(vec![named("Left"), named("Left")]));
@@ -1803,6 +2129,7 @@ mod tests {
                     })
                     .collect(),
                 speaker_name: None,
+                provenance: Default::default(),
             })
         };
         roomeq_model::SpeakerConfig::MultiSub(roomeq_model::config::MultiSubGroup {
@@ -1810,6 +2137,7 @@ mod tests {
             speaker_name: None,
             subwoofers: orders.iter().map(|names| source(names)).collect(),
             allpass_optimization: false,
+            joint_optimization: false,
         })
     }
 
@@ -1845,6 +2173,7 @@ mod tests {
                 MeasurementSource::InMemoryMultiple(vec![]),
             ],
             allpass_optimization: false,
+            joint_optimization: false,
         });
         assert!(multisub_seat_order_mismatch(&config).is_none());
     }
@@ -1893,6 +2222,7 @@ mod tests {
                     },
                 ),
                 speaker_name: None,
+                provenance: Default::default(),
             })
         };
         let mut config = roomeq_model::RoomConfig::default();
@@ -1903,6 +2233,7 @@ mod tests {
                 speaker_name: None,
                 subwoofers: vec![sub(), sub()],
                 allpass_optimization: false,
+                joint_optimization: false,
             }),
         );
         let warnings =

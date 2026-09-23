@@ -4,6 +4,7 @@ mod misc;
 mod refresh;
 mod role;
 mod types;
+mod waveform_status;
 
 pub(in crate::room_optimization) use build::*;
 pub(in crate::room_optimization) use channel::*;

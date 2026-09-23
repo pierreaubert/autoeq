@@ -7,6 +7,15 @@ from pathlib import Path
 
 from scripts.src.data_extract import display_channel_entries
 from scripts.src.dsp import split_driver_eq_plugins
+from scripts.src.acoustic_report import (
+    band_mean,
+    deepest_notch_db,
+    level_compensation,
+    pair_sum_difference,
+    summary_table_html,
+    symmetric_groups,
+    tof_table,
+)
 from scripts.src.report import (
     _all_eq_filters_html,
     _gain_plugins_html,
@@ -371,13 +380,19 @@ class SummarySectionTests(unittest.TestCase):
                 self.assertIn("Not approved for playback", html)
 
     def test_playback_status_discloses_reduced_input_contract(self):
-        html = _playback_status_html({
+        metadata = {
             "correction_acceptance": {"outcome": "accepted", "accepted": True, "decision": "accepted"},
             "effective_config": {"optimizer": {"finalization": {
                 "default_input_peak": 10 ** (-18 / 20),
                 "input_peak_limits": {"L<script>": 0.5},
             }}},
-        }, "IIR<script>")
+        }
+        from scripts.src.payload_binding import ALGORITHM, payload_digest
+        data = {"metadata": metadata, "channels": {}}
+        data["correction_decisions"] = {"ledger_version": "1.0.0", "decisions": [],
+            "payload_binding": {"algorithm": ALGORITHM, "graph_identity": "test-graph",
+                                "sha256": payload_digest(data, "test-graph")}}
+        html = _playback_status_html(metadata, "IIR<script>", data=data)
         self.assertIn("default: -18.00 dBFS", html)
         self.assertIn("L&lt;script&gt;: -6.02 dBFS", html)
         self.assertIn("IIR&lt;script&gt;", html)
@@ -464,6 +479,80 @@ class SummarySectionTests(unittest.TestCase):
             html.index("<h2>All EQ Filters</h2>"),
             html.index('<div class="tabs-container">'),
         )
+
+
+def _stereo_curves(spl_l, spl_r, freq=None):
+    freq = freq or [100.0, 1000.0, 2000.0, 3000.0]
+    return (
+        {"freq": list(freq), "spl": list(spl_l)},
+        {"freq": list(freq), "spl": list(spl_r)},
+    )
+
+
+class AcousticReportTests(unittest.TestCase):
+    def test_band_mean_and_notch(self):
+        curve = {"freq": [100.0, 200.0, 1000.0, 2000.0],
+                 "spl": [-12.0, -6.0, 0.0, 0.0]}
+        self.assertAlmostEqual(band_mean(curve["freq"], curve["spl"], 500.0, 3000.0), 0.0)
+        self.assertAlmostEqual(deepest_notch_db({"final_curve": curve}), -12.0)
+        self.assertIsNone(deepest_notch_db({}))
+
+    def test_level_compensation_loudest_is_reference(self):
+        init_l, init_r = _stereo_curves([1.0, 1.0, 1.0, 1.0], [-1.0, -1.0, -1.0, -1.0])
+        rows = level_compensation({"L": {"initial_curve": init_l},
+                                   "R": {"initial_curve": init_r}})
+        by_name = {r["speaker"]: r for r in rows}
+        self.assertAlmostEqual(by_name["L"]["comp_db"], 0.0)
+        self.assertAlmostEqual(by_name["R"]["comp_db"], -2.0)
+        self.assertAlmostEqual(by_name["L"]["residual_db"], 0.0)
+
+    def test_symmetric_groups_pair_stereo(self):
+        groups, unpaired = symmetric_groups({"L": {}, "R": {}, "C": {}})
+        self.assertEqual(groups, [("L+R", ["L", "R"])])
+        self.assertEqual(unpaired, ["C"])
+
+    def test_pair_sum_difference_grids_must_match(self):
+        curve_a = {"freq": [100.0, 200.0], "spl": [0.0, 0.0]}
+        curve_b = {"freq": [100.0, 200.0], "spl": [0.0, 0.0]}
+        combo = pair_sum_difference(curve_a, curve_b)
+        self.assertAlmostEqual(combo["sum_spl"][0], 6.0206, places=3)
+        self.assertAlmostEqual(combo["diff_spl"][0], -120.0)
+        self.assertIsNone(pair_sum_difference(curve_a, {"freq": [100.0], "spl": [0.0]}))
+
+    def test_tof_table_and_summary_pending_markers(self):
+        metadata = {"timing_diagnostics": {"channels": [
+            {"name": "L", "measured_arrival_ms": 0.4, "applied_delay_ms": 0.2,
+             "final_arrival_ms": 0.6, "final_offset_from_reference_ms": 0.0},
+        ]}}
+        rows = tof_table(metadata)
+        self.assertEqual(len(rows), 1)
+        self.assertAlmostEqual(rows[0]["after_ms"], 0.6)
+        html = summary_table_html({"channels": {"L": {"final_curve": {
+            "freq": [100.0, 1000.0], "spl": [-5.0, 0.0]}}}})
+        self.assertIn("Deepest notch", html)
+        self.assertIn("pending", html)
+        self.assertIn("early_late_curves", html)
+
+    def test_html_report_contains_feat_report_sections(self):
+        init_l, init_r = _stereo_curves([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0])
+        data = {"channels": {"L": {"initial_curve": init_l, "final_curve": init_l},
+                             "R": {"initial_curve": init_r, "final_curve": init_r}},
+                "metadata": {"timing_diagnostics": {"channels": [
+                    {"name": "L", "measured_arrival_ms": 0.4, "applied_delay_ms": 0.0,
+                     "final_arrival_ms": 0.4, "final_offset_from_reference_ms": 0.0},
+                    {"name": "R", "measured_arrival_ms": 0.5, "applied_delay_ms": 0.0,
+                     "final_arrival_ms": 0.5, "final_offset_from_reference_ms": 0.1},
+                ]}}}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+        for expected in ("Section 1 — Results summary",
+                         "Relative level compensation",
+                         "Time of flight",
+                         "Smoothed response",
+                         "Symmetric pair: L+R"):
+            self.assertIn(expected, html)
 
 
 if __name__ == "__main__":

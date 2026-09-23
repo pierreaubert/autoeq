@@ -8,6 +8,35 @@ from scripts.src.correction_explanation import correction_explanation_html
 
 
 class CorrectionExplanationTests(unittest.TestCase):
+    def test_measurement_conditioning_history_is_partial_and_escaped(self):
+        payload = {"channel": "<left>", "receipt": {"entries": [{
+            "operation": "source_overlap_alignment",
+            "parameters": {"declared_valid_band_hz": [100, 8000], "input_bins": 1000, "output_bins": 128},
+        }, {"operation": "source_spatial_power_rms", "parameters": {}}]}}
+        payload["source_snapshot_binding"] = "verified_parsed_curve_snapshot"
+        stage = {"stage": "measurement_input_conditioning", "status": "applied", "checks": [
+            {"passed": True, "diagnostic": json.dumps(payload)}]}
+        html = correction_explanation_html({"metadata": {"stage_outcomes": [stage]}})
+        for text in ("&lt;left&gt;", "100–8000 Hz", "1000 → 128 bins", "power domain",
+                     "partial recorded history", "not proof of capture/calibration validity",
+                     "match the frozen input snapshot in source order", "does not authenticate the original recording"):
+            self.assertIn(text, html)
+        self.assertNotIn("<left>", html)
+        stage["checks"][0]["diagnostic"] = "malformed JSON"
+        html = correction_explanation_html({"metadata": {"stage_outcomes": [stage]}})
+        self.assertNotIn("Aligned source grids", html)
+
+    def test_empty_conditioning_is_not_missing_or_complete_lineage(self):
+        stage = {"stage": "measurement_input_conditioning", "status": "applied", "checks": [{
+            "passed": True, "diagnostic": json.dumps({"channel": "L", "receipt": {"entries": []}})}]}
+        html = correction_explanation_html({"metadata": {"stage_outcomes": [stage]}})
+        self.assertIn("no numerical loading change recorded", html)
+        self.assertIn("does not describe later processing", html)
+        stage["checks"] = []
+        stage["status"] = "degraded"
+        html = correction_explanation_html({"metadata": {"stage_outcomes": [stage]}})
+        self.assertNotIn("no numerical loading change recorded", html)
+
     def test_optimizer_band_is_used_when_no_narrower_policy_is_configured(self):
         html = correction_explanation_html({"metadata": {"effective_config": {
             "optimizer": {"min_freq": 30, "max_freq": 400}
@@ -134,6 +163,15 @@ def _fixture(name):
 
 
 class CorrectionDecisionLedgerTests(unittest.TestCase):
+    def test_roadmap_correction_agreeing_labels_do_not_verify_payload(self):
+        data = {"channels": {"L": {"plugins": [{"plugin_type": "gain",
+                "parameters": {"gain_db": 12.0}}]}},
+                "metadata": {"delivered_graph_identity": "graph-final-1"},
+                "correction_decisions": {"ledger_version": "1.0.0", "decisions": [_record()]}}
+        html = correction_explanation_html(data)
+        self.assertNotIn("1 applied delivery claims", html)
+        self.assertIn("payload binding", html)
+
     def test_missing_ledger_renders_reason_unavailable_without_crashing(self):
         html = correction_explanation_html({})
         self.assertIn("Reason unavailable", html)
@@ -302,6 +340,67 @@ class CorrectionDecisionLedgerTests(unittest.TestCase):
         self.assertNotIn("correction_decisions", legacy)
         html = correction_explanation_html(legacy)
         self.assertIn("Reason unavailable", html)
+
+    def test_roadmap_correction_acceptance_sets_render_with_counts_and_reasons(self):
+        from scripts.src.payload_binding import ALGORITHM, payload_digest
+        ledger = _fixture("accepted.json")
+        identity = ledger["decisions"][0]["final_graph_identity"]
+        data = {"channels": {}, "correction_decisions": ledger}
+        ledger["payload_binding"] = {"algorithm": ALGORITHM, "graph_identity": identity,
+                                     "sha256": payload_digest({"channels": {}}, identity)}
+        html = correction_explanation_html(data)
+        self.assertIn("Final acceptance sets:", html)
+        self.assertIn("1 applied delivery claims (d-accepted-1)", html)
+        self.assertIn("0 reverted", html)
+        self.assertIn("0 provisional history", html)
+        self.assertIn("0 withheld", html)
+        reverted = correction_explanation_html(
+            {"correction_decisions": _fixture("rejected_with_reversion.json")})
+        self.assertIn("Final acceptance sets:", reverted)
+        self.assertIn("reverted (rolled back; not delivered)", reverted)
+        self.assertIn("Supersedes: d-attempt-1", reverted)
+
+    def test_roadmap_correction_final_fallback_overrides_candidate_records(self):
+        accepted = _fixture("accepted.json")
+        data = {"correction_decisions": accepted, "metadata": {"correction_acceptance": {
+            "outcome": "accepted", "accepted": True, "decision": "identity_fallback"}}}
+        html = correction_explanation_html(data)
+        self.assertIn("d-accepted-1", html)
+        self.assertIn("fell back to identity", html)
+        self.assertIn("not delivered correction", html)
+        self.assertNotIn("identity fallback is superseded", html)
+
+    def test_roadmap_correction_fallback_cannot_supersede_itself(self):
+        ledger = _fixture("accepted.json")
+        record = ledger["decisions"][0]
+        record["decision_id"] = "identity-fallback-left"
+        record["status"] = "already_acceptable"
+        record["reason_codes"] = ["structural_identity_fallback"]
+        html = correction_explanation_html({
+            "correction_decisions": ledger,
+            "metadata": {"correction_acceptance": {
+                "outcome": "unchanged", "accepted": False, "decision": "identity_fallback"}},
+        })
+        self.assertIn("fell back to identity", html)
+        self.assertNotIn("take precedence", html)
+        self.assertNotIn("identity fallback is superseded", html)
+
+    def test_roadmap_correction_fallback_resolves_without_applied_records(self):
+        data = {"correction_decisions": _fixture("insufficient_evidence.json"),
+                "metadata": {"correction_acceptance": {
+                    "outcome": "unchanged", "accepted": False, "decision": "identity_fallback"}}}
+        html = correction_explanation_html(data)
+        self.assertIn("fell back to identity", html)
+        self.assertIn("no applied correction records", html)
+        self.assertNotIn("identity fallback is superseded", html)
+
+    def test_roadmap_correction_absent_ledger_stays_unavailable(self):
+        html = correction_explanation_html({"metadata": {}})
+        self.assertIn("Individual decisions unavailable", html)
+        self.assertIn("Reason unavailable", html)
+        self.assertNotIn("Final acceptance sets:", html)
+        html = correction_explanation_html({})
+        self.assertIn("No final correction decision was recorded.", html)
 
 
 if __name__ == "__main__":

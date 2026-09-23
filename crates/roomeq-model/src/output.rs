@@ -16,13 +16,13 @@ pub use crate::Curve;
 /// Frequency response curve data for serialization
 ///
 /// Represents a curve with frequency points and SPL values.
-/// SPL values are normalized (mean-subtracted in the 1000-2000 Hz range)
-/// for consistent comparison across measurements.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+/// Conversion preserves the source level; it does not normalize captures.
+/// Display normalization, when present, is identified by `norm_range`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct CurveData {
     /// Frequency points in Hz
     pub freq: Vec<f64>,
-    /// Sound Pressure Level in dB (normalized)
+    /// Sound pressure level in dB, in the source curve's reference convention.
     pub spl: Vec<f64>,
     /// Phase in degrees (optional)
     #[serde(
@@ -34,6 +34,14 @@ pub struct CurveData {
     /// Optional frequency range used for normalization
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub norm_range: Option<(f64, f64)>,
+    /// Measured noise floor on this grid, in the same level reference as `spl`.
+    /// A level-reference shift must shift this array by the same amount.
+    /// Absent for legacy curves or when capture noise was not measured.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub noise_floor_db: Option<Vec<f64>>,
+    /// Measured coherence on this grid; absence is not perfect coherence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coherence: Option<Vec<f64>>,
 }
 
 fn wrap_phase_degrees(phase: f64) -> f64 {
@@ -67,6 +75,8 @@ impl From<Curve> for CurveData {
             spl: curve.spl.to_vec(),
             phase: curve.phase.map(|p| p.to_vec()),
             norm_range: None,
+            noise_floor_db: curve.noise_floor_db.map(|values| values.to_vec()),
+            coherence: curve.coherence.map(|values| values.to_vec()),
         }
     }
 }
@@ -78,6 +88,8 @@ impl From<&Curve> for CurveData {
             spl: curve.spl.to_vec(),
             phase: curve.phase.as_ref().map(|p| p.to_vec()),
             norm_range: None,
+            noise_floor_db: curve.noise_floor_db.as_ref().map(|values| values.to_vec()),
+            coherence: curve.coherence.as_ref().map(|values| values.to_vec()),
         }
     }
 }
@@ -88,6 +100,8 @@ impl From<CurveData> for Curve {
             freq: ndarray::Array1::from(data.freq),
             spl: ndarray::Array1::from(data.spl),
             phase: data.phase.map(ndarray::Array1::from),
+            noise_floor_db: data.noise_floor_db.map(ndarray::Array1::from),
+            coherence: data.coherence.map(ndarray::Array1::from),
             ..Default::default()
         }
     }
@@ -141,6 +155,9 @@ pub struct ChannelDspChain {
     /// or any channel with phase-derived IRs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direct_early_late_correction: Option<DirectEarlyLateCorrectionMetrics>,
+    /// Stage-bound joint subwoofer diagnostics, when that method ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joint_sub: Option<crate::JointSubDiagnostics>,
 }
 
 /// DSP chain for an individual driver in a multi-driver speaker
@@ -700,6 +717,14 @@ pub struct OptimizationMetadata {
     /// Audibility-first acceptance decision for the final correction chain.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub correction_acceptance: Option<crate::CorrectionAcceptanceReport>,
+    /// Provisional decision records collected during the run (evidence
+    /// checks, constraints, target policy, phase/crossover/sub operations,
+    /// pruning, fallback decisions). In-memory threading only, never
+    /// serialized: observation stays separate from delivery claims, and
+    /// the finalized graph-bound ledger is attached to
+    /// `DspChainOutput.correction_decisions` by workflow reconciliation.
+    #[serde(skip)]
+    pub provisional_decisions: Vec<crate::decision_ledger::DecisionRecord>,
     /// Per-filter audibility-veto verdicts keyed by channel.  Report-only
     /// decisions remain visible even when no filter was removed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -723,6 +748,11 @@ pub struct OptimizationMetadata {
     /// verify that an override did not silently replace unrelated sections.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub effective_config: Option<Box<crate::RoomConfig>>,
+    /// Per-channel operation-boundary verdicts from the evidence intake.
+    /// Phase dispatch, target policy, and the final ledger read these
+    /// records; a missing gate means the channel ran before intake gating.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operation_gates: Option<Vec<crate::eligibility::ChannelOperationGate>>,
 }
 
 #[cfg(test)]
@@ -798,11 +828,39 @@ mod tests {
             spl: vec![80.0, 82.0, 81.0],
             phase: Some(vec![0.0, 45.0, 90.0]),
             norm_range: Some((1000.0, 2000.0)),
+            ..Default::default()
         };
         let curve: Curve = data.clone().into();
         assert_eq!(curve.freq.to_vec(), data.freq);
         assert_eq!(curve.spl.to_vec(), data.spl);
         assert_eq!(curve.phase.as_ref().map(|p| p.to_vec()), data.phase);
+    }
+
+    #[test]
+    fn curve_data_preserves_capture_quality_without_inventing_missing_evidence() {
+        let capture = Curve {
+            freq: ndarray::Array1::from_vec(vec![50.0, 100.0, 200.0]),
+            spl: ndarray::Array1::from_vec(vec![72.0, 81.0, 76.0]),
+            phase: Some(ndarray::Array1::from_vec(vec![10.0, 20.0, 30.0])),
+            noise_floor_db: Some(ndarray::Array1::from_vec(vec![50.0, 60.0, 55.0])),
+            coherence: Some(ndarray::Array1::from_vec(vec![0.95, 0.7, 0.99])),
+            ..Default::default()
+        };
+        for data in [CurveData::from(&capture), CurveData::from(capture.clone())] {
+            let json = serde_json::to_value(&data).unwrap();
+            let restored: Curve = serde_json::from_value::<CurveData>(json).unwrap().into();
+            assert_eq!(restored.noise_floor_db, capture.noise_floor_db);
+            assert_eq!(restored.coherence, capture.coherence);
+            assert_eq!(restored.spl, capture.spl);
+            restored.validate("round-tripped capture").unwrap();
+        }
+        let legacy: CurveData = serde_json::from_value(serde_json::json!({
+            "freq": [50.0, 100.0, 200.0], "spl": [72.0, 81.0, 76.0]
+        }))
+        .unwrap();
+        let restored: Curve = legacy.into();
+        assert!(restored.noise_floor_db.is_none());
+        assert!(restored.coherence.is_none());
     }
 
     #[test]
@@ -812,6 +870,7 @@ mod tests {
             spl: vec![80.0, 82.0],
             phase: None,
             norm_range: None,
+            ..Default::default()
         };
         let json = serde_json::to_string(&data).unwrap();
         let back: CurveData = serde_json::from_str(&json).unwrap();

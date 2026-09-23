@@ -6,6 +6,7 @@ import io
 import json
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -18,14 +19,25 @@ spec.loader.exec_module(launcher)
 
 
 class RequiredBackendTests(unittest.TestCase):
+    @unittest.skipUnless(launcher.os.name == "posix", "POSIX process-group contract")
+    def test_timeout_reaps_descendants_and_preserves_partial_output(self):
+        command = [sys.executable, "-c",
+                   "import subprocess,sys,time; "
+                   "subprocess.Popen([sys.executable,'-c','import time; time.sleep(30)']); "
+                   "print('backend-started',flush=True); time.sleep(30)"]
+        with self.assertRaises(subprocess.TimeoutExpired) as caught:
+            launcher.run_contracts(command, cwd=Path.cwd(), env=dict(launcher.os.environ), timeout=0.5)
+        self.assertIn("backend-started", caught.exception.output)
+
     def run_launcher(self, output="", returncode=0, missing=False, error=None):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             results = [subprocess.CompletedProcess([], 0, "CamillaDSP test\n")]
-            results.append(error or subprocess.CompletedProcess([], returncode, output))
             with patch.object(launcher, "__file__", str(root / "scripts/launcher.py")), \
                  patch.object(launcher.shutil, "which", return_value=None if missing else "/backend"), \
                  patch.object(launcher.subprocess, "run", side_effect=results), \
+                 patch.object(launcher, "run_contracts", side_effect=error,
+                              return_value=subprocess.CompletedProcess([], returncode, output)), \
                  contextlib.redirect_stdout(io.StringIO()):
                 if missing or error or returncode or output != self.success:
                     with self.assertRaises(Exception):
@@ -33,6 +45,9 @@ class RequiredBackendTests(unittest.TestCase):
                 else:
                     launcher.main()
             record = json.loads((root / "target/qa/camilladsp-backend-contracts.json").read_text())
+            if isinstance(error, subprocess.TimeoutExpired):
+                self.assertEqual((root / "target/qa/camilladsp-backend-contracts.log").read_text(),
+                                 error.output or "")
             self.assertEqual(record["status"], "passed" if output == self.success and not (missing or error or returncode) else "failed")
             return record
 
@@ -42,6 +57,7 @@ class RequiredBackendTests(unittest.TestCase):
         record = self.run_launcher(self.success)
         self.assertEqual(record["tests_passed"], 8)
         self.assertIn("roomeq-workflow", record["command"])
+        self.assertIn("--include-ignored", record["command"])
 
     def test_missing_workflow_owner(self):
         owner = "room_optimization::gd::tests::tool_contract_camilladsp_fractional_gd_matches_exported_response"
@@ -85,7 +101,7 @@ class RequiredBackendTests(unittest.TestCase):
         self.run_launcher(self.success.replace(f"test {physical} ... ok\n", "test unrelated ... ok\n"))
 
     def test_timeout(self):
-        self.run_launcher(error=subprocess.TimeoutExpired("cargo", 180))
+        self.run_launcher(error=subprocess.TimeoutExpired("cargo", 180, output="partial backend output\n"))
 
 
 if __name__ == "__main__":

@@ -3,6 +3,9 @@ use crate::PeqModel;
 /// Prepared data for single-channel EQ optimization.
 /// Contains all pre-processed data that is independent of filter count.
 pub(super) struct PreparedSingleChannelEq {
+    pub(super) input_normalization: roomeq_model::InputNormalizationEvidence,
+    /// Objective target with the frozen input normalization restored.
+    pub(super) acceptance_target: crate::Curve,
     pub(super) objective_data: autoeq_optim::optim::ObjectiveData,
     pub(super) args_template: autoeq_optim::OptimParams,
     pub(super) peq_model: PeqModel,

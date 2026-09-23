@@ -34,7 +34,8 @@ pub(super) fn source_is_cea2034_shaped(source: &MeasurementSource) -> bool {
         let lower = path.to_string_lossy().to_lowercase();
         lower.contains("cea2034") || lower.contains("spinorama") || lower.contains("cea-2034")
     };
-    let ref_hint = |r: &MeasurementRef| match r {
+    let ref_hint = |r: &MeasurementRef| match r.original() {
+        MeasurementRef::Loaded { .. } => unreachable!("original removes snapshot wrappers"),
         MeasurementRef::Path(p) => path_hints(p),
         MeasurementRef::Named { path, name } => {
             path_hints(path)

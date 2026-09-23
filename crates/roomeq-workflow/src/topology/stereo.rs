@@ -161,6 +161,9 @@ impl WorkflowExecutor for Stereo20Executor {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            operation_gates: None,
+
+            provisional_decisions: Vec::new(),
         };
 
         // 5. Process supporting-source channels.
@@ -176,6 +179,7 @@ impl WorkflowExecutor for Stereo20Executor {
         )?;
 
         Ok(RoomOptimizationResult {
+            finalized_decisions: None,
             channels: channel_chains,
             channel_results,
             deployed_source_curves: HashMap::new(),

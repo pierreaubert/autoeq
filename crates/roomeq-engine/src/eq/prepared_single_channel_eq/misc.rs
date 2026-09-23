@@ -24,6 +24,66 @@ mod level_reference_tests {
     use ndarray::Array1;
 
     #[test]
+    fn normalization_receipt_records_actual_gain_and_unsmoothed_identities() {
+        let curve = Curve {
+            freq: vec![100.0, 200.0, 400.0].into(),
+            spl: vec![80.0, 82.0, 84.0].into(),
+            ..Default::default()
+        };
+        let config = OptimizerConfig {
+            min_freq: 100.0,
+            max_freq: 400.0,
+            ..Default::default()
+        };
+        for (supplied, expected_gain, expected_policy) in [
+            (
+                None,
+                -82.0,
+                roomeq_model::NormalizationReferencePolicy::CorrectionBandArithmeticMean,
+            ),
+            (
+                Some(77.0),
+                -77.0,
+                roomeq_model::NormalizationReferencePolicy::ProvidedSharedReference,
+            ),
+        ] {
+            let prep = prepare_single_channel_eq_with_spin(
+                &curve, &config, None, 48_000.0, None, supplied,
+            )
+            .unwrap();
+            let evidence = &prep.input_normalization;
+            assert_eq!(evidence.applied_gain_db, expected_gain);
+            assert_eq!(evidence.reference_policy, expected_policy);
+            assert_eq!(evidence.correction_band_hz, [100.0, 400.0]);
+            let normalized = Curve {
+                spl: &curve.spl + expected_gain,
+                ..curve.clone()
+            };
+            let fingerprint = |curve: &Curve| {
+                roomeq_model::decision_ledger::canonical_value_identity(
+                    &serde_json::to_value(curve).unwrap(),
+                )
+                .fingerprint
+            };
+            assert_eq!(evidence.input_curve_identity, fingerprint(&curve));
+            assert_eq!(evidence.normalized_curve_identity, fingerprint(&normalized));
+            assert!(evidence.reference_target_identity.is_none());
+        }
+        for invalid in [f64::NAN, f64::INFINITY] {
+            assert!(
+                prepare_single_channel_eq_with_normalization(
+                    &curve,
+                    &config,
+                    None,
+                    48_000.0,
+                    Some(invalid)
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
     fn limited_band_preparation_does_not_normalize_away_bass_excess() {
         let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 512);
         let target_spl = freq.mapv(|f| -8.0 * (f / 20.0).log10() / 3.0);
@@ -70,6 +130,24 @@ mod level_reference_tests {
             )
             .unwrap();
             let data = &prepared.objective_data;
+            if let Some(reference) = reference {
+                assert_eq!(prepared.input_normalization.applied_gain_db, -reference);
+            } else {
+                assert!(
+                    prepared
+                        .input_normalization
+                        .reference_target_identity
+                        .is_some()
+                );
+            }
+            assert_eq!(
+                prepared.input_normalization.reference_policy,
+                if reference.is_some() {
+                    roomeq_model::NormalizationReferencePolicy::ProvidedSharedReference
+                } else {
+                    roomeq_model::NormalizationReferencePolicy::LimitedCorrectionTargetReference
+                }
+            );
             let bass: Vec<_> = data
                 .freqs
                 .iter()
@@ -196,20 +274,55 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
             (sum + *level, count + 1)
         });
     let reference_target = resources::target_curve(curve, resources);
-    let mean_spl = normalization_mean_spl
-        .or_else(|| {
-            crate::spectral_align::limited_correction_target_reference(
-                curve,
-                &reference_target,
-                effective_max_freq,
-            )
-        })
-        .unwrap_or_else(|| if count > 0 { sum / count as f64 } else { 0.0 });
+    use roomeq_model::NormalizationReferencePolicy;
+    let (mean_spl, reference_policy) = if let Some(reference) = normalization_mean_spl {
+        (
+            reference,
+            NormalizationReferencePolicy::ProvidedSharedReference,
+        )
+    } else if let Some(reference) = crate::spectral_align::limited_correction_target_reference(
+        curve,
+        &reference_target,
+        effective_max_freq,
+    ) {
+        (
+            reference,
+            NormalizationReferencePolicy::LimitedCorrectionTargetReference,
+        )
+    } else {
+        (
+            if count > 0 { sum / count as f64 } else { 0.0 },
+            NormalizationReferencePolicy::CorrectionBandArithmeticMean,
+        )
+    };
+    if !mean_spl.is_finite() {
+        return Err("EQ normalization reference must be finite".into());
+    }
     let normalized_curve_unsmoothed = Curve {
         freq: curve.freq.clone(),
         spl: &curve.spl - mean_spl,
         phase: curve.phase.clone(),
         ..Default::default()
+    };
+    let identity = |curve: &Curve| -> Result<String, Box<dyn Error>> {
+        Ok(
+            roomeq_model::decision_ledger::canonical_value_identity(&serde_json::to_value(curve)?)
+                .fingerprint,
+        )
+    };
+    let input_normalization = roomeq_model::InputNormalizationEvidence {
+        input_curve_identity: identity(curve)?,
+        normalized_curve_identity: identity(&normalized_curve_unsmoothed)?,
+        applied_gain_db: -mean_spl,
+        reference_policy,
+        correction_band_hz: [effective_min_freq, effective_max_freq],
+        reference_target_identity: if reference_policy
+            == NormalizationReferencePolicy::LimitedCorrectionTargetReference
+        {
+            Some(identity(&reference_target)?)
+        } else {
+            None
+        },
     };
 
     // Compute decomposed correction weights BEFORE psychoacoustic smoothing.
@@ -588,7 +701,11 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     }
     objective_data.objective = Some(objective_data.build_objective());
 
+    let mut acceptance_target = target_curve;
+    acceptance_target.spl += mean_spl;
     Ok(PreparedSingleChannelEq {
+        input_normalization,
+        acceptance_target,
         objective_data,
         args_template,
         peq_model,
@@ -675,7 +792,7 @@ pub(in super::super) fn run_optimization_pass(
         )
     };
 
-    let global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+    let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
         opt_result,
         &x,
@@ -698,6 +815,17 @@ pub(in super::super) fn run_optimization_pass(
             .into());
         }
     }
+    // Emission-side envelope record: recompute the per-candidate limits from
+    // the same objective data and refuse infeasible winners instead of
+    // emitting them.
+    crate::evidence_gate::verify_emission_candidate(
+        "prepared-single-global",
+        &x,
+        &prep.objective_data,
+        &optim_params,
+        &mut global_evidence,
+    )
+    .map_err(|reason| format!("prepared global candidate refused at emission: {reason}"))?;
     let global_loss = global_evidence
         .objective
         .ok_or("global optimizer did not return a finite objective")?;
@@ -739,6 +867,14 @@ pub(in super::super) fn run_optimization_pass(
                 local_evidence.status
             );
         }
+        crate::evidence_gate::verify_emission_candidate(
+            "prepared-single-refine",
+            &x,
+            &prep.objective_data,
+            &optim_params,
+            &mut local_evidence,
+        )
+        .map_err(|reason| format!("prepared refine candidate refused at emission: {reason}"))?;
         let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
         let use_local = local_evidence.confidence
             != autoeq_optim::optim::OptimizerConfidence::Unusable
@@ -791,6 +927,7 @@ pub(in super::super) fn run_optimization_pass(
     let final_loss =
         autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &prep.objective_data);
     for evidence in &mut optimizer_evidence {
+        evidence.input_normalization = Some(prep.input_normalization.clone());
         if evidence.selected_for_output {
             evidence.objective = Some(final_loss);
         }

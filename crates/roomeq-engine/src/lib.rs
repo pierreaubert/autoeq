@@ -12,7 +12,8 @@ pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerConfidence, Optimi
 /// parallel ownership of the underlying implementations.
 pub mod analysis {
     pub use roomeq_analysis::{
-        crossover_utils, frequency_grid, ir_waveform, response_metrics, slope, time_align,
+        crossover_utils, frequency_grid, ir_waveform, quasi_anechoic, response_metrics, slope,
+        time_align,
     };
 }
 pub mod error {
@@ -38,10 +39,6 @@ pub mod bass_phase_confidence;
 pub mod cea2034;
 /// Complete path-free preparation and execution for one channel.
 pub mod channel_execution;
-/// Cumulative pruning audit and source-summation checks (E3).
-pub mod pruning_audit;
-/// Provisional correction decision records emitted at the decision site (E2).
-pub mod provisional_decisions;
 /// Path-free phase-linear, hybrid, and mixed-phase channel processing.
 pub mod channel_fir;
 /// Path-free low-latency, warped-IIR, and Kautz-modal channel processing.
@@ -61,8 +58,6 @@ pub mod channel_target;
 pub mod config_adapter;
 /// Multi-driver crossover optimization and polarity search.
 pub mod crossover;
-pub mod summation_search;
-pub mod target_enforcement;
 /// Path-free cross-talk cancellation matrix solving and diagnostics.
 pub mod ctc;
 /// Double-bass-array optimization and phase-critical array summation.
@@ -108,17 +103,23 @@ pub mod pipeline;
 pub mod progress;
 /// Filesystem-capable validation of configured measurement provenance.
 pub mod provenance;
+/// Provisional correction decision records emitted at the decision site (E2).
+pub mod provisional_decisions;
+/// Cumulative pruning audit and source-summation checks (E3).
+pub mod pruning_audit;
 pub mod report_adapter;
 /// Shared in-memory results returned by RoomEQ execution workflows.
 pub mod room_result;
 pub mod runtime_limiter;
 /// Broadband spectral inter-channel response alignment.
 pub mod spectral_align;
+pub mod summation_search;
+pub mod target_enforcement;
 pub use roomeq_analysis::spatial_robustness;
-/// Supporting-source room compensation filter design.
-pub mod supporting_source;
 /// Evidence-aware operation gating and local constraint evaluation (E1).
 pub mod evidence_gate;
+/// Supporting-source room compensation filter design.
+pub mod supporting_source;
 /// Deterministic topology, crossover, and bass-routing primitives.
 pub mod topology;
 /// Path-free time-alignment analysis used by workflow preparation.

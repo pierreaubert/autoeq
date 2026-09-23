@@ -210,9 +210,14 @@ fn stereo_2_1_config() -> RoomConfig {
             ]),
             subwoofers: Some(SubwooferSystemConfig {
                 config: SubwooferStrategy::Single,
-                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec!["xo".to_string()])),
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+                    "xo".to_string(),
+                ])),
                 routing: Default::default(),
-                    outputs: vec![roomeq_model::SubwooferOutput { id: "sub".to_string(), speaker: "sub".to_string() }],
+                outputs: vec![roomeq_model::SubwooferOutput {
+                    id: "sub".to_string(),
+                    speaker: "sub".to_string(),
+                }],
             }),
             bass_management: None,
             ..Default::default()
@@ -314,6 +319,7 @@ fn assemble_workflow_result_empty_channels_succeeds() {
     let config = room_config_with_optimizer(speakers, Some(system), tiny_optimizer());
     let sys = config.system.as_ref().unwrap();
     let result = RoomOptimizationResult {
+        finalized_decisions: None,
         channels: HashMap::new(),
         channel_results: HashMap::new(),
         deployed_source_curves: HashMap::new(),
@@ -362,12 +368,14 @@ fn assemble_generic_result_non_empty_success() {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         },
     );
     let mut channel_results = HashMap::new();
     channel_results.insert(
         "left".to_string(),
         ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: "left".to_string(),
             pre_score: 0.5,
             post_score: 0.9,
@@ -386,6 +394,7 @@ fn assemble_generic_result_non_empty_success() {
     channel_means.insert("left".to_string(), 80.0);
 
     let generic = GenericChannelCollection {
+        provisional_decisions: Vec::new(),
         channel_chains,
         channel_results,
         pre_scores: vec![0.5],

@@ -26,6 +26,7 @@ fn single_speaker_config(
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("left.csv")),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     RoomConfig {

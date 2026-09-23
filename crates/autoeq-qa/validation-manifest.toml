@@ -1359,14 +1359,13 @@ runner = "python"
 [[case]]
 id = "autoeq-qa.h01-fir-bin-rounding.v1"
 family = "H01"
-owner = "tailpy"
+owner = "autoeq"
 script = "h01_fir_bin_rounding.wls"
 golden = "h01_fir_bin_rounding.json"
-test = "h01_fir_bin_rounding"
+test = "wolfram_h01_fir_bin_rounding"
 tolerance = "N: absolute error <= 1e-6 dB on rounded-bin value; exact-DTFT gap budgeted separately"
 tolerance_kind = "abs"
 tier = "smoke"
-runner = "python"
 
 [[case]]
 id = "autoeq-qa.h02-scorer-sign.v1"

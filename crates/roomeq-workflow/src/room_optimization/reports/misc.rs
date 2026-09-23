@@ -594,6 +594,7 @@ mod tests {
             spl: curve.spl.to_vec(),
             phase: curve.phase.as_ref().map(|p| p.to_vec()),
             norm_range: None,
+            ..Default::default()
         }
     }
 
@@ -633,6 +634,7 @@ mod tests {
     fn single_channel_result(name: &str) -> (ChannelOptimizationResult, ChannelDspChain) {
         let curve = small_curve();
         let ch = ChannelOptimizationResult {
+            measurement_conditioning: None,
             name: name.to_string(),
             pre_score: 0.5,
             post_score: 0.1,
@@ -656,6 +658,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         (ch, chain)
     }
@@ -663,6 +666,7 @@ mod tests {
     fn result_with_channel(name: &str) -> RoomOptimizationResult {
         let (ch, chain) = single_channel_result(name);
         RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::from([(name.to_string(), chain)]),
             channel_results: HashMap::from([(name.to_string(), ch)]),
             deployed_source_curves: HashMap::new(),
@@ -874,6 +878,7 @@ mod tests {
             spl: vec![0.0, 5.0, 0.0, 5.0, 0.0],
             phase: None,
             norm_range: None,
+            ..Default::default()
         };
         let rough = curve_roughness_rms_db(&curve, (300.0, 4_000.0)).unwrap();
         assert!(rough > 0.0);
@@ -902,6 +907,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         assert_eq!(
             headroom_peak_boost_db(&HashMap::from([("left".to_string(), chain)])),
@@ -923,6 +929,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         assert!(headroom_peak_boost_db(&HashMap::from([("left".to_string(), chain)])).is_none());
     }
@@ -943,6 +950,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         let sub = ChannelDspChain {
             channel: "sub".to_string(),
@@ -962,6 +970,7 @@ mod tests {
             spl: vec![0.0, 5.0, 0.0, 5.0, 0.0],
             phase: None,
             norm_range: None,
+            ..Default::default()
         };
         let chain = ChannelDspChain {
             channel: "center".to_string(),
@@ -975,6 +984,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         let rough = dialog_band_roughness_rms_db(&HashMap::from([("center".to_string(), chain)]));
         assert!(rough.is_some_and(|v| v > 0.0));
@@ -996,6 +1006,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         let b = ChannelDspChain {
             channel: "b".to_string(),
@@ -1017,6 +1028,7 @@ mod tests {
                 spl: vec![80.0, 80.0],
                 phase: None,
                 norm_range: None,
+                ..Default::default()
             }),
             eq_response: None,
             target_curve: None,
@@ -1024,6 +1036,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         let b = ChannelDspChain {
             channel: "b".to_string(),
@@ -1035,6 +1048,7 @@ mod tests {
                 spl: vec![80.0, 80.0, 80.0],
                 phase: None,
                 norm_range: None,
+                ..Default::default()
             }),
             eq_response: None,
             target_curve: None,
@@ -1042,6 +1056,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         let rms = group_mean_deviation_rms_db(&[&a, &b], (20.0, 20_000.0));
         assert!(rms.is_none());
@@ -1083,6 +1098,7 @@ mod tests {
     #[test]
     fn generate_validation_bundle_report_creates_json() {
         let mut result = RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::new(),
             channel_results: HashMap::new(),
             deployed_source_curves: HashMap::new(),
@@ -1136,6 +1152,7 @@ mod tests {
     #[test]
     fn generate_validation_bundle_report_disabled_clears_metadata() {
         let mut result = RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::new(),
             channel_results: HashMap::new(),
             deployed_source_curves: HashMap::new(),
@@ -1316,6 +1333,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         assert_eq!(excursion_hpf_hz_from_chain(&chain), Some(85.0));
     }
@@ -1339,6 +1357,7 @@ mod tests {
             post_ir: None,
             fir_temporal_masking: None,
             direct_early_late_correction: None,
+            joint_sub: None,
         };
         assert_eq!(excursion_hpf_hz_from_chain(&chain), None);
     }

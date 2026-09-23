@@ -1,5 +1,20 @@
 {
   "$defs": {
+    "AngularCoverage": {
+      "additionalProperties": false,
+      "description": "Off-axis/angular coverage of a direct-sound capture.\n\nDetail correction above the modal transition needs angular evidence;\na single on-axis capture never authorizes high-resolution speaker\ninversion. Angles are loudspeaker-relative azimuth in degrees.",
+      "properties": {
+        "angles_deg": {
+          "description": "Measured off-axis angles in degrees (on-axis `0.0` may be included).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "AreaPriorKind": {
       "description": "Probability density shape over positions, JSON-serialisable.",
       "oneOf": [
@@ -337,6 +352,26 @@
       },
       "type": "object"
     },
+    "AveragingMethod": {
+      "description": "How the capture was averaged across space or time.\n\nA moving-microphone average cannot supply a physical phase response\nor room impulse response, so it is never a phase source.",
+      "oneOf": [
+        {
+          "const": "stationary",
+          "description": "Stationary microphone; timing reference preserved.",
+          "type": "string"
+        },
+        {
+          "const": "moving_microphone",
+          "description": "Moving-microphone magnitude average; magnitude only.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Averaging method was not recorded.",
+          "type": "string"
+        }
+      ]
+    },
     "BassAnchorChannelResultLegacy": {
       "additionalProperties": false,
       "description": "Per-channel bass-anchor result (mirror of `BassAnchorChannelResult`).",
@@ -624,6 +659,316 @@
           "type": "string"
         }
       ]
+    },
+    "CaptureCorrection": {
+      "description": "Clock correction actually applied to a saved take.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Samples remain on their original device clock.",
+          "type": "string"
+        },
+        {
+          "const": "resampled",
+          "description": "Samples were resampled to the declared timing reference.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureGeometry": {
+      "description": "Interpretation of the microphone positions within a capture session.",
+      "oneOf": [
+        {
+          "const": "spread",
+          "description": "Independent listening seats for spatial magnitude measurements.",
+          "type": "string"
+        },
+        {
+          "const": "compact",
+          "description": "Surveyed microphone cluster for conditional direction estimation.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureKind": {
+      "description": "How the underlying capture was acquired.\n\nMoving-microphone magnitude data cannot supply phase or impulse\nresponses; stationary captures keep a timing reference. `Unknown`\nis the default for legacy data and must never read as a claim.",
+      "oneOf": [
+        {
+          "const": "stationary_ir",
+          "description": "Stationary microphone sweep or impulse response.",
+          "type": "string"
+        },
+        {
+          "const": "spatial_magnitude",
+          "description": "Spatial magnitude capture (e.g. moving microphone).",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound",
+          "description": "Gated/windowed direct-sound measurement.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Capture mode was not recorded.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureArrival": {
+      "additionalProperties": false,
+      "description": "A detected event with explicit limits on its measured direction.",
+      "properties": {
+        "arrival_ms": {
+          "description": "Arrival time relative to the shared sweep origin, in milliseconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "band_hz": {
+          "description": "Band used for the pair-delay estimate, in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "Unit vector toward the arriving source/image source, when identifiable.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "issues": {
+          "description": "Missing or ambiguous direction evidence is explained here.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "level_db": {
+          "description": "First microphone event peak energy relative to direct sound, in dB.",
+          "format": "double",
+          "type": "number"
+        },
+        "microphone_energy_db": {
+          "default": [],
+          "description": "Integrated event energy relative to each microphones direct segment, in capture order.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "mirror_ambiguous": {
+          "description": "True when a planar array leaves the side of arrival unresolved.",
+          "type": "boolean"
+        },
+        "relative_ms": {
+          "description": "Delay relative to the detected direct sound, in milliseconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "residual_samples": {
+          "description": "RMS pair-delay fit residual in samples; not an angular uncertainty.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "arrival_ms",
+        "relative_ms",
+        "level_db",
+        "mirror_ambiguous",
+        "issues"
+      ],
+      "type": "object"
+    },
+    "CaptureReflectionReport": {
+      "additionalProperties": false,
+      "description": "Measured arrival candidates for one simultaneously captured source.",
+      "properties": {
+        "direct_sound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureArrival"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "SSIR direct-arrival candidate; detection is not a surveyed source label."
+        },
+        "early_reflections": {
+          "description": "Early reflection candidates, ordered by arrival time.",
+          "items": {
+            "$ref": "#/$defs/CaptureArrival"
+          },
+          "type": "array"
+        },
+        "issues": {
+          "description": "Conditions that prevented source-level analysis.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_id": {
+          "description": "Sequentially excited source identity.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_id",
+        "early_reflections",
+        "issues"
+      ],
+      "type": "object"
+    },
+    "CaptureProvenance": {
+      "additionalProperties": false,
+      "description": "Capture provenance in exactly the associated measurement-reference order.",
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/CaptureGeometry",
+          "description": "One geometry interpretation for the complete session."
+        },
+        "reflection_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureReflectionReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Detected source arrivals and conditional measured directions."
+        },
+        "takes": {
+          "description": "One entry per measurement, including every failed timing fit.",
+          "items": {
+            "$ref": "#/$defs/CaptureTakeProvenance"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "geometry",
+        "takes"
+      ],
+      "type": "object"
+    },
+    "CaptureTakeProvenance": {
+      "additionalProperties": false,
+      "description": "Clock, calibration, and position evidence for one microphone take.",
+      "properties": {
+        "calibration_id": {
+          "description": "Frozen calibration identity, preferably its SHA-256 digest.",
+          "type": "string"
+        },
+        "calibration_orientation": {
+          "description": "Calibration orientation: `on_axis` or `ninety_degrees`.",
+          "type": "string"
+        },
+        "correction_applied": {
+          "$ref": "#/$defs/CaptureCorrection",
+          "description": "Transformation applied to the associated measurement audio."
+        },
+        "device_id": {
+          "description": "Actual negotiated input device identity.",
+          "type": "string"
+        },
+        "gain_db": {
+          "description": "Frozen microphone input gain in decibels.",
+          "format": "double",
+          "type": "number"
+        },
+        "microphone_id": {
+          "description": "Physical microphone identity, unique within this source capture.",
+          "type": "string"
+        },
+        "offset_samples": {
+          "description": "Input sample index corresponding to reference sample zero.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "position_m": {
+          "description": "Position in the session's right-handed coordinate system, in meters.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "position_uncertainty_mm": {
+          "description": "Position survey uncertainty in millimeters.",
+          "format": "double",
+          "type": "number"
+        },
+        "preserves_acoustic_delay": {
+          "default": false,
+          "description": "False for arrival-aligned data that removed unknown propagation delay.",
+          "type": "boolean"
+        },
+        "quality_passed": {
+          "default": false,
+          "description": "Separate measurement-quality acceptance, never inferred from a clock fit.",
+          "type": "boolean"
+        },
+        "residual_uncertainty_us": {
+          "description": "Conditional residual timing bound; missing never means zero.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "skew_ppm": {
+          "description": "Relative input clock skew in parts per million.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "timing_reference_id": {
+          "description": "Common acoustic or electrical reference identity, when established.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "microphone_id",
+        "device_id",
+        "correction_applied",
+        "calibration_id",
+        "gain_db",
+        "calibration_orientation",
+        "position_m",
+        "position_uncertainty_mm"
+      ],
+      "type": "object"
     },
     "CardioidConfig": {
       "additionalProperties": false,
@@ -1410,6 +1755,93 @@
       },
       "type": "object"
     },
+    "DirectSoundCaptureFacts": {
+      "additionalProperties": false,
+      "description": "Raw direct-sound acquisition facts for one measurement.\n\nField mapping onto core contract K1: capture kind travels verbatim;\ngate length, geometry, angular coverage, and averaging method are the\ncapture facts the K1 envelope cites by reference. Nothing here is a\nverdict; assessment belongs to `roomeq-analysis`.",
+      "properties": {
+        "angular": {
+          "$ref": "#/$defs/AngularCoverage",
+          "default": {},
+          "description": "Recorded angular coverage."
+        },
+        "averaging": {
+          "$ref": "#/$defs/AveragingMethod",
+          "default": "unknown",
+          "description": "How the capture was averaged."
+        },
+        "capture_kind": {
+          "$ref": "#/$defs/CaptureKind",
+          "default": "unknown",
+          "description": "K1 capture kind, reused verbatim."
+        },
+        "direct_path_m": {
+          "description": "Direct source-to-microphone path length in meters.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "first_reflection_path_m": {
+          "description": "First-reflection path length in meters.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "gate_s": {
+          "description": "Gate/window length in seconds applied for direct-sound isolation.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sample_rate_hz": {
+          "description": "Capture sample rate in Hz, when known.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "sound_speed_m_s": {
+          "description": "Speed of sound in m/s used for the interval conversion.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "sound_speed_m_s"
+      ],
+      "type": "object"
+    },
+    "DirectSoundEvidence": {
+      "additionalProperties": false,
+      "description": "Capture facts and the explicitly selected policy used to assess them.\n\nNeither declarations nor a policy establish acquisition authenticity.\nAnalysis checks internal consistency and usable frequency support.",
+      "properties": {
+        "facts": {
+          "$ref": "#/$defs/DirectSoundCaptureFacts",
+          "description": "Raw acquisition facts, retained without upgrading unknown values."
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QuasiAnechoicPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Explicit policy; absence cannot silently select fixture defaults."
+        }
+      },
+      "required": [
+        "facts"
+      ],
+      "type": "object"
+    },
     "DirectivityModel": {
       "oneOf": [
         {
@@ -1788,6 +2220,24 @@
           "format": "double",
           "type": "number"
         },
+        "physical_drive": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PhysicalDrivePolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional operator-declared steady-sine physical limits, checked on final routes.\nAbsence does not establish hardware capacity; this is not a dynamic safety gate."
+        },
+        "physical_drive_weight": {
+          "default": 0.0,
+          "description": "Optional final-candidate cost per squared worst declared demand/limit ratio.\nAdded to mean seat target error in dB; zero preserves acoustic-only ranking.\nPositive values require physical declarations and never relax safety gates.",
+          "format": "double",
+          "type": "number"
+        },
         "subwoofer_limiter": {
           "default": false,
           "description": "Protect summed physical sub outputs with a runtime limiter instead of static cuts.\nRequires native playback to preserve the limiter and matching output delays.",
@@ -2078,7 +2528,7 @@
         },
         "max_q": {
           "default": 2.0,
-          "description": "If the global Q bound is still at/above this value, cap it when the\npolicy is applied. Frequency-selective Q caps are not available in the\ncurrent PEQ parameterization, so this is intentionally conservative.",
+          "description": "Frequency-local maximum Q in the guarded band. The optimizer adapter\ncombines it with the global and Schroeder policies; the stricter cap\nwins. This does not lower the global Q limit for bass filters.",
           "format": "double",
           "type": "number"
         },
@@ -2235,6 +2685,10 @@
           },
           "type": "array"
         },
+        "provenance": {
+          "$ref": "#/$defs/MeasurementProvenance",
+          "description": "Declared acquisition provenance shared by the set (default unknown)."
+        },
         "speaker_name": {
           "description": "Optional speaker name (e.g., \"Genelec 8361A\")",
           "type": [
@@ -2246,6 +2700,75 @@
       "required": [
         "measurements"
       ],
+      "type": "object"
+    },
+    "MeasurementProvenance": {
+      "additionalProperties": false,
+      "description": "Declared acquisition provenance of one measurement source.\n\nEvery field is optional at the schema level so old JSON stays readable;\nundeclared provenance degrades to unknown, never to an authorization.",
+      "properties": {
+        "calibration_id": {
+          "description": "Calibration identity applied at acquisition, if any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capture": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Ordered per-device capture facts; absent for legacy acquisition workflows."
+        },
+        "capture_kind": {
+          "$ref": "#/$defs/ProvenanceCaptureKind",
+          "default": "unknown",
+          "description": "Declared acquisition kind (default unknown)."
+        },
+        "direct_sound": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DirectSoundEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Capture facts and explicit policy for quasi-anechoic assessment.\nThe legacy angular boolean alone does not authorize detail correction."
+        },
+        "has_direct_angular": {
+          "description": "Whether off-axis/angular coverage backs direct-sound detail claims.",
+          "type": "boolean"
+        },
+        "has_measured_spl": {
+          "description": "Whether measured (not nominal) SPL backs this source.",
+          "type": "boolean"
+        },
+        "timing_reference_id": {
+          "description": "Shared stationary timing-reference identity, if any. Phase-critical\nwork needs the same identity across coherently combined sources.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "valid_band_hz": {
+          "description": "Gate-limited valid band in Hz, if a time gate bounds the evidence\n(e.g. quasi-anechoic valid band). Absent means the full grid support.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "MeasurementProvenanceReference": {
@@ -2318,6 +2841,10 @@
         "measurement": {
           "$ref": "#/$defs/MeasurementRef"
         },
+        "provenance": {
+          "$ref": "#/$defs/MeasurementProvenance",
+          "description": "Declared acquisition provenance (default unknown when absent)."
+        },
         "speaker_name": {
           "type": [
             "string",
@@ -2326,7 +2853,8 @@
         }
       },
       "required": [
-        "measurement"
+        "measurement",
+        "provenance"
       ],
       "type": "object"
     },
@@ -2370,6 +2898,28 @@
       "additionalProperties": false,
       "description": "Serializable mixed-phase correction configuration for JSON config files",
       "properties": {
+        "assessment": {
+          "$ref": "#/$defs/PhaseAssessmentConfig",
+          "default": {
+            "consistency_tol_ms": 0.5,
+            "dip_depth_db": 6.0,
+            "min_valid_fraction": 0.8,
+            "smooth_narrow_oct": 0.16666666666666666,
+            "smooth_wide_oct": 0.5,
+            "snr_floor_db": 10.0,
+            "strict_dips": false,
+            "taper_oct": 0.5
+          },
+          "description": "Evidence bar for the excess-phase assessment that must support the\nphase action before any FIR is generated. Defaults mirror the\nanalysis-validated values; every field stays user-overridable."
+        },
+        "max_correction_latency_ms": {
+          "description": "Maximum causal FIR centering delay in milliseconds for standalone phase correction.\n\nThis bounds the delay added by the generated FIR, not the measured\nacoustic propagation delay. Other DSP stages and backend buffering\nare separate. Default: None (no budget).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "max_fir_length_ms": {
           "default": 10.0,
           "description": "Maximum FIR length in milliseconds for excess phase correction. Default: 10.0",
@@ -2673,7 +3223,12 @@
       "properties": {
         "allpass_optimization": {
           "default": false,
-          "description": "Enable per-subwoofer all-pass filter optimization",
+          "description": "Enable per-subwoofer all-pass filter optimization.\nMeasurement-backed workflows require shared stationary timing evidence.",
+          "type": "boolean"
+        },
+        "joint_optimization": {
+          "default": false,
+          "description": "Select joint coherent multi-sub optimization over the\nsource-by-seat transfer matrix instead of the variation-only\ndetailed mode. Requires per-seat measurements with phase on\nevery sub and a verified shared timing reference. Refuses missing\nevidence without running an alternate optimizer. Takes precedence over legacy\n`optimizer.multi_seat` processing for this group. Default: false.\nRouted systems must select subwoofer strategy `mso`; `single` would\nselect independent subs and is rejected when joint mode is requested.",
           "type": "boolean"
         },
         "name": {
@@ -2903,6 +3458,8 @@
             "max_attenuation_db": 12.0,
             "max_useful_output_loss_db": 3.0,
             "output_ceiling_dbfs": 0.0,
+            "physical_drive": null,
+            "physical_drive_weight": 0.0,
             "subwoofer_limiter": false
           },
           "description": "Final graph electrical limits and cumulative correction selection."
@@ -3423,6 +3980,176 @@
       },
       "type": "object"
     },
+    "PhaseAssessmentConfig": {
+      "additionalProperties": false,
+      "description": "Evidence bar for excess-phase assessment before phase correction.\n\nBins below `snr_floor_db` are excluded; assessment returns unknown\nunless `min_valid_fraction` of the band stays usable. Narrow-vs-wide\ngroup-delay disagreement above `consistency_tol_ms` marks the phase\nwindow-sensitive. `strict_dips` forces unknown on any uncertain dip.",
+      "properties": {
+        "consistency_tol_ms": {
+          "default": 0.5,
+          "description": "Maximum tolerated narrow-vs-wide group-delay disagreement in ms.",
+          "format": "double",
+          "type": "number"
+        },
+        "dip_depth_db": {
+          "default": 6.0,
+          "description": "Depth below the wide-smoothed magnitude that counts as a dip in dB.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_valid_fraction": {
+          "default": 0.8,
+          "description": "Minimum usable fraction of in-band bins.",
+          "format": "double",
+          "type": "number"
+        },
+        "retain_magnitude_on_refusal": {
+          "description": "Retain existing magnitude processing when per-driver phase evidence is refused.\n\nOpt-in workflow policy: no replacement FIR is designed, and a phase\nrefusal is recorded. Shared-FIR behavior is unchanged. Invalid capture\ntiming, malformed input, and operational failures still abort.",
+          "type": "boolean"
+        },
+        "smooth_narrow_oct": {
+          "default": 0.16666666666666666,
+          "description": "Fractional-octave smoothing width for excess group delay.",
+          "format": "double",
+          "type": "number"
+        },
+        "smooth_wide_oct": {
+          "default": 0.5,
+          "description": "Second wider smoothing width for the window-sensitivity check.",
+          "format": "double",
+          "type": "number"
+        },
+        "snr_floor_db": {
+          "default": 10.0,
+          "description": "Bins below this SNR in dB are excluded from the assessment.",
+          "format": "double",
+          "type": "number"
+        },
+        "strict_dips": {
+          "default": false,
+          "description": "When true, any uncertain dip forces an unknown verdict.",
+          "type": "boolean"
+        },
+        "taper_oct": {
+          "default": 0.5,
+          "description": "Cosine taper width in octaves at the assessment band edges.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "PhysicalDriveEnvelope": {
+      "additionalProperties": false,
+      "description": "One explicitly calibrated, frequency-sampled physical-demand envelope.",
+      "properties": {
+        "calibration_id": {
+          "description": "Operator-declared calibration identity, not merely microphone FR calibration.",
+          "type": "string"
+        },
+        "demand_at_reference": {
+          "description": "Demand at `reference_output_peak`, in the quantity's units at each frequency.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "frequencies_hz": {
+          "description": "Increasing positive measured frequencies; no interpolation of physical limits.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "limit_conditions_id": {
+          "description": "Must match the demand conditions; incompatible limits cannot authorize passing.",
+          "type": "string"
+        },
+        "limits": {
+          "description": "Compatible maximum demand at each frequency, in the same quantity and units.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "linear_valid_output_peak": {
+          "description": "Highest digital output peak for which linear scaling is declared valid.",
+          "format": "double",
+          "type": "number"
+        },
+        "quantity": {
+          "$ref": "#/$defs/PhysicalDriveQuantity"
+        },
+        "reference_conditions_id": {
+          "description": "Hardware/load/protection/stimulus reference for the demand measurements.",
+          "type": "string"
+        },
+        "reference_output_peak": {
+          "description": "Digital sinusoid peak at the serialized physical output during calibration.",
+          "format": "double",
+          "type": "number"
+        },
+        "sine_duration_seconds": {
+          "description": "Duration shared by the demand and limit declarations, in seconds.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "quantity",
+        "calibration_id",
+        "reference_conditions_id",
+        "limit_conditions_id",
+        "sine_duration_seconds",
+        "reference_output_peak",
+        "linear_valid_output_peak",
+        "frequencies_hz",
+        "demand_at_reference",
+        "limits"
+      ],
+      "type": "object"
+    },
+    "PhysicalDrivePolicy": {
+      "additionalProperties": false,
+      "description": "Optional declared physical limits; every emitted physical output must be covered.",
+      "properties": {
+        "outputs": {
+          "additionalProperties": {
+            "items": {
+              "$ref": "#/$defs/PhysicalDriveEnvelope"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "outputs"
+      ],
+      "type": "object"
+    },
+    "PhysicalDriveQuantity": {
+      "description": "Physical amplitude quantity; all supported demands scale linearly with drive.",
+      "oneOf": [
+        {
+          "const": "voltage_rms",
+          "description": "Amplifier output voltage, volts RMS for a steady sinusoid.",
+          "type": "string"
+        },
+        {
+          "const": "current_rms",
+          "description": "Amplifier output current, amperes RMS for a steady sinusoid.",
+          "type": "string"
+        },
+        {
+          "const": "excursion_peak_mm",
+          "description": "Driver displacement, millimeters peak for a steady sinusoid.",
+          "type": "string"
+        }
+      ]
+    },
     "PreRingingSerdeConfig": {
       "additionalProperties": false,
       "description": "Serializable pre-ringing configuration for JSON config files",
@@ -3564,6 +4291,36 @@
         {
           "const": "kautz_modal",
           "description": "Kautz modal mode — pole-tuned filter targeting detected room modes.\nUses room mode analysis to place filter poles at resonance frequencies.\nGain optimization via linear least-squares (very fast, no DE needed).\nExports the runtime topology as `kautz_filter` with modal sections.\nBest for small, highly resonant rooms with clear modal problems.\nReturns an error if no room modes are detected.",
+          "type": "string"
+        }
+      ]
+    },
+    "ProvenanceCaptureKind": {
+      "description": "Declared acquisition kind of one measurement source.\n\nThis is a declaration, not an inference: the loader never guesses a kind\nfrom data shape. Undeclared sources stay [`ProvenanceCaptureKind::Unknown`]\nand unknown never authorizes phase-critical work.",
+      "oneOf": [
+        {
+          "const": "stationary_ir",
+          "description": "Stationary impulse-response capture with a timing reference.",
+          "type": "string"
+        },
+        {
+          "const": "spatial_magnitude",
+          "description": "Spatial magnitude capture (including moving-microphone averages)\nwithout a timing reference.",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound",
+          "description": "Direct-sound capture.",
+          "type": "string"
+        },
+        {
+          "const": "simulated_backend",
+          "description": "Exported-backend simulation or rendering; not an acoustic recording.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Capture kind not stated.",
           "type": "string"
         }
       ]
@@ -3744,6 +4501,39 @@
           "type": "integer"
         }
       },
+      "type": "object"
+    },
+    "QuasiAnechoicPolicy": {
+      "additionalProperties": false,
+      "description": "Explicit assessment budgets, not universal acoustic thresholds.",
+      "properties": {
+        "cycles_for_valid_band": {
+          "description": "Full cycles required within the reflection-free gate.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_off_axis_abs_deg": {
+          "description": "Minimum absolute angle counting as off-axis, in degrees.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_off_axis_count": {
+          "description": "Minimum number of distinct off-axis directions.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "version": {
+          "description": "Policy version, currently `quasi-anechoic-v1`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "version",
+        "cycles_for_valid_band",
+        "min_off_axis_count",
+        "min_off_axis_abs_deg"
+      ],
       "type": "object"
     },
     "RecordingConfiguration": {
@@ -5309,6 +6099,8 @@
           "max_attenuation_db": 12.0,
           "max_useful_output_loss_db": 3.0,
           "output_ceiling_dbfs": 0.0,
+          "physical_drive": null,
+          "physical_drive_weight": 0.0,
           "subwoofer_limiter": false
         },
         "local_algo": "cobyla",

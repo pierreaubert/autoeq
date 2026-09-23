@@ -132,8 +132,7 @@ impl GatePolicy {
                 self.version
             ));
         }
-        if !self.coherence_threshold.is_finite()
-            || !(0.0..=1.0).contains(&self.coherence_threshold)
+        if !self.coherence_threshold.is_finite() || !(0.0..=1.0).contains(&self.coherence_threshold)
         {
             return Err(format!(
                 "coherence threshold must be finite in [0, 1] (got {})",
@@ -201,13 +200,13 @@ pub fn judge_operation(
     policy: &GatePolicy,
 ) -> OperationVerdict {
     let mut reasons: Vec<&'static str> = Vec::new();
-    let build = |verdict: BandVerdict,
-                 reasons: Vec<&'static str>,
-                 evidence: &OperationEvidence| OperationVerdict {
-        operation,
-        verdict,
-        reason_codes: reasons,
-        evidence_id: evidence.evidence_id.clone(),
+    let build = |verdict: BandVerdict, reasons: Vec<&'static str>, evidence: &OperationEvidence| {
+        OperationVerdict {
+            operation,
+            verdict,
+            reason_codes: reasons,
+            evidence_id: evidence.evidence_id.clone(),
+        }
     };
     if policy.validate().is_err() {
         reasons.push("invalid_policy");
@@ -375,7 +374,10 @@ impl LocalQEnvelope {
                 ));
             }
         }
-        if knots.windows(2).any(|pair| pair[0].freq_hz >= pair[1].freq_hz) {
+        if knots
+            .windows(2)
+            .any(|pair| pair[0].freq_hz >= pair[1].freq_hz)
+        {
             return Err(String::from(
                 "local-Q knot frequencies must be strictly increasing",
             ));
@@ -412,11 +414,7 @@ impl LocalQEnvelope {
 /// Effective maximum Q at a filter center: the stricter of the global cap
 /// and the local envelope. An absent envelope preserves existing global
 /// behavior exactly; local Q never adds a global bass penalty.
-pub fn effective_max_q(
-    global_max_q: f64,
-    local: Option<&LocalQEnvelope>,
-    center_hz: f64,
-) -> f64 {
+pub fn effective_max_q(global_max_q: f64, local: Option<&LocalQEnvelope>, center_hz: f64) -> f64 {
     match local.and_then(|envelope| envelope.max_q_at(center_hz)) {
         Some(local_max) => global_max_q.min(local_max),
         None => global_max_q,
@@ -507,10 +505,14 @@ pub fn check_realized_composite(
             "realized composite needs matching nonempty frequency and gain arrays",
         ));
     }
-    if freqs.windows(2).any(|pair| !pair[1].is_finite() || pair[1] <= pair[0])
+    if freqs
+        .windows(2)
+        .any(|pair| !pair[1].is_finite() || pair[1] <= pair[0])
         || !freqs[0].is_finite()
     {
-        return Err(String::from("frequency grid must be finite and strictly ascending"));
+        return Err(String::from(
+            "frequency grid must be finite and strictly ascending",
+        ));
     }
     if realized_db.iter().any(|value| !value.is_finite()) {
         return Err(String::from("realized gains must be finite"));
@@ -539,7 +541,9 @@ pub fn check_realized_composite(
         }
     }
     if in_band == 0 {
-        return Err(String::from("no measured bins fall inside the correction band"));
+        return Err(String::from(
+            "no measured bins fall inside the correction band",
+        ));
     }
     Ok(CompositeEnvelopeReport {
         band_peak_gain_db: band_peak,
@@ -548,6 +552,50 @@ pub fn check_realized_composite(
         bins_checked: freqs.len(),
         within_envelope: span_peak <= max_gain_db,
     })
+}
+
+/// Re-verify one emitted optimizer winner against the shared envelope rules.
+///
+/// The dispatchers already finalize production winners; this is the
+/// emission-side record with the same spec-building path
+/// ([`OwnedConstraintSpec`](autoeq_optim::optim::OwnedConstraintSpec)): it
+/// recomputes the per-candidate limits from the same objective data and
+/// optimizer params, refuses infeasible candidates instead of emitting
+/// them, and attaches the diagnostics to `evidence` so adjustment and
+/// refusal evidence survives with the result.
+///
+/// # Errors
+///
+/// Returns the refusal reason when the candidate breaches its composite
+/// envelope or the spec cannot be built from the params.
+pub fn verify_emission_candidate(
+    candidate_id: &str,
+    x: &[f64],
+    data: &autoeq_optim::optim::ObjectiveData,
+    params: &autoeq_optim::OptimParams,
+    evidence: &mut autoeq_optim::optim::OptimizerRunEvidence,
+) -> Result<(), String> {
+    let owned = autoeq_optim::optim::OwnedConstraintSpec::from_params(params)?;
+    let constrained =
+        autoeq_optim::optim::constrain_candidate(candidate_id, x, data, &owned.as_spec())?;
+    if !constrained.feasible {
+        let detail = constrained
+            .composite_breaches
+            .first()
+            .map(|breach| {
+                format!(
+                    ", first at {:.1} Hz ({:.2} dB vs {:.2} dB)",
+                    breach.frequency_hz, breach.observed_db, breach.bound_db
+                )
+            })
+            .unwrap_or_default();
+        return Err(format!(
+            "candidate '{candidate_id}' refused at emission: {} composite breach(es){detail}",
+            constrained.composite_breaches.len(),
+        ));
+    }
+    evidence.constraint_report = Some(constrained);
+    Ok(())
 }
 
 /// One engine entry path with its conditioning, bounds, and confidence sites.
@@ -624,8 +672,7 @@ pub fn entry_paths() -> Vec<EntryPath> {
             entry: "bass_management planning/prediction; home_cinema routing",
             conditioning: "channel_preprocessing::preprocess_channel; excursion protection",
             bounds: "bass_management crossover limits; excursion high-pass realization",
-            phase_confidence:
-                "bass_phase_confidence::crossover_phase_advisories (crossover overlap)",
+            phase_confidence: "bass_phase_confidence::crossover_phase_advisories (crossover overlap)",
         },
     ]
 }
@@ -656,11 +703,8 @@ mod evidence_gate_tests {
         evidence.has_measured_phase = true;
         evidence.mean_coherence = Some(0.55);
         evidence.min_band_snr_db = Some(25.0);
-        let magnitude = judge_operation(
-            CorrectionOperation::MagnitudeCorrection,
-            &evidence,
-            &policy,
-        );
+        let magnitude =
+            judge_operation(CorrectionOperation::MagnitudeCorrection, &evidence, &policy);
         assert_eq!(magnitude.verdict, BandVerdict::Eligible);
         for operation in [
             CorrectionOperation::CoherentSummation,
@@ -669,8 +713,10 @@ mod evidence_gate_tests {
             let phase = judge_operation(operation, &evidence, &policy);
             assert_eq!(phase.verdict, BandVerdict::Limited);
             assert!(phase.reason_codes.contains(&"low_band_coherence"));
-            assert!(magnitude.grants_operation() && !phase.grants_operation()
-                || phase.verdict == BandVerdict::Limited);
+            assert!(
+                magnitude.grants_operation() && !phase.grants_operation()
+                    || phase.verdict == BandVerdict::Limited
+            );
         }
         // Spatial magnitude capture: magnitude possible, phase unsupported.
         let spatial = band_evidence(CaptureKind::SpatialMagnitude);
@@ -678,7 +724,11 @@ mod evidence_gate_tests {
             judge_operation(CorrectionOperation::MagnitudeCorrection, &spatial, &policy).verdict,
             BandVerdict::Eligible
         );
-        let excess = judge_operation(CorrectionOperation::ExcessPhaseCorrection, &spatial, &policy);
+        let excess = judge_operation(
+            CorrectionOperation::ExcessPhaseCorrection,
+            &spatial,
+            &policy,
+        );
         assert_eq!(excess.verdict, BandVerdict::Unsupported);
         assert!(excess.reason_codes.contains(&"no_timing_reference"));
     }
@@ -688,13 +738,22 @@ mod evidence_gate_tests {
         // Local envelope allows narrow bass cuts without a global bass
         // penalty; the effective bound is the stricter of the two.
         let envelope = LocalQEnvelope::new(vec![
-            LocalQKnot { freq_hz: 30.0, max_q: 8.0 },
-            LocalQKnot { freq_hz: 120.0, max_q: 3.0 },
+            LocalQKnot {
+                freq_hz: 30.0,
+                max_q: 8.0,
+            },
+            LocalQKnot {
+                freq_hz: 120.0,
+                max_q: 3.0,
+            },
         ])
         .expect("valid knots");
         let global_max_q = 10.0;
         let effective = effective_max_q(global_max_q, Some(&envelope), 45.0);
-        assert!(effective < global_max_q, "local envelope must bind below 120 Hz");
+        assert!(
+            effective < global_max_q,
+            "local envelope must bind below 120 Hz"
+        );
         assert!(effective > 3.0 && effective < 8.0);
         // A supported narrow bass cut (Q 6 at 45 Hz) fits the local bound.
         assert!(6.0 <= effective);
@@ -704,18 +763,28 @@ mod evidence_gate_tests {
         assert_eq!(envelope.max_q_at(20.0), Some(8.0));
         assert_eq!(envelope.max_q_at(500.0), Some(3.0));
         assert!(envelope.max_q_at(-5.0).is_none());
-        assert!(LocalQEnvelope::new(vec![
-            LocalQKnot { freq_hz: 120.0, max_q: 3.0 },
-            LocalQKnot { freq_hz: 30.0, max_q: 8.0 },
-        ])
-        .is_err());
+        assert!(
+            LocalQEnvelope::new(vec![
+                LocalQKnot {
+                    freq_hz: 120.0,
+                    max_q: 3.0
+                },
+                LocalQKnot {
+                    freq_hz: 30.0,
+                    max_q: 8.0
+                },
+            ])
+            .is_err()
+        );
     }
 
     #[test]
     fn engine_realized_filters_obey_composite_envelope() {
         // Bass-only correction with unrelated upper-band damage: the
         // full-span peak (retained upper band) governs acceptance.
-        let freqs: Vec<f64> = (0..200).map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 199.0)).collect();
+        let freqs: Vec<f64> = (0..200)
+            .map(|i| 20.0 * 1000.0_f64.powf(i as f64 / 199.0))
+            .collect();
         let mut realized = vec![0.0; freqs.len()];
         for (i, &f) in freqs.iter().enumerate() {
             if (30.0..=120.0).contains(&f) {
@@ -752,13 +821,16 @@ mod evidence_gate_tests {
         ] {
             let verdict = judge_operation(operation, &evidence, &policy);
             assert_eq!(verdict.verdict, BandVerdict::Unsupported);
-            assert!(verdict.reason_codes.contains(&"missing_phase_not_synthesized"));
+            assert!(
+                verdict
+                    .reason_codes
+                    .contains(&"missing_phase_not_synthesized")
+            );
             assert!(!verdict.grants_operation());
         }
         // Unknown capture degrades to unknown, never to eligible.
         let unknown = band_evidence(CaptureKind::Unknown);
-        let verdict =
-            judge_operation(CorrectionOperation::MagnitudeCorrection, &unknown, &policy);
+        let verdict = judge_operation(CorrectionOperation::MagnitudeCorrection, &unknown, &policy);
         assert_eq!(verdict.verdict, BandVerdict::Unknown);
         // F15: relative data never grants absolute loudness.
         let loudness = judge_operation(

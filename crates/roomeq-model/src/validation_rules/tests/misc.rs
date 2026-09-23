@@ -15,6 +15,7 @@ fn config_with_algorithm(algo: &str) -> RoomConfig {
         SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
             measurement: MeasurementRef::Path(PathBuf::from("test.csv")),
             speaker_name: None,
+            provenance: Default::default(),
         })),
     );
     let mut optimizer = OptimizerConfig::default();

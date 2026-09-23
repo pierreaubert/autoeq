@@ -118,6 +118,7 @@ fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig 
         let measurement_source = MeasurementSource::Single(roomeq_model::MeasurementSingle {
             measurement: measurement_ref,
             speaker_name: None,
+            provenance: Default::default(),
         });
         let speaker_config = SpeakerConfig::Single(measurement_source);
 

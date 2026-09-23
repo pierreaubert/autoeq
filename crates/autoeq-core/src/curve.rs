@@ -72,6 +72,46 @@ impl Default for Curve {
 }
 
 impl Curve {
+    /// Select measured samples within a frequency band without extrapolation.
+    ///
+    /// Phase, coherence, and noise-floor arrays retain the same sample selection.
+    /// Derived phase caches are cleared because they may depend on excluded data.
+    /// The original curve is unchanged.
+    ///
+    /// # Errors
+    /// Returns an error for invalid arrays or band edges, or fewer than two
+    /// retained samples. Band edges must be finite with `0 < low < high`.
+    pub fn select_frequency_band(&self, [low, high]: [f64; 2]) -> Result<Self> {
+        if !low.is_finite() || !high.is_finite() || low <= 0.0 || low >= high {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: "Usable frequency band must have finite edges with 0 < low < high".into(),
+            });
+        }
+        self.validate("usable measurement")?;
+        let indices: Vec<_> = self
+            .freq
+            .iter()
+            .enumerate()
+            .filter_map(|(i, f)| (*f >= low && *f <= high).then_some(i))
+            .collect();
+        if indices.len() < 2 {
+            return Err(AutoeqError::InvalidMeasurement {
+                message: "Declared usable band does not overlap measurement support with at least two loaded samples".into(),
+            });
+        }
+        let select = |values: &Array1<f64>| values.select(ndarray::Axis(0), &indices);
+        Ok(Self {
+            freq: select(&self.freq),
+            spl: select(&self.spl),
+            phase: self.phase.as_ref().map(select),
+            coherence: self.coherence.as_ref().map(select),
+            noise_floor_db: self.noise_floor_db.as_ref().map(select),
+            min_phase: None,
+            excess_phase: None,
+            excess_delay_ms: None,
+        })
+    }
+
     /// Return the versioned canonical byte representation used for content
     /// identity. Derived cache fields are deliberately excluded: they are
     /// implementation details which are recomputed when a measurement loads.
@@ -287,6 +327,30 @@ mod validation_tests {
             phase: Some(Array1::from_vec(vec![0.0, -5.0, -20.0])),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn frequency_band_selection_validates_edges_and_retains_measured_phase() {
+        let curve = valid_curve();
+        let selected = curve.select_frequency_band([100.0, 1000.0]).unwrap();
+        assert_eq!(selected.freq, ndarray::array![100.0, 1000.0]);
+        assert_eq!(selected.spl, ndarray::array![81.0, 79.0]);
+        assert_eq!(selected.phase, Some(ndarray::array![-5.0, -20.0]));
+        assert_eq!(curve.freq.len(), 3);
+        for band in [
+            [0.0, 1000.0],
+            [1000.0, 100.0],
+            [100.0, 100.0],
+            [f64::NAN, 1000.0],
+            [100.0, f64::INFINITY],
+            [21.0, 99.0],
+            [99.0, 101.0],
+        ] {
+            assert!(curve.select_frequency_band(band).is_err(), "{band:?}");
+        }
+        let mut invalid = curve;
+        invalid.phase = Some(ndarray::array![0.0]);
+        assert!(invalid.select_frequency_band([100.0, 1000.0]).is_err());
     }
 
     #[test]

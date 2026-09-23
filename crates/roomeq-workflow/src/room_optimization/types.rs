@@ -30,6 +30,7 @@ pub(super) type SpeakerProcessResult = std::result::Result<
         Vec<roomeq_engine::OptimizerRunEvidence>,
         Vec<roomeq_model::FilterVetoVerdict>,
         Option<roomeq_model::VetoAdjudicationReport>,
+        Option<roomeq_engine::channel_measurements::MeasurementConditioningReceipt>,
     ),
     AutoeqError,
 >;
@@ -42,6 +43,7 @@ pub(super) struct GenericChannelCollection {
     pub(super) curves: HashMap<String, roomeq_model::Curve>,
     pub(super) channel_means: HashMap<String, f64>,
     pub(super) channel_arrivals: HashMap<String, f64>,
+    pub(super) provisional_decisions: Vec<roomeq_model::decision_ledger::DecisionRecord>,
 }
 
 /// Result type for mixed mode processing
@@ -59,6 +61,7 @@ pub(super) type MixedModeResult = (
     Vec<roomeq_engine::OptimizerRunEvidence>,
     Vec<roomeq_model::FilterVetoVerdict>,
     Option<roomeq_model::VetoAdjudicationReport>,
+    Option<roomeq_engine::channel_measurements::MeasurementConditioningReceipt>,
 );
 
 /// Action to take after progress callback
@@ -121,6 +124,7 @@ pub(super) fn collect_generic_channel_results(
     let mut curves: HashMap<String, roomeq_model::Curve> = HashMap::new();
     let mut channel_means: HashMap<String, f64> = HashMap::new();
     let mut channel_arrivals: HashMap<String, f64> = HashMap::new();
+    let mut provisional_decisions = Vec::new();
 
     for res in results {
         let (
@@ -137,6 +141,7 @@ pub(super) fn collect_generic_channel_results(
             optimizer_evidence,
             audibility_veto,
             veto_adjudication,
+            measurement_conditioning,
         ) = res?;
 
         let physical_fir = config
@@ -150,8 +155,14 @@ pub(super) fn collect_generic_channel_results(
                 .is_some_and(|drivers| !drivers.is_empty())
             && config.optimizer.processing_mode != ProcessingMode::LowLatency;
         if physical_fir {
-            final_curve =
-                super::per_driver_fir::generate(&mut chain, config, sample_rate, output_dir)?;
+            let (curve, decisions) = super::per_driver_fir::generate_recorded(
+                &mut chain,
+                config,
+                sample_rate,
+                output_dir,
+            )?;
+            final_curve = curve;
+            provisional_decisions.extend(decisions);
         }
         channel_chains.insert(channel_name.clone(), chain);
         curves.insert(channel_name.clone(), final_curve.clone());
@@ -250,6 +261,7 @@ pub(super) fn collect_generic_channel_results(
                 optimizer_evidence,
                 audibility_veto,
                 veto_adjudication,
+                measurement_conditioning,
             },
         );
 
@@ -284,5 +296,6 @@ pub(super) fn collect_generic_channel_results(
         post_scores,
         channel_means,
         channel_arrivals,
+        provisional_decisions,
     })
 }

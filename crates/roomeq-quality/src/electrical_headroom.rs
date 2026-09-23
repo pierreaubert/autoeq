@@ -30,6 +30,14 @@ pub struct SampledElectricalOutputPeak {
     pub required_attenuation_db: f64,
 }
 
+/// Electrical envelopes retained for frequency-dependent physical-limit comparisons.
+#[derive(Debug, Clone)]
+pub struct SampledElectricalAssessment {
+    pub outputs: Vec<SampledElectricalOutputPeak>,
+    /// Peak amplitudes on the caller's exact grid, keyed by physical output.
+    pub amplitudes_by_output: BTreeMap<String, Vec<f64>>,
+}
+
 /// Bound simultaneous independently phased sinusoidal inputs at each frequency.
 /// Input limits are peak linear amplitudes relative to digital full scale.
 /// Paths from the same input add complexly before independent-input magnitudes
@@ -40,6 +48,20 @@ pub fn evaluate_sampled_electrical_headroom(
     paths: &[ElectricalPath<'_>],
     input_peak_limits: &BTreeMap<String, f64>,
 ) -> Result<Vec<SampledElectricalOutputPeak>, String> {
+    evaluate_sampled_electrical_assessment(frequencies_hz, sample_rate_hz, paths, input_peak_limits)
+        .map(|assessment| assessment.outputs)
+}
+
+/// Evaluate canonical electrical summation while retaining every sampled output amplitude.
+///
+/// # Errors
+/// Rejects invalid grids, incomplete paths/input limits, and nonfinite accumulation.
+pub fn evaluate_sampled_electrical_assessment(
+    frequencies_hz: &[f64],
+    sample_rate_hz: f64,
+    paths: &[ElectricalPath<'_>],
+    input_peak_limits: &BTreeMap<String, f64>,
+) -> Result<SampledElectricalAssessment, String> {
     if !sample_rate_hz.is_finite()
         || sample_rate_hz <= 0.0
         || frequencies_hz.len() < 2
@@ -81,6 +103,7 @@ pub fn evaluate_sampled_electrical_headroom(
         }
     }
     let mut result = Vec::new();
+    let mut amplitudes_by_output = BTreeMap::new();
     for output in outputs {
         let input_paths: Vec<_> = matrix
             .iter()
@@ -88,6 +111,7 @@ pub fn evaluate_sampled_electrical_headroom(
             .collect();
         let mut peak = 0.0_f64;
         let mut peak_index = 0;
+        let mut amplitudes = Vec::with_capacity(frequencies_hz.len());
         for index in 0..frequencies_hz.len() {
             let amplitude: f64 = input_paths
                 .iter()
@@ -96,12 +120,14 @@ pub fn evaluate_sampled_electrical_headroom(
             if !amplitude.is_finite() {
                 return Err("electrical transfer accumulation overflowed".into());
             }
+            amplitudes.push(amplitude);
             if amplitude > peak {
                 peak = amplitude;
                 peak_index = index;
             }
         }
         let peak_dbfs = (peak > 0.0).then(|| 20.0 * peak.log10());
+        amplitudes_by_output.insert(output.to_owned(), amplitudes);
         result.push(SampledElectricalOutputPeak {
             output: output.into(),
             inputs: input_paths
@@ -121,7 +147,10 @@ pub fn evaluate_sampled_electrical_headroom(
             required_attenuation_db: peak_dbfs.unwrap_or(0.0).max(0.0),
         });
     }
-    Ok(result)
+    Ok(SampledElectricalAssessment {
+        outputs: result,
+        amplitudes_by_output,
+    })
 }
 
 #[cfg(test)]

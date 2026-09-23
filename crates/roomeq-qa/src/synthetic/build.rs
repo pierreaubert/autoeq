@@ -6,9 +6,10 @@ use super::types::DifficultyLevel;
 use super::types::SubTopology;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use roomeq_model::{
-    CardioidConfig, CrossoverConfig, Curve, DBAConfig, FirConfig, MeasurementSource,
-    MixedPhaseSerdeConfig, MultiSubGroup, OptimizerConfig, ProcessingMode, RoomConfig,
-    SpeakerConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig, default_config_version,
+    CardioidConfig, CrossoverConfig, Curve, DBAConfig, FirConfig, MeasurementRef,
+    MeasurementSource, MixedPhaseSerdeConfig, MultiSubGroup, OptimizerConfig, ProcessingMode,
+    RoomConfig, SpeakerConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
+    default_config_version,
 };
 use roomeq_synthetic::{
     generate_cardioid_scenario, generate_channel_curve, generate_dba_scenario,
@@ -103,14 +104,51 @@ pub(super) fn apply_parameter_signal_axes(
         } else {
             curve.phase = None;
         }
-        config.speakers.insert(
-            name.clone(),
-            SpeakerConfig::Single(MeasurementSource::InMemory(curve)),
-        );
+        let source = if row.phase == 1 {
+            // These analytic responses model stationary, same-clock IRs. Declare
+            // that synthetic timing reference so crossover admission tests the
+            // optimizer instead of stopping at unknown acquisition provenance.
+            serde_json::from_value(serde_json::json!({
+                "inline": {
+                    "frequencies": curve.freq.to_vec(),
+                    "magnitude_db": curve.spl.to_vec(),
+                    "phase_deg": curve.phase.as_ref().unwrap().to_vec(),
+                },
+                "provenance": {
+                    "capture_kind": "stationary_ir",
+                    "timing_reference_id": "qa-analytic-common-clock",
+                },
+            }))
+            .expect("valid synthetic stationary measurement")
+        } else {
+            MeasurementSource::InMemory(curve)
+        };
+        config
+            .speakers
+            .insert(name.clone(), SpeakerConfig::Single(source));
     }
     if let Some(fir) = &mut config.optimizer.fir {
         let duration_ms = [5.0, 10.0, 20.0][row.fir_duration as usize];
         fir.taps = (duration_ms * sample_rate / 1000.0).round() as usize;
+    }
+}
+
+pub(super) fn parameter_fixture_curve(speaker: &SpeakerConfig) -> Option<Curve> {
+    let SpeakerConfig::Single(source) = speaker else {
+        return None;
+    };
+    match source {
+        MeasurementSource::InMemory(curve) => Some(curve.clone()),
+        MeasurementSource::Single(single) => match &single.measurement {
+            MeasurementRef::Inline(inline) => Some(Curve {
+                freq: inline.frequencies.clone().into(),
+                spl: inline.magnitude_db.clone().into(),
+                phase: inline.phase_deg.clone().map(Into::into),
+                ..Curve::default()
+            }),
+            _ => None,
+        },
+        _ => None,
     }
 }
 
@@ -196,6 +234,8 @@ fn default_qa_mixed_phase_config() -> MixedPhaseSerdeConfig {
         pre_ringing_threshold_db: -30.0,
         min_spatial_depth: 0.5,
         phase_smoothing_octaves: 0.167,
+        assessment: Default::default(),
+        max_correction_latency_ms: None,
     }
 }
 
@@ -213,6 +253,7 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
             speaker_name: None,
             subwoofers,
             allpass_optimization: allpass,
+            joint_optimization: false,
         }),
     );
 
@@ -365,6 +406,7 @@ pub(super) fn build_multichannel_config(
                         speaker_name: None,
                         subwoofers,
                         allpass_optimization: allpass,
+                        joint_optimization: false,
                     }),
                 );
                 sys_speakers.insert("LFE".to_string(), "lfe".to_string());
@@ -399,6 +441,7 @@ pub(super) fn build_multichannel_config(
                             .map(MeasurementSource::InMemory)
                             .collect(),
                         allpass_optimization: false,
+                        joint_optimization: false,
                     }),
                 );
                 sys_speakers.insert("LFE".to_string(), "lfe".to_string());
@@ -606,12 +649,8 @@ mod tests {
             let curves: Vec<_> = ["Left", "Right"]
                 .iter()
                 .map(|name| {
-                    let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) =
-                        &config.speakers[*name]
-                    else {
-                        panic!("expected in-memory measurement")
-                    };
-                    curve
+                    parameter_fixture_curve(&config.speakers[*name])
+                        .expect("single analytic measurement")
                 })
                 .collect();
             assert_eq!(curves[0].phase.is_some(), row.phase == 1);
@@ -682,9 +721,7 @@ mod tests {
                 }
             }
             for speaker in config.speakers.values() {
-                let SpeakerConfig::Single(MeasurementSource::InMemory(curve)) = speaker else {
-                    panic!("expected in-memory measurement");
-                };
+                let curve = parameter_fixture_curve(speaker).expect("single analytic measurement");
                 assert_eq!(curve.phase.is_some(), row.phase == 1);
                 assert!(curve.spl.iter().all(|value| value.is_finite()));
             }

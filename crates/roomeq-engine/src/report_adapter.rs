@@ -68,6 +68,8 @@ pub fn to_optimizer_run_evidence(
     value: &autoeq_optim::optim::OptimizerRunEvidence,
 ) -> roomeq_model::OptimizerRunEvidence {
     roomeq_model::OptimizerRunEvidence {
+        input_normalization: value.input_normalization.clone(),
+        multi_input_normalization: value.multi_input_normalization.clone(),
         algorithm: value.algorithm.clone(),
         termination: to_optimizer_termination(value.termination),
         converged: value.converged,

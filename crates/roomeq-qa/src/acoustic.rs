@@ -1494,6 +1494,7 @@ mod tests {
         })).unwrap();
         metadata.bass_management = Some(bass);
         let mut result = RoomOptimizationResult {
+            finalized_decisions: None,
             channels: HashMap::from([
                 (
                     "left".into(),

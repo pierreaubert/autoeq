@@ -23,9 +23,9 @@ pub struct HighFrequencyCorrectionConfig {
     /// expressed as 1/N octave. Lower N means broader smoothing.
     #[serde(default = "default_high_freq_smoothing_n")]
     pub smoothing_n: usize,
-    /// If the global Q bound is still at/above this value, cap it when the
-    /// policy is applied. Frequency-selective Q caps are not available in the
-    /// current PEQ parameterization, so this is intentionally conservative.
+    /// Frequency-local maximum Q in the guarded band. The optimizer adapter
+    /// combines it with the global and Schroeder policies; the stricter cap
+    /// wins. This does not lower the global Q limit for bass filters.
     #[serde(default = "default_high_freq_guard_max_q")]
     pub max_q: f64,
 }

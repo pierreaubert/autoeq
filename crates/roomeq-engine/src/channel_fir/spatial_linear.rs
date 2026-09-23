@@ -24,14 +24,24 @@ pub(super) fn optimize(
         measurements.individual(),
         optimization_curve,
     );
-    let (objective, _, effective) = crate::eq::prepare_multi_measurement_objective(
-        &curves,
-        request.optimizer,
-        request.optimizer.multi_measurement.as_ref().unwrap(),
-        Some(request.eq_resources),
-        request.sample_rate,
-    )
-    .map_err(|error| fail(format!("Hybrid FIR objective preparation: {error}")))?;
+    let curves = curves
+        .iter()
+        .map(|curve| {
+            request
+                .prepared
+                .usable_curve(curve)
+                .map(|curve| curve.into_owned())
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (objective, _, effective, normalization) =
+        crate::eq::prepare_multi_measurement_objective_recorded(
+            &curves,
+            request.optimizer,
+            request.optimizer.multi_measurement.as_ref().unwrap(),
+            Some(request.eq_resources),
+            request.sample_rate,
+        )
+        .map_err(|error| fail(format!("Hybrid FIR objective preparation: {error}")))?;
     let bank = &objective.multi_objective.as_ref().unwrap().objectives;
     let iir: Vec<_> = bank
         .iter()
@@ -176,7 +186,7 @@ pub(super) fn optimize(
         .optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
         .map_err(|error| fail(format!("Hybrid FIR basis optimizer: {error}")))?;
     let returned_loss = evaluate(&result.x);
-    let selected_search = returned_loss.is_finite() && returned_loss < best_loss;
+    let mut selected_search = returned_loss.is_finite() && returned_loss < best_loss;
     if selected_search {
         best_loss = returned_loss;
         best = result.x;
@@ -187,7 +197,7 @@ pub(super) fn optimize(
         ));
     }
     let sum: f64 = best.iter().sum();
-    let coefficients = (0..taps)
+    let coefficients: Vec<f64> = (0..taps)
         .map(|tap| {
             candidates
                 .iter()
@@ -196,8 +206,40 @@ pub(super) fn optimize(
                 .sum()
         })
         .collect();
+    // Realized-transfer ceiling: the bank searches template weights, so the
+    // emitted taps are checked directly. A breaching winner reverts to the
+    // neutral vertex with a recorded reason; refusal when neutral breaches.
+    let grids: Vec<Array1<f64>> = distinct.iter().map(|(grid, _)| grid.clone()).collect();
+    let neutral_taps = candidates[count - 1].clone();
+    let mut ceiling_note: Option<String> = None;
+    let coefficients = match super::enforce_realized_fir_ceiling(
+        "hybrid-linear-fir",
+        coefficients,
+        neutral_taps,
+        &grids,
+        request.sample_rate,
+        request.optimizer,
+    ) {
+        Ok((taps, note)) => {
+            if note.is_some() {
+                let mut neutral_weights = vec![0.0; count];
+                neutral_weights[count - 1] = 1.0;
+                best_loss = evaluate(&neutral_weights);
+                if !best_loss.is_finite() {
+                    return Err(fail(
+                        "Hybrid FIR neutral fallback has no finite objective".into(),
+                    ));
+                }
+                best = neutral_weights;
+                selected_search = false;
+                ceiling_note = note;
+            }
+            taps
+        }
+        Err(error) => return Err(error),
+    };
     let status = format!(
-        "{}hybrid linear FIR convex-bank search; {} candidates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; configured_iteration_or_evaluation_budget={}; {}",
+        "{}hybrid linear FIR convex-bank search; {} candidates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; configured_iteration_or_evaluation_budget={}; {}{}",
         if result.success {
             ""
         } else {
@@ -213,7 +255,10 @@ pub(super) fn optimize(
         result.fun,
         returned_loss,
         effective.max_iter,
-        result.message
+        result.message,
+        ceiling_note
+            .map(|note| format!("; {note}"))
+            .unwrap_or_default(),
     );
     let mut evidence = OptimizerRunEvidence::from_backend_result(
         &result.algorithm,
@@ -224,6 +269,7 @@ pub(super) fn optimize(
         effective.max_iter,
         effective.seed,
     );
+    evidence.multi_input_normalization = Some(normalization);
     evidence.evaluation_count = Some(evaluations.load(std::sync::atomic::Ordering::Relaxed));
     Ok((coefficients, evidence))
 }

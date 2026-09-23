@@ -84,6 +84,21 @@ impl PlaybackBinding {
     /// Fail closed on the first incompatible field. A mismatch never
     /// degrades to a scored comparison with a warning.
     pub fn check_compatible(&self, other: &Self) -> Result<(), String> {
+        for binding in [self, other] {
+            for (name, value) in [
+                ("source", binding.source_id.as_str()),
+                ("seat", binding.seat_id.as_str()),
+                ("calibration", binding.calibration_id.as_str()),
+                ("processing state", binding.processing_state.as_str()),
+            ] {
+                if value.trim().is_empty() {
+                    return Err(format!("capture binding needs a nonempty {name} identity"));
+                }
+            }
+            if !binding.sample_rate_hz.is_finite() || binding.sample_rate_hz <= 0.0 {
+                return Err("capture binding needs a finite positive sample rate".to_owned());
+            }
+        }
         if self.graph_id.trim().is_empty() || other.graph_id.trim().is_empty() {
             return Err(String::from(
                 "capture binding needs graph identities on both sides",
@@ -201,12 +216,48 @@ pub struct CaptureComparisonReport {
 }
 
 impl CaptureComparisonReport {
+    /// Require complete supported evidence before promoting a comparison result.
+    ///
+    /// `passed` alone only summarizes assessed metrics. Missing timing, excluded
+    /// bands, absent numeric results, or inconsistent serialized pass flags must
+    /// not authorize playback verification.
+    pub fn is_complete_pass(&self) -> bool {
+        self.assessed
+            && self.passed
+            && self.unassessed_reason.is_none()
+            && self.excluded_bands.is_empty()
+            && self.evaluated_band_hz.is_some_and(|band| {
+                band[0].is_finite() && band[1].is_finite() && band[0] > 0.0 && band[1] > band[0]
+            })
+            && ["magnitude_agreement", "useful_output", "timing_agreement"]
+                .iter()
+                .all(|name| {
+                    self.metric_outcomes
+                        .iter()
+                        .filter(|metric| metric.metric == *name)
+                        .count()
+                        == 1
+                })
+            && self.metric_outcomes.iter().all(|metric| {
+                metric.assessed
+                    && metric.passed
+                    && metric
+                        .observed
+                        .zip(metric.tolerance)
+                        .is_some_and(|(observed, tolerance)| {
+                            observed.is_finite()
+                                && tolerance.is_finite()
+                                && observed >= 0.0
+                                && tolerance >= 0.0
+                                && observed <= tolerance
+                        })
+            })
+    }
+
     /// True only for a passing acoustic capture. Simulated and
     /// backend-rendered passes test software behavior, never the room.
     pub fn counts_as_acoustic_verification(&self) -> bool {
-        self.assessed
-            && self.passed
-            && self.evidence_class == PlaybackEvidenceKind::Acoustic.as_str()
+        self.is_complete_pass() && self.evidence_class == PlaybackEvidenceKind::Acoustic.as_str()
     }
 
     /// True only for a passing maximum-output acoustic capture. A
@@ -543,6 +594,61 @@ mod capture_tests {
     use super::*;
     use ndarray::Array1;
 
+    #[test]
+    fn roadmap_correction_capture_incomplete_metrics_cannot_verify_playback() {
+        let frequencies = grid();
+        let magnitude_only = curve(&frequencies, &flat(80.0));
+        let complex = curve_with_phase(&frequencies, &flat(80.0), &vec![0.0; frequencies.len()]);
+        for (capture, band) in [
+            (&magnitude_only, [20.0, 20_000.0]),
+            (&complex, [10.0, 20_000.0]),
+        ] {
+            let report = compare_prediction_capture(
+                &complex,
+                capture,
+                &binding(),
+                &binding(),
+                PlaybackEvidenceKind::Acoustic,
+                PlaybackLevel::SmallSignal,
+                &DeclaredAlignment {
+                    gain_db: 0.0,
+                    delay_ms: 0.0,
+                },
+                &tolerances(),
+                band,
+            )
+            .unwrap();
+            assert!(report.passed, "supported magnitude metrics still agree");
+            assert!(
+                !report.counts_as_acoustic_verification(),
+                "missing timing or support is not a full playback pass: {report:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_capture_equal_missing_bindings_are_not_compatible() {
+        for field in [
+            "source",
+            "seat",
+            "calibration",
+            "processing",
+            "zero_rate",
+            "infinite_rate",
+        ] {
+            let mut value = binding();
+            match field {
+                "source" => value.source_id.clear(),
+                "seat" => value.seat_id = " ".to_owned(),
+                "calibration" => value.calibration_id.clear(),
+                "processing" => value.processing_state.clear(),
+                "zero_rate" => value.sample_rate_hz = 0.0,
+                _ => value.sample_rate_hz = f64::INFINITY,
+            }
+            assert!(value.check_compatible(&value).is_err(), "{field}");
+        }
+    }
+
     fn curve(freq: &[f64], spl: &[f64]) -> Curve {
         Curve {
             freq: Array1::from(freq.to_vec()),
@@ -797,8 +903,8 @@ mod capture_tests {
     fn quality_simulation_not_acoustic_verification() {
         // Identical data passes as a simulation but never verifies the room.
         let frequencies = grid();
-        let prediction = curve(&frequencies, &flat(80.0));
-        let capture = curve(&frequencies, &flat(80.0));
+        let prediction = curve_with_phase(&frequencies, &flat(80.0), &vec![0.0; frequencies.len()]);
+        let capture = prediction.clone();
         let declared = DeclaredAlignment {
             gain_db: 0.0,
             delay_ms: 0.0,
@@ -840,8 +946,8 @@ mod capture_tests {
     fn quality_small_signal_not_maximum_output() {
         // A passing small-signal transfer check supports no max-output claim.
         let frequencies = grid();
-        let prediction = curve(&frequencies, &flat(80.0));
-        let capture = curve(&frequencies, &flat(80.0));
+        let prediction = curve_with_phase(&frequencies, &flat(80.0), &vec![0.0; frequencies.len()]);
+        let capture = prediction.clone();
         let declared = DeclaredAlignment {
             gain_db: 0.0,
             delay_ms: 0.0,

@@ -33,69 +33,347 @@ use roomeq_model::decision_ledger::{
 };
 use roomeq_model::{CorrectionAcceptanceReport, DspGraph};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use crate::evidence_intake::WorkflowOutcome;
+
+mod delivered_gains;
 
 /// Workflow reconciliation policy version.
 pub const RECONCILIATION_POLICY_VERSION: &str = "workflow-reconciliation-v1";
 
-/// Immutable delivered-graph identity: canonical JSON plus a compact fingerprint.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct GraphIdentity {
-    /// Canonical (key-order-stable) JSON of the delivered graph.
-    pub canonical_json: String,
-    /// FNV-1a 64-bit fingerprint of the canonical JSON, hex-encoded.
-    pub fingerprint: String,
+/// Capture serialized processing before final workflow mutation stages.
+pub(crate) fn processing_snapshot(
+    result: &roomeq_engine::room_result::RoomOptimizationResult,
+) -> Result<serde_json::Value, String> {
+    let output = result.to_dsp_chain_output();
+    // Reuse the canonical channel-control projection (plugins and ordered
+    // driver names/indices/plugins), excluding plots and diagnostic snapshots.
+    let channels: std::collections::BTreeMap<_, _> = output
+        .channels
+        .iter()
+        .map(|(name, chain)| {
+            roomeq_model::joint_sub_report::joint_sub_processing_identity(chain)
+                .map(|identity| (name, identity))
+        })
+        .collect::<Result<_, _>>()
+        .map_err(|error| format!("channel controls do not serialize: {error}"))?;
+    serde_json::to_value((output.global_plugins, channels))
+        .map_err(|error| format!("processing snapshot does not serialize: {error}"))
 }
 
-impl GraphIdentity {
-    /// Whether this identity binds the given graph.
-    pub fn binds(&self, graph: &DspGraph) -> bool {
-        canonical_graph_identity(graph) == *self
-    }
-}
-
-fn sort_canonical(value: serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Object(map) => {
-            let sorted: BTreeMap<String, serde_json::Value> = map
-                .into_iter()
-                .map(|(key, value)| (key, sort_canonical(value)))
-                .collect();
-            serde_json::Value::Object(sorted.into_iter().collect())
+/// Finalize public workflow decisions after all processing and report mutations.
+pub(crate) fn finalize_result_ledger(
+    result: &mut roomeq_engine::room_result::RoomOptimizationResult,
+    assessed_processing: &serde_json::Value,
+    sample_rate_hz: f64,
+) -> Result<(), String> {
+    // Inner safety stages can remove phase processing before the outer processing
+    // snapshot is taken. Reconcile the operation's actual emitted FIR reference,
+    // not just the later snapshot or a generic acceptance status.
+    let mut rolled_back_ids = Vec::new();
+    for record in &mut result.metadata.provisional_decisions {
+        if record.action != DecisionAction::PhaseCorrect || record.status != DecisionStatus::Applied
+        {
+            continue;
         }
-        serde_json::Value::Array(items) => {
-            serde_json::Value::Array(items.into_iter().map(sort_canonical).collect())
+        let expected: Vec<_> = record
+            .evidence_refs
+            .iter()
+            .filter_map(|value| value.strip_prefix("phase-fir:"))
+            .collect();
+        if expected.is_empty() {
+            continue;
         }
-        scalar => scalar,
+        let references: Vec<_> = result
+            .channels
+            .get(&record.physical_output)
+            .into_iter()
+            .flat_map(|channel| {
+                channel.plugins.iter().chain(
+                    channel
+                        .drivers
+                        .iter()
+                        .flatten()
+                        .flat_map(|driver| &driver.plugins),
+                )
+            })
+            .filter(|plugin| plugin.plugin_type == "convolution")
+            .map(|plugin| {
+                plugin
+                    .parameters
+                    .get("ir_file")
+                    .and_then(serde_json::Value::as_str)
+            })
+            .collect();
+        let branches_match = record
+            .evidence_refs
+            .iter()
+            .filter_map(|value| value.strip_prefix("phase-fir-driver:"))
+            .all(|binding| {
+                binding.split_once(':').is_some_and(|(index, filename)| {
+                    index.parse::<usize>().ok().is_some_and(|index| {
+                        result
+                            .channels
+                            .get(&record.physical_output)
+                            .and_then(|channel| channel.drivers.as_ref())
+                            .is_some_and(|drivers| {
+                                drivers.iter().any(|driver| {
+                                    driver.index == index
+                                        && driver.plugins.iter().any(|plugin| {
+                                            plugin.plugin_type == "convolution"
+                                                && plugin
+                                                    .parameters
+                                                    .get("ir_file")
+                                                    .and_then(serde_json::Value::as_str)
+                                                    == Some(filename)
+                                        })
+                                })
+                            })
+                    })
+                })
+            });
+        if expected
+            .iter()
+            .all(|reference| references.contains(&Some(*reference)))
+            && branches_match
+        {
+            continue;
+        }
+        if references.is_empty() {
+            // The emitted convolution stage is gone. Keep its candidate as history
+            // and emit a separate bound reversion through the canonical reconciler.
+            rolled_back_ids.push(record.decision_id.clone());
+            record
+                .reason_codes
+                .push("phase_fir_removed_before_delivery".to_owned());
+        } else {
+            // A redistributed/replaced FIR may preserve the effect, but a path
+            // substitution alone is not a replay witness of that equivalence.
+            record.status = DecisionStatus::Unresolved;
+            record
+                .reason_codes
+                .push("phase_fir_replaced_requires_reassessment".to_owned());
+        }
     }
+    // A candidate-stage claim cannot be promoted against changed processing.
+    // Keep the original decision and its observations as unresolved history until
+    // the owning operation supplies a final replay/reversion witness. A change
+    // alone cannot establish whether a particular correction was removed.
+    if processing_snapshot(result)? != *assessed_processing {
+        for record in &mut result.metadata.provisional_decisions {
+            if matches!(
+                record.status,
+                DecisionStatus::Applied
+                    | DecisionStatus::Constrained
+                    | DecisionStatus::AlreadyAcceptable
+            ) {
+                record.status = DecisionStatus::Unresolved;
+                record.stage = DecisionStage::Provisional;
+                record.final_graph_identity = None;
+                record.reason_codes.push(
+                    "processing_changed_during_finalization_requires_reassessment".to_owned(),
+                );
+            }
+        }
+    }
+    result.finalized_decisions = None;
+    let mut output = result.to_dsp_chain_output();
+    finalize_output_ledger(
+        &mut output,
+        &result.metadata.provisional_decisions,
+        &ReconciliationEvents {
+            rolled_back_ids,
+            final_acceptance: result.metadata.correction_acceptance.clone(),
+            ..Default::default()
+        },
+    )?;
+    let evidence = roomeq_quality::graph_acceptance_evidence(&output, sample_rate_hz)?;
+    output
+        .correction_decisions
+        .as_mut()
+        .ok_or("final ledger missing")?
+        .acceptance_evidence = Some(evidence);
+    result.finalized_decisions = Some(roomeq_engine::room_result::FinalizedDecisions::from_output(
+        &output,
+    )?);
+    Ok(())
 }
 
-fn fnv1a_hex(input: &str) -> String {
-    let mut hash: u64 = 0xcbf29ce484222325;
-    for byte in input.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    format!("{hash:016x}")
-}
+/// Canonical delivered-payload identity lives with the ledger contract in
+/// the model so the export lane can rebind carried ledgers after
+/// reference rewriting without depending on workflow.
+pub use roomeq_model::decision_ledger::{
+    GraphIdentity, canonical_graph_identity, canonical_value_identity,
+};
 
-/// Compute the immutable identity of a delivered graph.
+/// Reconcile provisional records against the delivered output and attach
+/// the finalized ledger.
 ///
-/// Object keys are sorted before serialization, so two graphs with identical
-/// content share one identity regardless of insertion order. This is the
-/// workflow-local binding target until the export lane publishes the
-/// canonical X1 graph hash (handoff); the comparison semantics (exact
-/// canonical equality) already match that contract.
-pub fn canonical_graph_identity(graph: &DspGraph) -> GraphIdentity {
-    let value = serde_json::to_value(graph).expect("DspGraph serializes");
-    let canonical_json = serde_json::to_string(&sort_canonical(value)).expect("canonical JSON");
-    let fingerprint = fnv1a_hex(&canonical_json);
-    GraphIdentity {
-        canonical_json,
-        fingerprint,
+/// The identity is computed over `output` with any previous ledger
+/// cleared, so a stale or forged attachment cannot survive: it is
+/// replaced by reconciliation against the exact bytes being shipped.
+/// Final delivery claims bind the fresh fingerprint; history stays
+/// provisional. Retained joint-stage refusals are added as history. Without
+/// provisional records or such refusals, the ledger is explicitly empty
+/// (valid) — the report layer, not this function, explains *why*
+/// no decision applied. Every emission point (native save, export
+/// package) finalizes its own object; any later mutation must
+/// re-finalize, which [`verify_final_binding`] enforces.
+///
+/// # Errors
+///
+/// Returns a reason when the output does not serialize or a provisional
+/// record is invalid: an invalid producer fails the emission
+/// fail-closed instead of shipping an unbound ledger.
+pub fn finalize_output_ledger(
+    output: &mut DspGraph,
+    provisional: &[DecisionRecord],
+    events: &ReconciliationEvents,
+) -> Result<GraphIdentity, String> {
+    output.correction_decisions = None;
+    let value = serde_json::to_value(&*output)
+        .map_err(|error| format!("delivered output does not serialize: {error}"))?;
+    let identity = canonical_value_identity(&value);
+    let mut records = provisional.to_vec();
+    let gains = delivered_gains::records(output)?;
+    for previous in provisional
+        .iter()
+        .filter(|record| record.decision_id.starts_with(delivered_gains::ID_PREFIX))
+    {
+        if !gains
+            .iter()
+            .any(|gain| gain.decision_id == previous.decision_id)
+        {
+            return Err(format!(
+                "stale delivered gain record: {}",
+                previous.decision_id
+            ));
+        }
     }
+    for record in joint_sub_rejection_history(output)?
+        .into_iter()
+        .chain(gains)
+    {
+        if let Some(existing) = records
+            .iter()
+            .find(|existing| existing.decision_id == record.decision_id)
+        {
+            let mut comparable = existing.clone();
+            // Reconciliation may append final-acceptance context, but must
+            // never replace the source refusal or promote it to applied EQ.
+            comparable
+                .reason_codes
+                .retain(|code| !code.starts_with("final_acceptance_"));
+            // A repeated finalization may carry the previous binding. The
+            // processing facts must still match the freshly derived record.
+            if record.decision_id.starts_with(delivered_gains::ID_PREFIX) {
+                comparable.stage = record.stage;
+                comparable.final_graph_identity = record.final_graph_identity.clone();
+            }
+            if comparable != record {
+                return Err(format!(
+                    "conflicting {} history: {}",
+                    if record.decision_id.starts_with(delivered_gains::ID_PREFIX) {
+                        "delivered-gain"
+                    } else {
+                        "joint-stage"
+                    },
+                    record.decision_id
+                ));
+            }
+        } else {
+            records.push(record);
+        }
+    }
+    for record in &records {
+        record
+            .validate()
+            .map_err(|reason| format!("provisional record refused: {reason}"))?;
+    }
+    let mut ledger = reconcile_ledger(&records, &identity, events);
+    ledger.payload_binding = Some(roomeq_model::payload_binding::PayloadBinding::new(
+        &value,
+        &identity.fingerprint,
+    ));
+    verify_final_binding(&ledger, &identity)?;
+    output.correction_decisions = Some(ledger);
+    Ok(identity)
+}
+
+// Preserve actual stage refusals as history, not acceptance of the final route.
+// The retained diagnostics are the producer; never infer a refusal from curves
+// or promote a missing reason into "already acceptable".
+fn joint_sub_rejection_history(output: &DspGraph) -> Result<Vec<DecisionRecord>, String> {
+    let mut records = Vec::new();
+    for (channel, chain) in &output.channels {
+        let Some(report) = &chain.joint_sub else {
+            continue;
+        };
+        let evidence = canonical_value_identity(
+            &serde_json::to_value(report).map_err(|error| error.to_string())?,
+        );
+        let band = report.seats.first().and_then(|seat| {
+            let frequencies = &seat.before.freq;
+            (frequencies.len() >= 2
+                && frequencies.iter().all(|f| f.is_finite() && *f > 0.0)
+                && frequencies.windows(2).all(|pair| pair[0] < pair[1])
+                && report
+                    .seats
+                    .iter()
+                    .all(|seat| seat.before.freq == *frequencies))
+            .then(|| [frequencies[0], frequencies[frequencies.len() - 1]])
+        });
+        for (kind, action, reason) in [
+            (
+                "joint_array_proposal_reverted",
+                DecisionAction::GainAdjust,
+                &report.array_rejection_reason,
+            ),
+            (
+                "joint_shared_eq_proposal_reverted",
+                DecisionAction::Equalize,
+                &report.shared_eq_rejection_reason,
+            ),
+        ] {
+            let Some(reason) = reason.as_ref().filter(|reason| !reason.trim().is_empty()) else {
+                continue;
+            };
+            for physical_output in &report.physical_outputs {
+                records.push(DecisionRecord {
+                    decision_id: format!("{kind}:{channel}:{physical_output}:{}", evidence.fingerprint),
+                    ledger_version: DECISION_LEDGER_VERSION.to_owned(),
+                    stage: DecisionStage::Provisional,
+                    logical_input: channel.clone(),
+                    physical_output: physical_output.clone(),
+                    // Capture identities are not retained in these stage diagnostics.
+                    measurement_refs: Vec::new(),
+                    seat_refs: report.seats.iter().map(|seat| format!(
+                        "{}:seat-index-{}", seat.reference_scope, seat.seat_index,
+                    )).collect(),
+                    frequency_band_hz: band,
+                    filter_center_hz: None,
+                    action,
+                    status: DecisionStatus::Reverted,
+                    reason_codes: vec![kind.to_owned(), reason.clone(), "stage_history_not_final_route_acceptance".to_owned()],
+                    observed: Vec::new(),
+                    limits: vec![
+                        ObservedQuantity { name: "stage_correction_band_min".into(), value: report.level_band_hz[0], unit: "hz".into() },
+                        ObservedQuantity { name: "stage_correction_band_max".into(), value: report.level_band_hz[1], unit: "hz".into() },
+                    ],
+                    evidence_refs: vec![
+                        format!("channels.{channel}.joint_sub:{}", evidence.fingerprint),
+                        "predicted_stage_assessment_not_recorded_playback".into(),
+                        "raw_capture_identity_unavailable; seats use recorded reference plus positional index".into(),
+                    ],
+                    confidence: roomeq_model::AssessmentConfidence::Unknown,
+                    related_decision_ids: Vec::new(),
+                    supersedes_ids: Vec::new(),
+                    final_graph_identity: None,
+                });
+            }
+        }
+    }
+    Ok(records)
 }
 
 /// Events consumed by reconciliation after the provisional stages ran.
@@ -129,9 +407,9 @@ fn observed(name: &str, value: f64, unit: &str) -> ObservedQuantity {
 ///   with their status preserved;
 /// - rolled-back IDs gain a final `Reverted` record that supersedes the
 ///   attempted record (F10: the attempted benefit is never delivered);
-/// - identity-fallback outputs gain a final `AlreadyAcceptable` record: the
-///   output is unchanged, and any provisional benefit on that output is
-///   superseded, never advertised;
+/// - identity-fallback outputs gain a final `Reverted` record: the
+///   candidate was not retained, which does not establish that the baseline
+///   is acoustically acceptable;
 /// - post-stage trims are recorded as linked final `GainAdjust` observations
 ///   so the delivered chain (with trims) matches the ledger.
 ///
@@ -147,6 +425,22 @@ pub fn reconcile_ledger(
 
     for record in provisional {
         let mut retained = record.clone();
+        if let Some(acceptance) = &events.final_acceptance {
+            let reason = match acceptance.derived_outcome() {
+                roomeq_model::RoomEqOutcome::Accepted => "final_acceptance_accepted",
+                roomeq_model::RoomEqOutcome::Unchanged => "final_acceptance_unchanged",
+                roomeq_model::RoomEqOutcome::Rejected => "final_acceptance_rejected",
+                roomeq_model::RoomEqOutcome::InsufficientEvidence => {
+                    "final_acceptance_insufficient_evidence"
+                }
+            };
+            // Applied describes processing, not a demonstrated benefit. An
+            // acoustic failure alone does not prove retained protection was
+            // removed. Only the explicit mutation events below claim reversion.
+            if !retained.reason_codes.iter().any(|code| code == reason) {
+                retained.reason_codes.push(reason.to_owned());
+            }
+        }
         // Only delivery claims become final: applied (or constrained
         // partial) corrections bound to the delivered graph. Attempts that
         // cannot stand as delivery (insufficient evidence, outside scope,
@@ -230,10 +524,25 @@ pub fn reconcile_ledger(
             seat_refs,
             frequency_band_hz: superseded.and_then(|record| record.frequency_band_hz),
             filter_center_hz: None,
-            action: DecisionAction::Equalize,
+            action: superseded.map_or(DecisionAction::Equalize, |record| record.action.clone()),
             status: DecisionStatus::Reverted,
-            reason_codes: vec![String::from("rollback_after_acceptance_failure")],
-            observed: vec![observed("delivered_correction_db", 0.0, "db")],
+            reason_codes: vec![if superseded.is_some_and(|record| {
+                record
+                    .reason_codes
+                    .iter()
+                    .any(|reason| reason == "phase_fir_removed_before_delivery")
+            }) {
+                String::from("phase_fir_removed_before_delivery")
+            } else {
+                String::from("rollback_after_acceptance_failure")
+            }],
+            observed: if superseded
+                .is_some_and(|record| record.action == DecisionAction::PhaseCorrect)
+            {
+                vec![observed("phase_fir_retained", 0.0, "ratio")]
+            } else {
+                vec![observed("delivered_correction_db", 0.0, "db")]
+            },
             limits: Vec::new(),
             evidence_refs,
             confidence: roomeq_model::AssessmentConfidence::High,
@@ -259,7 +568,7 @@ pub fn reconcile_ledger(
             frequency_band_hz: None,
             filter_center_hz: None,
             action: DecisionAction::Equalize,
-            status: DecisionStatus::AlreadyAcceptable,
+            status: DecisionStatus::Reverted,
             reason_codes: vec![String::from("structural_identity_fallback")],
             observed: vec![observed("delivered_correction_db", 0.0, "db")],
             limits: Vec::new(),
@@ -324,6 +633,8 @@ pub fn reconcile_ledger(
     }
 
     CorrectionDecisionLedger {
+        acceptance_evidence: None,
+        payload_binding: None,
         ledger_version: DECISION_LEDGER_VERSION.to_string(),
         decisions,
     }
@@ -340,14 +651,7 @@ pub fn verify_final_binding(
 ) -> Result<(), String> {
     ledger.validate()?;
     for record in &ledger.decisions {
-        if record.stage == DecisionStage::Final
-            && matches!(
-                record.status,
-                DecisionStatus::Applied
-                    | DecisionStatus::AlreadyAcceptable
-                    | DecisionStatus::Constrained
-            )
-        {
+        if record.stage == DecisionStage::Final {
             match &record.final_graph_identity {
                 Some(bound) if bound == &delivered_identity.fingerprint => {}
                 _ => {
@@ -624,6 +928,207 @@ mod tests {
     use super::*;
     use roomeq_model::decision_ledger::{DecisionRecord, DecisionStatus};
 
+    #[test]
+    fn roadmap_correction_joint_phase_requires_every_resource() {
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        let mut candidate = provisional_applied("joint-phase", "left", None);
+        candidate.action = DecisionAction::PhaseCorrect;
+        candidate.evidence_refs.extend([
+            "phase-fir:first.wav".to_owned(),
+            "phase-fir:second.wav".to_owned(),
+        ]);
+        result.metadata.provisional_decisions.push(candidate);
+        result.channels.get_mut("left").unwrap().plugins =
+            vec![roomeq_engine::output::create_convolution_plugin(
+                "first.wav",
+            )];
+        let processing = processing_snapshot(&result).unwrap();
+        finalize_result_ledger(&mut result, &processing, 48000.0).unwrap();
+        let output = result.to_dsp_chain_output();
+        let ledger = output.correction_decisions.as_ref().unwrap();
+        assert!(
+            !ledger.decisions.iter().any(|record| {
+                record.action == DecisionAction::PhaseCorrect
+                    && record.stage == DecisionStage::Final
+                    && record.status == DecisionStatus::Applied
+            }),
+            "one surviving FIR cannot prove a joint phase operation survived"
+        );
+    }
+
+    #[test]
+    fn roadmap_correction_phase_resource_replacement_is_not_delivery() {
+        for replacement in [None, Some("replacement.wav")] {
+            let mut result = crate::test_fixtures::single_channel_room_result("left");
+            let mut candidate = provisional_applied("phase-candidate", "left", None);
+            candidate.action = DecisionAction::PhaseCorrect;
+            candidate
+                .evidence_refs
+                .push("phase-fir:original.wav".to_owned());
+            result.metadata.provisional_decisions.push(candidate);
+            let channel = result.channels.get_mut("left").unwrap();
+            channel.plugins.clear();
+            if let Some(reference) = replacement {
+                channel
+                    .plugins
+                    .push(roomeq_engine::output::create_convolution_plugin(reference));
+            }
+            // The removal/replacement predates the outer finalization snapshot.
+            let processing = processing_snapshot(&result).unwrap();
+            finalize_result_ledger(&mut result, &processing, 48_000.0).unwrap();
+            let output = result.to_dsp_chain_output();
+            let ledger = output.correction_decisions.as_ref().unwrap();
+            assert!(!ledger.decisions.iter().any(|record| {
+                record.stage == DecisionStage::Final && record.status == DecisionStatus::Applied
+            }));
+            if replacement.is_some() {
+                assert_eq!(ledger.decisions.len(), 1);
+                assert_eq!(ledger.decisions[0].status, DecisionStatus::Unresolved);
+            } else {
+                let reversion = ledger
+                    .decisions
+                    .iter()
+                    .find(|record| record.status == DecisionStatus::Reverted)
+                    .unwrap();
+                assert_eq!(reversion.action, DecisionAction::PhaseCorrect);
+                assert_eq!(reversion.supersedes_ids, ["phase-candidate"]);
+                assert_eq!(reversion.stage, DecisionStage::Final);
+                assert!(reversion.final_graph_identity.is_some());
+            }
+            ledger.validate().unwrap();
+        }
+    }
+
+    #[test]
+    fn roadmap_correction_stale_reversion_binding_is_refused() {
+        let (_, identity) = delivered_graph();
+        let ledger = reconcile_ledger(
+            &[provisional_applied("candidate", "left", None)],
+            &identity,
+            &ReconciliationEvents {
+                rolled_back_ids: vec!["candidate".to_owned()],
+                ..Default::default()
+            },
+        );
+        assert!(verify_final_binding(&ledger, &identity).is_ok());
+        let changed = canonical_value_identity(&serde_json::json!({"different": "processing"}));
+        assert!(verify_final_binding(&ledger, &changed).is_err());
+    }
+
+    #[test]
+    fn roadmap_correction_public_snapshot_invalidates_later_mutation() {
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        result
+            .metadata
+            .provisional_decisions
+            .push(provisional_applied("candidate", "left", None));
+        let processing = processing_snapshot(&result).unwrap();
+        finalize_result_ledger(&mut result, &processing, 48_000.0).unwrap();
+        let output = result.to_dsp_chain_output();
+        assert_eq!(
+            output.correction_decisions.as_ref().unwrap().decisions[0].stage,
+            DecisionStage::Final
+        );
+        assert!(roomeq_engine::room_result::FinalizedDecisions::from_output(&output).is_ok());
+
+        result
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .plugins
+            .push(roomeq_engine::output::create_gain_plugin(1.0));
+        let changed = result.to_dsp_chain_output();
+        let record = &changed.correction_decisions.as_ref().unwrap().decisions[0];
+        assert_eq!(record.status, DecisionStatus::Unresolved);
+        assert_eq!(record.stage, DecisionStage::Provisional);
+        assert!(record.final_graph_identity.is_none());
+        assert!(
+            record
+                .reason_codes
+                .iter()
+                .any(|reason| reason == "payload_changed_after_reconciliation")
+        );
+        assert!(changed.correction_decisions.unwrap().validate().is_ok());
+    }
+
+    #[test]
+    fn roadmap_correction_final_mutation_does_not_promote_candidate_claims() {
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        result
+            .metadata
+            .provisional_decisions
+            .push(provisional_applied("candidate", "left", None));
+        let processing = processing_snapshot(&result).unwrap();
+        result
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .plugins
+            .push(roomeq_engine::output::create_gain_plugin(-1.0));
+        finalize_result_ledger(&mut result, &processing, 48_000.0).unwrap();
+        let output = result.to_dsp_chain_output();
+        let record = &output.correction_decisions.as_ref().unwrap().decisions[0];
+        assert_eq!(record.status, DecisionStatus::Unresolved);
+        assert!(
+            record
+                .reason_codes
+                .iter()
+                .any(|reason| reason
+                    == "processing_changed_during_finalization_requires_reassessment")
+        );
+        assert!(!record.is_final_claim());
+    }
+
+    #[test]
+    fn roadmap_correction_report_only_updates_preserve_processing_claim() {
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        result
+            .metadata
+            .provisional_decisions
+            .push(provisional_applied("candidate", "left", None));
+        let processing = processing_snapshot(&result).unwrap();
+        result.metadata.timestamp = "new report timestamp".to_owned();
+        result.channels.get_mut("left").unwrap().final_curve = None;
+        assert_eq!(processing_snapshot(&result).unwrap(), processing);
+        finalize_result_ledger(&mut result, &processing, 48_000.0).unwrap();
+        let output = result.to_dsp_chain_output();
+        let record = &output.correction_decisions.as_ref().unwrap().decisions[0];
+        assert_eq!(record.status, DecisionStatus::Applied);
+        assert_eq!(record.stage, DecisionStage::Final);
+    }
+
+    #[test]
+    fn roadmap_correction_acceptance_failure_does_not_invent_processing_reversion() {
+        let (_, identity) = delivered_graph();
+        let report = rejected_report();
+        assert_eq!(
+            report.derived_outcome(),
+            roomeq_model::RoomEqOutcome::Rejected
+        );
+        let ledger = reconcile_ledger(
+            &[provisional_applied("retained-protection", "left", None)],
+            &identity,
+            &ReconciliationEvents {
+                final_acceptance: Some(report),
+                ..Default::default()
+            },
+        );
+        let record = &ledger.decisions[0];
+        assert_eq!(record.status, DecisionStatus::Applied);
+        assert!(
+            record
+                .reason_codes
+                .iter()
+                .any(|reason| reason == "final_acceptance_rejected")
+        );
+        assert!(
+            !ledger
+                .decisions
+                .iter()
+                .any(|record| record.status == DecisionStatus::Reverted)
+        );
+    }
+
     fn provisional_applied(id: &str, output: &str, band: Option<[f64; 2]>) -> DecisionRecord {
         DecisionRecord {
             decision_id: id.to_string(),
@@ -772,12 +1277,111 @@ mod tests {
                 .applied_final_ids
                 .contains(&String::from("dec-eq-left"))
         );
-        assert!(result.applied_final_ids.contains(&String::from("trim-left")));
+        assert!(
+            result
+                .applied_final_ids
+                .contains(&String::from("trim-left"))
+        );
         assert!(result.history_ids.contains(&String::from("dec-phase-left")));
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["outcome"], serde_json::json!("accepted"));
         let back: WorkflowResultDocument = serde_json::from_value(json).unwrap();
         assert_eq!(back, result);
+    }
+
+    /// Emission attaches a bound ledger: provisional Applied rows become
+    /// Final claims on the exact shipped bytes, and the returned identity
+    /// matches the payload without its ledger.
+    #[test]
+    fn roadmap_correction_finalize_attaches_bound_ledger() {
+        let (mut graph, _) = delivered_graph();
+        assert!(graph.correction_decisions.is_none());
+        let provisional = vec![provisional_applied(
+            "dec-eq-left",
+            "left",
+            Some([40.0, 400.0]),
+        )];
+        let events = ReconciliationEvents::default();
+        let identity =
+            finalize_output_ledger(&mut graph, &provisional, &events).expect("finalize attaches");
+        let ledger = graph
+            .correction_decisions
+            .as_ref()
+            .expect("ledger attached to the shipped output");
+        assert!(ledger.validate().is_ok());
+        assert!(verify_final_binding(ledger, &identity).is_ok());
+        let applied = ledger
+            .decisions
+            .iter()
+            .find(|record| record.decision_id == "dec-eq-left")
+            .expect("provisional row survives");
+        assert_eq!(applied.stage, DecisionStage::Final);
+        assert_eq!(
+            applied.final_graph_identity.as_deref(),
+            Some(identity.fingerprint.as_str())
+        );
+        // The identity binds the DSP content, never the ledger itself:
+        // clearing the attachment reproduces the same fingerprint.
+        let mut cleared = graph.clone();
+        cleared.correction_decisions = None;
+        assert_eq!(canonical_graph_identity(&cleared), identity);
+    }
+
+    /// A stale or forged attachment cannot survive finalization: it is
+    /// replaced by reconciliation against the exact shipped bytes.
+    #[test]
+    fn roadmap_correction_finalize_replaces_stale_attachment() {
+        let (mut graph, _) = delivered_graph();
+        let mut stale = provisional_applied("dec-stale", "left", Some([40.0, 400.0]));
+        stale.stage = DecisionStage::Final;
+        stale.final_graph_identity = Some(String::from("deadbeefdeadbeef"));
+        graph.correction_decisions = Some(CorrectionDecisionLedger {
+            acceptance_evidence: None,
+            payload_binding: None,
+            ledger_version: DECISION_LEDGER_VERSION.to_string(),
+            decisions: vec![stale],
+        });
+        let provisional = vec![provisional_applied(
+            "dec-eq-left",
+            "left",
+            Some([40.0, 400.0]),
+        )];
+        finalize_output_ledger(&mut graph, &provisional, &ReconciliationEvents::default())
+            .expect("finalize replaces stale ledger");
+        let ledger = graph.correction_decisions.as_ref().unwrap();
+        assert!(
+            ledger
+                .decisions
+                .iter()
+                .all(|record| record.decision_id != "dec-stale"),
+            "stale rows must not survive"
+        );
+    }
+
+    /// No applicable decisions ships an explicitly empty (valid) ledger,
+    /// not a fabricated acceptance: reports explain the absence.
+    #[test]
+    fn roadmap_correction_finalize_empty_provisional_is_explicitly_empty() {
+        let (mut graph, _) = delivered_graph();
+        let identity = finalize_output_ledger(&mut graph, &[], &ReconciliationEvents::default())
+            .expect("empty provisional finalizes");
+        let ledger = graph.correction_decisions.as_ref().unwrap();
+        assert!(ledger.validate().is_ok());
+        assert!(ledger.decisions.is_empty());
+        assert!(verify_final_binding(ledger, &identity).is_ok());
+    }
+
+    /// An invalid producer fails the emission fail-closed: nothing
+    /// attaches and the caller must refuse to ship.
+    #[test]
+    fn roadmap_correction_finalize_refuses_invalid_provisional() {
+        let (mut graph, _) = delivered_graph();
+        let mut bad = provisional_applied("dec-bad", "left", Some([40.0, 400.0]));
+        bad.logical_input.clear();
+        let error = finalize_output_ledger(&mut graph, &[bad], &ReconciliationEvents::default())
+            .expect_err("invalid provisional must refuse emission");
+        assert!(error.contains("provisional record refused"), "{error}");
+        assert!(graph.correction_decisions.is_none());
     }
 
     #[test]
@@ -851,7 +1455,11 @@ mod tests {
             .iter()
             .find(|record| record.decision_id == "identity-fallback-left")
             .expect("fallback record exists");
-        assert_eq!(fallback.status, DecisionStatus::AlreadyAcceptable);
+        assert_eq!(fallback.status, DecisionStatus::Reverted);
+        assert!(!ledger.decisions.iter().any(|record| {
+            record.stage == DecisionStage::Final
+                && record.status == DecisionStatus::AlreadyAcceptable
+        }));
         assert!(
             fallback
                 .supersedes_ids

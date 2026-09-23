@@ -1,8 +1,39 @@
+use super::constraint_envelope::finalize_candidate;
 use super::objective_data::ObjectiveData;
 use super::objective_data::run_autoeq_de_with_epa_callback;
 use super::types::OptimProgressCallback;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Finalize one backend winner through the shared envelope choke-point.
+///
+/// Every optimizer backend funnels through the three dispatchers below, so
+/// finalizing here leaves no bypass: gains repair onto their envelopes, Q
+/// enforces the global cap plus the policy-declared local caps, composite
+/// breaches refuse, and the returned loss is re-verified at the repaired
+/// parameters. Failed backend runs propagate untouched.
+fn finalize_dispatch_winner(
+    candidate_id: &str,
+    x: &mut [f64],
+    data: &ObjectiveData,
+    params: &crate::OptimParams,
+    result: Result<(String, f64), (String, f64)>,
+) -> Result<(String, f64), (String, f64)> {
+    let (algo, _) = result?;
+    let failed =
+        |reason: String| -> Result<(String, f64), (String, f64)> { Err((reason, f64::INFINITY)) };
+    let owned = match super::constraint_envelope::OwnedConstraintSpec::from_params(params) {
+        Ok(owned) => owned,
+        Err(reason) => return failed(reason),
+    };
+    match finalize_candidate(candidate_id, x, data, &owned.as_spec()) {
+        Ok(finalized) => {
+            x.copy_from_slice(&finalized.params);
+            Ok((algo, finalized.loss))
+        }
+        Err(reason) => failed(reason),
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -40,6 +71,11 @@ pub struct OptimizerRestartEvidence {
 /// "not converged" is classified as best-effort rather than success.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerRunEvidence {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub multi_input_normalization: Option<roomeq_model::MultiInputNormalizationEvidence>,
+    /// Analysis conditioning recorded by the owning preparation path, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_normalization: Option<roomeq_model::InputNormalizationEvidence>,
     pub algorithm: String,
     pub termination: OptimizerTermination,
     pub converged: bool,
@@ -61,6 +97,12 @@ pub struct OptimizerRunEvidence {
     pub selected_for_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restart_history: Vec<OptimizerRestartEvidence>,
+    /// Envelope finalization report for the emitted parameters, when the
+    /// emitter ran the shared choke-point. Dispatchers finalize before
+    /// returning; engine emission re-checks and attaches the diagnostics
+    /// here so refusal evidence survives with the result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub constraint_report: Option<super::constraint_envelope::ConstrainedCandidate>,
 }
 
 const fn default_true() -> bool {
@@ -127,6 +169,8 @@ impl OptimizerRunEvidence {
         };
         Self {
             algorithm: algorithm.to_string(),
+            input_normalization: None,
+            multi_input_normalization: None,
             termination,
             converged,
             best_effort,
@@ -139,6 +183,7 @@ impl OptimizerRunEvidence {
             confidence,
             selected_for_output: true,
             restart_history: Vec::new(),
+            constraint_report: None,
         }
     }
 }
@@ -226,7 +271,9 @@ pub fn optimize_filters_with_algo_override(
     let algo = algo_override.unwrap_or(&params.algo);
     let backend = super::registry::resolve(algo)
         .ok_or_else(|| (format!("Unknown algorithm: {}", algo), f64::INFINITY))?;
-    backend.optimize(x, lower_bounds, upper_bounds, objective_data, params, None)
+    let snapshot = objective_data.clone();
+    let result = backend.optimize(x, lower_bounds, upper_bounds, objective_data, params, None);
+    finalize_dispatch_winner(algo, x, &snapshot, params, result)
 }
 
 /// Optimize filter parameters with a progress callback for per-iteration updates.
@@ -256,7 +303,8 @@ pub fn optimize_filters_with_callback(
     // which now also matches `autoeq:cobyla` and `autoeq:isres` and would
     // silently route them through DE instead of the chosen backend.
     if backend.name().eq_ignore_ascii_case("autoeq:de") {
-        return run_autoeq_de_with_epa_callback(
+        let snapshot = objective_data.clone();
+        let result = run_autoeq_de_with_epa_callback(
             x,
             lower_bounds,
             upper_bounds,
@@ -265,6 +313,7 @@ pub fn optimize_filters_with_callback(
             backend.name(),
             callback,
         );
+        return finalize_dispatch_winner(backend.name(), x, &snapshot, params, result);
     }
 
     // Generic path: delegate to the trait. Backends without callback
@@ -275,14 +324,16 @@ pub fn optimize_filters_with_callback(
     } else {
         None
     };
-    backend.optimize(
+    let snapshot = objective_data.clone();
+    let result = backend.optimize(
         x,
         lower_bounds,
         upper_bounds,
         objective_data,
         params,
         cb_for_backend,
-    )
+    );
+    finalize_dispatch_winner(backend.name(), x, &snapshot, params, result)
 }
 
 /// Callback variant of [`optimize_filters_detailed`].

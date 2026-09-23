@@ -18,6 +18,7 @@ fn single_speaker(path: &str, speaker_name: Option<&str>) -> SpeakerConfig {
     SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
         measurement: MeasurementRef::Path(PathBuf::from(path)),
         speaker_name: speaker_name.map(str::to_string),
+        provenance: Default::default(),
     }))
 }
 
@@ -28,6 +29,7 @@ fn multi_speaker(paths: &[&str]) -> SpeakerConfig {
             .map(|p| MeasurementRef::Path(PathBuf::from(p)))
             .collect(),
         speaker_name: None,
+        provenance: Default::default(),
     }))
 }
 
@@ -395,6 +397,7 @@ fn b10_weights_mismatch_inside_speaker_group() {
                 MeasurementRef::Path(PathBuf::from("c.csv")),
             ],
             speaker_name: None,
+            provenance: Default::default(),
         })],
         crossover: None,
     });

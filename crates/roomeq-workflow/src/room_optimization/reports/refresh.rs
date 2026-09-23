@@ -9,6 +9,198 @@ use super::misc::final_score_band_for_channel;
 use super::misc::recompute_curve_flatness_score;
 use super::role::update_perceptual_metrics;
 
+#[cfg(test)]
+mod serialized_waveform_tests {
+    use super::*;
+    use math_audio_iir_fir::KautzFilter;
+
+    #[test]
+    fn serial_fir_composition_matches_direct_oracle_and_checks_resources() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let chain = result.channels.get_mut("L").unwrap();
+        chain.plugins.clear();
+        for (name, taps) in [("a.wav", vec![1.0, 2.0, 3.0]), ("b.wav", vec![4.0, 5.0])] {
+            let mut writer = hound::WavWriter::create(
+                dir.path().join(name),
+                hound::WavSpec {
+                    channels: 1,
+                    sample_rate: 48_000,
+                    bits_per_sample: 32,
+                    sample_format: hound::SampleFormat::Float,
+                },
+            )
+            .unwrap();
+            for tap in taps {
+                writer.write_sample(tap as f32).unwrap();
+            }
+            writer.finalize().unwrap();
+            chain
+                .plugins
+                .push(roomeq_engine::output::create_convolution_plugin(name));
+        }
+        let taps = deployed_fir_coefficients(Some(chain), None, dir.path(), 48_000.0).unwrap();
+        // Direct polynomial multiplication, including the last nonzero tail.
+        assert_eq!(taps.len(), 4);
+        for (actual, expected) in taps.iter().zip([4.0, 13.0, 22.0, 15.0]) {
+            assert!((actual - expected).abs() < 1e-12);
+        }
+        assert!(deployed_fir_coefficients(Some(chain), None, dir.path(), 96_000.0).is_none());
+        chain.plugins.push(roomeq_model::PluginConfigWrapper {
+            plugin_type: "band_split".into(),
+            parameters: serde_json::json!({}),
+        });
+        assert!(deployed_fir_coefficients(Some(chain), None, dir.path(), 48_000.0).is_none());
+    }
+
+    #[test]
+    fn serial_fir_temporal_evidence_composes_all_resources_and_rejects_partial_sets() {
+        let dir = tempfile::tempdir().unwrap();
+        for rate in [48_000_u32, 96_000] {
+            let mut result = crate::test_fixtures::single_channel_room_result("L");
+            let channel = result.channel_results.get_mut("L").unwrap();
+            channel.initial_curve.phase =
+                Some(ndarray::Array1::zeros(channel.initial_curve.freq.len()));
+            // A retained single-stage kernel must not override two emitted resources.
+            channel.fir_coeffs = Some(vec![1.0]);
+            let delay = rate as usize / 1000;
+            let mut taps = vec![0.0; delay + 1];
+            taps[delay] = 1.0;
+            for name in ["a.wav", "b.wav"] {
+                let mut writer = hound::WavWriter::create(
+                    dir.path().join(name),
+                    hound::WavSpec {
+                        channels: 1,
+                        sample_rate: rate,
+                        bits_per_sample: 32,
+                        sample_format: hound::SampleFormat::Float,
+                    },
+                )
+                .unwrap();
+                for &value in &taps {
+                    writer.write_sample(value as f32).unwrap();
+                }
+                writer.finalize().unwrap();
+            }
+            result.channels.get_mut("L").unwrap().plugins = ["a.wav", "b.wav"]
+                .into_iter()
+                .map(|name| roomeq_model::PluginConfigWrapper {
+                    plugin_type: "convolution".into(),
+                    parameters: serde_json::json!({"ir_file": name}),
+                })
+                .collect();
+            refresh_temporal_ir_evidence(
+                &mut result,
+                &RoomConfig::default(),
+                f64::from(rate),
+                dir.path(),
+            );
+            let metrics = result.channels["L"].fir_temporal_masking.as_ref().unwrap();
+            assert!(
+                (metrics.main_time_ms - 2.0).abs() < 0.05,
+                "{rate}: {metrics:?}"
+            );
+
+            // Resolve every resource: missing later stages cannot leave a partial pass.
+            result.channels.get_mut("L").unwrap().plugins[1].parameters["ir_file"] =
+                serde_json::json!("missing.wav");
+            refresh_temporal_ir_evidence(
+                &mut result,
+                &RoomConfig::default(),
+                f64::from(rate),
+                dir.path(),
+            );
+            assert!(result.channels["L"].fir_temporal_masking.is_none());
+            assert!(result.channels["L"].post_ir.is_none());
+        }
+    }
+
+    #[test]
+    fn serialized_kautz_waveform_matches_streamed_bank_gain_and_delay() {
+        for rate in [44_100.0, 48_000.0, 96_000.0] {
+            let mut result = crate::test_fixtures::single_channel_room_result("L");
+            let channel = result.channel_results.get_mut("L").unwrap();
+            channel.initial_curve.spl.fill(80.0);
+            channel.initial_curve.phase =
+                Some(ndarray::Array1::zeros(channel.initial_curve.freq.len()));
+            // No PEQ surrogate is necessary to describe this emitted bank.
+            channel.biquads.clear();
+            let filter = serde_json::json!({
+                "topology": "kautz_filter", "filter_type": "peak",
+                "freq": 75.0, "q": 2.0, "db_gain": 0.0,
+                "kautz_sections": [
+                    {"pole_freq": 75.0, "q": 2.0, "gain": -0.025},
+                    {"pole_freq": 135.0, "q": 3.0, "gain": 0.018}
+                ]
+            });
+            result.channels.get_mut("L").unwrap().plugins = vec![
+                roomeq_engine::output::create_labeled_eq_plugin_from_filter_configs(
+                    vec![filter],
+                    "kautz_modal",
+                ),
+                roomeq_engine::output::create_gain_plugin(-6.0),
+                roomeq_engine::output::create_delay_plugin(128_000.0 / rate),
+            ];
+            refresh_temporal_ir_evidence(&mut result, &RoomConfig::default(), rate, Path::new("."));
+            let reported = result.channels["L"]
+                .post_ir
+                .as_ref()
+                .expect("phase-supported serialized waveform");
+            let mut bank = KautzFilter::from_room_modes(&[(75.0, 2.0), (135.0, 3.0)], rate);
+            bank.sections[0].gain = -0.025;
+            bank.sections[1].gain = 0.018;
+            let mut expected = vec![0.0; reported.amplitude.len()];
+            for (sample, value) in expected.iter_mut().enumerate().skip(128) {
+                let input = if sample == 128 { 1.0 } else { 0.0 };
+                *value = 10.0_f64.powf(-6.0 / 20.0) * (input + bank.process(input));
+            }
+            let error = reported
+                .amplitude
+                .iter()
+                .zip(expected)
+                .map(|(actual, expected)| (actual - expected).abs())
+                .fold(0.0_f64, f64::max);
+            assert!(
+                error < 1e-9,
+                "{rate} Hz: waveform differs from streamed playback by {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn serialized_waveform_failure_clears_stale_views_without_peq_fallback() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let initial = &mut result.channel_results.get_mut("L").unwrap().initial_curve;
+        initial.phase = Some(ndarray::Array1::zeros(initial.freq.len()));
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_gain_plugin(-3.0)];
+        refresh_temporal_ir_evidence(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+        );
+        assert!(result.channels["L"].post_ir.is_some());
+        result.channels.get_mut("L").unwrap().plugins = vec![
+            roomeq_engine::output::create_labeled_eq_plugin_from_filter_configs(
+                vec![serde_json::json!({
+                    "topology": "kautz_filter",
+                    "kautz_sections": [{"pole_freq": 75.0, "q": 2.0, "gain": "invalid"}]
+                })],
+                "kautz_modal",
+            ),
+        ];
+        refresh_temporal_ir_evidence(
+            &mut result,
+            &RoomConfig::default(),
+            48_000.0,
+            Path::new("."),
+        );
+        assert!(result.channels["L"].pre_ir.is_none());
+        assert!(result.channels["L"].post_ir.is_none());
+    }
+}
+
 pub(in super::super) fn refresh_final_reports(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
@@ -161,6 +353,7 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
 ) {
     let epa_cfg = config.optimizer.epa_config.clone().unwrap_or_default();
     let runtime_epa_cfg = roomeq_engine::config_adapter::to_optimizer_epa(&epa_cfg);
+    let mut waveform_errors = std::collections::BTreeMap::new();
 
     // Evidence describes the currently deployed chain. Clear values left by
     // an earlier pre-gate refresh before rebuilding them; otherwise a safety
@@ -168,31 +361,26 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
     // its convolution stage has been removed.
     for chain in result.channels.values_mut() {
         chain.fir_temporal_masking = None;
+        chain.pre_ir = None;
+        chain.post_ir = None;
+        chain.direct_early_late_correction = None;
     }
 
     let ir_inputs: Vec<_> = result
         .channel_results
         .iter()
         .map(|(name, ch)| {
-            let delay_ms = result
-                .channels
-                .get(name)
-                .map(total_chain_delay_ms)
-                .unwrap_or(0.0);
-            let fir_coeffs = ch.fir_coeffs.clone().or_else(|| {
-                deployed_fir_coefficients(result.channels.get(name), sidecar_dir, sample_rate)
-            });
-            (
-                name.clone(),
-                ch.initial_curve.clone(),
-                ch.biquads.clone(),
-                fir_coeffs,
-                delay_ms,
-            )
+            let fir_coeffs = deployed_fir_coefficients(
+                result.channels.get(name),
+                ch.fir_coeffs.as_deref(),
+                sidecar_dir,
+                sample_rate,
+            );
+            (name.clone(), ch.initial_curve.clone(), fir_coeffs)
         })
         .collect();
 
-    for (channel_name, initial_curve, biquads, fir_coeffs, delay_ms) in ir_inputs {
+    for (channel_name, initial_curve, fir_coeffs) in ir_inputs {
         if result
             .channels
             .get(&channel_name)
@@ -225,35 +413,55 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
                     }
                 }
             }
-            let post = super::super::per_driver_fir::replay(
-                chain,
-                &initial_curve,
-                sample_rate,
-                sidecar_dir,
-            )
-            .ok();
-            let pre_ir = roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms(
-                &initial_curve,
-                &[],
-                None,
-                0.0,
-                sample_rate,
-            )
-            .map(|pair| pair.0);
-            let post_ir = post
-                .and_then(|curve| {
+            let timing = super::super::parallel_timing::validate(chain, config, &initial_curve);
+            let timing_available = timing.is_ok();
+            let post = timing
+                .map_err(|message| AutoeqError::InvalidConfiguration { message })
+                .and_then(|()| {
+                    super::super::per_driver_fir::replay(
+                        chain,
+                        &initial_curve,
+                        sample_rate,
+                        sidecar_dir,
+                    )
+                })
+                .inspect_err(|error| {
+                    log::warn!("Physical-driver waveform unavailable for {channel_name}: {error}");
+                    waveform_errors.insert(channel_name.clone(), error.to_string());
+                })
+                .ok();
+            // The group reference may itself be a synthesized coherent sum.
+            // Without timing provenance, it is not an independent fallback.
+            let pre_ir = timing_available
+                .then(|| {
                     roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms(
-                        &curve,
+                        &initial_curve,
                         &[],
                         None,
                         0.0,
                         sample_rate,
                     )
                 })
+                .flatten()
                 .map(|pair| pair.0);
+            let pair = post.and_then(|curve| {
+                roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms_from_curves(
+                    &initial_curve,
+                    &curve,
+                    sample_rate,
+                )
+            });
             let chain = result.channels.get_mut(&channel_name).unwrap();
-            chain.pre_ir = pre_ir;
-            chain.post_ir = post_ir;
+            if let Some((pre, post)) = pair {
+                chain.pre_ir = Some(pre);
+                chain.post_ir = Some(post);
+            } else {
+                chain.pre_ir = pre_ir;
+                chain.post_ir = None;
+            }
+            // This branch does not rebuild direct/early/late decomposition.
+            // Never retain a result from a previous serial-chain realization.
+            chain.direct_early_late_correction = None;
             chain.fir_temporal_masking = metrics.into_iter().max_by(|a, b| {
                 a.pre_ringing_audible_db
                     .total_cmp(&b.pre_ringing_audible_db)
@@ -268,14 +476,71 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
             chain.post_ir = None;
             chain.direct_early_late_correction = None;
         }
-        if let Some((pre_ir, post_ir)) =
-            roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms(
+        let waveforms = result.channels.get(&channel_name).and_then(|chain| {
+            if chain
+                .drivers
+                .as_ref()
+                .is_some_and(|drivers| !drivers.is_empty())
+            {
+                // Branch gains, delays, and EQ cannot be recovered from a PEQ
+                // summary applied to a combined reference. Replay each capture
+                // through its actual branch, then the common chain, exactly once.
+                let post = super::super::parallel_timing::validate(
+                    chain, config, &initial_curve,
+                ).map_err(|message| AutoeqError::InvalidConfiguration { message }).and_then(|()| super::super::per_driver_fir::replay(
+                    chain,
+                    &initial_curve,
+                    sample_rate,
+                    sidecar_dir,
+                ))
+                .inspect_err(|error| {
+                    log::warn!("Parallel waveform unavailable for {channel_name}: {error}");
+                    waveform_errors.insert(channel_name.clone(), error.to_string());
+                })
+                .ok()?;
+                return roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms_from_curves(
+                    &initial_curve,
+                    &post,
+                    sample_rate,
+                );
+            }
+            let mut embedded = HashMap::new();
+            let convolutions: Vec<_> = chain
+                .plugins
+                .iter()
+                .filter(|plugin| plugin.plugin_type == "convolution")
+                .collect();
+            // A retained common kernel has an unambiguous owner only for a
+            // single convolution. Otherwise resolve each emitted resource.
+            if convolutions.len() == 1
+                && let Some(taps) = fir_coeffs.as_ref()
+                && let Some(path) = convolutions[0]
+                    .parameters
+                    .get("ir_file")
+                    .and_then(|value| value.as_str())
+            {
+                embedded.insert(path.to_owned(), taps.clone());
+            }
+            roomeq_engine::analysis::ir_waveform::compute_channel_ir_waveforms_with_transfer(
                 &initial_curve,
-                &biquads,
-                fir_coeffs.as_deref(),
-                delay_ms,
                 sample_rate,
+                |frequencies| match crate::ctc::channel_electrical_response_with_embedded_irs(
+                    chain,
+                    frequencies,
+                    sample_rate,
+                    sidecar_dir,
+                    &embedded,
+                ) {
+                    Ok(response) => Some(response),
+                    Err(error) => {
+                        log::warn!("Serialized waveform unavailable for {channel_name}: {error}");
+                        waveform_errors.insert(channel_name.clone(), error.to_string());
+                        None
+                    }
+                },
             )
+        });
+        if let Some((pre_ir, post_ir)) = waveforms
             && let Some(chain) = result.channels.get_mut(&channel_name)
         {
             chain.pre_ir = Some(pre_ir);
@@ -295,23 +560,46 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
             );
         }
     }
+    super::waveform_status::record(result, &waveform_errors);
 }
 
-/// Load a deployed convolution sidecar when the optimization result did not
-/// retain its in-memory coefficients. This occurs for FIRs introduced while
-/// assembling topology/workflow output, and must not make runtime evidence
-/// classify the channel as IIR-only.
+/// Compose every serial convolution, without substituting a partial resource set.
+///
+/// Retained taps have an unambiguous owner only for a single convolution.
+/// This is FIR-only evidence: other DSP stages and alignment delays are separate.
 fn deployed_fir_coefficients(
     chain: Option<&roomeq_model::ChannelDspChain>,
+    retained: Option<&[f64]>,
     sidecar_dir: &Path,
     sample_rate: f64,
 ) -> Option<Vec<f64>> {
-    chain?
+    let chain = chain?;
+    let convolutions: Vec<_> = chain
         .plugins
         .iter()
         .filter(|plugin| plugin.plugin_type == "convolution")
-        .filter_map(|plugin| {
-            let ir_file = plugin.parameters.get("ir_file")?.as_str()?;
+        .collect();
+    if convolutions.is_empty() {
+        return None;
+    }
+    if convolutions.len() > 1
+        && chain
+            .plugins
+            .iter()
+            .any(|plugin| matches!(plugin.plugin_type.as_str(), "band_split" | "band_merge"))
+    {
+        // A parallel split must be replayed with its crossovers, not treated
+        // as a cascade of every FIR appearing in its serialized plugin list.
+        return None;
+    }
+    let mut kernels = Vec::with_capacity(convolutions.len());
+    for plugin in &convolutions {
+        let ir_file = plugin.parameters.get("ir_file")?.as_str()?;
+        let taps = if convolutions.len() == 1
+            && let Some(retained) = retained
+        {
+            retained.to_vec()
+        } else {
             let path = Path::new(ir_file);
             let path = if path.is_relative() {
                 sidecar_dir.join(path)
@@ -329,15 +617,47 @@ fn deployed_fir_coefficients(
                 );
                 return None;
             }
-            Some(
-                decoded
-                    .samples
-                    .into_iter()
-                    .map(f64::from)
-                    .collect::<Vec<_>>(),
-            )
-        })
-        .max_by_key(Vec::len)
+            decoded.samples.into_iter().map(f64::from).collect()
+        };
+        if taps.is_empty() || taps.iter().any(|value| !value.is_finite()) {
+            return None;
+        }
+        kernels.push(taps);
+    }
+    if kernels.len() == 1 {
+        return kernels.pop();
+    }
+    // Bound analysis memory, not allowed acoustic latency. Oversized chains
+    // have unavailable evidence rather than a truncated or wrapped response.
+    const MAX_ANALYSIS_FFT: usize = 1 << 22;
+    let length = kernels
+        .iter()
+        .try_fold(1_usize, |length, taps| length.checked_add(taps.len() - 1))?;
+    let fft_size = length.checked_next_power_of_two()?;
+    if fft_size > MAX_ANALYSIS_FFT {
+        return None;
+    }
+    let mut planner = rustfft::FftPlanner::<f64>::new();
+    let forward = planner.plan_fft_forward(fft_size);
+    let inverse = planner.plan_fft_inverse(fft_size);
+    let mut product = vec![num_complex::Complex64::new(1.0, 0.0); fft_size];
+    let mut buffer = vec![num_complex::Complex64::new(0.0, 0.0); fft_size];
+    for taps in kernels {
+        buffer.fill(num_complex::Complex64::new(0.0, 0.0));
+        for (value, tap) in buffer.iter_mut().zip(taps) {
+            value.re = tap;
+        }
+        forward.process(&mut buffer);
+        for (value, factor) in product.iter_mut().zip(&buffer) {
+            *value *= factor;
+        }
+    }
+    inverse.process(&mut product);
+    let taps: Vec<_> = product[..length]
+        .iter()
+        .map(|value| value.re / fft_size as f64)
+        .collect();
+    taps.iter().all(|value| value.is_finite()).then_some(taps)
 }
 
 pub(in super::super) fn refresh_direct_early_late_reports(
@@ -414,6 +734,9 @@ mod tests {
         let n = ch_result.initial_curve.freq.len();
         ch_result.initial_curve.phase = Some(ndarray::Array1::zeros(n));
         ch_result.fir_coeffs = Some(vec![0.0, 1.0, 0.0]);
+        result.channels.get_mut("L").unwrap().plugins.push(
+            roomeq_engine::output::create_convolution_plugin("retained.wav"),
+        );
         assert!(result.channels["L"].fir_temporal_masking.is_none());
 
         refresh_temporal_ir_evidence(
@@ -429,6 +752,12 @@ mod tests {
         assert!(chain.post_ir.is_some());
 
         result.channel_results.get_mut("L").unwrap().fir_coeffs = None;
+        result
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .plugins
+            .retain(|plugin| plugin.plugin_type != "convolution");
         refresh_temporal_ir_evidence(
             &mut result,
             &RoomConfig::default(),

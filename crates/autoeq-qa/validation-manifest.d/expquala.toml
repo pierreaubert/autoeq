@@ -1,0 +1,105 @@
+# autoeq-qa validation manifest fragment: expquala group (EX01,
+# EX02, EX03, RC01, RC02, RQ01, RQ02, RQ03, RQ04). One per-case block
+# follows; merged by the workflow owner into
+# validation-manifest.toml. Stems are globally unique
+# (<family>_<slug>, lowercase); ids are
+# autoeq-qa.<stem-with-dashes>.v1.
+
+[[case]]
+id = "autoeq-qa.ex01-apo-biquad-gain-delay.v1"
+family = "EX01"
+owner = "roomeq-export"
+script = "ex01_apo_biquad_gain_delay.wls"
+golden = "ex01_apo_biquad_gain_delay.json"
+test = "wolfram_ex01_apo_biquad_gain_delay"
+tolerance = "A/Q/I: complex-relative error <= 1e-9 (transfer); coefficients <= 1e-12 rel; text params <= 1e-9 abs"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ex02-delay-padding-matrix.v1"
+family = "EX02"
+owner = "roomeq-export"
+script = "ex02_delay_padding_matrix.wls"
+golden = "ex02_delay_padding_matrix.json"
+test = "wolfram_ex02_delay_padding_matrix"
+tolerance = "A/I: exact padding/indices; realized taps and effective delay <= 1e-12 rel"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ex03-rendered-convolution-taps.v1"
+family = "EX03"
+owner = "roomeq-export"
+script = "ex03_rendered_convolution_taps.wls"
+golden = "ex03_rendered_convolution_taps.json"
+test = "wolfram_ex03_rendered_convolution_taps"
+tolerance = "N/Q/I: taps/samples <= 1e-12 abs; DTFT <= 1e-9 rel; f32 L1 within declared bound"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rc01-wav-decode-dtft-calibration.v1"
+family = "RC01"
+owner = "roomeq-cli"
+script = "rc01_wav_decode_dtft_calibration.wls"
+golden = "rc01_wav_decode_dtft_calibration.json"
+test = "wolfram_rc01_wav_decode_dtft_calibration"
+tolerance = "A/N/Q/I: exact decode; DTFT <= 1e-9 rel; levels <= 1e-9 dB abs; stereo/rate refused"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rc02-route-matrix-prediction.v1"
+family = "RC02"
+owner = "roomeq-cli"
+script = "rc02_route_matrix_prediction.wls"
+golden = "rc02_route_matrix_prediction.json"
+test = "wolfram_rc02_route_matrix_prediction"
+tolerance = "A/I: complex sums <= 1e-9 rel; magnitudes <= 1e-9 dB; phases <= 1e-6 deg circular"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rq01-seat-bin-cvar.v1"
+family = "RQ01"
+owner = "roomeq-quality"
+script = "rq01_seat_bin_cvar.wls"
+golden = "rq01_seat_bin_cvar.json"
+test = "wolfram_rq01_seat_bin_cvar"
+tolerance = "A/B/X: aggregates/CVaR <= 1e-12 abs; group delay <= 1e-9 ms; degenerate support is None"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rq02-step-schroeder-t60.v1"
+family = "RQ02"
+owner = "roomeq-quality"
+script = "rq02_step_schroeder_t60.wls"
+golden = "rq02_step_schroeder_t60.json"
+test = "wolfram_rq02_step_schroeder_t60"
+tolerance = "N: step/decay/envelope <= 1e-9 abs; T60 <= 1e-9 s; R-squared <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rq03-welch-noise-spl.v1"
+family = "RQ03"
+owner = "roomeq-quality"
+script = "rq03_welch_noise_spl.wls"
+golden = "rq03_welch_noise_spl.json"
+test = "wolfram_rq03_welch_noise_spl"
+tolerance = "N/Q: PSD <= 1e-9 rel (1e-18 abs floor at analytic zeros); octave SPL <= 1e-6 dB"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rq04-headroom-drive-verdicts.v1"
+family = "RQ04"
+owner = "roomeq-quality"
+script = "rq04_headroom_drive_verdicts.wls"
+golden = "rq04_headroom_drive_verdicts.json"
+test = "wolfram_rq04_headroom_drive_verdicts"
+tolerance = "A/L/X: amplitudes <= 1e-12 abs; headroom <= 1e-9 dB; exact verdict booleans"
+tolerance_kind = "abs"
+tier = "smoke"

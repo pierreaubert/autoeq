@@ -1,0 +1,103 @@
+# qqsa group: quality/QA/synthetic cross-validation (smoke tier).
+# Families RQ05, RQ06, RQ08, QA01, QA02, QA03, RS01, RS02, RS03.
+# Each entry below is one comparison block with its oracle script,
+# engine golden, Rust comparison test, tolerance, and tier.
+
+[[case]]
+id = "autoeq-qa.rq05-capture-alignment.v1"
+family = "RQ05"
+owner = "roomeq-quality"
+script = "rq05_capture_alignment.wls"
+golden = "rq05_capture_alignment.json"
+test = "wolfram_rq05_capture_alignment"
+tolerance = "A: absolute error <= 1e-9 dB (residual peak, mean change, output loss); exact support/binding decisions"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rq06-tone-render.v1"
+family = "RQ06"
+owner = "roomeq-quality"
+script = "rq06_tone_render.wls"
+golden = "rq06_tone_render.json"
+test = "wolfram_rq06_tone_render"
+tolerance = "N/Q: absolute error <= 1e-6 (f32 samples, peak, RMS); invalid inputs refuse"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rq08-delay-oracle.v1"
+family = "RQ08"
+owner = "roomeq-quality"
+script = "rq08_delay_oracle.wls"
+golden = "rq08_delay_oracle.json"
+test = "wolfram_rq08_delay_oracle"
+tolerance = "A: complex relative error <= 1e-9 (transfer); grid relative error <= 1e-12"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.qa01-clock-phase.v1"
+family = "QA01"
+owner = "roomeq-qa"
+script = "qa01_clock_phase.wls"
+golden = "qa01_clock_phase.json"
+test = "wolfram_qa01_clock_phase"
+tolerance = "A: absolute error <= 1e-9 (s, degrees, dB); exact cancellation/invariance decisions"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.qa02-heldout-perturb.v1"
+family = "QA02"
+owner = "roomeq-qa"
+script = "qa02_heldout_perturb.wls"
+golden = "qa02_heldout_perturb.json"
+test = "wolfram_qa02_heldout_perturb"
+tolerance = "A/B: absolute error <= 1e-9 (perturbed transfer, tail mean); exact partition decisions"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.qa03-seed-matrix.v1"
+family = "QA03"
+owner = "roomeq-qa"
+script = "qa03_seed_matrix.wls"
+golden = "qa03_seed_matrix.json"
+test = "wolfram_qa03_seed_matrix"
+tolerance = "A/B/X: absolute error <= 1e-9 (fractions, tail risk, median); exact counts and stage replay"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rs01-flat-tilt.v1"
+family = "RS01"
+owner = "roomeq-synthetic"
+script = "rs01_flat_tilt.wls"
+golden = "rs01_flat_tilt.json"
+test = "wolfram_rs01_flat_tilt"
+tolerance = "A: absolute error <= 1e-9 dB (plants); grid relative error <= 1e-12; degenerate grids empty"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rs02-coherent-sum.v1"
+family = "RS02"
+owner = "roomeq-synthetic"
+script = "rs02_coherent_sum.wls"
+golden = "rs02_coherent_sum.json"
+test = "wolfram_rs02_coherent_sum"
+tolerance = "A: absolute error <= 1e-9 (dB and linear pressure); exact cancellation/refusal decisions"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rs03-tone-bank.v1"
+family = "RS03"
+owner = "roomeq-synthetic"
+script = "rs03_tone_bank.wls"
+golden = "rs03_tone_bank.json"
+test = "wolfram_rs03_tone_bank"
+tolerance = "N: absolute error <= 1e-9 (samples); DTFT relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"

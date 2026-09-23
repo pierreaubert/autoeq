@@ -1,0 +1,47 @@
+# autoeq-qa meas-group fragment (families M01-M04). Cases below mirror the
+# entry shape of validation-manifest.toml; the release gate merges this
+# fragment verbatim.
+
+[[case]]
+id = "autoeq-qa.m01-pir-prefscore.v1"
+family = "M01"
+owner = "autoeq-measurements"
+script = "m01_pir_prefscore.wls"
+golden = "m01_pir_prefscore.json"
+test = "wolfram_m01_pir_prefscore"
+tolerance = "absolute SPL/metric error <= 1e-9 dB"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.m02-avg-coherent.v1"
+family = "M02"
+owner = "autoeq-measurements"
+script = "m02_avg_coherent.wls"
+golden = "m02_avg_coherent.json"
+test = "wolfram_m02_avg_coherent"
+tolerance = "absolute SPL/phase error <= 1e-9 dB/deg"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.m03-mic-clock.v1"
+family = "M03"
+owner = "autoeq-measurements"
+script = "m03_mic_clock.wls"
+golden = "m03_mic_clock.json"
+test = "wolfram_m03_mic_clock"
+tolerance = "absolute dB/deg/s/ppm error <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.m04-ingest-adapters.v1"
+family = "M04"
+owner = "autoeq-measurements"
+script = "m04_ingest_adapters.wls"
+golden = "m04_ingest_adapters.json"
+test = "wolfram_m04_ingest_adapters"
+tolerance = "absolute SPL/phase error <= 1e-9 dB/deg"
+tolerance_kind = "abs"
+tier = "smoke"

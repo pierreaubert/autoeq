@@ -1,0 +1,69 @@
+# core1 fragment: autoeq-core families C02, C04, C05.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md.
+
+[[case]]
+id = "autoeq-qa.c02-peq-layouts.v1"
+family = "C02"
+owner = "autoeq-core"
+script = "c02_peq_layouts.wls"
+golden = "c02_peq_layouts.json"
+test = "wolfram_c02_peq_layouts"
+tolerance = "complex relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c02-free-types.v1"
+family = "C02"
+owner = "autoeq-core"
+script = "c02_free_types.wls"
+golden = "c02_free_types.json"
+test = "wolfram_c02_free_types"
+tolerance = "complex relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c04-octave-smooth.v1"
+family = "C04"
+owner = "autoeq-core"
+script = "c04_octave_smooth.wls"
+golden = "c04_octave_smooth.json"
+test = "wolfram_c04_octave_smooth"
+tolerance = "absolute SPL error <= 1e-9 dB"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c04-gaussian-smooth.v1"
+family = "C04"
+owner = "autoeq-core"
+script = "c04_gaussian_smooth.wls"
+golden = "c04_gaussian_smooth.json"
+test = "wolfram_c04_gaussian_smooth"
+tolerance = "absolute error <= 1e-12"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c05-unwrap-delay.v1"
+family = "C05"
+owner = "autoeq-core"
+script = "c05_unwrap_delay.wls"
+golden = "c05_unwrap_delay.json"
+test = "wolfram_c05_unwrap_delay"
+tolerance = "absolute error <= 1e-9 (degrees/ms)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c05-minphase-flat.v1"
+family = "C05"
+owner = "autoeq-core"
+script = "c05_minphase_flat.wls"
+golden = "c05_minphase_flat.json"
+test = "wolfram_c05_minphase_flat"
+tolerance = "absolute phase error <= 0.5 deg"
+tolerance_kind = "abs"
+tier = "smoke"

@@ -1,0 +1,60 @@
+# model fragment: roomeq-model families RM01, RM02, RM03, RM04.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md.
+# (The sibling RM01 room-volume case autoeq-qa.rm01-schroeder-spl.v1 is
+# owned by validation-manifest.d/self2.toml and is not repeated here.)
+
+[[case]]
+id = "autoeq-qa.rm01-spl-level.v1"
+family = "RM01"
+owner = "roomeq-model"
+script = "rm01_spl_level.wls"
+golden = "rm01_spl_level.json"
+test = "wolfram_rm01_spl_level"
+tolerance = "absolute error <= 1e-4 dB/linear on the f32 calibration path"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rm02-target-shape.v1"
+family = "RM02"
+owner = "roomeq-model"
+script = "rm02_target_shape.wls"
+golden = "rm02_target_shape.json"
+test = "wolfram_rm02_target_shape"
+tolerance = "absolute SPL error <= 1e-9 dB; guard verdicts exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rm03-auto-tune.v1"
+family = "RM03"
+owner = "roomeq-model"
+script = "rm03_auto_tune.wls"
+golden = "rm03_auto_tune.json"
+test = "wolfram_rm03_auto_tune"
+tolerance = "absolute error <= 1e-9 (dB/Q/counts exact)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rm03-band-gauss.v1"
+family = "RM03"
+owner = "roomeq-model"
+script = "rm03_band_gauss.wls"
+golden = "rm03_band_gauss.json"
+test = "wolfram_rm03_band_gauss"
+tolerance = "absolute band error <= 1e-9 Hz; Gaussian boundary exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rm04-phase-thresholds.v1"
+family = "RM04"
+owner = "roomeq-model"
+script = "rm04_phase_thresholds.wls"
+golden = "rm04_phase_thresholds.json"
+test = "wolfram_rm04_phase_thresholds"
+tolerance = "absolute error <= 1e-9 deg; acceptance decisions exact"
+tolerance_kind = "abs"
+tier = "smoke"

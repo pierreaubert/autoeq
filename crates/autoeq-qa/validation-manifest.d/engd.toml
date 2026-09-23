@@ -1,0 +1,116 @@
+# autoeq-qa validation manifest fragment: engd group (RE13-RE20, RE23, RE24).
+#
+# Merged into validation-manifest.toml by the QA owner. Stems are globally
+# unique; ids are autoeq-qa.<stem-with-dashes>.v1. Every case resolves its
+# reference through autoeq_qa::require_reference and emits QA_RESULT.
+# Tolerance classes follow reviews/catalogue-20260923.md (A/N/L/B/X/I).
+
+[[case]]
+id = "autoeq-qa.re13-mso-seat-response.v1"
+family = "RE13"
+owner = "roomeq-engine"
+script = "re13_mso_seat_response.wls"
+golden = "re13_mso_seat_response.json"
+test = "wolfram_re13_mso_seat_response"
+tolerance = "SPL absolute error <= 1e-9 dB; complex phasor relative error <= 1e-12 (phase compared unwrap-invariant)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re14-combined-curves.v1"
+family = "RE14"
+owner = "roomeq-engine"
+script = "re14_combined_curves.wls"
+golden = "re14_combined_curves.json"
+test = "wolfram_re14_combined_curves"
+tolerance = "SPL/phase absolute error <= 1e-8 (dB/degrees); weighted mean and seat variance <= 1e-9 dB"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re15-modal-svd.v1"
+family = "RE15"
+owner = "roomeq-engine"
+script = "re15_modal_svd.wls"
+golden = "re15_modal_svd.json"
+test = "wolfram_re15_modal_svd"
+tolerance = "singular values, retained energy, sign-invariant projector and residual: relative error <= 1e-12"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re16-spatial-quadrature.v1"
+family = "RE16"
+owner = "roomeq-engine"
+script = "re16_spatial_quadrature.wls"
+golden = "re16_spatial_quadrature.json"
+test = "wolfram_re16_spatial_quadrature"
+tolerance = "quadrature transcription <= 1e-9; normal CDF <= 2e-7, inverse normal <= 2e-9 (approximation bounds); expected/CVaR <= 1e-12; quadrature-vs-analytic budget 0.1"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re17-interchannel-deviation.v1"
+family = "RE17"
+owner = "roomeq-engine"
+script = "re17_interchannel_deviation.wls"
+golden = "re17_interchannel_deviation.json"
+test = "wolfram_re17_interchannel_deviation"
+tolerance = "spread and RMS/peak statistics absolute error <= 1e-9 dB; upper-band reference exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re18-dba-sum.v1"
+family = "RE18"
+owner = "roomeq-engine"
+script = "re18_dba_sum.wls"
+golden = "re18_dba_sum.json"
+test = "wolfram_re18_dba_sum"
+tolerance = "combined SPL/phase absolute error <= 1e-8 (dB/degrees); missing phase and empty arrays refuse"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re19-bass-power.v1"
+family = "RE19"
+owner = "roomeq-engine"
+script = "re19_bass_power.wls"
+golden = "re19_bass_power.json"
+test = "wolfram_re19_bass_power"
+tolerance = "SPL/phase absolute error <= 1e-9 (dB/degrees); H R H^H programme powers relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re20-drr-velvet.v1"
+family = "RE20"
+owner = "roomeq-engine"
+script = "re20_drr_velvet.wls"
+golden = "re20_drr_velvet.json"
+test = "wolfram_re20_drr_velvet"
+tolerance = "DRR absolute error <= 1e-9 dB including exact +-40 dB fallbacks; velvet sequence exact tap-by-tap"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re23-ctc-regularized.v1"
+family = "RE23"
+owner = "roomeq-engine"
+script = "re23_ctc_regularized.wls"
+golden = "re23_ctc_regularized.json"
+test = "wolfram_re23_ctc_regularized"
+tolerance = "FIR taps, betas, gains, reconstruction and delivered residual/balance metrics absolute error <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re24-cardioid.v1"
+family = "RE24"
+owner = "roomeq-engine"
+script = "re24_cardioid.wls"
+golden = "re24_cardioid.json"
+test = "wolfram_re24_cardioid"
+tolerance = "processed rear phase and combined SPL/phase absolute error <= 1e-8 (degrees/dB); rear SPL untouched"
+tolerance_kind = "abs"
+tier = "smoke"

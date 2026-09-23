@@ -1,0 +1,72 @@
+# autoeq-qa validation manifest fragment: optimc group (O07-O12).
+#
+# Each case pairs a `.wls` oracle with a checked-in engine golden and a
+# `tests/wolfram_<stem>.rs` comparison target. Tolerance classes follow
+# reviews/catalogue-20260923.md: A = direct f64 algebra, X = exact
+# support/decision checks.
+
+[[case]]
+id = "autoeq-qa.o07-crossover-sum.v1"
+family = "O07"
+owner = "autoeq-optim"
+script = "o07_crossover_sum.wls"
+golden = "o07_crossover_sum.json"
+test = "wolfram_o07_crossover_sum"
+tolerance = "[A] complex relative error <= 1e-9; combined dB absolute error <= 1e-8 dB"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o08-joint-multisub.v1"
+family = "O08"
+owner = "autoeq-optim"
+script = "o08_joint_multisub.wls"
+golden = "o08_joint_multisub.json"
+test = "wolfram_o08_joint_multisub"
+tolerance = "[A] absolute error <= 1e-9 dB^2 on variation/output_drive/target_error/total"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o09-group-delay.v1"
+family = "O09"
+owner = "autoeq-optim"
+script = "o09_group_delay.wls"
+golden = "o09_group_delay.json"
+test = "wolfram_o09_group_delay"
+tolerance = "[A] absolute error <= 1e-9 ms (group delay, duration) and <= 1e-9 deg/dimensionless (deviation, loss)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o10-bark-sharpness.v1"
+family = "O10"
+owner = "autoeq-optim"
+script = "o10_bark_sharpness.wls"
+golden = "o10_bark_sharpness.json"
+test = "wolfram_o10_bark_sharpness"
+tolerance = "[A] Bark/CBW relative error <= 1e-12, weights/loudness/sharpness absolute error <= 1e-9; Bark inverse round-trip <= 0.02 (pinned Newton budget)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o11-temporal-ir.v1"
+family = "O11"
+owner = "autoeq-optim"
+script = "o11_temporal_ir.wls"
+golden = "o11_temporal_ir.json"
+test = "wolfram_o11_temporal_ir"
+tolerance = "[A] absolute error <= 1e-9 dB/ms; main peak index exact [X]; normalized vs absolute EPA paths bit-identical [X]"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o12-pareto-mixed.v1"
+family = "O12"
+owner = "autoeq-optim"
+script = "o12_pareto_mixed.wls"
+golden = "o12_pareto_mixed.json"
+test = "wolfram_o12_pareto_mixed"
+tolerance = "[X] Pareto front identity exact; [A] slopes/mixed-loss absolute error <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"

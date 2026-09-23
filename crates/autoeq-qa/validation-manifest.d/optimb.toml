@@ -1,0 +1,49 @@
+# autoeq-qa validation manifest fragment: optimb group (O05, O06, O13, O14).
+#
+# Merged into validation-manifest.toml by the QA owner. Stems are globally
+# unique; ids are autoeq-qa.<stem-with-dashes>.v1. Every case resolves its
+# reference through autoeq_qa::require_reference and emits QA_RESULT.
+
+[[case]]
+id = "autoeq-qa.o05-constraint-penalties.v1"
+family = "O05"
+owner = "autoeq-optim"
+script = "o05_constraint_penalties.wls"
+golden = "o05_constraint_penalties.json"
+test = "wolfram_o05_constraint_penalties"
+tolerance = "absolute error <= 1e-9 in native units (dB, octaves, linear Q); penalties relative <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o06-initial-guess-bounds.v1"
+family = "O06"
+owner = "autoeq-optim"
+script = "o06_initial_guess_bounds.wls"
+golden = "o06_initial_guess_bounds.json"
+test = "wolfram_o06_initial_guess_bounds"
+tolerance = "absolute error <= 1e-9 (centers/bounds 1e-12); widths/gains inside exact diversification bands; flags exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o13-backend-objectives.v1"
+family = "O13"
+owner = "autoeq-optim"
+script = "o13_backend_objectives.wls"
+golden = "o13_backend_objectives.json"
+test = "wolfram_o13_backend_objectives"
+tolerance = "fixed-candidate absolute error <= 1e-9; seeded backend objective gap <= 1e-2 with exact feasibility"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o14-rerank-ordering.v1"
+family = "O14"
+owner = "autoeq-optim"
+script = "o14_rerank_ordering.wls"
+golden = "o14_rerank_ordering.json"
+test = "wolfram_o14_rerank_ordering"
+tolerance = "exact rank order, ranks, scores and abort contracts (no numeric tolerance)"
+tolerance_kind = "abs"
+tier = "smoke"

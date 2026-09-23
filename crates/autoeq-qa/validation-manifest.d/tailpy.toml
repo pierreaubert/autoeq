@@ -1,0 +1,89 @@
+# autoeq-qa validation manifest fragment: tailpy group (PY01, PY02,
+# PY03, PY04, PY05, H01, H02). Script/helper families as runner=python
+# cases. One entry block per case; merged by the workflow owner into
+# validation-manifest.toml. Stems are globally unique
+# (<family>_<slug>, lowercase); ids are <stem-with-dashes>.v1.
+
+[[case]]
+id = "autoeq-qa.py01-dsp-smoothing.v1"
+family = "PY01"
+owner = "tailpy"
+script = "py01_dsp_smoothing.wls"
+golden = "py01_dsp_smoothing.json"
+test = "py01_dsp_smoothing"
+tolerance = "A: absolute error <= 1e-9 dB (triangular-log viewer smoothing)"
+tolerance_kind = "abs"
+tier = "smoke"
+runner = "python"
+
+[[case]]
+id = "autoeq-qa.py02-band-statistics.v1"
+family = "PY02"
+owner = "tailpy"
+script = "py02_band_statistics.wls"
+golden = "py02_band_statistics.json"
+test = "py02_band_statistics"
+tolerance = "A: absolute error <= 1e-9 dB (band mean); empty band is None"
+tolerance_kind = "abs"
+tier = "smoke"
+runner = "python"
+
+[[case]]
+id = "autoeq-qa.py03-roon-correlation.v1"
+family = "PY03"
+owner = "tailpy"
+script = "py03_roon_correlation.wls"
+golden = "py03_roon_correlation.json"
+test = "py03_roon_correlation"
+tolerance = "N: exact integer samples (inter-channel correlation delay)"
+tolerance_kind = "abs"
+tier = "smoke"
+runner = "python"
+
+[[case]]
+id = "autoeq-qa.py04-converter-decode.v1"
+family = "PY04"
+owner = "tailpy"
+script = "py04_converter_decode.wls"
+golden = "py04_converter_decode.json"
+test = "py04_converter_decode"
+tolerance = "A: absolute error <= 1e-9 (SPL dB, phase deg); 6-decimal rounding exact"
+tolerance_kind = "abs"
+tier = "smoke"
+runner = "python"
+
+[[case]]
+id = "autoeq-qa.py05-heldout-contract.v1"
+family = "PY05"
+owner = "tailpy"
+script = "py05_heldout_contract.wls"
+golden = "py05_heldout_contract.json"
+test = "py05_heldout_contract"
+tolerance = "A: absolute error <= 6e-5 dB/deg (4-decimal CSV rounding)"
+tolerance_kind = "abs"
+tier = "smoke"
+runner = "python"
+
+[[case]]
+id = "autoeq-qa.h01-fir-bin-rounding.v1"
+family = "H01"
+owner = "tailpy"
+script = "h01_fir_bin_rounding.wls"
+golden = "h01_fir_bin_rounding.json"
+test = "h01_fir_bin_rounding"
+tolerance = "N: absolute error <= 1e-6 dB on rounded-bin value; exact-DTFT gap budgeted separately"
+tolerance_kind = "abs"
+tier = "smoke"
+runner = "python"
+
+[[case]]
+id = "autoeq-qa.h02-scorer-sign.v1"
+family = "H02"
+owner = "tailpy"
+script = "h02_scorer_sign.wls"
+golden = "h02_scorer_sign.json"
+test = "h02_scorer_sign"
+tolerance = "N: complex relative error <= 1e-9 (RBJ peak transfer); coefficients <= 1e-12 rel"
+tolerance_kind = "rel"
+tier = "smoke"
+runner = "python"

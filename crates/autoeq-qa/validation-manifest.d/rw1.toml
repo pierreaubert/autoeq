@@ -1,0 +1,71 @@
+# rw1 fragment: roomeq-workflow families RW01-RW06.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md
+# (RW01 [I/A/N], RW02 [N/I], RW03 [N/I], RW04 [A/L/I], RW05 [A/L/I],
+# RW06 [A/N/I]). Owner: roomeq-workflow.
+
+[[case]]
+id = "autoeq-qa.rw01-intake-overlap.v1"
+family = "RW01"
+owner = "roomeq-workflow"
+script = "rw01_intake_overlap.wls"
+golden = "rw01_intake_overlap.json"
+test = "wolfram_rw01_intake_overlap"
+tolerance = "absolute overlap error <= 1e-12 Hz; disjoint refusal exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw02-windowed-matrix-dft.v1"
+family = "RW02"
+owner = "roomeq-workflow"
+script = "rw02_windowed_matrix_dft.wls"
+golden = "rw02_windowed_matrix_dft.json"
+test = "wolfram_rw02_windowed_matrix_dft"
+tolerance = "complex relative error <= 1e-9 per bin; Hann weights absolute <= 1e-12"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw03-dsp-fir-convolution.v1"
+family = "RW03"
+owner = "roomeq-workflow"
+script = "rw03_dsp_fir_convolution.wls"
+golden = "rw03_dsp_fir_convolution.json"
+test = "wolfram_rw03_dsp_fir_convolution"
+tolerance = "complex relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw04-crossover-bounded-sum.v1"
+family = "RW04"
+owner = "roomeq-workflow"
+script = "rw04_crossover_bounded_sum.wls"
+golden = "rw04_crossover_bounded_sum.json"
+test = "wolfram_rw04_crossover_bounded_sum"
+tolerance = "winner triple exact; band error absolute <= 1e-12; per-bin magnitude relative <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw05-electrical-headroom.v1"
+family = "RW05"
+owner = "roomeq-workflow"
+script = "rw05_electrical_headroom.wls"
+golden = "rw05_electrical_headroom.json"
+test = "wolfram_rw05_electrical_headroom"
+tolerance = "peak amplitude and dBFS absolute <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw06-velvet-support.v1"
+family = "RW06"
+owner = "roomeq-workflow"
+script = "rw06_velvet_support.wls"
+golden = "rw06_velvet_support.json"
+test = "wolfram_rw06_velvet_support"
+tolerance = "velvet taps exact; support name exact; summary mean/std absolute <= 1e-12"
+tolerance_kind = "abs"
+tier = "smoke"

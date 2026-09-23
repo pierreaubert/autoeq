@@ -1,0 +1,47 @@
+# rab-group fragment: roomeq-analysis families RA03, RA04, RA05, RA06.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md.
+
+[[case]]
+id = "autoeq-qa.ra03-mode-null-masks.v1"
+family = "RA03"
+owner = "roomeq-analysis"
+script = "ra03_mode_null_masks.wls"
+golden = "ra03_mode_null_masks.json"
+test = "wolfram_ra03_mode_null_masks"
+tolerance = "[A] relative error <= 1e-9 (mode/null Q, prominence, depth); [A] absolute mask error <= 1e-12"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra04-decay-severity.v1"
+family = "RA04"
+owner = "roomeq-analysis"
+script = "ra04_decay_severity.wls"
+golden = "ra04_decay_severity.json"
+test = "wolfram_ra04_decay_severity"
+tolerance = "[A] absolute threshold error <= 1e-12 s; relative Q error <= 1e-12; absolute severity error <= 1e-9 dB; [A/N] planted-RT60 regression relative error <= 0.15 with confidence >= 0.5; domain/decision gates exact [X]"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra05-delay-excess-phase.v1"
+family = "RA05"
+owner = "roomeq-analysis"
+script = "ra05_delay_excess_phase.wls"
+golden = "ra05_delay_excess_phase.json"
+test = "wolfram_ra05_delay_excess_phase"
+tolerance = "[A] absolute bulk-delay error <= 1e-6 s; residual/correction phase <= 1e-9; [N] all-pass excess-GD absolute error <= 0.35 ms; correction latency/tap bounds exact [X]"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra06-reflection-cancel.v1"
+family = "RA06"
+owner = "roomeq-analysis"
+script = "ra06_reflection_cancel.wls"
+golden = "ra06_reflection_cancel.json"
+test = "wolfram_ra06_reflection_cancel"
+tolerance = "[A] absolute Butterworth-Q error <= 1e-12; complex-relative H error <= 1e-9; [N] absolute impulse-response error <= 1e-9; recurrence/convolution agree to 1e-12"
+tolerance_kind = "rel"
+tier = "smoke"

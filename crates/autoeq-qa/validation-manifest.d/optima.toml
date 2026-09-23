@@ -1,0 +1,74 @@
+# autoeq-qa validation manifest fragment: optima group (O01-O04).
+#
+# Fragment of validation-manifest.toml owned by the optima lane. Each case
+# needs its `.wls` oracle (wolfram/), engine-blessed golden
+# (wolfram/goldens/), and comparison test (tests/wolfram_<stem>.rs).
+# Tolerance class A throughout: direct f64 algebra in dB units, absolute
+# error <= 1e-9 (O02 CVaR/variance reductions additionally pin exact
+# small-population enumerations per class B at the same 1e-9 budget).
+
+[[case]]
+id = "autoeq-qa.o01-scalar-weights.v1"
+family = "O01"
+owner = "autoeq-optim"
+script = "o01_scalar_weights.wls"
+golden = "o01_scalar_weights.json"
+test = "wolfram_o01_scalar_weights"
+tolerance = "absolute error <= 1e-9 dB (ERB/band/combined/masked loss)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o01-asymmetric-weights.v1"
+family = "O01"
+owner = "autoeq-optim"
+script = "o01_asymmetric_weights.wls"
+golden = "o01_asymmetric_weights.json"
+test = "wolfram_o01_asymmetric_weights"
+tolerance = "absolute error <= 1e-9 dB (asymmetric combined loss)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o02-scalarization.v1"
+family = "O02"
+owner = "autoeq-optim"
+script = "o02_scalarization.wls"
+golden = "o02_scalarization.json"
+test = "wolfram_o02_scalarization"
+tolerance = "absolute error <= 1e-9 dB (per-curve losses and all scalarizations)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o03-tv2-stencil.v1"
+family = "O03"
+owner = "autoeq-optim"
+script = "o03_tv2_stencil.wls"
+golden = "o03_tv2_stencil.json"
+test = "wolfram_o03_tv2_stencil"
+tolerance = "absolute error <= 1e-9 dB/decade^2 (TV2 penalties; exact zero for constant/affine)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o04-deadband.v1"
+family = "O04"
+owner = "autoeq-optim"
+script = "o04_deadband.wls"
+golden = "o04_deadband.json"
+test = "wolfram_o04_deadband"
+tolerance = "absolute error <= 1e-9 dB (deadband outputs incl. exact-boundary zeros)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.o04-bass-boost.v1"
+family = "O04"
+owner = "autoeq-optim"
+script = "o04_bass_boost.wls"
+golden = "o04_bass_boost.json"
+test = "wolfram_o04_bass_boost"
+tolerance = "absolute error <= 1e-9 dB (linear/Harman/disabled target curves)"
+tolerance_kind = "abs"
+tier = "smoke"

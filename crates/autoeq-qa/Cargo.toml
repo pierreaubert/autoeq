@@ -1,0 +1,39 @@
+[package]
+name = "autoeq-qa"
+version = "0.5.0"
+edition = "2024"
+description = "Wolfram Engine cross-validation for AutoEQ / RoomEQ (oracles, goldens, comparison tests)"
+license = "GPL-3.0-or-later"
+homepage = "https://github.com/pierreaubert/autoeq"
+repository = "https://github.com/pierreaubert/autoeq"
+keywords = ["qa", "validation", "audio", "wolfram", "dsp"]
+categories = ["science", "development-tools::testing"]
+
+[lib]
+name = "autoeq_qa"
+path = "src/lib.rs"
+
+[dependencies]
+autoeq-core = { workspace = true }
+autoeq-artifacts = { workspace = true }
+autoeq-fir = { workspace = true }
+autoeq-plot = { workspace = true }
+autoeq-measurements = { workspace = true }
+autoeq-optim = { workspace = true }
+autoeq-workflow = { workspace = true }
+autoeq-cli = { workspace = true }
+roomeq-model = { workspace = true }
+roomeq-engine = { workspace = true }
+roomeq-export = { workspace = true }
+roomeq-quality = { workspace = true }
+roomeq-qa = { workspace = true }
+roomeq-cli = { workspace = true }
+roomeq-analysis = { workspace = true }
+roomeq-synthetic = { workspace = true }
+roomeq-workflow = { workspace = true }
+num-complex = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+ndarray = { workspace = true }

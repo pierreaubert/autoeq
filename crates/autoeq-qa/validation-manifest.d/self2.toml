@@ -1,0 +1,10 @@
+[[case]]
+id = "autoeq-qa.rm01-schroeder-spl.v1"
+family = "RM01"
+owner = "roomeq-model"
+script = "rm01_schroeder_spl.wls"
+golden = "rm01_schroeder_spl.json"
+test = "wolfram_rm01_schroeder_spl"
+tolerance = "1e-9 absolute Hz (f64); 1e-4 dB/linear on the f32 calibration path; degenerate inputs pin to 0.0"
+tolerance_kind = "abs"
+tier = "smoke"

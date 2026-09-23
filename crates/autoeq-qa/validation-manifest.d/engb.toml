@@ -1,0 +1,48 @@
+# engb fragment: roomeq-engine families RE03, RE04, RE05, RE09.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md
+# (RE03 [A/I/S], RE04 [A/X], RE05 [N/I/S], RE09 [A/N/S]).
+
+[[case]]
+id = "autoeq-qa.re03-candidate-loss.v1"
+family = "RE03"
+owner = "roomeq-engine"
+script = "re03_candidate_loss.wls"
+golden = "re03_candidate_loss.json"
+test = "wolfram_re03_candidate_loss"
+tolerance = "relative error <= 1e-9 on recomputed candidate loss (ERB-rate + log-band weighted RMS)"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re04-pruning-cumulative.v1"
+family = "RE04"
+owner = "roomeq-engine"
+script = "re04_pruning_cumulative.wls"
+golden = "re04_pruning_cumulative.json"
+test = "wolfram_re04_pruning_cumulative"
+tolerance = "complex relative error <= 1e-9; dB differences absolute error <= 1e-8 dB; ERB impact relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re05-fir-residual.v1"
+family = "RE05"
+owner = "roomeq-engine"
+script = "re05_fir_residual.wls"
+golden = "re05_fir_residual.json"
+test = "wolfram_re05_fir_residual"
+tolerance = "complex relative error <= 1e-9; residual/corrected absolute error <= 1e-8 dB; linear-phase deviation <= 1e-9 rad"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re09-kautz-bank.v1"
+family = "RE09"
+owner = "roomeq-engine"
+script = "re09_kautz_bank.wls"
+golden = "re09_kautz_bank.json"
+test = "wolfram_re09_kautz_bank"
+tolerance = "complex relative error <= 1e-9 on prescribed and fitted dry-plus-bank composites"
+tolerance_kind = "rel"
+tier = "smoke"

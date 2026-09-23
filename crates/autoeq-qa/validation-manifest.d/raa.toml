@@ -1,0 +1,70 @@
+# raa fragment: roomeq-analysis families RA01, RA02.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md
+# (RA01 [A/X], RA02 [A/N]).
+
+[[case]]
+id = "autoeq-qa.ra01-hybrid-grid.v1"
+family = "RA01"
+owner = "roomeq-analysis"
+script = "ra01_hybrid_grid.wls"
+golden = "ra01_hybrid_grid.json"
+test = "wolfram_ra01_hybrid_grid"
+tolerance = "grid relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra01-log-slope.v1"
+family = "RA01"
+owner = "roomeq-analysis"
+script = "ra01_log_slope.wls"
+golden = "ra01_log_slope.json"
+test = "wolfram_ra01_log_slope"
+tolerance = "absolute slope error <= 1e-9 dB/oct"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra01-lr24-crossover.v1"
+family = "RA01"
+owner = "roomeq-analysis"
+script = "ra01_lr24_crossover.wls"
+golden = "ra01_lr24_crossover.json"
+test = "wolfram_ra01_lr24_crossover"
+tolerance = "complex relative error <= 1e-9; crossover-sum absolute error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra02-probe-delay.v1"
+family = "RA02"
+owner = "roomeq-analysis"
+script = "ra02_probe_delay.wls"
+golden = "ra02_probe_delay.json"
+test = "wolfram_ra02_probe_delay"
+tolerance = "absolute timing error <= 0.02 ms; gain error <= 0.05 dB"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra02-phase-slope-delay.v1"
+family = "RA02"
+owner = "roomeq-analysis"
+script = "ra02_phase_slope_delay.wls"
+golden = "ra02_phase_slope_delay.json"
+test = "wolfram_ra02_phase_slope_delay"
+tolerance = "absolute delay error <= 1e-9 ms"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra02-arrival-alignment.v1"
+family = "RA02"
+owner = "roomeq-analysis"
+script = "ra02_arrival_alignment.wls"
+golden = "ra02_arrival_alignment.json"
+test = "wolfram_ra02_arrival_alignment"
+tolerance = "exact arrival samples; absolute error <= 1e-9 ms"
+tolerance_kind = "abs"
+tier = "smoke"

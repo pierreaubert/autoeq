@@ -1,0 +1,75 @@
+# autoeq-qa validation manifest fragment: group core2.
+#
+# Families C07/C08 (autoeq-core measurement confidence + local-Q),
+# C03-extra (log mean + log2 slope), F01/F02 (autoeq-fir designs,
+# target resolution, WAV), AR01 (artifact transport). Merge with
+# validation-manifest.toml at release time; every case has a `.wls`
+# oracle, an engine-blessed golden, and a `tests/` comparison target.
+# Each comparison resolves its reference through
+# `autoeq_qa::require_reference` and emits a `QA_RESULT:` record.
+
+[[case]]
+id = "autoeq-qa.c07-quality-geometry.v1"
+family = "C07"
+owner = "autoeq-core"
+script = "c07_quality_geometry.wls"
+golden = "c07_quality_geometry.json"
+test = "wolfram_c07_quality_geometry"
+tolerance = "absolute error <= 1e-9 (dB/coherence/variance/Hz/s/deg) [A/X]"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c08-local-q.v1"
+family = "C08"
+owner = "autoeq-core"
+script = "c08_local_q.wls"
+golden = "c08_local_q.json"
+test = "wolfram_c08_local_q"
+tolerance = "absolute Q error <= 1e-12 [A/X]"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.c03-logmean-slope.v1"
+family = "C03"
+owner = "autoeq-core"
+script = "c03_logmean_slope.wls"
+golden = "c03_logmean_slope.json"
+test = "wolfram_c03_logmean_slope"
+tolerance = "absolute error <= 1e-9 dB (mean) / dB-per-octave (slope) [A/X]"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.f01-fir-flat-designs.v1"
+family = "F01"
+owner = "autoeq-fir"
+script = "f01_fir_flat_designs.wls"
+golden = "f01_fir_flat_designs.json"
+test = "wolfram_f01_fir_flat_designs"
+tolerance = "taps absolute <= 1e-9, realized complex-relative <= 1e-9 [N]"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.f02-target-grid-wav.v1"
+family = "F02"
+owner = "autoeq-fir"
+script = "f02_target_grid_wav.wls"
+golden = "f02_target_grid_wav.json"
+test = "wolfram_f02_target_grid_wav"
+tolerance = "target absolute <= 1e-9 dB; WAV DTFT within Sum Abs[delta_h] [A/Q/X]"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ar01-impulse-store.v1"
+family = "AR01"
+owner = "autoeq-artifacts"
+script = "ar01_impulse_store.wls"
+golden = "ar01_impulse_store.json"
+test = "wolfram_ar01_impulse_store"
+tolerance = "byte-exact reload; decoded f32 within 1e-7 absolute [Q/X]"
+tolerance_kind = "abs"
+tier = "smoke"

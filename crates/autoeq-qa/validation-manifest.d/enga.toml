@@ -1,0 +1,61 @@
+# enga fragment: roomeq-engine families RE01, RE02, RE06, RE21, RE22.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md
+# (RE01 [A/N/X], RE02 [A/I], RE06 [N/Q], RE21 [I/A], RE22 [A/X/I]).
+# Each entry records one engine-blessed oracle, golden, and comparison
+# target; tiers are all smoke (seconds).
+
+[[case]]
+id = "autoeq-qa.re01-dsp-gain-delay.v1"
+family = "RE01"
+owner = "roomeq-engine"
+script = "re01_dsp_gain_delay.wls"
+golden = "re01_dsp_gain_delay.json"
+test = "wolfram_re01_dsp_gain_delay"
+tolerance = "complex relative error <= 1e-9 (serial gain, delay, peak SOS)"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re02-preference-shelves.v1"
+family = "RE02"
+owner = "roomeq-engine"
+script = "re02_preference_shelves.wls"
+golden = "re02_preference_shelves.json"
+test = "wolfram_re02_preference_shelves"
+tolerance = "absolute error <= 1e-9 dB (preference shelf correction)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re06-fir-integer-delay.v1"
+family = "RE06"
+owner = "roomeq-engine"
+script = "re06_fir_integer_delay.wls"
+golden = "re06_fir_integer_delay.json"
+test = "wolfram_re06_fir_integer_delay"
+tolerance = "exact stored taps; complex relative error <= 1e-9 (delayed DTFT)"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re21-eq-response-correction.v1"
+family = "RE21"
+owner = "roomeq-engine"
+script = "re21_eq_response_correction.wls"
+golden = "re21_eq_response_correction.json"
+test = "wolfram_re21_eq_response_correction"
+tolerance = "absolute error <= 1e-12 dB (final-minus-initial on shared grid)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re22-limiter-gain-envelope.v1"
+family = "RE22"
+owner = "roomeq-engine"
+script = "re22_limiter_gain_envelope.wls"
+golden = "re22_limiter_gain_envelope.json"
+test = "wolfram_re22_limiter_gain_envelope"
+tolerance = "exact latency samples and envelope flag; absolute error <= 1e-12 dB"
+tolerance_kind = "abs"
+tier = "smoke"

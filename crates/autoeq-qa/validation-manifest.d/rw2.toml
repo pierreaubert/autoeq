@@ -1,0 +1,70 @@
+# autoeq-qa validation manifest fragment: rw2 group (RW07, RW08, RW09,
+# RW10, RW11, ROOT01). One entry block per case; merged by the manifest
+# owner into validation-manifest.toml. Stems are globally unique
+# (family_slug lowercase); ids are autoeq-qa.stem-with-dashes.v1.
+
+[[case]]
+id = "autoeq-qa.rw07-scorecard-pruning.v1"
+family = "RW07"
+owner = "roomeq-workflow"
+script = "rw07_scorecard_pruning.wls"
+golden = "rw07_scorecard_pruning.json"
+test = "wolfram_rw07_scorecard_pruning"
+tolerance = "I/X: exact ran/stale/skipped identity, tolerance 0"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw08-stimulus-binding.v1"
+family = "RW08"
+owner = "roomeq-workflow"
+script = "rw08_stimulus_binding.wls"
+golden = "rw08_stimulus_binding.json"
+test = "wolfram_rw08_stimulus_binding"
+tolerance = "I/Q: exact hash/label/count identity, tolerance 0"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw09-scaled-replay.v1"
+family = "RW09"
+owner = "roomeq-workflow"
+script = "rw09_scaled_replay.wls"
+golden = "rw09_scaled_replay.json"
+test = "wolfram_rw09_scaled_replay"
+tolerance = "A: complex relative error <= 1e-9"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw10-from-measurement-slope.v1"
+family = "RW10"
+owner = "roomeq-workflow"
+script = "rw10_from_measurement_slope.wls"
+golden = "rw10_from_measurement_slope.json"
+test = "wolfram_rw10_from_measurement_slope"
+tolerance = "A: absolute error <= 1e-9 dB/oct (slope) and dB (window mean)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.rw11-hybrid-grid-delay.v1"
+family = "RW11"
+owner = "roomeq-workflow"
+script = "rw11_hybrid_grid_delay.wls"
+golden = "rw11_hybrid_grid_delay.json"
+test = "wolfram_rw11_hybrid_grid_delay"
+tolerance = "N/A: grid relative error <= 1e-12; delay/ms and phase/deg absolute error <= 1e-9"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.root01-facade-passthrough.v1"
+family = "ROOT01"
+owner = "roomeq-engine"
+script = "root01_facade_passthrough.wls"
+golden = "root01_facade_passthrough.json"
+test = "wolfram_root01_facade_passthrough"
+tolerance = "A/I: complex relative error <= 1e-12; facade bit-identical to direct kernel"
+tolerance_kind = "rel"
+tier = "smoke"

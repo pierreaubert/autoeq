@@ -1,0 +1,48 @@
+# rac fragment: roomeq-analysis families RA07, RA08, RA09, RA10.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md
+# (RA07 [A/B], RA08 [A/X], RA09 [A/N], RA10 [A/X]).
+
+[[case]]
+id = "autoeq-qa.ra07-spatial-stats.v1"
+family = "RA07"
+owner = "roomeq-analysis"
+script = "ra07_spatial_stats.wls"
+golden = "ra07_spatial_stats.json"
+test = "wolfram_ra07_spatial_stats"
+tolerance = "[A] absolute error <= 1e-9 dB (power average, spread); [A] absolute mask error <= 1e-12; [B] absolute band/CVaR error <= 1e-9 dB; single-curve band width exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra08-area-interp.v1"
+family = "RA08"
+owner = "roomeq-analysis"
+script = "ra08_area_interp.wls"
+golden = "ra08_area_interp.json"
+test = "wolfram_ra08_area_interp"
+tolerance = "[A] absolute error <= 1e-9 (dB SPL, degrees, unit weights, confidence); support/out-of-support decisions exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra09-rir-weights.v1"
+family = "RA09"
+owner = "roomeq-analysis"
+script = "ra09_rir_weights.wls"
+golden = "ra09_rir_weights.json"
+test = "wolfram_ra09_rir_weights"
+tolerance = "[A] absolute error <= 1e-9 dB (prototype SPL); [A/N] absolute weight-matrix error <= 1e-9; measured-direction counts and magnitude-only contract exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ra10-evidence-stats.v1"
+family = "RA10"
+owner = "roomeq-analysis"
+script = "ra10_evidence_stats.wls"
+golden = "ra10_evidence_stats.json"
+test = "wolfram_ra10_evidence_stats"
+tolerance = "[A] absolute error <= 1e-9 (dB spread, seconds, Hz, degrees); support/verdict/label/reason decisions exact"
+tolerance_kind = "abs"
+tier = "smoke"

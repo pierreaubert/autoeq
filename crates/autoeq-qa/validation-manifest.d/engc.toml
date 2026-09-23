@@ -1,0 +1,61 @@
+# engc fragment: roomeq-engine families RE07, RE08, RE10, RE11, RE12.
+# Merged into validation-manifest.toml by the manifest owner; stems are
+# globally unique. Tolerance classes per reviews/catalogue-20260923.md
+# (RE07 [N/I], RE08 [N/I], RE10 [A/N/I], RE11 [A/S], RE12 [A/N/B/S]).
+# Magnitude agreement is checked separately from phase/delay claims;
+# no excess-phase correction is claimed by any case below.
+
+[[case]]
+id = "autoeq-qa.re07-null-mask.v1"
+family = "RE07"
+owner = "roomeq-engine"
+script = "re07_null_mask.wls"
+golden = "re07_null_mask.json"
+test = "wolfram_re07_null_mask"
+tolerance = "exact boolean agreement on the null mask (6 dB envelope, 0.8 coherence, 10 dB SNR gates)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re08-split-band-sum.v1"
+family = "RE08"
+owner = "roomeq-engine"
+script = "re08_split_band_sum.wls"
+golden = "re08_split_band_sum.json"
+test = "wolfram_re08_split_band_sum"
+tolerance = "complex relative error <= 1e-9; combined dB absolute error <= 1e-8 dB; split bands elementwise 1e-12 with exact lengths"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re10-branch-sum-levels.v1"
+family = "RE10"
+owner = "roomeq-engine"
+script = "re10_branch_sum_levels.wls"
+golden = "re10_branch_sum_levels.json"
+test = "wolfram_re10_branch_sum_levels"
+tolerance = "complex relative error <= 1e-9; combined dB absolute error <= 1e-8 dB; level delta exact from band means"
+tolerance_kind = "rel"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re11-summation-lattice.v1"
+family = "RE11"
+owner = "roomeq-engine"
+script = "re11_summation_lattice.wls"
+golden = "re11_summation_lattice.json"
+test = "wolfram_re11_summation_lattice"
+tolerance = "band summation error absolute error <= 1e-9; lattice identity and ledger outcomes exact"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.re12-gd-coherence.v1"
+family = "RE12"
+owner = "roomeq-engine"
+script = "re12_gd_coherence.wls"
+golden = "re12_gd_coherence.json"
+test = "wolfram_re12_gd_coherence"
+tolerance = "group delay absolute error <= 1e-9 ms; mean coherence absolute error <= 1e-12; gate reasons exact"
+tolerance_kind = "abs"
+tier = "smoke"

@@ -1,0 +1,71 @@
+# autoeq-qa validation manifest fragment: app group (AW01, PL01, PL02,
+# AC01, AC02, AC03). One [[case]] block per case; merged by the
+# workflow owner into validation-manifest.toml. Stems are globally
+# unique (`<family>_<slug>`, lowercase); ids are
+# `autoeq-qa.<stem-with-dashes>.v1`.
+
+[[case]]
+id = "autoeq-qa.aw01-workflow-correction.v1"
+family = "AW01"
+owner = "autoeq-workflow"
+script = "aw01_workflow_correction.wls"
+golden = "aw01_workflow_correction.json"
+test = "wolfram_aw01_workflow_correction"
+tolerance = "A: absolute error <= 1e-6 dB (target/eq/corrected/RMS traces)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.pl01-tonal-regression.v1"
+family = "PL01"
+owner = "autoeq-plot"
+script = "pl01_tonal_regression.wls"
+golden = "pl01_tonal_regression.json"
+test = "wolfram_pl01_tonal_regression"
+tolerance = "A: absolute error <= 1e-9 (slope dB/oct, intercept dB, line dB)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.pl02-plot-response-trace.v1"
+family = "PL02"
+owner = "autoeq-plot"
+script = "pl02_plot_response_trace.wls"
+golden = "pl02_plot_response_trace.json"
+test = "wolfram_pl02_plot_response_trace"
+tolerance = "A/I: absolute SPL error <= 1e-6 dB (eq/corrected/error traces)"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ac01-cli-spacing-score.v1"
+family = "AC01"
+owner = "autoeq-cli"
+script = "ac01_cli_spacing_score.wls"
+golden = "ac01_cli_spacing_score.json"
+test = "wolfram_ac01_cli_spacing_score"
+tolerance = "A/X: spacings exact <= 1e-12 oct; eq <= 1e-6 dB; score <= 1e-9 points"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ac02-apo-roundtrip-gap.v1"
+family = "AC02"
+owner = "autoeq-cli"
+script = "ac02_apo_roundtrip_gap.wls"
+golden = "ac02_apo_roundtrip_gap.json"
+test = "wolfram_ac02_apo_roundtrip_gap"
+tolerance = "A/Q/X: APO line exact; traces <= 1e-6 dB; gap <= 1e-9 dB"
+tolerance_kind = "abs"
+tier = "smoke"
+
+[[case]]
+id = "autoeq-qa.ac03-benchmark-stats.v1"
+family = "AC03"
+owner = "autoeq-cli"
+script = "ac03_benchmark_stats.wls"
+golden = "ac03_benchmark_stats.json"
+test = "wolfram_ac03_benchmark_stats"
+tolerance = "A/B/X: absolute error <= 1e-12; tie mask exact"
+tolerance_kind = "abs"
+tier = "smoke"

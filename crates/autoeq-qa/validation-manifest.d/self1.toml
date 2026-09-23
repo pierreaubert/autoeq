@@ -1,0 +1,10 @@
+[[case]]
+id = "autoeq-qa.rq07-abx-binomial.v1"
+family = "RQ07"
+owner = "roomeq-quality"
+script = "rq07_abx_binomial.wls"
+golden = "rq07_abx_binomial.json"
+test = "wolfram_rq07_abx_binomial"
+tolerance = "absolute error <= 1e-9 (probabilities, interval ends); exact thresholds; invalid inputs refuse"
+tolerance_kind = "abs"
+tier = "smoke"

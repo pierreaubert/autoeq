@@ -3253,6 +3253,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         apply_ctc_if_enabled(&mut result, &config, 48000.0, None).unwrap();
@@ -3272,6 +3273,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: Some(CtcConfig::default()),
+            reporting: None,
             cea2034_cache: None,
         };
         config.ctc.as_mut().unwrap().enabled = false;
@@ -3292,6 +3294,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: Some(CtcConfig::default()),
+            reporting: None,
             cea2034_cache: None,
         };
         config.ctc.as_mut().unwrap().enabled = true;
@@ -3319,6 +3322,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: Some(CtcConfig::default()),
+            reporting: None,
             cea2034_cache: None,
         };
         config.ctc.as_mut().unwrap().enabled = true;
@@ -4104,6 +4108,12 @@ mod tests {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         );
         result.channel_results.insert(
@@ -4203,6 +4213,12 @@ mod tests {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         );
         result.channel_results.insert(

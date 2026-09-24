@@ -6,6 +6,7 @@ use math_audio_iir_fir::Biquad;
 use roomeq_model::ChannelDspChain;
 
 use crate::channel_target::TargetContext;
+pub use crate::segment_support::SegmentSupportReport;
 
 pub(crate) fn subtract_target_tilt(curve: &Curve, target: &TargetContext) -> Curve {
     if let Some(tilt_curve) = &target.target_tilt_curve {
@@ -81,6 +82,9 @@ pub struct ChannelProcessingResult {
     pub audibility_veto: Vec<roomeq_model::FilterVetoVerdict>,
     /// Frozen-chain adjudication summary, when the veto post-pass ran.
     pub veto_adjudication: Option<roomeq_model::VetoAdjudicationReport>,
+    /// Multi-segment authorization report, present only when the channel
+    /// declares two or more usable bands. `None` preserves legacy behavior.
+    pub segment_support: Option<SegmentSupportReport>,
 }
 
 #[cfg(test)]

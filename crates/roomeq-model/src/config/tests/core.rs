@@ -19,6 +19,71 @@ fn room_config_default_uses_current_config_version() {
     assert_eq!(RoomConfig::default().version, default_config_version());
 }
 
+fn reporting_base_config() -> RoomConfig {
+    // Smallest structurally valid base: one measured speaker, no system.
+    let mut config = RoomConfig::default();
+    config.speakers.insert(
+        "L".to_string(),
+        SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Path("left.csv".into()),
+            speaker_name: None,
+            provenance: Default::default(),
+        })),
+    );
+    config
+}
+
+#[test]
+fn structural_validation_accepts_absent_or_positive_t60_tolerance() {
+    // No declared tolerance: the viewer flatness cell stays pending.
+    let config = reporting_base_config();
+    assert_eq!(config.report_t60_tolerance_s(), None);
+    assert!(config.validate_structure().is_ok());
+
+    let mut declared = reporting_base_config();
+    declared.reporting = Some(ReportingConfig {
+        t60_flatness_tolerance_s: Some(0.05),
+    });
+    assert_eq!(declared.report_t60_tolerance_s(), Some(0.05));
+    assert!(declared.validate_structure().is_ok());
+}
+
+#[test]
+fn structural_validation_rejects_nonpositive_t60_tolerance() {
+    for tolerance in [0.0, -0.05, f64::NAN, f64::INFINITY] {
+        let mut config = reporting_base_config();
+        config.reporting = Some(ReportingConfig {
+            t60_flatness_tolerance_s: Some(tolerance),
+        });
+        assert!(
+            config.validate_structure().is_err(),
+            "tolerance {tolerance} must fail structural validation"
+        );
+    }
+}
+
+#[test]
+fn legacy_described_room_configs_match_the_generated_schema() {
+    let schema = schemars::schema_for!(RoomConfig);
+    assert_eq!(
+        schema.get("properties").unwrap()["description"],
+        serde_json::json!({ "type": "string" })
+    );
+    for fixture in [
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/data/roomeq/test_config_scenario_a_full.json"
+        )),
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/data/roomeq/test_config_scenario_b_full.json"
+        )),
+    ] {
+        let config: RoomConfig = serde_json::from_str(fixture).unwrap();
+        assert_eq!(config.version, "3.0.0");
+    }
+}
+
 #[test]
 fn structural_validation_report_cannot_claim_production_readiness() {
     let mut config = RoomConfig::default();

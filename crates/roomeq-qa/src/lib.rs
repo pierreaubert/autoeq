@@ -425,7 +425,10 @@ pub(crate) fn optimize_room_with_selected_seed(
     output_dir: Option<&Path>,
 ) -> anyhow::Result<(RoomOptimizationResult, u64)> {
     let (selected_seed, scores) = select_median_seed(config, sample_rate, |seeded| {
-        roomeq_workflow::optimize_room(seeded, sample_rate, None, None)
+        // A missing output directory makes workflow sidecars land in `.`.
+        // Parallel QA cases must not share those filenames during seed scoring.
+        let scratch = tempfile::tempdir()?;
+        roomeq_workflow::optimize_room(seeded, sample_rate, None, Some(scratch.path()))
             .map_err(|error| anyhow::anyhow!(error.to_string()))
     })?;
     let mut selected = config.clone();
@@ -442,7 +445,8 @@ pub(crate) fn optimize_room_single_seed(
     config: &RoomConfig,
     sample_rate: f64,
 ) -> anyhow::Result<RoomOptimizationResult> {
-    roomeq_workflow::optimize_room(config, sample_rate, None, None)
+    let scratch = tempfile::tempdir()?;
+    roomeq_workflow::optimize_room(config, sample_rate, None, Some(scratch.path()))
         .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
@@ -453,10 +457,11 @@ pub(crate) fn optimize_room_with_validation(
     validation_measurements: HashMap<String, Vec<roomeq_model::Curve>>,
 ) -> anyhow::Result<RoomOptimizationResult> {
     let (selected_seed, scores) = select_median_seed(config, sample_rate, |seeded| {
+        let scratch = tempfile::tempdir()?;
         roomeq_workflow::RoomPipeline::new(roomeq_workflow::RoomPipelineRequest {
             config: seeded,
             sample_rate,
-            output_dir: None,
+            output_dir: Some(scratch.path()),
             probe_arrival_overrides: None,
         })
         .with_validation_measurements(validation_measurements.clone())

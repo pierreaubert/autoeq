@@ -247,8 +247,15 @@ fn load_usable_reference_curve(
         .map_err(|error| AutoeqError::InvalidMeasurement {
         message: error.to_string(),
     })?;
-    match source.provenance().valid_band_hz {
-        Some(band) => curve.select_frequency_band(band),
+    match source
+        .provenance()
+        .declared_support_bands()
+        .map_err(|message| AutoeqError::InvalidMeasurement { message })?
+    {
+        Some(bands) if bands.len() == 1 => curve.select_frequency_band(bands[0]),
+        Some(_) => Err(AutoeqError::InvalidMeasurement {
+            message: "shared level reference cannot flatten disjoint measurement support".into(),
+        }),
         None => Ok(curve),
     }
 }
@@ -617,6 +624,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }

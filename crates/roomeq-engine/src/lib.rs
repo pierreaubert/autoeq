@@ -84,6 +84,8 @@ pub mod height_channel_alignment;
 pub mod home_cinema;
 /// Inter-channel tonal matching using broadband spectral correction.
 pub mod inter_channel_timbre_matching;
+/// Measured-room acoustics (early reflections, octave T60) for reporting.
+pub mod ir_acoustics;
 /// Path-free frequency-split FIR/IIR channel processing.
 pub mod mixed_crossover;
 /// Mixed IIR/FIR phase decomposition and excess-phase correction.
@@ -111,6 +113,8 @@ pub mod report_adapter;
 /// Shared in-memory results returned by RoomEQ execution workflows.
 pub mod room_result;
 pub mod runtime_limiter;
+/// Post-realization authorization for multi-segment measurement support.
+pub mod segment_support;
 /// Broadband spectral inter-channel response alignment.
 pub mod spectral_align;
 pub mod summation_search;

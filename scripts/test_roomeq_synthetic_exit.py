@@ -17,10 +17,11 @@ from src.payload_binding import verify_payload_binding
 
 ROOT = Path(__file__).resolve().parents[1]
 BINARY = ROOT / "target/release/roomeq-qa-synthetic"
-# Progress observers now preserve adaptive selection and its existing per-pass
-# budgets. The full five-seed matrix takes minutes, not the old fixed-pass
-# smoke path's seconds. This limits process runtime, not acoustic acceptance.
-MATRIX_TIMEOUT_SECONDS = 15 * 60
+# Progress observers preserve adaptive selection and its existing per-pass
+# budgets. A single full-scale 5.1 refusal row can exceed 15 minutes, and the
+# reduced-level matrix contains 16 serial rows. This only bounds subprocess
+# runtime; it does not relax any acoustic or safety assertion.
+MATRIX_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
 class SavedOutput(dict):

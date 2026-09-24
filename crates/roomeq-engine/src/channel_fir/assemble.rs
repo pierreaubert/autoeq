@@ -65,8 +65,12 @@ pub(super) fn assemble_fir_result(
     } else {
         final_curve.clone()
     };
+    // Score on usable support only: multi-segment gap bins are display
+    // samples, not measurements. Single-band and unrestricted channels
+    // select an identical range, so their scores are unchanged.
+    let usable_score = request.prepared.usable_curve(&score_curve)?;
     let post_score = channel_target::flatness_score_in_range(
-        &score_curve,
+        usable_score.as_ref(),
         request.preprocessed.score_min_freq,
         request.target.max_freq,
     );
@@ -93,7 +97,13 @@ pub(super) fn assemble_fir_result(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
         target_curve,
+        early_late_curves: None,
     };
     let (fir_coeffs, convolution_sidecar) = sidecar_output(optimizer_output);
 
@@ -111,6 +121,9 @@ pub(super) fn assemble_fir_result(
         optimizer_evidence,
         audibility_veto,
         veto_adjudication,
+        // Multi-segment authorization runs once per channel in
+        // `execute_prepared_channel`, after every processing mode assembles.
+        segment_support: None,
     })
 }
 

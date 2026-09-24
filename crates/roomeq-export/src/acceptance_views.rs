@@ -285,6 +285,7 @@ mod tests {
             payload_binding: Some(binding),
             ledger_version: DECISION_LEDGER_VERSION.into(),
             decisions: Vec::new(),
+            channel_summaries: Vec::new(),
         });
         let build = |graph: &roomeq_model::DspGraph| {
             crate::build_export_package(

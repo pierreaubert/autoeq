@@ -15,6 +15,11 @@ class SelectedDelayRunnerTests(unittest.TestCase):
         with (
             patch("sys.argv", ["run_selected_delay_contract.py"]),
             patch.object(
+                run_selected_delay_contract,
+                "SCRATCH_ROOT",
+                run_selected_delay_contract.Path(__file__).resolve().parents[1],
+            ),
+            patch.object(
                 run_selected_delay_contract.tempfile,
                 "TemporaryDirectory",
                 return_value=contextlib.nullcontext("/Volumes/home_tmp/tmp/test-only"),

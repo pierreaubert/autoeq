@@ -4,10 +4,13 @@ import json
 import os
 import unittest
 
-from scripts.src.correction_explanation import correction_explanation_html
+from scripts.src.correction_explanation import _band_label, correction_explanation_html
 
 
 class CorrectionExplanationTests(unittest.TestCase):
+    def test_narrow_support_gap_keeps_distinct_endpoints(self):
+        self.assertEqual(_band_label((19999.99, 20000.0)), "19999.99–20000 Hz")
+
     def test_measurement_conditioning_history_is_partial_and_escaped(self):
         payload = {"channel": "<left>", "receipt": {"entries": [{
             "operation": "source_overlap_alignment",

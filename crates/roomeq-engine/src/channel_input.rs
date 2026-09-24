@@ -33,7 +33,7 @@ impl PreparedCea2034 {
 #[derive(Clone, Debug)]
 pub struct PreparedChannelInput {
     measurements: PreparedChannelMeasurements,
-    valid_band_hz: Option<[f64; 2]>,
+    valid_bands_hz: Vec<[f64; 2]>,
     arrival_time_ms: Option<f64>,
     cea2034: PreparedCea2034,
     eq_resources: EqResources,
@@ -48,7 +48,7 @@ impl PreparedChannelInput {
     ) -> Self {
         Self {
             measurements,
-            valid_band_hz: None,
+            valid_bands_hz: Vec::new(),
             arrival_time_ms,
             cea2034,
             eq_resources,
@@ -75,29 +75,108 @@ impl PreparedChannelInput {
     ///
     /// # Errors
     /// Returns an error unless both edges are finite and `0 < low < high`.
-    pub fn with_valid_band_hz(mut self, band: [f64; 2]) -> autoeq_core::Result<Self> {
-        let [low, high] = band;
-        if !low.is_finite() || !high.is_finite() || low <= 0.0 || low >= high {
+    pub fn with_valid_band_hz(self, band: [f64; 2]) -> autoeq_core::Result<Self> {
+        self.with_valid_bands_hz(&[band])
+    }
+
+    /// Restrict correction to declared usable measurement segments, preserving
+    /// internal coverage gaps.
+    ///
+    /// Bands must be finite with `0 < low < high`, ordered, and disjoint,
+    /// mirroring the `MeasurementProvenance::declared_support_bands` contract.
+    /// This declaration does not authorize direct-sound or phase correction.
+    /// Raw measurement curves remain unchanged.
+    ///
+    /// # Errors
+    /// Returns an error for empty, invalid, unordered, or overlapping bands.
+    pub fn with_valid_bands_hz(mut self, bands: &[[f64; 2]]) -> autoeq_core::Result<Self> {
+        if bands.is_empty() {
             return Err(autoeq_core::AutoeqError::InvalidMeasurement {
-                message: "Declared valid_band_hz must have finite edges with 0 < low < high"
-                    .to_owned(),
+                message: "Declared valid_bands_hz must not be empty".to_owned(),
             });
         }
-        self.valid_band_hz = Some(band);
+        for (index, [low, high]) in bands.iter().copied().enumerate() {
+            if !low.is_finite() || !high.is_finite() || low <= 0.0 || low >= high {
+                return Err(autoeq_core::AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "Declared valid_bands_hz band {index} must have finite edges with 0 < low < high"
+                    ),
+                });
+            }
+            if index > 0 && low <= bands[index - 1][1] {
+                return Err(autoeq_core::AutoeqError::InvalidMeasurement {
+                    message: "Declared valid_bands_hz must be ordered and disjoint".to_owned(),
+                });
+            }
+        }
+        self.valid_bands_hz = bands.to_vec();
         Ok(self)
     }
 
-    /// Return the declared usable band, if supplied by measurement provenance.
+    /// Return the declared usable band when exactly one segment is declared.
+    ///
+    /// Multi-segment support has no single-band view; use
+    /// [`Self::valid_bands_hz`] so internal gaps are never flattened away.
     pub fn valid_band_hz(&self) -> Option<[f64; 2]> {
-        self.valid_band_hz
+        if self.valid_bands_hz.len() == 1 {
+            Some(self.valid_bands_hz[0])
+        } else {
+            None
+        }
+    }
+
+    /// Return the declared usable segments (empty when unrestricted).
+    pub fn valid_bands_hz(&self) -> &[[f64; 2]] {
+        &self.valid_bands_hz
+    }
+
+    /// Whether any declared usable support restricts this channel.
+    pub fn has_valid_bands(&self) -> bool {
+        !self.valid_bands_hz.is_empty()
+    }
+
+    /// Internal coverage gaps between consecutive declared segments.
+    ///
+    /// No measurement exists inside these intervals: correction filters may
+    /// not center there and scoring must not consume gap samples.
+    pub fn gap_intervals_hz(&self) -> Vec<[f64; 2]> {
+        self.valid_bands_hz
+            .windows(2)
+            .map(|pair| [pair[0][1], pair[1][0]])
+            .collect()
+    }
+
+    /// Whether a frequency lies inside declared usable support.
+    ///
+    /// Unrestricted channels support every finite positive frequency;
+    /// non-finite or non-positive frequencies are never supported.
+    pub fn supports_frequency(&self, frequency_hz: f64) -> bool {
+        if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+            return false;
+        }
+        self.valid_bands_hz.is_empty()
+            || self
+                .valid_bands_hz
+                .iter()
+                .any(|[low, high]| frequency_hz >= *low && frequency_hz <= *high)
     }
 
     /// Select usable loaded samples without extrapolating or changing raw measurements.
+    ///
+    /// Multi-segment support selects the union of declared segments; gap
+    /// samples are dropped, never interpolated.
     pub(crate) fn usable_curve<'a>(&self, curve: &'a Curve) -> Result<Cow<'a, Curve>> {
-        let Some(band) = self.valid_band_hz else {
+        if self.valid_bands_hz.is_empty() {
             return Ok(Cow::Borrowed(curve));
-        };
-        curve.select_frequency_band(band).map(Cow::Owned)
+        }
+        if self.valid_bands_hz.len() == 1 {
+            return curve
+                .select_frequency_band(self.valid_bands_hz[0])
+                .map(Cow::Owned);
+        }
+        curve
+            .select_frequency_bands(&self.valid_bands_hz)
+            .map(Cow::Owned)
     }
 
     pub fn arrival_time_ms(&self) -> Option<f64> {
@@ -219,5 +298,55 @@ mod tests {
         let bounded = input.with_valid_band_hz([200.0, 800.0]).unwrap();
         assert_eq!(bounded.valid_band_hz(), Some([200.0, 800.0]));
         assert_eq!(bounded.measurements().representative().freq[0], 100.0);
+    }
+
+    #[test]
+    fn disjoint_bands_select_union_and_expose_gaps() {
+        let curve = Curve {
+            freq: ndarray::array![20.0, 100.0, 1_000.0, 8_000.0, 20_000.0],
+            spl: ndarray::array![80.0, 81.0, 99.0, 79.0, 78.0],
+            ..Curve::default()
+        };
+        let input = PreparedChannelInput::from_measurements(PreparedChannelMeasurements::new(
+            curve.clone(),
+            vec![curve.clone()],
+            false,
+        ));
+        let bounded = input
+            .with_valid_bands_hz(&[[20.0, 100.0], [8_000.0, 20_000.0]])
+            .unwrap();
+        // Multi-segment support has no single-band view: callers must use
+        // the segment list so the internal gap is never flattened away.
+        assert_eq!(bounded.valid_band_hz(), None);
+        assert_eq!(
+            bounded.valid_bands_hz(),
+            &[[20.0, 100.0], [8_000.0, 20_000.0]]
+        );
+        assert!(bounded.has_valid_bands());
+        assert_eq!(bounded.gap_intervals_hz(), vec![[100.0, 8_000.0]]);
+        assert!(bounded.supports_frequency(50.0));
+        assert!(bounded.supports_frequency(10_000.0));
+        assert!(!bounded.supports_frequency(1_000.0));
+        assert!(!bounded.supports_frequency(f64::NAN));
+        let usable = bounded.usable_curve(&curve).unwrap();
+        assert_eq!(usable.freq, ndarray::array![20.0, 100.0, 8_000.0, 20_000.0]);
+        // Empty, unordered, and overlapping declarations are rejected.
+        for bands in [
+            vec![],
+            vec![[8_000.0, 20_000.0], [20.0, 100.0]],
+            vec![[20.0, 8_000.0], [8_000.0, 20_000.0]],
+            vec![[0.0, 100.0], [8_000.0, 20_000.0]],
+        ] {
+            assert!(
+                PreparedChannelInput::from_measurements(PreparedChannelMeasurements::new(
+                    curve.clone(),
+                    vec![curve.clone()],
+                    false,
+                ))
+                .with_valid_bands_hz(&bands)
+                .is_err(),
+                "{bands:?}"
+            );
+        }
     }
 }

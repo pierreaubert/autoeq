@@ -144,6 +144,46 @@ fn joint_headroom_gain_reduction_db(margin_db: f64) -> f64 {
     }
 }
 
+/// Optimized per-group crossover solution pending the no-improvement check.
+struct GroupCrossoverSolution {
+    freq_hz: f64,
+    main_delay_ms: f64,
+    bass_delay_ms: f64,
+    polarity_inverted: bool,
+    trim_db: f64,
+    objective_after: Option<f64>,
+}
+
+/// Revert an optimized group solution to the baseline plan when it does not
+/// strictly improve on the baseline objective.
+///
+/// Pure decision logic extracted so it can be tested deterministically: the
+/// call site only runs inside the phase-gated optimizer, which is currently
+/// deferred (`phase_available = false`), so reaching the branch end-to-end is
+/// seed-dependent. The `Option` comparison preserves the call-site semantics
+/// exactly (`None >= None` reverts; `None < Some(_)` keeps the solution).
+fn revert_group_crossover_if_no_improvement(
+    solution: GroupCrossoverSolution,
+    objective_before: Option<f64>,
+    baseline_freq_hz: f64,
+) -> (GroupCrossoverSolution, bool) {
+    if solution.objective_after >= objective_before {
+        (
+            GroupCrossoverSolution {
+                freq_hz: baseline_freq_hz,
+                main_delay_ms: 0.0,
+                bass_delay_ms: 0.0,
+                polarity_inverted: false,
+                trim_db: 0.0,
+                objective_after: objective_before,
+            },
+            true,
+        )
+    } else {
+        (solution, false)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn optimize_home_cinema_group_crossovers(
     config: &RoomConfig,
@@ -330,15 +370,27 @@ pub fn optimize_home_cinema_group_crossovers(
                 polarity_inverted,
             );
             objective_after = bass_management_objective(objective_after_curve.as_ref(), final_freq);
-            if objective_after >= objective_before {
+            let (reverted_solution, reverted) = revert_group_crossover_if_no_improvement(
+                GroupCrossoverSolution {
+                    freq_hz: final_freq,
+                    main_delay_ms,
+                    bass_delay_ms,
+                    polarity_inverted,
+                    trim_db,
+                    objective_after,
+                },
+                objective_before,
+                plan.frequency_hz,
+            );
+            if reverted {
                 advisories.push("group_optimizer_no_improvement".to_string());
-                final_freq = plan.frequency_hz;
-                main_delay_ms = 0.0;
-                bass_delay_ms = 0.0;
-                polarity_inverted = false;
-                trim_db = 0.0;
-                objective_after = objective_before;
             }
+            final_freq = reverted_solution.freq_hz;
+            main_delay_ms = reverted_solution.main_delay_ms;
+            bass_delay_ms = reverted_solution.bass_delay_ms;
+            polarity_inverted = reverted_solution.polarity_inverted;
+            trim_db = reverted_solution.trim_db;
+            objective_after = reverted_solution.objective_after;
         }
 
         if advisories.is_empty() {
@@ -2220,6 +2272,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
@@ -2395,6 +2448,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
 
@@ -2420,15 +2474,82 @@ mod tests {
         );
     }
 
+    fn revert_candidate() -> GroupCrossoverSolution {
+        GroupCrossoverSolution {
+            freq_hz: 95.0,
+            main_delay_ms: 3.0,
+            bass_delay_ms: 7.0,
+            polarity_inverted: true,
+            trim_db: 1.5,
+            objective_after: Some(2.0),
+        }
+    }
+
     #[test]
-    #[ignore = "no-improvement revert branch is hard to trigger deterministically"]
-    fn group_crossover_no_improvement_revert_branch_documented() {
-        // The revert branch is reached when the crossover optimizer cannot
-        // produce a lower objective than the baseline. Because the DE objective
-        // surface is non-convex and seed-dependent, forcing this outcome is not
-        // reliable in a unit test; the branch is exercised indirectly by the
-        // optimizer when conditions happen to produce objective_after >=
-        // objective_before.
+    fn group_crossover_no_improvement_reverts_to_baseline() {
+        // Ties do not count as improvements: objective_after >= objective_before
+        // restores the baseline plan and reports the baseline objective.
+        let (solution, reverted) =
+            revert_group_crossover_if_no_improvement(revert_candidate(), Some(2.0), 80.0);
+        assert!(reverted);
+        assert_eq!(solution.freq_hz, 80.0);
+        assert_eq!(solution.main_delay_ms, 0.0);
+        assert_eq!(solution.bass_delay_ms, 0.0);
+        assert!(!solution.polarity_inverted);
+        assert_eq!(solution.trim_db, 0.0);
+        assert_eq!(solution.objective_after, Some(2.0));
+
+        let (solution, reverted) = revert_group_crossover_if_no_improvement(
+            GroupCrossoverSolution {
+                objective_after: Some(3.0),
+                ..revert_candidate()
+            },
+            Some(2.0),
+            80.0,
+        );
+        assert!(reverted);
+        assert_eq!(solution.freq_hz, 80.0);
+        assert_eq!(solution.objective_after, Some(2.0));
+    }
+
+    #[test]
+    fn group_crossover_strict_improvement_keeps_solution() {
+        let (solution, reverted) = revert_group_crossover_if_no_improvement(
+            GroupCrossoverSolution {
+                objective_after: Some(1.5),
+                ..revert_candidate()
+            },
+            Some(2.0),
+            80.0,
+        );
+        assert!(!reverted);
+        assert_eq!(solution.freq_hz, 95.0);
+        assert_eq!(solution.main_delay_ms, 3.0);
+        assert_eq!(solution.bass_delay_ms, 7.0);
+        assert!(solution.polarity_inverted);
+        assert_eq!(solution.trim_db, 1.5);
+        assert_eq!(solution.objective_after, Some(1.5));
+    }
+
+    #[test]
+    fn group_crossover_revert_preserves_option_ordering() {
+        // Missing optimized objective (None) is worse than any measured
+        // baseline, so the solution is kept; missing baseline reverts.
+        let (_, reverted) = revert_group_crossover_if_no_improvement(
+            GroupCrossoverSolution {
+                objective_after: None,
+                ..revert_candidate()
+            },
+            Some(2.0),
+            80.0,
+        );
+        assert!(!reverted);
+
+        let (solution, reverted) =
+            revert_group_crossover_if_no_improvement(revert_candidate(), None, 80.0);
+        assert!(reverted);
+        assert_eq!(solution.freq_hz, 80.0);
+        assert_eq!(solution.objective_after, None);
     }
 
     #[test]
@@ -2995,6 +3116,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }

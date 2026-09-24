@@ -55,8 +55,7 @@ fn psycho_fast_f03_abx_ten_for_ten_is_one_in_1024() {
     let p = abx_p_value(10, 10).expect("valid trial count");
     assert!((p - 1.0 / 1_024.0).abs() <= 1e-12, "p={p}");
     assert_eq!(abx_min_correct(10, 0.05).expect("attainable rule"), 9);
-    let outcome =
-        score_abx_condition("mono-timbre", 10, 10, 9, 10).expect("matching rule counts");
+    let outcome = score_abx_condition("mono-timbre", 10, 10, 9, 10).expect("matching rule counts");
     assert_eq!(outcome.decision, "pass");
     assert!((outcome.p_value - 1.0 / 1_024.0).abs() <= 1e-12);
 }
@@ -75,6 +74,7 @@ fn psycho_fast_f03_nonsignificant_is_not_equivalence() {
         intent: ComparisonIntent::Equivalence,
         attributes: vec!["detectability".to_string()],
         equivalence_bound: None,
+        equivalence_max_p_correct: None,
         reference: ReferenceKind::PublishedCases {
             citation: "Toole ch.3".to_string(),
         },
@@ -90,6 +90,7 @@ fn psycho_fast_f03_nonsignificant_is_not_equivalence() {
         intent: ComparisonIntent::Preference,
         attributes: vec!["transparent".to_string()],
         equivalence_bound: None,
+        equivalence_max_p_correct: None,
         reference: ReferenceKind::PublishedCases {
             citation: "Toole ch.3".to_string(),
         },
@@ -132,8 +133,8 @@ fn psycho_fast_c02_worst_seat_named_not_averaged() {
             levels
         }),
     ];
-    let acceptance = evaluate_multi_seat_acceptance(&pre, &post, &[], &[], &target)
-        .expect("aligned grids");
+    let acceptance =
+        evaluate_multi_seat_acceptance(&pre, &post, &[], &[], &target).expect("aligned grids");
     assert_eq!(acceptance.training.seats.len(), 3);
     assert_eq!(acceptance.training.worst_seat_index, Some(2));
     let worst = acceptance
@@ -205,13 +206,11 @@ fn psycho_fast_c03_normalization_cannot_hide_output_loss() {
         "normalized view passes shape checks, proving the raw loss is what the gate caught"
     );
     assert!(
-        (raw.metrics.pre_target_weighted_rms_db - display.metrics.pre_target_weighted_rms_db)
-            .abs()
+        (raw.metrics.pre_target_weighted_rms_db - display.metrics.pre_target_weighted_rms_db).abs()
             <= 1e-9
     );
     assert!(
-        raw.metrics.post_target_weighted_rms_db - display.metrics.post_target_weighted_rms_db
-            > 5.0,
+        raw.metrics.post_target_weighted_rms_db - display.metrics.post_target_weighted_rms_db > 5.0,
         "raw and display post metrics must diverge by the hidden loss"
     );
 }
@@ -245,6 +244,7 @@ fn psycho_fast_e03_single_scalar_never_equivalence() {
         intent: ComparisonIntent::Equivalence,
         attributes: vec!["timbre".to_string()],
         equivalence_bound: None,
+        equivalence_max_p_correct: None,
         reference: ReferenceKind::PublishedCases {
             citation: "none".to_string(),
         },

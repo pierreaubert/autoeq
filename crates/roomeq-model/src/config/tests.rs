@@ -25,6 +25,7 @@ use super::policy::{
 };
 use super::report_outcome::BudgetAggregation;
 use super::report_outcome::PruningBudget;
+use super::reporting_config::ReportingConfig;
 use super::room_config::RoomConfig;
 use super::speaker_config::SpeakerConfig;
 use super::speaker_group::SpeakerGroup;

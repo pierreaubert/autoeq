@@ -355,6 +355,15 @@ impl CoverageMask {
                 message: "coverage mask must not be empty".into(),
             });
         }
+        autoeq_core::alignment::validate_alignment_grid(
+            &ndarray::Array1::from_vec(freq.clone()),
+            "coverage-mask source",
+        )
+        .map_err(|error| crate::MeasurementError::InvalidEvidence {
+            measurement: "coverage-mask".into(),
+            operation: "coverage_mask_new".into(),
+            message: error.to_string(),
+        })?;
         Ok(Self { freq, valid })
     }
 
@@ -369,6 +378,9 @@ impl CoverageMask {
     /// whose endpoints are both valid (or exactly on a valid source
     /// point). Gap bins and out-of-support targets stay invalid.
     pub fn resample(&self, target_freq: &[f64]) -> Result<Self, crate::MeasurementError> {
+        // Public fields and deserialization can bypass `new`; validate the
+        // source before `partition_point` assumes sorted frequencies.
+        Self::new(self.freq.clone(), self.valid.clone())?;
         if target_freq.is_empty() {
             return Err(crate::MeasurementError::InvalidEvidence {
                 measurement: "coverage-mask".into(),
@@ -426,6 +438,20 @@ pub fn resample_curve_with_coverage(
     coverage: &CoverageMask,
     target_freq: &Array1<f64>,
 ) -> Result<(Curve, CoverageMask), crate::MeasurementError> {
+    CoverageMask::new(coverage.freq.clone(), coverage.valid.clone())?;
+    autoeq_core::alignment::validate_alignment_grid(target_freq, "coverage-resample target")
+        .map_err(|error| crate::MeasurementError::InvalidEvidence {
+            measurement: "coverage-resample".into(),
+            operation: "resample_curve_with_coverage".into(),
+            message: error.to_string(),
+        })?;
+    curve
+        .validate("coverage-resample source")
+        .map_err(|error| crate::MeasurementError::InvalidEvidence {
+            measurement: "coverage-resample".into(),
+            operation: "resample_curve_with_coverage".into(),
+            message: error.to_string(),
+        })?;
     if coverage.freq.len() != curve.freq.len()
         || coverage
             .freq
@@ -634,6 +660,8 @@ mod tests {
         assert!(mask.resample(&[100.0, f64::NAN, 400.0]).is_err());
         assert!(mask.resample(&[400.0, 100.0]).is_err());
         assert!(mask.resample(&[100.0, -200.0]).is_err());
+        assert!(CoverageMask::new(vec![400.0, 100.0], vec![true, true]).is_err());
+        assert!(CoverageMask::new(vec![100.0, f64::NAN], vec![true, true]).is_err());
 
         let curve = Curve {
             freq: Array1::from_vec(freq),
@@ -647,6 +675,14 @@ mod tests {
         assert_eq!(resampled_curve.spl.len(), 5);
         assert_eq!(resampled_mask.valid, vec![true, false, false, true, false]);
         assert!(resampled_curve.coherence.is_some());
+        let invalid_grid = Array1::from_vec(vec![400.0, 100.0]);
+        assert!(resample_curve_with_coverage(&curve, &mask, &invalid_grid).is_err());
+        let malformed = CoverageMask {
+            freq: vec![400.0, 100.0],
+            valid: vec![true, true],
+        };
+        assert!(malformed.resample(&[200.0]).is_err());
+        assert!(resample_curve_with_coverage(&curve, &malformed, &target_grid).is_err());
     }
 
     #[test]

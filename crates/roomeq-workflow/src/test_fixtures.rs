@@ -42,6 +42,7 @@ pub fn empty_metadata() -> OptimizationMetadata {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        t60_flatness_tolerance_s: None,
         operation_gates: None,
         provisional_decisions: Vec::new(),
     }
@@ -76,6 +77,12 @@ pub fn single_channel_room_result(channel_name: &str) -> RoomOptimizationResult 
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     let mut channel_results = HashMap::new();

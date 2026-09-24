@@ -10,11 +10,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS = ("2.0_8361a", "2.0_d3v", "2.0_t7v")
 FEM_DATASETS = {
-    "large_multi_seat_2_1": ("left", "right"),
+    "large_multi_seat_2_1": ("left", "right", "subwoofer"),
     "medium_multi_seat": ("left", "right"),
-    "medium_stereo_2_1": ("left", "right"),
-    "small_stereo_2_2_mso": ("left", "right"),
-    "medium_surround_5_1": ("left", "right", "center", "surround_left", "surround_right"),
+    "medium_stereo_2_1": ("left", "right", "subwoofer"),
+    "small_stereo_2_2_mso": ("left", "right", "sub1", "sub2"),
+    "medium_surround_5_1": ("left", "right", "center", "surround_left", "surround_right", "subwoofer"),
 }
 SEEDS = [1, 7, 42, 424242, 8675309]
 
@@ -141,31 +141,36 @@ def main() -> None:
         manifest = json.load(handle)
     held_out = {
         "fem_large_multiseat_21": [
-            (c, f"../generate/fem/large_multi_seat_2_1/{name}_heldout_{p}.csv")
-            for c, name in (("L", "left"), ("R", "right"))
+            (c, f"../generate/fem/large_multi_seat_2_1/{name}_heldout_{p}.csv", p)
+            for c, name in (("L", "left"), ("R", "right"), ("Sub1", "subwoofer"))
             for p in (1, 2)
         ],
         "fem_medium_multiseat_20": [
-            (c, f"../generate/fem/medium_multi_seat/{name}_heldout_{p}.csv")
+            (c, f"../generate/fem/medium_multi_seat/{name}_heldout_{p}.csv", p)
             for c, name in (("L", "left"), ("R", "right"))
             for p in (1, 2)
         ],
-        "measured_stereo_8361a": [(c, f"../measured/2.0_8361a/{c}_heldout_{p}.csv") for c in ("L", "R") for p in (1, 2)],
-        "fem_medium_stereo_21": [(c, f"../generate/fem/medium_stereo_2_1/{name}_heldout_{p}.csv") for c, name in (("L", "left"), ("R", "right")) for p in (1, 2)],
-        "measured_stereo_d3v": [(c, f"../measured/2.0_d3v/{c}_heldout_{p}.csv") for c in ("L", "R") for p in (1, 2)],
-        "measured_stereo_t7v": [(c, f"../measured/2.0_t7v/{c}_heldout_{p}.csv") for c in ("L", "R") for p in (1, 2)],
+        "measured_stereo_8361a": [(c, f"../measured/2.0_8361a/{c}_heldout_{p}.csv", p) for c in ("L", "R") for p in (1, 2)],
+        "fem_medium_stereo_21": [(c, f"../generate/fem/medium_stereo_2_1/{name}_heldout_{p}.csv", p) for c, name in (("L", "left"), ("R", "right"), ("Sub1", "subwoofer")) for p in (1, 2)],
+        "measured_stereo_d3v": [(c, f"../measured/2.0_d3v/{c}_heldout_{p}.csv", p) for c in ("L", "R") for p in (1, 2)],
+        "measured_stereo_t7v": [(c, f"../measured/2.0_t7v/{c}_heldout_{p}.csv", p) for c in ("L", "R") for p in (1, 2)],
         "fem_small_stereo_22_mso": [
-            (c, f"../generate/fem/small_stereo_2_2_mso/{name}_heldout_{p}.csv")
-            for c, name in (("L", "left"), ("R", "right"))
+            (c, f"../generate/fem/small_stereo_2_2_mso/{name}_heldout_{p}.csv", p)
+            for c, name in (("L", "left"), ("R", "right"), ("Sub1", "sub1"), ("Sub2", "sub2"))
             for p in (1, 2)
         ],
-        "fem_medium_home_cinema_51": [(c, f"../generate/fem/medium_surround_5_1/{name}_heldout_{p}.csv") for c, name in (("L", "left"), ("R", "right"), ("C", "center"), ("SL", "surround_left"), ("SR", "surround_right")) for p in (1, 2)],
+        "fem_medium_home_cinema_51": [(c, f"../generate/fem/medium_surround_5_1/{name}_heldout_{p}.csv", p) for c, name in (("L", "left"), ("R", "right"), ("C", "center"), ("SL", "surround_left"), ("SR", "surround_right"), ("Sub1", "subwoofer")) for p in (1, 2)],
     }
     for scenario in manifest["scenarios"]:
         if scenario["id"] in held_out:
             scenario["held_out"] = [
-                {"channel": channel, "path": path}
-                for channel, path in held_out[scenario["id"]]
+                {
+                    "channel": channel,
+                    "path": path,
+                    **({"seat_id": f"synthetic-heldout-{position}"}
+                       if scenario["provenance"] == "fem" else {}),
+                }
+                for channel, path, position in held_out[scenario["id"]]
             ]
         scenario["robustness"] = {
             "seeds": SEEDS,

@@ -36,7 +36,10 @@ pub struct TargetReconciliationSummary {
 ///
 /// One row per proposal band, in proposal order. `graph_identity` binds
 /// final claims; without it rows stay provisional and never read as
-/// delivery claims.
+/// delivery claims. Every row carries the enforced user-target identity in
+/// `evidence_refs` when the report names one, so the respected target stays
+/// identifiable without inferring it from bands or reasons; callers must not
+/// push it again.
 #[allow(clippy::too_many_arguments)]
 pub fn reconcile_target_decisions(
     report: &TargetEnforcementReport,
@@ -66,6 +69,12 @@ pub fn reconcile_target_decisions(
                 (DecisionStatus::Applied, vec![String::from("target_ok")])
             };
             reasons.extend(outcome.reason_codes.iter().cloned());
+            let mut evidence_refs = proposal.evidence_refs.clone();
+            if let Some(target_id) = &report.resolution.user_target_id
+                && !evidence_refs.contains(target_id)
+            {
+                evidence_refs.push(target_id.clone());
+            }
             DecisionRecord {
                 decision_id: format!("target-band-{index}"),
                 ledger_version: DECISION_LEDGER_VERSION.to_string(),
@@ -85,7 +94,7 @@ pub fn reconcile_target_decisions(
                     unit: String::from("ratio"),
                 }],
                 limits: Vec::new(),
-                evidence_refs: proposal.evidence_refs.clone(),
+                evidence_refs,
                 confidence: AssessmentConfidence::default(),
                 related_decision_ids: Vec::new(),
                 supersedes_ids: Vec::new(),
@@ -153,11 +162,76 @@ mod tests {
             assert!(record.validate().is_ok());
             assert!(record.is_final_claim());
             assert_eq!(record.filter_center_hz, None);
+            // The enforced user target stays identifiable on every row.
+            assert_eq!(
+                record
+                    .evidence_refs
+                    .iter()
+                    .filter(|reference| *reference == "user-flat")
+                    .count(),
+                1,
+                "row {} must carry the enforced target exactly once",
+                record.decision_id
+            );
         }
         assert!(
             records[0]
                 .reason_codes
                 .contains(&String::from("room_curve_only_detail_eq"))
         );
+    }
+
+    #[test]
+    fn reconcile_rows_without_named_target_invent_no_identity() {
+        let mut chain = roomeq_model::target_transition::TargetChain {
+            version: TARGET_TRANSITION_VERSION.to_string(),
+            stages: vec![TargetStage {
+                kind: TargetStageKind::MeasuredCalibration,
+                stage_id: String::from("cal"),
+                label: String::from("calibration"),
+                evidence_refs: Vec::new(),
+            }],
+            transition: TransitionConfig {
+                version: TARGET_TRANSITION_VERSION.to_string(),
+                center_hz: 300.0,
+                width_oct: 1.0,
+            },
+            user_target_id: None,
+        };
+        // A chain without a user target still enforces the damage guard;
+        // rows carry no invented identity.
+        let proposals = proposals();
+        let report = enforce_target_chain(&chain, &proposals).unwrap();
+        assert!(report.resolution.user_target_id.is_none());
+        let records = reconcile_target_decisions(
+            &report,
+            &proposals,
+            "stereo",
+            "main-l",
+            vec![String::from("meas-1")],
+            vec![String::from("mlp")],
+            Some(String::from("graph-1")),
+        );
+        assert_eq!(records.len(), 2);
+        for record in &records {
+            assert!(record.validate().is_ok());
+            assert!(!record.evidence_refs.iter().any(|reference| {
+                reference == "user-flat" || reference.starts_with("user-target")
+            }));
+        }
+        chain.user_target_id = Some(String::from("user-flat"));
+        let report = enforce_target_chain(&chain, &proposals).unwrap();
+        let records = reconcile_target_decisions(
+            &report,
+            &proposals,
+            "stereo",
+            "main-l",
+            vec![String::from("meas-1")],
+            vec![String::from("mlp")],
+            Some(String::from("graph-1")),
+        );
+        for record in &records {
+            assert!(record.evidence_refs.contains(&String::from("user-flat")));
+        }
     }
 }

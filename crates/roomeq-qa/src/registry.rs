@@ -976,6 +976,7 @@ mod tests {
                 stage_outcomes: Vec::new(),
                 qa_seed_distribution: None,
                 effective_config: None,
+                t60_flatness_tolerance_s: None,
                 operation_gates: None,
 
                 provisional_decisions: Vec::new(),

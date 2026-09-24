@@ -1,7 +1,7 @@
 //! RoomEQ configuration-file loading and application path resolution.
 
 use crate::measurement::{
-    DEFAULT_FREQUENCY_SAMPLES, load_source_individual_with_frequency_samples,
+    DEFAULT_FREQUENCY_SAMPLES, load_source_with_individual_with_frequency_samples,
 };
 use std::path::{Path, PathBuf};
 
@@ -77,9 +77,18 @@ fn migrate_legacy_optimizer_mode(config: &mut serde_json::Value) {
 /// untagged and one system map uses `flatten`; a strict boundary gives JSON
 /// files the desired typo protection without changing programmatic model
 /// construction or the representation of those compatibility types.
-pub fn deserialize_room_config_strict(config: serde_json::Value) -> Result<RoomConfig> {
+pub fn deserialize_room_config_strict(mut config: serde_json::Value) -> Result<RoomConfig> {
     if let Some(version) = config.get("version").and_then(serde_json::Value::as_str) {
         roomeq_model::validate_config_version(version).map_err(anyhow::Error::msg)?;
+    }
+    // Legacy authored configurations use a top-level prose label. It has no
+    // processing semantics, but is an explicitly accepted input field rather
+    // than a typo that should disable strict validation for other fields.
+    if let Some(root) = config.as_object_mut()
+        && let Some(description) = root.remove("description")
+        && !description.is_string()
+    {
+        bail!("RoomEQ config description must be a string");
     }
     let encoded = serde_json::to_vec(&config).context("Failed to encode merged config JSON")?;
     let mut deserializer = serde_json::Deserializer::from_slice(&encoded);
@@ -195,8 +204,12 @@ pub fn validate_room_config_for_workflow_with_frequency_samples(
     let mut errors = Vec::new();
     for (speaker_name, speaker) in &config.speakers {
         for (source_index, source) in collect_sources(speaker).into_iter().enumerate() {
-            match load_source_individual_with_frequency_samples(source, frequency_samples) {
-                Ok(curves) if curves.is_empty() => errors.push(format!(
+            // Support-aware loading: disjoint sources condition each segment
+            // independently and retain gap display samples. Averaging paths
+            // (group/multisub/home-cinema) keep their own curve-only refusal
+            // until they consume per-band authorization.
+            match load_source_with_individual_with_frequency_samples(source, frequency_samples) {
+                Ok((_, individual)) if individual.is_empty() => errors.push(format!(
                     "speaker '{speaker_name}' source {source_index} produced no measurement curves"
                 )),
                 Ok(_) => {}
@@ -397,6 +410,40 @@ mod tests {
         }))
         .expect_err("unknown nested field must fail");
         assert!(nested_error.to_string().contains("optimizer.target_tilt"));
+    }
+
+    #[test]
+    fn strict_deserializer_accepts_legacy_descriptions_without_opening_unknown_fields() {
+        for fixture in [
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/data/roomeq/test_config_scenario_a_full.json"
+            )),
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../tests/data/roomeq/test_config_scenario_b_full.json"
+            )),
+        ] {
+            let value = serde_json::from_str(fixture).unwrap();
+            assert!(deserialize_room_config_strict(value).is_ok());
+        }
+        assert!(
+            deserialize_room_config_strict(serde_json::json!({
+                "version": "3.0.0",
+                "description": 42,
+                "speakers": {}
+            }))
+            .is_err()
+        );
+        assert!(
+            deserialize_room_config_strict(serde_json::json!({
+                "version": "3.0.0",
+                "description": "legacy label",
+                "speakers": {},
+                "optimiser": {}
+            }))
+            .is_err()
+        );
     }
 
     #[test]

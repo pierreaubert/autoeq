@@ -74,7 +74,11 @@ pub struct ObservedQuantity {
 
 impl ObservedQuantity {
     /// Build a quantity; rejects empty names/units and nonfinite values.
-    pub fn new(name: impl Into<String>, value: f64, unit: impl Into<String>) -> Result<Self, String> {
+    pub fn new(
+        name: impl Into<String>,
+        value: f64,
+        unit: impl Into<String>,
+    ) -> Result<Self, String> {
         let quantity = Self {
             name: name.into(),
             value,
@@ -117,7 +121,9 @@ pub struct EvidenceRegistry {
 impl EvidenceRegistry {
     /// Build a registry; rejects blank IDs.
     pub fn new(ids: impl IntoIterator<Item = String>) -> Result<Self, String> {
-        let mut registry = Self { ids: BTreeSet::new() };
+        let mut registry = Self {
+            ids: BTreeSet::new(),
+        };
         for id in ids {
             if id.trim().is_empty() {
                 return Err(String::from("evidence reference ID must not be empty"));
@@ -249,7 +255,9 @@ impl ProvisionalDecision {
     pub fn link_related(&mut self, other_id: impl Into<String>) -> Result<(), EmitError> {
         let other_id = other_id.into();
         if other_id.trim().is_empty() {
-            return Err(EmitError(String::from("related decision ID must not be empty")));
+            return Err(EmitError(String::from(
+                "related decision ID must not be empty",
+            )));
         }
         if !self.related_decision_ids.contains(&other_id) {
             self.related_decision_ids.push(other_id);
@@ -285,10 +293,14 @@ pub fn emit_decision(
         return Err(invalid(String::from("decision_id must not be empty")));
     }
     if params.logical_input.trim().is_empty() {
-        return Err(invalid(String::from("decision logical_input must not be empty")));
+        return Err(invalid(String::from(
+            "decision logical_input must not be empty",
+        )));
     }
     if params.physical_output.trim().is_empty() {
-        return Err(invalid(String::from("decision physical_output must not be empty")));
+        return Err(invalid(String::from(
+            "decision physical_output must not be empty",
+        )));
     }
     if let Some(band_hz) = params.frequency_band_hz
         && (!band_hz[0].is_finite()
@@ -415,8 +427,7 @@ mod provisional_decision_tests {
     use super::*;
 
     fn registry() -> EvidenceRegistry {
-        EvidenceRegistry::new([String::from("ev-1"), String::from("ev-2")])
-            .expect("valid registry")
+        EvidenceRegistry::new([String::from("ev-1"), String::from("ev-2")]).expect("valid registry")
     }
 
     fn base_params() -> DecisionParams {
@@ -492,7 +503,10 @@ mod provisional_decision_tests {
         assert_eq!(record.limits[0].unit, "db");
         // A constrained partial links its remainder instead of dropping it.
         record.link_related("dec-remainder").expect("valid link");
-        assert_eq!(record.related_decision_ids, vec![String::from("dec-remainder")]);
+        assert_eq!(
+            record.related_decision_ids,
+            vec![String::from("dec-remainder")]
+        );
         assert!(record.link_related("  ").is_err());
 
         assert!(
@@ -561,7 +575,10 @@ mod provisional_decision_tests {
                 .contains(&String::from("optimizer_failed"))
         );
         assert!(!failure.authorizes_removal());
-        assert_eq!(failure.confidence, roomeq_model::AssessmentConfidence::Unknown);
+        assert_eq!(
+            failure.confidence,
+            roomeq_model::AssessmentConfidence::Unknown
+        );
         // Blank identities and bad bands fail instead of shipping.
         let mut bad = base_params();
         bad.logical_input = String::from("  ");

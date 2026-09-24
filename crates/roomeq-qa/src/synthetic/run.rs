@@ -761,6 +761,39 @@ mod tests {
     use roomeq_model::{StageOutcome, StageStatus};
 
     #[test]
+    #[ignore = "runs the five-seed 7.1.4 optimizer"]
+    fn reduced_level_714_mso_does_not_fail_structural_headroom() {
+        use crate::synthetic::consts::{ALL_LAYOUTS, ALL_SUB_TOPOS, EASY, SAMPLE_RATE};
+        use roomeq_model::ProcessingMode;
+
+        let layout = ALL_LAYOUTS
+            .iter()
+            .find(|layout| layout.name == "7.1.4")
+            .unwrap();
+        let topology = ALL_SUB_TOPOS
+            .iter()
+            .find(|topology| topology.name == "mso_2sub")
+            .unwrap();
+        let base =
+            roomeq_synthetic::generate_speaker_rolloff_curve(20.0, 20_000.0, 200, 80.0, -6.0);
+        let result = super::run_multichannel_test(
+            layout,
+            Some(topology),
+            &EASY,
+            &base,
+            ProcessingMode::LowLatency,
+            SAMPLE_RATE,
+        );
+        assert!(
+            !result.reason.contains("structural baseline requires"),
+            "{}: {}",
+            result.name,
+            result.reason
+        );
+        assert!(result.passed, "{}: {}", result.name, result.reason);
+    }
+
+    #[test]
     fn runtime_score_tolerance_accepts_small_absolute_wobble() {
         assert!(score_is_within_runtime_regression_tolerance(3.257, 3.357));
         assert!(!score_is_within_runtime_regression_tolerance(3.257, 3.6));

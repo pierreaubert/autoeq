@@ -13,7 +13,7 @@ from check_selected_delay_artifact import check_selected_delay
 
 TEST_NAME = "roadmap_correction_joint_drive_pair_reaches_public_finalization"
 COMBINED_TEST_NAME = "roadmap_correction_joint_drive_search_reaches_final_graph_trials"
-SCRATCH_ROOT = Path("/Volumes/home_tmp/tmp")
+SCRATCH_ROOT = Path(os.environ.get("ROOMEQ_QA_SCRATCH_ROOT", "/Volumes/home_tmp/tmp"))
 
 
 def run(artifact: Path, *, combined: bool = False) -> dict:

@@ -26,6 +26,7 @@ fn capture(id: &str, grid: Vec<f64>) -> RawCaptureRef {
         calibration_id: None,
         artifact_hash: None,
         grid_hz: grid,
+        validity_mask: None,
     }
 }
 

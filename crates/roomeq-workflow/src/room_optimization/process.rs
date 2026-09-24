@@ -49,6 +49,9 @@ fn with_empty_veto(result: Result<GroupProcessingResult>) -> Result<MixedModeRes
                 Vec::new(),
                 None,
                 None,
+                // Group processing has no per-channel segment report; the
+                // engine still enforces single-band behavior unchanged.
+                None,
             )
         },
     )
@@ -180,6 +183,10 @@ pub(super) fn process_generic_channels(
                 audibility_veto,
                 veto_adjudication,
                 measurement_conditioning,
+                // Multi-segment authorization is enforced in-engine; the
+                // per-segment report is visible at the single-channel
+                // boundary and is not re-published down this chain.
+                _segment_support,
             )) => {
                 send_progress(
                     observer_shared,

@@ -613,6 +613,7 @@ fn optimize_stereo_2_0_empty_config_errors() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
     let sys = config.system.as_ref().unwrap();
@@ -651,6 +652,7 @@ fn optimize_home_cinema_empty_config_succeeds() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
     let sys = config.system.as_ref().unwrap();

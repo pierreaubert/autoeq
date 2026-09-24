@@ -158,14 +158,21 @@ pub fn preprocess_channel(
         broadband_max_freq,
         sample_rate,
     );
-    if prepared.valid_band_hz().is_some() {
+    if prepared.has_valid_bands() {
         // Fit and accept on usable evidence, then replay the selected transfer
         // on the retained raw grid for reporting and later realized checks.
+        // Multi-segment support re-selects the union afterwards so the
+        // optimizer never fits gap display samples as if they were measured.
         let mut shifted = curve.clone();
         shifted.spl += broadband.mean_shift;
         let transfer =
             response::compute_peq_complex_response(&broadband.biquads, &shifted.freq, sample_rate);
-        broadband.curve_for_optim = response::apply_complex_response(&shifted, &transfer);
+        let replayed = response::apply_complex_response(&shifted, &transfer);
+        broadband.curve_for_optim = if prepared.valid_bands_hz().len() > 1 {
+            prepared.usable_curve(&replayed)?.into_owned()
+        } else {
+            replayed
+        };
     }
 
     target.pre_score = pre_score;

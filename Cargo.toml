@@ -114,11 +114,11 @@ proptest = { version = "1.8", default-features = false, features = ["std"] }
 serial_test = "4"
 wide = "0.6.1"
 
-# Math-Audio crates from GitHub
-math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+# Shared report primitives at the published Gitea revision.
+math-iir-fir = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
+math-dsp = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
+math-optimisation = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
+math-rir = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
 sofa-reader = "0.2"
 
 # Core numerical computing

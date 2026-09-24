@@ -442,7 +442,13 @@ fn test_add_delay_plugin() {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
         target_curve: None,
+        early_late_curves: None,
     };
 
     add_delay_plugin(&mut chain, 10.0);
@@ -492,6 +498,7 @@ fn test_create_dsp_chain_output() {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        t60_flatness_tolerance_s: None,
         operation_gates: None,
 
         provisional_decisions: Vec::new(),
@@ -573,6 +580,7 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        t60_flatness_tolerance_s: None,
         operation_gates: None,
 
         provisional_decisions: Vec::new(),

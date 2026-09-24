@@ -163,6 +163,7 @@ fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig 
         optimizer: OptimizerConfig::default(),
         recording_config,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
         provenance: Default::default(),
     }

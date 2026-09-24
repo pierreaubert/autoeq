@@ -16,7 +16,13 @@ def _band(value):
 
 
 def _band_label(value):
-    return f"{value[0]:g}–{value[1]:g} Hz"
+    # A narrow but real support gap must not render as a zero-width interval
+    # because six significant digits round both endpoints to the same text.
+    for precision in (6, 10, 15, 17):
+        low, high = (f"{endpoint:.{precision}g}" for endpoint in value)
+        if low != high:
+            return f"{low}–{high} Hz"
+    return f"{value[0]!r}–{value[1]!r} Hz"
 
 
 def _measurement_conditioning_history(stage):
@@ -194,7 +200,7 @@ _K4_SET_TEXT = {
 }
 
 
-def _k4_sets_summary(records: list, delivery_blocked: bool = False) -> str:
+def _k4_sets_summary(records: list, delivery_blocked: bool = False) -> list[str]:
     """Group decision records into acceptance sets for the top summary.
 
     Applied delivery claims, reversions, provisional history, and withheld
@@ -226,7 +232,7 @@ def _k4_sets_summary(records: list, delivery_blocked: bool = False) -> str:
         ids = ", ".join(sets[bucket]) if sets[bucket] else "none"
         why = f" Reasons: {', '.join(reasons[bucket])}." if reasons[bucket] else " No reason recorded."
         parts.append(f"{len(sets[bucket])} {_K4_SET_TEXT[bucket]} ({ids}).{why}")
-    return "Final acceptance sets: " + " ".join(parts)
+    return parts
 
 
 def _k4_bucket_ids(records: list, bucket: str) -> list[str]:
@@ -327,7 +333,12 @@ def _k4_section_html(data: dict) -> tuple[str, list[str]]:
     if disagree:
         banner += ("<p><strong>Final records disagree on the delivered-graph identity; "
                   "this explanation is unverified and nothing below is shown as delivered.</strong></p>")
-    summary = f"<p><strong>{escape(_k4_sets_summary(decisions, delivery_blocked or binding_invalid))}</strong></p>"
+    summary_rows = _k4_sets_summary(decisions, delivery_blocked or binding_invalid)
+    summary = (
+        '<h4>Final acceptance sets:</h4><ul class="acceptance-sets">'
+        + ''.join(f'<li>{escape(row)}</li>' for row in summary_rows)
+        + '</ul>'
+    )
     table = ('<h3>Recorded final correction decisions</h3>' + summary + banner)
     if rows:
         table += ('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;text-align:left">'

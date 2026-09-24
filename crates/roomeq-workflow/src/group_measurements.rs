@@ -59,13 +59,10 @@ pub(crate) fn multisub_source_reference_scope(
         ) {
             return None;
         }
-        if let Some([lo, hi]) = provenance.valid_band_hz
-            && (!lo.is_finite()
-                || !hi.is_finite()
-                || lo <= 0.0
-                || lo >= hi
-                || lo > band_hz[0]
-                || hi < band_hz[1])
+        if let Some(bands) = provenance.declared_support_bands().ok()?
+            && !bands
+                .iter()
+                .any(|[lo, hi]| *lo <= band_hz[0] && *hi >= band_hz[1])
         {
             return None;
         }

@@ -140,7 +140,24 @@ fn verify_delivered_channel_alignment(
         .collect();
     let (_, spread, band) =
         final_role_level_alignment_gains(config, &result.deployed_source_curves, &reference_curves);
-    if !spread.is_finite() || spread > FINAL_CHANNEL_LEVEL_TOLERANCE_DB {
+    if !spread.is_finite() {
+        return Err(failed(format!(
+            "delivered routed channel-level spread {spread:.3} dB exceeds {:.3} dB over {:.1}-{:.1} Hz",
+            FINAL_CHANNEL_LEVEL_TOLERANCE_DB, band.0, band.1,
+        )));
+    }
+    let structural_fallback = result.metadata.stage_outcomes.iter().any(|stage| {
+        stage.stage == "final_correction_selection"
+            && stage
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "structural_baseline_published")
+    }) && result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .is_some_and(|report| !report.accepted);
+    if spread > FINAL_CHANNEL_LEVEL_TOLERANCE_DB && !structural_fallback {
         return Err(failed(format!(
             "delivered routed channel-level spread {spread:.3} dB exceeds {:.3} dB over {:.1}-{:.1} Hz",
             FINAL_CHANNEL_LEVEL_TOLERANCE_DB, band.0, band.1,
@@ -149,16 +166,36 @@ fn verify_delivered_channel_alignment(
     let mut check = StageCheck::pass("delivered_channel_level_spread_db", StageCheckKind::Safety);
     check.observed = Some(spread);
     check.limit = Some(FINAL_CHANNEL_LEVEL_TOLERANCE_DB);
+    check.passed = spread <= FINAL_CHANNEL_LEVEL_TOLERANCE_DB;
     result
         .metadata
         .stage_outcomes
         .retain(|stage| stage.stage != "final_delivered_channel_alignment");
     result.metadata.stage_outcomes.push(StageOutcome {
         stage: "final_delivered_channel_alignment".into(),
-        status: StageStatus::Applied,
+        status: if check.passed {
+            StageStatus::Applied
+        } else {
+            StageStatus::Degraded
+        },
         checks: vec![check],
-        advisories: vec![format!("replayed_band_hz={:.1}-{:.1}", band.0, band.1)],
+        advisories: vec![format!(
+            "replayed_band_hz={:.1}-{:.1}; spread_db={spread:.6}; limit_db={FINAL_CHANNEL_LEVEL_TOLERANCE_DB:.6}",
+            band.0, band.1
+        )],
     });
+    if spread > FINAL_CHANNEL_LEVEL_TOLERANCE_DB
+        && let Some(report) = result.metadata.correction_acceptance.as_mut()
+    {
+        report.accepted = false;
+        report.decision = roomeq_model::CorrectionDecision::Rejected;
+        report
+            .violations
+            .push("baseline_delivered_channel_level_spread".into());
+        report.violations.sort();
+        report.violations.dedup();
+        report.refresh_outcome();
+    }
     Ok(())
 }
 
@@ -798,15 +835,33 @@ fn publish_baseline(
     // graph. Reconstruct playback before measuring levels; never retain a
     // successful alignment report from a different candidate.
     refresh_responses(&mut baseline, fs, dir)?;
-    let alignment =
-        apply_final_channel_level_alignment(&mut baseline, config, fs, dir).map_err(|error| {
-            failed(format!(
-                "structural fallback channel-level replay failed: {error}"
-            ))
-        })?;
-    if alignment.checks.iter().any(|check| !check.passed) {
-        return Err(failed("fallback channel-level alignment failed"));
-    }
+    // Alignment is a candidate operation. A rejected correction must not make
+    // the structural fallback disappear merely because its own optional level
+    // alignment cannot pass the acoustic checks. Try it on a copy so a failed
+    // attempt cannot leave a partially modified fallback graph behind.
+    let mut aligned = baseline.clone();
+    let alignment = match apply_final_channel_level_alignment(&mut aligned, config, fs, dir) {
+        Ok(outcome) if outcome.checks.iter().all(|check| check.passed) => {
+            baseline = aligned;
+            outcome
+        }
+        Ok(mut outcome) => {
+            outcome.status = StageStatus::Degraded;
+            outcome
+                .advisories
+                .push("structural_fallback_level_alignment_rejected".into());
+            outcome
+        }
+        Err(error @ AutoeqError::OptimizationFailed { .. }) => StageOutcome {
+            stage: "final_channel_level_alignment".into(),
+            status: StageStatus::Degraded,
+            advisories: vec![format!(
+                "structural_fallback_level_alignment_rejected: {error}"
+            )],
+            checks: Vec::new(),
+        },
+        Err(error) => return Err(error),
+    };
     baseline.metadata.stage_outcomes.retain(|stage| {
         stage.stage != "final_channel_level_alignment"
             && stage.stage != "channel_level_candidate_requires_final_refinement"
@@ -1375,6 +1430,12 @@ fn headroom_input_chain<'a>(
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             });
     }
     result
@@ -2349,6 +2410,57 @@ mod tests {
         let error = verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path())
             .expect_err("a stale success must not authorize a changed graph");
         assert!(error.to_string().contains("10.000 dB"), "{error}");
+
+        // An already rejected structural fallback remains inspectable with a
+        // failed delivered check, rather than acquiring a false accepted stage.
+        result.metadata.correction_acceptance = Some(roomeq_model::CorrectionAcceptanceReport {
+            policy: roomeq_model::CorrectionAcceptancePolicy::RuntimeSafety,
+            runtime_policy: None,
+            decision: roomeq_model::CorrectionDecision::IdentityFallback,
+            accepted: false,
+            outcome: roomeq_model::RoomEqOutcome::Unchanged,
+            metrics: roomeq_model::CorrectionMetricSummary {
+                auditory_frequency_measure: "erb_rate".into(),
+                pre_target_weighted_rms_db: 1.0,
+                post_target_weighted_rms_db: 1.0,
+                improvement_db: 0.0,
+                improvement_ratio: 0.0,
+                post_p95_abs_residual_db: 1.0,
+                post_worst_abs_residual_db: 1.0,
+                correction_rms_db: 0.0,
+                max_abs_correction_db: 0.0,
+            },
+            violations: Vec::new(),
+            reverted_stages: Vec::new(),
+            acoustic_quality: None,
+            realization_quality: None,
+        });
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "final_correction_selection".into(),
+            status: StageStatus::Degraded,
+            advisories: vec!["structural_baseline_published".into()],
+            checks: Vec::new(),
+        });
+        verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path()).unwrap();
+        let delivered = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "final_delivered_channel_alignment")
+            .unwrap();
+        assert_eq!(delivered.status, StageStatus::Degraded);
+        assert!(delivered.checks.iter().any(|check| !check.passed));
+        let acceptance = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(!acceptance.accepted);
+        assert_eq!(
+            acceptance.decision,
+            roomeq_model::CorrectionDecision::Rejected
+        );
+        assert!(
+            acceptance
+                .violations
+                .contains(&"baseline_delivered_channel_level_spread".to_string())
+        );
     }
 
     #[test]

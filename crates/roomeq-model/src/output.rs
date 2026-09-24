@@ -120,6 +120,212 @@ pub use crate::IrWaveform;
 /// Backwards-compatible name for the canonical DSP execution/export graph.
 pub type DspChainOutput = crate::DspGraph;
 
+/// Third-octave early/late energy report for one channel's measured room IR.
+///
+/// The viewer renders this field only when `method`, `reference`,
+/// `smoothing`, and `split_ms` carry the exact values below and the three
+/// curves share one finite grid covering 1–8 kHz. Absence renders as
+/// "pending", never as success.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelEarlyLateCurves {
+    /// Energy-decomposition method; always `"incoherent_band_energy"`.
+    pub method: String,
+    /// Band-energy reference; always `"full_peak_band"`.
+    pub reference: String,
+    /// Frequency smoothing; always `"third_octave"`.
+    pub smoothing: String,
+    /// Early/late split after the direct reference, in milliseconds.
+    pub split_ms: f64,
+    /// Evidence basis; always `"measured_room_ir"`.
+    pub basis: String,
+    /// Direct-sound reference: `"broadband envelope peak"`, or
+    /// `"120 Hz lowpass envelope peak"` for subwoofer/LFE channels.
+    pub direct_reference: String,
+    /// Third-octave coverage of the emitted curves in Hz.
+    pub valid_band_hz: [f64; 2],
+    /// Incoherent sum of early and late band energies (not a complex sum).
+    pub full: CurveData,
+    /// Band energy in the first 20 ms after the direct reference.
+    pub early: CurveData,
+    /// Band energy after the first 20 ms until the IR ends.
+    pub late: CurveData,
+}
+
+/// One detected early reflection from a measured room IR.
+///
+/// Gains are dBFS relative to the 1–8 kHz filtered direct peak; times are
+/// post-direct milliseconds. The viewer cross-checks distance against
+/// 34.3 cm/ms and the first dip against 500/time_ms, and requires gains in
+/// `[-15, 0]` dBFS within 15 ms.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelReflectionEvent {
+    /// Event gain in dBFS relative to the filtered direct peak.
+    pub gain_dbfs: f64,
+    /// Post-direct arrival time in milliseconds.
+    pub time_ms: f64,
+    /// Path difference in centimeters.
+    pub distance_cm: f64,
+    /// First comb dip in Hz.
+    pub first_dip_hz: f64,
+    /// Comb ripple in dB; null when the gain equals direct (unbounded).
+    pub ripple_db: Option<f64>,
+}
+
+/// Band-limited early-reflection table for one channel's measured room IR.
+///
+/// The viewer renders this field only when `method`, `band_hz`,
+/// `threshold_dbfs`, and a nonempty `direct_reference` carry the exact
+/// values below. Absence renders as pending, never as success.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelEarlyReflections {
+    /// Evidence basis; always `"measured_room_ir"`.
+    pub basis: String,
+    /// Table method; always `"bandlimited_early_reflection_table_v1"`.
+    pub method: String,
+    /// Analysis band in Hz; always `[1000, 8000]`.
+    pub band_hz: [f64; 2],
+    /// Detection threshold in dBFS; always `-15`.
+    pub threshold_dbfs: f64,
+    /// Direct-sound reference description (nonempty).
+    pub direct_reference: String,
+    /// Pre-correction events from the measured IR.
+    pub pre: Vec<ChannelReflectionEvent>,
+    /// Post-correction events; empty until a post-correction IR is measured.
+    pub post: Vec<ChannelReflectionEvent>,
+}
+
+/// One octave-band Schroeder/T60 fit from a measured room IR.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelT60Band {
+    /// Octave centre frequency in Hz.
+    pub centre_hz: f64,
+    /// Selected T60 in seconds; null when invalid.
+    pub t60_s: Option<f64>,
+    /// Fit range that produced the value (`T30`/`T20`; also `EDT` on rows
+    /// that stay invalid because EDT alone is not late-decay T60).
+    pub fit_range: Option<String>,
+    /// `r²` of the selected fit (0.0 when invalid).
+    pub r2: f64,
+    /// Whether the value passed the fit-range + `min_r2` policy.
+    pub valid: bool,
+    /// Machine-readable reason when invalid (nonempty).
+    pub reason: String,
+}
+
+/// Nine-band octave T60 report for one channel's measured room IR.
+///
+/// The viewer requires all nine ordered bands with valid rows carrying
+/// `T20`/`T30` fits above `min_r2`, and invalid rows carrying a nonempty
+/// reason with no plotted value. Absence renders as pending.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelOctaveT60 {
+    /// Evidence basis; always `"measured_room_ir"`.
+    pub basis: String,
+    /// Minimum fit `r²` for validity.
+    pub min_r2: f64,
+    /// Nine octave bands, 63 Hz–16 kHz in order.
+    pub bands: Vec<ChannelT60Band>,
+}
+
+/// STFT waterfall decay grid for one channel's measured room IR (pre-
+/// correction only; there is no post-correction IR at optimization time).
+///
+/// The viewer renders this field only when `basis`, `method`, and
+/// `reference` carry the exact values below and the grid is a nonempty
+/// finite `times × freqs` matrix matching `mags_db`. Absence renders as
+/// pending, never as success.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelWaterfall {
+    /// Evidence basis; always `"measured_room_ir"`.
+    pub basis: String,
+    /// Analysis method; always `"hann_stft_waterfall_v1"`.
+    pub method: String,
+    /// Level reference; always `"full_grid_peak"` (each grid is relative
+    /// to its own peak, so two channels' grids do not compare absolutely).
+    pub reference: String,
+    /// Emitted frequency coverage in Hz.
+    pub valid_band_hz: [f64; 2],
+    /// STFT window in milliseconds; always `32`.
+    pub window_ms: f64,
+    /// STFT hop in milliseconds; always `2`.
+    pub hop_ms: f64,
+    /// Post-direct span in milliseconds; always `500`.
+    pub post_ms: f64,
+    /// Frame centre times relative to the direct peak in milliseconds.
+    pub times_ms: Vec<f64>,
+    /// Bin centre frequencies in Hz.
+    pub freqs_hz: Vec<f64>,
+    /// Magnitudes in dB relative to the grid peak, `mags_db[frame][bin]`.
+    pub mags_db: Vec<Vec<f32>>,
+    /// Machine-readable scope and non-comparison disclaimer.
+    pub scope: String,
+}
+
+/// One prominent resonance decay slice from a measured room IR.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelResonanceDecay {
+    /// Resonance frequency in Hz.
+    pub freq_hz: f64,
+    /// Level at the 60 ms slice in dB relative to the waterfall grid peak.
+    pub level_db: f64,
+    /// Fitted decay time in seconds; null when the bin has no fittable
+    /// 20–200 ms decay.
+    pub decay_time_s: Option<f64>,
+}
+
+/// Prominent-resonance decay slices for one channel's measured room IR.
+///
+/// The viewer renders this field only when `basis`, `method`, and
+/// `reference` carry the exact values below. An empty `decays` list means
+/// the analysis ran and found no prominent resonances, not a failure.
+/// Absence of the field renders as pending.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelResonanceDecays {
+    /// Evidence basis; always `"measured_room_ir"`.
+    pub basis: String,
+    /// Detection method; always `"hann_stft_waterfall_v1"`.
+    pub method: String,
+    /// Level reference; always `"full_grid_peak"`.
+    pub reference: String,
+    /// Slice offset after the direct peak in milliseconds; always `60`.
+    pub slice_ms: f64,
+    /// Detected resonances with fitted decay times.
+    pub decays: Vec<ChannelResonanceDecay>,
+}
+
+/// Three-cycle wavelet heatmap for one channel's measured room IR (pre-
+/// correction only).
+///
+/// The viewer renders this field only when `basis`, `method`, and
+/// `reference` carry the exact values below and the heatmap is a nonempty
+/// finite `freqs × times` matrix matching `mags_db` with at least two
+/// frequency rows and two time columns. Absence renders as pending.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelWavelet {
+    /// Evidence basis; always `"measured_room_ir"`.
+    pub basis: String,
+    /// Analysis method; always `"complex_morlet_three_cycle_v1"`.
+    pub method: String,
+    /// Level reference; always `"full_grid_peak"`.
+    pub reference: String,
+    /// Emitted frequency coverage in Hz.
+    pub valid_band_hz: [f64; 2],
+    /// Wavelet cycles; always `3`.
+    pub cycles: f64,
+    /// Log-grid density in frequencies per octave; always `6`.
+    pub freqs_per_octave: f64,
+    /// Raw frame hop in milliseconds; always `1`.
+    pub hop_ms: f64,
+    /// Display range in dB; always `[-30, 0]`.
+    pub display_range_db: [f64; 2],
+    /// Centre frequencies in Hz.
+    pub freqs_hz: Vec<f64>,
+    /// Frame centre times relative to the direct peak in milliseconds.
+    pub times_ms: Vec<f64>,
+    /// Magnitudes in dB relative to the grid peak, `mags_db[freq][time]`.
+    pub mags_db: Vec<Vec<f32>>,
+}
+
 /// DSP chain for a single channel
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelDspChain {
@@ -158,6 +364,31 @@ pub struct ChannelDspChain {
     /// Stage-bound joint subwoofer diagnostics, when that method ran.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub joint_sub: Option<crate::JointSubDiagnostics>,
+    /// Third-octave early/late energy from the channel's measured room IR,
+    /// when a complete IR was declared at optimization time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early_late_curves: Option<ChannelEarlyLateCurves>,
+    /// Band-limited early-reflection table from the channel's measured room
+    /// IR, when a complete IR was declared at optimization time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub early_reflections: Option<ChannelEarlyReflections>,
+    /// Nine-band octave T60 from the channel's measured room IR, when a
+    /// complete IR was declared at optimization time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t60_octaves: Option<ChannelOctaveT60>,
+    /// STFT waterfall decay grid from the channel's measured room IR, when
+    /// a complete 500 ms post-peak window was declared at optimization
+    /// time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub waterfall: Option<ChannelWaterfall>,
+    /// Prominent-resonance decay slices from the channel's measured room
+    /// IR, accompanying `waterfall`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resonance_decays: Option<ChannelResonanceDecays>,
+    /// Three-cycle wavelet heatmap from the channel's measured room IR,
+    /// when a complete post-peak window was declared at optimization time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wavelet: Option<ChannelWavelet>,
 }
 
 /// DSP chain for an individual driver in a multi-driver speaker
@@ -753,6 +984,12 @@ pub struct OptimizationMetadata {
     /// records; a missing gate means the channel ran before intake gating.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operation_gates: Option<Vec<crate::eligibility::ChannelOperationGate>>,
+    /// Declared ±tolerance in seconds for the report Section 1 T60 flatness
+    /// share, carried from the input `reporting` policy. When absent the
+    /// viewer applies its documented standard default; it changes no
+    /// acceptance math.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t60_flatness_tolerance_s: Option<f64>,
 }
 
 #[cfg(test)]

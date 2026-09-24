@@ -205,10 +205,9 @@ pub enum TrialOutcome {
 
 /// Provenance of perceptual or listening evidence presented to a gate.
 ///
-/// Proxies, synthetic trials, and inconclusive outcomes never promote:
-/// only pinned independent references validate a perceptual model, and
-/// only sufficient real protocol-bound trials demonstrate listening
-/// benefit. Preference alone is not equivalence.
+/// These descriptors explain the claimed source of evidence. They are not
+/// validation receipts: a string saying "independent" or "real" cannot
+/// promote either G7 gate on its own.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EvidenceProvenance {
@@ -219,14 +218,9 @@ pub enum EvidenceProvenance {
         tolerance: String,
     },
     /// Approximate model metric (e.g. an audibility proxy): advisory only.
-    ExperimentalProxy {
-        metric_id: String,
-    },
+    ExperimentalProxy { metric_id: String },
     /// Simulated listeners or offline score deltas: never listening evidence.
-    SyntheticTrial {
-        seed: u64,
-        cases: usize,
-    },
+    SyntheticTrial { seed: u64, cases: usize },
     /// Real listeners under a frozen protocol hash.
     RealTrial {
         protocol_hash: String,
@@ -236,57 +230,22 @@ pub enum EvidenceProvenance {
 }
 
 impl EvidenceProvenance {
-    /// True only for a pinned independent reference with declared
-    /// calibration domain and tolerance.
+    /// Descriptive provenance alone never validates numeric model agreement.
     pub fn accepts_perceptual_validation(&self) -> bool {
-        match self {
-            Self::IndependentReference {
-                reference_id,
-                calibration_domain,
-                tolerance,
-            } => {
-                !reference_id.trim().is_empty()
-                    && !calibration_domain.trim().is_empty()
-                    && !tolerance.trim().is_empty()
-            }
-            Self::ExperimentalProxy { .. }
-            | Self::SyntheticTrial { .. }
-            | Self::RealTrial { .. } => false,
-        }
+        false
     }
 
-    /// True only for sufficient real protocol-bound trials whose outcome
-    /// meets the claimed intent. Inconclusive trials — including
-    /// nonsignificant ABX and bare preference — never promote.
+    /// A descriptor cannot prove trial import, binding, or statistical result.
     pub fn accepts_listening_benefit(&self, claims_equivalence: bool) -> bool {
-        match self {
-            Self::RealTrial {
-                protocol_hash,
-                sufficient,
-                outcome,
-            } => {
-                if protocol_hash.trim().is_empty() || !sufficient {
-                    return false;
-                }
-                match outcome {
-                    TrialOutcome::Benefit => !claims_equivalence,
-                    // Preference-only data never arrives here as
-                    // Equivalence: callers record it as Inconclusive.
-                    TrialOutcome::Equivalence => claims_equivalence,
-                    TrialOutcome::Inconclusive => false,
-                }
-            }
-            Self::IndependentReference { .. }
-            | Self::ExperimentalProxy { .. }
-            | Self::SyntheticTrial { .. } => false,
-        }
+        let _ = claims_equivalence;
+        false
     }
 }
 
 /// Assess the perceptual-validation gate from evidence provenance.
 ///
-/// Accepted evidence yields a passed gate with the reference as evidence;
-/// anything else yields an unassessed gate that cannot promote.
+/// Descriptive evidence yields an unassessed gate; numeric reference evidence
+/// must pass the approved-registry path below.
 pub fn assess_perceptual_gate(provenance: &EvidenceProvenance) -> GateAssessment {
     if provenance.accepts_perceptual_validation() {
         GateAssessment {
@@ -303,10 +262,63 @@ pub fn assess_perceptual_gate(provenance: &EvidenceProvenance) -> GateAssessment
     }
 }
 
+/// Assess model validation from a licensed model pin, hashed vector files,
+/// and approved numeric reference evidence. The default registry is empty
+/// until the G7 lane supplies independent vectors and approves their
+/// implementation identity.
+pub fn assess_verified_perceptual_gate(
+    model: &autoeq_optim::perceptual_promotion::PinnedFidelityModel,
+    readiness: &roomeq_quality::EnforcementReadiness,
+    registry: &roomeq_model::reference_registry::ApprovedReferenceRegistry,
+    independent_vectors: &[crate::corpus::ReferenceVector],
+    generated_controls: &[crate::corpus::ReferenceVector],
+) -> GateAssessment {
+    let passed = model.validate().is_ok()
+        && crate::corpus::validate_reference_separation(independent_vectors, generated_controls)
+            .is_ok()
+        && independent_vectors.iter().all(|vector| {
+            vector.set_id == model.reference_vectors_id
+                && vector.edition == model.edition
+                && vector.license_id == model.license_id
+        })
+        && readiness.model_family == model.model_family
+        && readiness.edition == model.edition
+        && readiness
+            .reference_evidence
+            .as_ref()
+            .is_some_and(|evidence| {
+                evidence.vectors_id == model.reference_vectors_id
+                    && evidence.implementation_hash == model.implementation_commit
+            })
+        && readiness.check_ready(registry).is_ok();
+    GateAssessment {
+        gate: ReleaseGate::PerceptualValidation,
+        passed,
+        evidence: if passed {
+            let mut vector_hashes = independent_vectors
+                .iter()
+                .map(|vector| format!("{}={}", vector.id, vector.hash.to_ascii_lowercase()))
+                .collect::<Vec<_>>();
+            vector_hashes.sort();
+            format!(
+                "approved-reference:{}:{}:{}:{}:{}",
+                model.edition,
+                model.license_id,
+                model.implementation_commit,
+                model.reference_vectors_id,
+                vector_hashes.join(",")
+            )
+        } else {
+            String::new()
+        },
+    }
+}
+
 /// Assess the listening-benefit gate from evidence provenance.
 ///
-/// Only sufficient real trials with a demonstrated outcome pass; synthetic
-/// trials and inconclusive outcomes stay unassessed.
+/// A provenance description alone cannot certify a real, protocol-bound
+/// listening result. The G7 importer must supply a verified verdict before
+/// this gate can pass.
 pub fn assess_listening_gate(
     provenance: &EvidenceProvenance,
     claims_equivalence: bool,
@@ -525,19 +537,19 @@ mod release_gates_tests {
                 .unwrap()
                 .promoted()
         );
-        // A pinned independent reference with declared domain and
-        // tolerance does validate.
+        // Descriptive fields do not prove an independently reproduced
+        // numeric comparison against an approved reference registry.
         let pinned = EvidenceProvenance::IndependentReference {
             reference_id: String::from("iso-226-2024"),
             calibration_domain: String::from("20Hz-500Hz small rooms"),
             tolerance: String::from("+-1dB RMS"),
         };
-        assert!(pinned.accepts_perceptual_validation());
-        let mut passing = correctness_and_safety();
-        passing.push(assess_perceptual_gate(&pinned));
+        assert!(!pinned.accepts_perceptual_validation());
+        let mut unverified = correctness_and_safety();
+        unverified.push(assess_perceptual_gate(&pinned));
         assert!(
-            perceptual_release()
-                .promotion(&passing, false)
+            !perceptual_release()
+                .promotion(&unverified, false)
                 .unwrap()
                 .promoted()
         );
@@ -551,9 +563,120 @@ mod release_gates_tests {
     }
 
     #[test]
+    fn qa_unapproved_reference_cannot_promote_model_validation() {
+        use sha2::Digest;
+
+        let model = autoeq_optim::perceptual_promotion::PinnedFidelityModel {
+            model_family: "pemo-q".to_string(),
+            edition: "test-edition".to_string(),
+            implementation_commit: "test-commit".to_string(),
+            license_id: "test-license".to_string(),
+            reference_vectors_id: "test-vectors".to_string(),
+        };
+        let mut readiness = roomeq_quality::EnforcementReadiness {
+            reference: "test reference".to_string(),
+            calibration_id: "test-calibration".to_string(),
+            validated_domain: "test-domain".to_string(),
+            tolerances: vec!["test tolerance".to_string()],
+            model_family: model.model_family.clone(),
+            edition: model.edition.clone(),
+            reference_evidence: None,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let artifact_path = temp.path().join("test-vector.json");
+        let fixture = br#"{"cases":[{"id":"test-case","expected":0.1}]}"#;
+        std::fs::write(&artifact_path, fixture).unwrap();
+        let hash = sha2::Sha256::digest(fixture)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let vector = crate::corpus::ReferenceVector {
+            set_id: model.reference_vectors_id.clone(),
+            id: "test-vector".to_string(),
+            hash,
+            artifact_path: artifact_path.clone(),
+            edition: model.edition.clone(),
+            license_id: model.license_id.clone(),
+            independent: true,
+        };
+        let registry = roomeq_model::reference_registry::ApprovedReferenceRegistry::default();
+        assert!(
+            !assess_verified_perceptual_gate(&model, &readiness, &registry, &[vector.clone()], &[])
+                .passed
+        );
+
+        // A test-local approved fixture exercises the positive software path;
+        // it is not an independent model reference or a G7 result.
+        let evidence = roomeq_model::reference_registry::VerifiedReferenceEvidence {
+            implementation_id: "test-implementation".to_string(),
+            implementation_hash: model.implementation_commit.clone(),
+            vectors_id: model.reference_vectors_id.clone(),
+            model_family: model.model_family.clone(),
+            edition: model.edition.clone(),
+            calibration_id: readiness.calibration_id.clone(),
+            domain: readiness.validated_domain.clone(),
+            error_metric: "test-error".to_string(),
+            observed_error: 0.1,
+            error_tolerance: 0.2,
+            coverage: vec!["test-case".to_string()],
+        };
+        let registry = roomeq_model::reference_registry::ApprovedReferenceRegistry {
+            entries: vec![roomeq_model::reference_registry::ApprovedReferenceEntry {
+                implementation_id: evidence.implementation_id.clone(),
+                implementation_hash: evidence.implementation_hash.clone(),
+                vectors_id: evidence.vectors_id.clone(),
+                model_family: evidence.model_family.clone(),
+                edition: evidence.edition.clone(),
+                calibration_id: evidence.calibration_id.clone(),
+                domain: evidence.domain.clone(),
+                error_metric: evidence.error_metric.clone(),
+                error_tolerance: Some(evidence.error_tolerance),
+                required_coverage: evidence.coverage.clone(),
+            }],
+        };
+        readiness.reference_evidence = Some(evidence);
+        let accepted =
+            assess_verified_perceptual_gate(&model, &readiness, &registry, &[vector.clone()], &[]);
+        assert!(accepted.passed);
+        assert!(accepted.evidence.contains(&vector.hash));
+        assert!(accepted.evidence.contains(&model.implementation_commit));
+        let mut mismatched = model.clone();
+        mismatched.reference_vectors_id = "different-vectors".to_string();
+        assert!(
+            !assess_verified_perceptual_gate(
+                &mismatched,
+                &readiness,
+                &registry,
+                &[vector.clone()],
+                &[]
+            )
+            .passed
+        );
+        mismatched = model.clone();
+        mismatched.license_id.clear();
+        assert!(
+            !assess_verified_perceptual_gate(
+                &mismatched,
+                &readiness,
+                &registry,
+                &[vector.clone()],
+                &[]
+            )
+            .passed
+        );
+        std::fs::remove_file(&artifact_path).unwrap();
+        assert!(
+            !assess_verified_perceptual_gate(&model, &readiness, &registry, &[vector], &[]).passed
+        );
+    }
+
+    #[test]
     fn qa_synthetic_trials_do_not_promote_listening_benefit() {
         // Simulated listeners are programme output, not listener evidence.
-        let synthetic = EvidenceProvenance::SyntheticTrial { seed: 42, cases: 1000 };
+        let synthetic = EvidenceProvenance::SyntheticTrial {
+            seed: 42,
+            cases: 1000,
+        };
         assert!(!synthetic.accepts_listening_benefit(false));
         let mut gates = correctness_and_safety();
         gates.push(assess_listening_gate(&synthetic, false));
@@ -563,14 +686,13 @@ mod release_gates_tests {
                 .unwrap()
                 .promoted()
         );
-        // Only sufficient real protocol-bound trials with a demonstrated
-        // benefit promote.
+        // A claimed real trial still needs a verified imported result.
         let real = EvidenceProvenance::RealTrial {
             protocol_hash: String::from("abx-protocol-v2:9f3a"),
             sufficient: true,
             outcome: TrialOutcome::Benefit,
         };
-        assert!(real.accepts_listening_benefit(false));
+        assert!(!real.accepts_listening_benefit(false));
         // A real benefit trial does not satisfy an equivalence claim.
         assert!(!real.accepts_listening_benefit(true));
     }

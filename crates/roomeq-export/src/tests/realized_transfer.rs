@@ -559,6 +559,7 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
         stage_outcomes: Vec::new(),
         qa_seed_distribution: None,
         effective_config: None,
+        t60_flatness_tolerance_s: None,
         operation_gates: None,
 
         provisional_decisions: Vec::new(),
@@ -717,6 +718,18 @@ fn chain_response(
         .product()
 }
 
+/// Plugins of a routed channel, or an empty slice for a redirected input
+/// with no input-side chain (e.g. LFE feeding a sub output): the bus routes
+/// the input straight to the output chain, so the input side contributes
+/// unity response and zero delay to the reference.
+fn routed_channel_plugins<'a>(graph: &'a DspGraph, name: &String) -> &'a [PluginConfigWrapper] {
+    graph
+        .channels
+        .get(name)
+        .map(|chain| chain.plugins.as_slice())
+        .unwrap_or(&[])
+}
+
 /// Independent support calculation for the specified 129-tap delay kernel.
 /// Every parallel stage includes its zero-delay branches. Do not read the
 /// export's latency declaration to determine the expected padding.
@@ -735,8 +748,7 @@ fn reference_padding_samples(graph: &DspGraph, rate: f64) -> f64 {
             .fold(0.0_f64, f64::max)
     };
     let chain_delay = |name: &String, stage: Option<&str>| {
-        graph.channels[name]
-            .plugins
+        routed_channel_plugins(graph, name)
             .iter()
             .filter(|p| {
                 p.plugin_type == "delay"
@@ -829,8 +841,7 @@ fn reference_transfer_with_delay_model(
         }
     };
     let chain_delay = |name: &String, stage: &str| {
-        graph.channels[name]
-            .plugins
+        routed_channel_plugins(graph, name)
             .iter()
             .filter(|p| {
                 p.plugin_type == "delay" && p.parameters["room_eq_stage"].as_str() == Some(stage)
@@ -868,7 +879,7 @@ fn reference_transfer_with_delay_model(
                 .iter()
                 .map(|frequency| {
                     chain_response(
-                        &graph.channels[source].plugins,
+                        routed_channel_plugins(graph, source),
                         "pre_route",
                         sample_rate,
                         *frequency,
@@ -1846,6 +1857,12 @@ fn multisub_allpass_is_phase_only() {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         )]),
         metadata: None,
@@ -2108,6 +2125,12 @@ fn multisub_delay_precision_contract() {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         )]),
         metadata: None,
@@ -2230,6 +2253,12 @@ fn camilladsp_rejects_shared_global_eq() {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         )]),
         metadata: None,
@@ -2280,6 +2309,12 @@ fn staged_chain(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
     }
 }
 

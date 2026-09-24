@@ -652,12 +652,14 @@ mod outcome_tests {
 
     #[test]
     #[ignore = "focused full five-seed matrix row; run explicitly during outcome audit"]
-    fn hybrid_short_lfe_parameter_row_retains_requested_fir() {
+    fn hybrid_short_lfe_parameter_row_refuses_without_phase() {
+        // Matrix row 10 has no phase reference for its coherent LFE route.
+        // Its delivered physical subwoofer output is named Sub1, not LFE.
         let result = run_parameter_row_fixture(10);
-        let lfe = &result.channel_results["LFE"];
-        assert!(lfe.post_score < lfe.pre_score);
-        assert!(result.combined_post_score < result.combined_pre_score);
-        assert_eq!(lfe.fir_coeffs.as_ref().map(Vec::len), Some(480));
+        let sub = &result.channel_results["Sub1"];
+        assert_eq!(sub.post_score, sub.pre_score);
+        assert_eq!(result.combined_post_score, result.combined_pre_score);
+        assert!(sub.fir_coeffs.is_none());
     }
 
     #[test]

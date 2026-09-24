@@ -1825,61 +1825,6 @@
         }
       ]
     },
-    "CaptureCorrection": {
-      "description": "Clock correction actually applied to a saved take.",
-      "oneOf": [
-        {
-          "const": "none",
-          "description": "Samples remain on their original device clock.",
-          "type": "string"
-        },
-        {
-          "const": "resampled",
-          "description": "Samples were resampled to the declared timing reference.",
-          "type": "string"
-        }
-      ]
-    },
-    "CaptureGeometry": {
-      "description": "Interpretation of the microphone positions within a capture session.",
-      "oneOf": [
-        {
-          "const": "spread",
-          "description": "Independent listening seats for spatial magnitude measurements.",
-          "type": "string"
-        },
-        {
-          "const": "compact",
-          "description": "Surveyed microphone cluster for conditional direction estimation.",
-          "type": "string"
-        }
-      ]
-    },
-    "CaptureKind": {
-      "description": "How the underlying capture was acquired.\n\nMoving-microphone magnitude data cannot supply phase or impulse\nresponses; stationary captures keep a timing reference. `Unknown`\nis the default for legacy data and must never read as a claim.",
-      "oneOf": [
-        {
-          "const": "stationary_ir",
-          "description": "Stationary microphone sweep or impulse response.",
-          "type": "string"
-        },
-        {
-          "const": "spatial_magnitude",
-          "description": "Spatial magnitude capture (e.g. moving microphone).",
-          "type": "string"
-        },
-        {
-          "const": "direct_sound",
-          "description": "Gated/windowed direct-sound measurement.",
-          "type": "string"
-        },
-        {
-          "const": "unknown",
-          "description": "Capture mode was not recorded.",
-          "type": "string"
-        }
-      ]
-    },
     "CaptureArrival": {
       "description": "A detected event with explicit limits on its measured direction.",
       "properties": {
@@ -1962,6 +1907,93 @@
       ],
       "type": "object"
     },
+    "CaptureCorrection": {
+      "description": "Clock correction actually applied to a saved take.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Samples remain on their original device clock.",
+          "type": "string"
+        },
+        {
+          "const": "resampled",
+          "description": "Samples were resampled to the declared timing reference.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureGeometry": {
+      "description": "Interpretation of the microphone positions within a capture session.",
+      "oneOf": [
+        {
+          "const": "spread",
+          "description": "Independent listening seats for spatial magnitude measurements.",
+          "type": "string"
+        },
+        {
+          "const": "compact",
+          "description": "Surveyed microphone cluster for conditional direction estimation.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureKind": {
+      "description": "How the underlying capture was acquired.\n\nMoving-microphone magnitude data cannot supply phase or impulse\nresponses; stationary captures keep a timing reference. `Unknown`\nis the default for legacy data and must never read as a claim.",
+      "oneOf": [
+        {
+          "const": "stationary_ir",
+          "description": "Stationary microphone sweep or impulse response.",
+          "type": "string"
+        },
+        {
+          "const": "spatial_magnitude",
+          "description": "Spatial magnitude capture (e.g. moving microphone).",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound",
+          "description": "Gated/windowed direct-sound measurement.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Capture mode was not recorded.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureProvenance": {
+      "description": "Capture provenance in exactly the associated measurement-reference order.",
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/CaptureGeometry",
+          "description": "One geometry interpretation for the complete session."
+        },
+        "reflection_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureReflectionReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Detected source arrivals and conditional measured directions."
+        },
+        "takes": {
+          "description": "One entry per measurement, including every failed timing fit.",
+          "items": {
+            "$ref": "#/$defs/CaptureTakeProvenance"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "geometry",
+        "takes"
+      ],
+      "type": "object"
+    },
     "CaptureReflectionReport": {
       "description": "Measured arrival candidates for one simultaneously captured source.",
       "properties": {
@@ -1999,38 +2031,6 @@
         "source_id",
         "early_reflections",
         "issues"
-      ],
-      "type": "object"
-    },
-    "CaptureProvenance": {
-      "description": "Capture provenance in exactly the associated measurement-reference order.",
-      "properties": {
-        "geometry": {
-          "$ref": "#/$defs/CaptureGeometry",
-          "description": "One geometry interpretation for the complete session."
-        },
-        "reflection_report": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CaptureReflectionReport"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Detected source arrivals and conditional measured directions."
-        },
-        "takes": {
-          "description": "One entry per measurement, including every failed timing fit.",
-          "items": {
-            "$ref": "#/$defs/CaptureTakeProvenance"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "geometry",
-        "takes"
       ],
       "type": "object"
     },
@@ -2298,6 +2298,28 @@
             "null"
           ]
         },
+        "early_late_curves": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelEarlyLateCurves"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Third-octave early/late energy from the channel's measured room IR,\nwhen a complete IR was declared at optimization time."
+        },
+        "early_reflections": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelEarlyReflections"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Band-limited early-reflection table from the channel's measured room\nIR, when a complete IR was declared at optimization time."
+        },
         "eq_response": {
           "anyOf": [
             {
@@ -2382,6 +2404,28 @@
           ],
           "description": "Impulse response before correction (optional, requires phase data)"
         },
+        "resonance_decays": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelResonanceDecays"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Prominent-resonance decay slices from the channel's measured room\nIR, accompanying `waterfall`."
+        },
+        "t60_octaves": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelOctaveT60"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Nine-band octave T60 from the channel's measured room IR, when a\ncomplete IR was declared at optimization time."
+        },
         "target_curve": {
           "anyOf": [
             {
@@ -2392,11 +2436,154 @@
             }
           ],
           "description": "Effective target curve the optimizer worked against (optional)"
+        },
+        "waterfall": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelWaterfall"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "STFT waterfall decay grid from the channel's measured room IR, when\na complete 500 ms post-peak window was declared at optimization\ntime."
+        },
+        "wavelet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelWavelet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Three-cycle wavelet heatmap from the channel's measured room IR,\nwhen a complete post-peak window was declared at optimization time."
         }
       },
       "required": [
         "channel",
         "plugins"
+      ],
+      "type": "object"
+    },
+    "ChannelEarlyLateCurves": {
+      "description": "Third-octave early/late energy report for one channel's measured room IR.\n\nThe viewer renders this field only when `method`, `reference`,\n`smoothing`, and `split_ms` carry the exact values below and the three\ncurves share one finite grid covering 1–8 kHz. Absence renders as\n\"pending\", never as success.",
+      "properties": {
+        "basis": {
+          "description": "Evidence basis; always `\"measured_room_ir\"`.",
+          "type": "string"
+        },
+        "direct_reference": {
+          "description": "Direct-sound reference: `\"broadband envelope peak\"`, or\n`\"120 Hz lowpass envelope peak\"` for subwoofer/LFE channels.",
+          "type": "string"
+        },
+        "early": {
+          "$ref": "#/$defs/CurveData",
+          "description": "Band energy in the first 20 ms after the direct reference."
+        },
+        "full": {
+          "$ref": "#/$defs/CurveData",
+          "description": "Incoherent sum of early and late band energies (not a complex sum)."
+        },
+        "late": {
+          "$ref": "#/$defs/CurveData",
+          "description": "Band energy after the first 20 ms until the IR ends."
+        },
+        "method": {
+          "description": "Energy-decomposition method; always `\"incoherent_band_energy\"`.",
+          "type": "string"
+        },
+        "reference": {
+          "description": "Band-energy reference; always `\"full_peak_band\"`.",
+          "type": "string"
+        },
+        "smoothing": {
+          "description": "Frequency smoothing; always `\"third_octave\"`.",
+          "type": "string"
+        },
+        "split_ms": {
+          "description": "Early/late split after the direct reference, in milliseconds.",
+          "format": "double",
+          "type": "number"
+        },
+        "valid_band_hz": {
+          "description": "Third-octave coverage of the emitted curves in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "method",
+        "reference",
+        "smoothing",
+        "split_ms",
+        "basis",
+        "direct_reference",
+        "valid_band_hz",
+        "full",
+        "early",
+        "late"
+      ],
+      "type": "object"
+    },
+    "ChannelEarlyReflections": {
+      "description": "Band-limited early-reflection table for one channel's measured room IR.\n\nThe viewer renders this field only when `method`, `band_hz`,\n`threshold_dbfs`, and a nonempty `direct_reference` carry the exact\nvalues below. Absence renders as pending, never as success.",
+      "properties": {
+        "band_hz": {
+          "description": "Analysis band in Hz; always `[1000, 8000]`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "basis": {
+          "description": "Evidence basis; always `\"measured_room_ir\"`.",
+          "type": "string"
+        },
+        "direct_reference": {
+          "description": "Direct-sound reference description (nonempty).",
+          "type": "string"
+        },
+        "method": {
+          "description": "Table method; always `\"bandlimited_early_reflection_table_v1\"`.",
+          "type": "string"
+        },
+        "post": {
+          "description": "Post-correction events; empty until a post-correction IR is measured.",
+          "items": {
+            "$ref": "#/$defs/ChannelReflectionEvent"
+          },
+          "type": "array"
+        },
+        "pre": {
+          "description": "Pre-correction events from the measured IR.",
+          "items": {
+            "$ref": "#/$defs/ChannelReflectionEvent"
+          },
+          "type": "array"
+        },
+        "threshold_dbfs": {
+          "description": "Detection threshold in dBFS; always `-15`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "basis",
+        "method",
+        "band_hz",
+        "threshold_dbfs",
+        "direct_reference",
+        "pre",
+        "post"
       ],
       "type": "object"
     },
@@ -2424,6 +2611,33 @@
       },
       "type": "object"
     },
+    "ChannelOctaveT60": {
+      "description": "Nine-band octave T60 report for one channel's measured room IR.\n\nThe viewer requires all nine ordered bands with valid rows carrying\n`T20`/`T30` fits above `min_r2`, and invalid rows carrying a nonempty\nreason with no plotted value. Absence renders as pending.",
+      "properties": {
+        "bands": {
+          "description": "Nine octave bands, 63 Hz–16 kHz in order.",
+          "items": {
+            "$ref": "#/$defs/ChannelT60Band"
+          },
+          "type": "array"
+        },
+        "basis": {
+          "description": "Evidence basis; always `\"measured_room_ir\"`.",
+          "type": "string"
+        },
+        "min_r2": {
+          "description": "Minimum fit `r²` for validity.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "basis",
+        "min_r2",
+        "bands"
+      ],
+      "type": "object"
+    },
     "ChannelOperationGate": {
       "description": "Operation-boundary verdicts for one channel on the public workflow path.\n\nThe workflow intake evaluates every applicable operation against the\nchannel's declared provenance and attaches one gate per channel to the\npipeline result. Consumers (phase dispatch, target policy, the final\nledger) read these records instead of re-deriving permissions from a\nsingle phase flag.",
       "properties": {
@@ -2447,6 +2661,190 @@
         "channel",
         "measurement_id",
         "records"
+      ],
+      "type": "object"
+    },
+    "ChannelOperationalSummary": {
+      "description": "Per-channel share of decided final equalization scope that was delivered.\n\nNormative rule (req-roomeq-report R6), computed over the reconciled final\nledger only:\n- scope: final-stage records (`is_final_claim`) with action `Equalize`,\n  grouped by `physical_output`;\n- a record superseded by another record in the same ledger (its\n  `decision_id` appears in another record's `supersedes_ids`) is no longer\n  operative and is excluded from both counts;\n- delivered: scope records with status `Applied`, `AlreadyAcceptable`, or\n  `Constrained` — the same delivery-claim set reconciliation binds to the\n  delivered graph. `Reverted`, `InsufficientEvidence`, `OutsideScope`, and\n  `Unresolved` scope lowers the share; `Advisory` records never enter it\n  because provisional history cannot become a final claim;\n- `operational_response_pct` is `100 * delivered / decided`. It is a\n  ledger-delivery share with provenance-bound bands, not a measured\n  band-compliance percentage: an empty decided scope yields no percentage.",
+      "properties": {
+        "channel": {
+          "description": "Delivered physical output identity (ledger `physical_output`).",
+          "type": "string"
+        },
+        "decided_equalize": {
+          "description": "Decided final equalization records for the channel.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "delivered_equalize": {
+          "description": "Thereof delivered (`Applied`/`AlreadyAcceptable`/`Constrained`).",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "operational_response_pct": {
+          "description": "Share of decided final equalization scope delivered, in percent.\n`None` only when the scope count is zero; summaries are then omitted.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "decided_equalize",
+        "delivered_equalize"
+      ],
+      "type": "object"
+    },
+    "ChannelReflectionEvent": {
+      "description": "One detected early reflection from a measured room IR.\n\nGains are dBFS relative to the 1–8 kHz filtered direct peak; times are\npost-direct milliseconds. The viewer cross-checks distance against\n34.3 cm/ms and the first dip against 500/time_ms, and requires gains in\n`[-15, 0]` dBFS within 15 ms.",
+      "properties": {
+        "distance_cm": {
+          "description": "Path difference in centimeters.",
+          "format": "double",
+          "type": "number"
+        },
+        "first_dip_hz": {
+          "description": "First comb dip in Hz.",
+          "format": "double",
+          "type": "number"
+        },
+        "gain_dbfs": {
+          "description": "Event gain in dBFS relative to the filtered direct peak.",
+          "format": "double",
+          "type": "number"
+        },
+        "ripple_db": {
+          "description": "Comb ripple in dB; null when the gain equals direct (unbounded).",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "time_ms": {
+          "description": "Post-direct arrival time in milliseconds.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "gain_dbfs",
+        "time_ms",
+        "distance_cm",
+        "first_dip_hz"
+      ],
+      "type": "object"
+    },
+    "ChannelResonanceDecay": {
+      "description": "One prominent resonance decay slice from a measured room IR.",
+      "properties": {
+        "decay_time_s": {
+          "description": "Fitted decay time in seconds; null when the bin has no fittable\n20–200 ms decay.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "freq_hz": {
+          "description": "Resonance frequency in Hz.",
+          "format": "double",
+          "type": "number"
+        },
+        "level_db": {
+          "description": "Level at the 60 ms slice in dB relative to the waterfall grid peak.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "freq_hz",
+        "level_db"
+      ],
+      "type": "object"
+    },
+    "ChannelResonanceDecays": {
+      "description": "Prominent-resonance decay slices for one channel's measured room IR.\n\nThe viewer renders this field only when `basis`, `method`, and\n`reference` carry the exact values below. An empty `decays` list means\nthe analysis ran and found no prominent resonances, not a failure.\nAbsence of the field renders as pending.",
+      "properties": {
+        "basis": {
+          "description": "Evidence basis; always `\"measured_room_ir\"`.",
+          "type": "string"
+        },
+        "decays": {
+          "description": "Detected resonances with fitted decay times.",
+          "items": {
+            "$ref": "#/$defs/ChannelResonanceDecay"
+          },
+          "type": "array"
+        },
+        "method": {
+          "description": "Detection method; always `\"hann_stft_waterfall_v1\"`.",
+          "type": "string"
+        },
+        "reference": {
+          "description": "Level reference; always `\"full_grid_peak\"`.",
+          "type": "string"
+        },
+        "slice_ms": {
+          "description": "Slice offset after the direct peak in milliseconds; always `60`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "basis",
+        "method",
+        "reference",
+        "slice_ms",
+        "decays"
+      ],
+      "type": "object"
+    },
+    "ChannelT60Band": {
+      "description": "One octave-band Schroeder/T60 fit from a measured room IR.",
+      "properties": {
+        "centre_hz": {
+          "description": "Octave centre frequency in Hz.",
+          "format": "double",
+          "type": "number"
+        },
+        "fit_range": {
+          "description": "Fit range that produced the value (`T30`/`T20`; also `EDT` on rows\nthat stay invalid because EDT alone is not late-decay T60).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "r2": {
+          "description": "`r²` of the selected fit (0.0 when invalid).",
+          "format": "double",
+          "type": "number"
+        },
+        "reason": {
+          "description": "Machine-readable reason when invalid (nonempty).",
+          "type": "string"
+        },
+        "t60_s": {
+          "description": "Selected T60 in seconds; null when invalid.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "valid": {
+          "description": "Whether the value passed the fit-range + `min_r2` policy.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "centre_hz",
+        "r2",
+        "valid",
+        "reason"
       ],
       "type": "object"
     },
@@ -2487,6 +2885,186 @@
         "applied_delay_ms",
         "final_arrival_ms",
         "final_offset_from_reference_ms"
+      ],
+      "type": "object"
+    },
+    "ChannelWaterfall": {
+      "description": "STFT waterfall decay grid for one channel's measured room IR (pre-\ncorrection only; there is no post-correction IR at optimization time).\n\nThe viewer renders this field only when `basis`, `method`, and\n`reference` carry the exact values below and the grid is a nonempty\nfinite `times × freqs` matrix matching `mags_db`. Absence renders as\npending, never as success.",
+      "properties": {
+        "basis": {
+          "description": "Evidence basis; always `\"measured_room_ir\"`.",
+          "type": "string"
+        },
+        "freqs_hz": {
+          "description": "Bin centre frequencies in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "hop_ms": {
+          "description": "STFT hop in milliseconds; always `2`.",
+          "format": "double",
+          "type": "number"
+        },
+        "mags_db": {
+          "description": "Magnitudes in dB relative to the grid peak, `mags_db[frame][bin]`.",
+          "items": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "method": {
+          "description": "Analysis method; always `\"hann_stft_waterfall_v1\"`.",
+          "type": "string"
+        },
+        "post_ms": {
+          "description": "Post-direct span in milliseconds; always `500`.",
+          "format": "double",
+          "type": "number"
+        },
+        "reference": {
+          "description": "Level reference; always `\"full_grid_peak\"` (each grid is relative\nto its own peak, so two channels' grids do not compare absolutely).",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Machine-readable scope and non-comparison disclaimer.",
+          "type": "string"
+        },
+        "times_ms": {
+          "description": "Frame centre times relative to the direct peak in milliseconds.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "valid_band_hz": {
+          "description": "Emitted frequency coverage in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "window_ms": {
+          "description": "STFT window in milliseconds; always `32`.",
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "basis",
+        "method",
+        "reference",
+        "valid_band_hz",
+        "window_ms",
+        "hop_ms",
+        "post_ms",
+        "times_ms",
+        "freqs_hz",
+        "mags_db",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ChannelWavelet": {
+      "description": "Three-cycle wavelet heatmap for one channel's measured room IR (pre-\ncorrection only).\n\nThe viewer renders this field only when `basis`, `method`, and\n`reference` carry the exact values below and the heatmap is a nonempty\nfinite `freqs × times` matrix matching `mags_db` with at least two\nfrequency rows and two time columns. Absence renders as pending.",
+      "properties": {
+        "basis": {
+          "description": "Evidence basis; always `\"measured_room_ir\"`.",
+          "type": "string"
+        },
+        "cycles": {
+          "description": "Wavelet cycles; always `3`.",
+          "format": "double",
+          "type": "number"
+        },
+        "display_range_db": {
+          "description": "Display range in dB; always `[-30, 0]`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "freqs_hz": {
+          "description": "Centre frequencies in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "freqs_per_octave": {
+          "description": "Log-grid density in frequencies per octave; always `6`.",
+          "format": "double",
+          "type": "number"
+        },
+        "hop_ms": {
+          "description": "Raw frame hop in milliseconds; always `1`.",
+          "format": "double",
+          "type": "number"
+        },
+        "mags_db": {
+          "description": "Magnitudes in dB relative to the grid peak, `mags_db[freq][time]`.",
+          "items": {
+            "items": {
+              "format": "float",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "type": "array"
+        },
+        "method": {
+          "description": "Analysis method; always `\"complex_morlet_three_cycle_v1\"`.",
+          "type": "string"
+        },
+        "reference": {
+          "description": "Level reference; always `\"full_grid_peak\"`.",
+          "type": "string"
+        },
+        "times_ms": {
+          "description": "Frame centre times relative to the direct peak in milliseconds.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "valid_band_hz": {
+          "description": "Emitted frequency coverage in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        }
+      },
+      "required": [
+        "basis",
+        "method",
+        "reference",
+        "valid_band_hz",
+        "cycles",
+        "freqs_per_octave",
+        "hop_ms",
+        "display_range_db",
+        "freqs_hz",
+        "times_ms",
+        "mags_db"
       ],
       "type": "object"
     },
@@ -2693,6 +3271,13 @@
             }
           ],
           "description": "Supplemental quality views, independently bound to this ledger's graph.\nAbsent in legacy outputs; never promotes a correction or playback verdict."
+        },
+        "channel_summaries": {
+          "description": "Per-channel delivered-scope shares (req R6 `operational_room_response_pct`).\nDerived from the final records above at reconciliation time; absent in\nlegacy outputs. A channel with no decided final equalization scope has\nno entry here, which viewers render as pending, never as 100%.",
+          "items": {
+            "$ref": "#/$defs/ChannelOperationalSummary"
+          },
+          "type": "array"
         },
         "decisions": {
           "description": "Decision records in insertion order.",
@@ -5941,6 +6526,36 @@
       },
       "type": "object"
     },
+    "MeasurementInlineSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "inline": {
+          "$ref": "#/$defs/InlineMeasurement"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeasurementProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speaker_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "inline"
+      ],
+      "type": "object"
+    },
     "MeasurementMultiple": {
       "description": "Multiple measurements with metadata",
       "properties": {
@@ -5964,6 +6579,43 @@
       },
       "required": [
         "measurements"
+      ],
+      "type": "object"
+    },
+    "MeasurementPathSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeasurementProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speaker_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
       ],
       "type": "object"
     },
@@ -6031,6 +6683,19 @@
             "array",
             "null"
           ]
+        },
+        "valid_bands_hz": {
+          "description": "Ordered, disjoint usable intervals when the acquisition has internal\ncoverage gaps. Mutually exclusive with the legacy single valid band.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -6097,27 +6762,17 @@
       "description": "Reference to a measurement file"
     },
     "MeasurementSingle": {
-      "description": "Single measurement with metadata\n\nCustom implementation to support both string path and object with speaker_name",
-      "properties": {
-        "measurement": {
+      "anyOf": [
+        {
           "$ref": "#/$defs/MeasurementRef"
         },
-        "provenance": {
-          "$ref": "#/$defs/MeasurementProvenance",
-          "description": "Declared acquisition provenance (default unknown when absent)."
+        {
+          "$ref": "#/$defs/MeasurementPathSchema"
         },
-        "speaker_name": {
-          "type": [
-            "string",
-            "null"
-          ]
+        {
+          "$ref": "#/$defs/MeasurementInlineSchema"
         }
-      },
-      "required": [
-        "measurement",
-        "provenance"
-      ],
-      "type": "object"
+      ]
     },
     "MeasurementSource": {
       "anyOf": [
@@ -7198,6 +7853,14 @@
           "description": "Supporting-source room-compensation reports, keyed by logical channel.",
           "type": [
             "object",
+            "null"
+          ]
+        },
+        "t60_flatness_tolerance_s": {
+          "description": "Declared ±tolerance in seconds for the report Section 1 T60 flatness\nshare, carried from the input `reporting` policy. When absent the\nviewer applies its documented standard default; it changes no\nacceptance math.",
+          "format": "double",
+          "type": [
+            "number",
             "null"
           ]
         },
@@ -9560,6 +10223,20 @@
         }
       ]
     },
+    "ReportingConfig": {
+      "description": "Report-policy inputs that need an explicit operator declaration.\n\nThese change no acceptance math: they declare the policy the viewer uses\nto render summary cells from emitted evidence. Absent stays pending.",
+      "properties": {
+        "t60_flatness_tolerance_s": {
+          "description": "Declared ±tolerance in seconds for the report Section 1 T60 flatness\nshare (nine measured octave fits within tolerance of the\ncomplete-channel room mean). When `None`, the viewer applies the\nITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of ±0.05 s and labels\nthe cell accordingly. A present value must be finite and positive.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RirPrototypeConfig": {
       "description": "Configuration for building a distance- and directivity-weighted RIR prototype.",
       "properties": {
@@ -9775,6 +10452,9 @@
           ],
           "description": "Cross-talk cancellation / binaural-aware correction configuration."
         },
+        "description": {
+          "type": "string"
+        },
         "optimizer": {
           "$ref": "#/$defs/OptimizerConfig",
           "default": {
@@ -9829,6 +10509,17 @@
             }
           ],
           "description": "Recording configuration (device settings, signal parameters used during capture)"
+        },
+        "reporting": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReportingConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Report-policy inputs needing an explicit operator declaration (for\nexample the T60 flatness tolerance). Absent policies leave the viewer\nto its documented standard defaults; they change no acceptance math."
         },
         "speakers": {
           "additionalProperties": {

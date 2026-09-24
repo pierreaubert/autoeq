@@ -81,6 +81,12 @@ fn wolfram_rw03_dsp_fir_convolution() {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
     };
     let mut provider = MapIr {
         name: ir_file,

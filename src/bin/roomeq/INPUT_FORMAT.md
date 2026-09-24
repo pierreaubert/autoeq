@@ -205,6 +205,22 @@ sections remain in the chain because removing them changes later basis functions
 Pole-band limits do not guarantee zero response outside that band or compliance
 with realized gain limits. See the [review evidence log](../../../docs/ROOMEQ_REVIEW_20260916.md).
 
+## Report policy
+
+The optional top-level `reporting` object declares report policies that need
+an explicit operator statement. It changes no acceptance math; absent policies
+leave the corresponding viewer summary cells pending.
+
+- `reporting.t60_flatness_tolerance_s`: declared ±tolerance in seconds for
+  the report Section 1 "T60 flatness in window" share (nine measured octave
+  fits within tolerance of the complete-channel room mean). A present value
+  must be finite and positive, otherwise structural validation fails. When
+  absent, the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband
+  default of ±0.05 s (uniformly, as a documented simplification) and labels
+  the cell accordingly. The declared value is carried into output
+  `metadata.t60_flatness_tolerance_s`; the cell still needs nine valid
+  measured fits before rendering.
+
 ## Final multi-position validation
 
 Bass-managed crossover alignment uses the configured primary seat's measured
@@ -514,6 +530,16 @@ tails outside the band. Ordinary-channel level/passband analysis and IIR/FIR
 design select only loaded samples inside the usable band, preserving aligned
 phase, coherence, and noise-floor values. At least two loaded samples are
 required; edges between bins narrow to the retained grid without extrapolation.
+For an acquisition with internal gaps, use `valid_bands_hz` as ordered,
+nonoverlapping `[low, high]` intervals instead of `valid_band_hz`. The
+measurement loader aligns each interval independently and retains a support
+mask for the gap. Single-channel correction consumes the mask end to end:
+each segment is conditioned independently, optimization and scoring see only
+the union of measured samples, PEQ centers in a gap refuse the channel, and
+a per-channel segment report records per-segment scores with observed gap
+leakage. Curve-only single-curve and averaging (group/multisub/home-cinema)
+paths still refuse this declaration until they consume band-specific
+authorization.
 Full-band derived phase caches are not reused on the sliced data. This does
 not validate upstream acquisition, averaging, or resampling provenance.
 Workflow dense-grid conditioning isolates the declared region before reduction,
@@ -855,6 +881,9 @@ speaker, system, and bass-management objects as well as at the root. Typed map
 objects such as `speakers` still accept arbitrary map keys whose values conform
 to the declared schema. The generated `input_schema.json` mirrors this contract
 with `additionalProperties: false` on fixed-shape objects.
+The optional top-level `description` string from older authored configurations
+is accepted as prose metadata and ignored during optimization. Other unknown
+root fields still fail validation.
 
 For home-cinema bass management, `system.bass_management.lfe_low_pass_hz`
 controls the LFE programme path independently of the redirected-bass speaker
@@ -1085,6 +1114,12 @@ are checked against the candidate and verification plan. See the manual's
 "Declared calibrated IR comparisons" section for the exact handoff and
 `display-roomeq.py --capture-verification` report command. No baseline means
 unavailable, not a reconstructed pre-correction capture.
+The viewer can also place those bound diagnostics after the plots in one
+optimization report with
+`display-roomeq.py room-output.json --capture-verification verification-report.json -o room-report.html`.
+It verifies the saved optimization payload and referenced FIR bytes first,
+then requires the verification candidate graph ID to match. A mismatch or
+stale payload yields an unavailable capture section, never an adopted view.
 ETC requires declared nominal support for all 500–4000 Hz octave bands and
 the full 0–40 ms window plus finite-filter lookahead. The report preserves
 filter method, common baseline reference, display floor, and boundary caveats;
@@ -1099,6 +1134,37 @@ or explicit unavailable reasons. The T20 slope extrapolation is not passive-room
 RT or acoustic acceptance. See the manual for filter support, noise assumptions,
 finite-window limits, and the example handoff. These fields belong to the capture
 manifest, not RoomConfig; existing RoomConfig schemas are unchanged.
+
+With a matched baseline/candidate IR pair, verification also emits an advisory
+`octave_t60` view over 63 Hz–16 kHz. It reports valid T30/T20 fits, fit quality,
+and explicit unavailable reasons for missing band or decay support. Its
+automatic noise-cutoff and 0.90 fit threshold are analysis conventions, not
+acceptance limits; the separate `ir_analysis.decay` path above remains the
+declared-budget comparison. See the manual for interpretation and limitations.
+The capture HTML may additionally average accepted octave T60 fits across
+distinct sources at the same seat when stimulus, baseline graph, sample rate,
+capture kind, settings, and declared band match; each mean carries its
+contributing source count.
+The same pair can emit `early_reflections` from 1–8 kHz filtered IRs when
+the full band is declared usable; the report lists baseline/candidate
+post-direct peaks within 15 ms above −15 dB relative to direct and retains
+unavailable reasons when the evidence is insufficient.
+The pair can emit bound `early_late_curves` on a common full peak-band
+reference within each capture. It uses a 20 ms early split from the
+broadband envelope peak, or the 120 Hz lowpass envelope peak for sub/LFE,
+and plots full, early, and late third-octave energy contributions. The
+1–8 kHz mean is shown only with full declared band support; it is not an
+absolute between-capture level comparison or an optimization DSP JSON field.
+The pair can also emit a bound `waterfall` diagnostic if both IRs include
+the full 500 ms post-peak interval and analysis half-window. It carries
+decimated frequency × time grids within the declared usable band and
+60 ms resonance candidates with fitted decay times. Each grid has its own
+level reference, so the report does not treat the plot as an absolute
+between-capture level or passive-room damping comparison.
+The same complete pair can emit a `wavelet` heatmap with three-cycle Morlet
+analysis, 64 × 100 maximum displayed cells and −30…0 dB colors relative
+to each capture's own wavelet-grid peak. Its presence is an advisory capture
+diagnostic, not a per-channel optimization output field.
 
 
 Optional `ir_analysis.ambient_noise` references a separate silent-playback mono

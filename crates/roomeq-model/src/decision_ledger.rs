@@ -329,6 +329,127 @@ pub struct CorrectionDecisionLedger {
     /// Decision records in insertion order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decisions: Vec<DecisionRecord>,
+    /// Per-channel delivered-scope shares (req R6 `operational_room_response_pct`).
+    /// Derived from the final records above at reconciliation time; absent in
+    /// legacy outputs. A channel with no decided final equalization scope has
+    /// no entry here, which viewers render as pending, never as 100%.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub channel_summaries: Vec<ChannelOperationalSummary>,
+}
+
+/// Per-channel share of decided final equalization scope that was delivered.
+///
+/// Normative rule (req-roomeq-report R6), computed over the reconciled final
+/// ledger only:
+/// - scope: final-stage records (`is_final_claim`) with action `Equalize`,
+///   grouped by `physical_output`;
+/// - a record superseded by another record in the same ledger (its
+///   `decision_id` appears in another record's `supersedes_ids`) is no longer
+///   operative and is excluded from both counts;
+/// - delivered: scope records with status `Applied`, `AlreadyAcceptable`, or
+///   `Constrained` — the same delivery-claim set reconciliation binds to the
+///   delivered graph. `Reverted`, `InsufficientEvidence`, `OutsideScope`, and
+///   `Unresolved` scope lowers the share; `Advisory` records never enter it
+///   because provisional history cannot become a final claim;
+/// - `operational_response_pct` is `100 * delivered / decided`. It is a
+///   ledger-delivery share with provenance-bound bands, not a measured
+///   band-compliance percentage: an empty decided scope yields no percentage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelOperationalSummary {
+    /// Delivered physical output identity (ledger `physical_output`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub channel: String,
+    /// Share of decided final equalization scope delivered, in percent.
+    /// `None` only when the scope count is zero; summaries are then omitted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operational_response_pct: Option<f64>,
+    /// Decided final equalization records for the channel.
+    pub decided_equalize: u32,
+    /// Thereof delivered (`Applied`/`AlreadyAcceptable`/`Constrained`).
+    pub delivered_equalize: u32,
+}
+
+impl ChannelOperationalSummary {
+    /// Reject empty channels, inconsistent counts, and nonfinite percentages.
+    ///
+    /// # Errors
+    ///
+    /// Returns a reason for an empty channel, delivered counts above decided
+    /// counts, or a nonfinite percentage with nonzero scope.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.channel.trim().is_empty() {
+            return Err(String::from("channel summary channel must not be empty"));
+        }
+        if self.delivered_equalize > self.decided_equalize {
+            return Err(format!(
+                "channel summary '{}' delivers {} of {} decided records",
+                self.channel, self.delivered_equalize, self.decided_equalize
+            ));
+        }
+        match (self.decided_equalize, self.operational_response_pct) {
+            (0, None) => Ok(()),
+            (0, Some(_)) => Err(format!(
+                "channel summary '{}' must not carry a percentage without decided scope",
+                self.channel
+            )),
+            (_, None) => Err(format!(
+                "channel summary '{}' must carry a percentage for decided scope",
+                self.channel
+            )),
+            (_, Some(pct)) if !pct.is_finite() => Err(format!(
+                "channel summary '{}' percentage must be finite (got {})",
+                self.channel, pct
+            )),
+            (_, Some(_)) => Ok(()),
+        }
+    }
+}
+
+/// Derive per-channel operational summaries over reconciled final records.
+///
+/// See [`ChannelOperationalSummary`] for the normative rule. Output is sorted
+/// by channel; channels without decided final equalization scope are absent.
+#[must_use]
+pub fn operational_summaries(decisions: &[DecisionRecord]) -> Vec<ChannelOperationalSummary> {
+    let superseded: std::collections::BTreeSet<&str> = decisions
+        .iter()
+        .flat_map(|record| record.supersedes_ids.iter().map(String::as_str))
+        .collect();
+    let mut decided: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+    let mut delivered: std::collections::BTreeMap<&str, u32> = std::collections::BTreeMap::new();
+    for record in decisions {
+        if !record.is_final_claim() || record.action != DecisionAction::Equalize {
+            continue;
+        }
+        if superseded.contains(record.decision_id.as_str()) {
+            continue;
+        }
+        *decided.entry(record.physical_output.as_str()).or_default() += 1;
+        if matches!(
+            record.status,
+            DecisionStatus::Applied
+                | DecisionStatus::AlreadyAcceptable
+                | DecisionStatus::Constrained
+        ) {
+            *delivered
+                .entry(record.physical_output.as_str())
+                .or_default() += 1;
+        }
+    }
+    decided
+        .into_iter()
+        .map(|(channel, decided_equalize)| {
+            let delivered_equalize = delivered.get(channel).copied().unwrap_or(0);
+            ChannelOperationalSummary {
+                channel: channel.to_owned(),
+                operational_response_pct: Some(
+                    100.0 * f64::from(delivered_equalize) / f64::from(decided_equalize),
+                ),
+                decided_equalize,
+                delivered_equalize,
+            }
+        })
+        .collect()
 }
 
 impl CorrectionDecisionLedger {
@@ -361,6 +482,13 @@ impl CorrectionDecisionLedger {
             decision.validate()?;
             if !seen.insert(decision.decision_id.clone()) {
                 return Err(format!("duplicate decision_id '{}'", decision.decision_id));
+            }
+        }
+        let mut channels = std::collections::BTreeSet::new();
+        for summary in &self.channel_summaries {
+            summary.validate()?;
+            if !channels.insert(summary.channel.clone()) {
+                return Err(format!("duplicate channel summary '{}'", summary.channel));
             }
         }
         Ok(())
@@ -679,6 +807,7 @@ mod tests {
             payload_binding: None,
             ledger_version: DECISION_LEDGER_VERSION.to_string(),
             decisions: DecisionStatus::ALL.map(final_record).into_iter().collect(),
+            channel_summaries: Vec::new(),
         };
         assert!(ledger.validate().is_ok());
         let back: CorrectionDecisionLedger =
@@ -930,6 +1059,241 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn summary_record(
+        id: &str,
+        channel: &str,
+        status: DecisionStatus,
+        action: DecisionAction,
+        stage: DecisionStage,
+    ) -> DecisionRecord {
+        let mut record = DecisionRecord::example(status);
+        record.decision_id = id.to_owned();
+        record.logical_input = channel.to_owned();
+        record.physical_output = channel.to_owned();
+        record.action = action;
+        record.stage = stage;
+        record.final_graph_identity = if stage == DecisionStage::Final {
+            Some(String::from("graph-final-1"))
+        } else {
+            None
+        };
+        record
+    }
+
+    #[test]
+    fn model_operational_summary_counts_only_final_equalize_scope() {
+        // Delivered: Applied + AlreadyAcceptable + Constrained. Reverted,
+        // InsufficientEvidence, OutsideScope, and Unresolved scope lower the
+        // share; provisional history and non-EQ actions never enter it.
+        let decisions = vec![
+            summary_record(
+                "applied",
+                "L",
+                DecisionStatus::Applied,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "acceptable",
+                "L",
+                DecisionStatus::AlreadyAcceptable,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "constrained",
+                "L",
+                DecisionStatus::Constrained,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "reverted",
+                "L",
+                DecisionStatus::Reverted,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "weak",
+                "L",
+                DecisionStatus::InsufficientEvidence,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "out",
+                "L",
+                DecisionStatus::OutsideScope,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "open",
+                "L",
+                DecisionStatus::Unresolved,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "provisional",
+                "L",
+                DecisionStatus::Applied,
+                DecisionAction::Equalize,
+                DecisionStage::Provisional,
+            ),
+            summary_record(
+                "gain",
+                "L",
+                DecisionStatus::Applied,
+                DecisionAction::GainAdjust,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "phase",
+                "L",
+                DecisionStatus::Applied,
+                DecisionAction::PhaseCorrect,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "r-other",
+                "R",
+                DecisionStatus::Applied,
+                DecisionAction::Equalize,
+                DecisionStage::Final,
+            ),
+        ];
+        let summaries = operational_summaries(&decisions);
+        assert_eq!(summaries.len(), 2);
+        assert_eq!(summaries[0].channel, "L");
+        assert_eq!(summaries[0].decided_equalize, 7);
+        assert_eq!(summaries[0].delivered_equalize, 3);
+        assert!((summaries[0].operational_response_pct.unwrap() - 100.0 * 3.0 / 7.0).abs() < 1e-12);
+        assert_eq!(summaries[1].channel, "R");
+        assert!((summaries[1].operational_response_pct.unwrap() - 100.0).abs() < 1e-12);
+        for summary in &summaries {
+            assert!(summary.validate().is_ok());
+        }
+    }
+
+    #[test]
+    fn model_operational_summary_excludes_superseded_scope() {
+        // A rolled-back candidate stays provisional history; its final
+        // Reverted successor supersedes it and counts as undecided scope.
+        let mut candidate = summary_record(
+            "candidate",
+            "L",
+            DecisionStatus::Applied,
+            DecisionAction::Equalize,
+            DecisionStage::Provisional,
+        );
+        candidate.final_graph_identity = None;
+        let mut reverted = summary_record(
+            "candidate-reverted",
+            "L",
+            DecisionStatus::Reverted,
+            DecisionAction::Equalize,
+            DecisionStage::Final,
+        );
+        reverted.supersedes_ids = vec![String::from("candidate")];
+        let summaries = operational_summaries(&[candidate, reverted]);
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].decided_equalize, 1);
+        assert_eq!(summaries[0].delivered_equalize, 0);
+        assert_eq!(summaries[0].operational_response_pct, Some(0.0));
+    }
+
+    #[test]
+    fn model_operational_summary_empty_scope_has_no_entry() {
+        // No decided final equalization scope: no entry, so viewers render
+        // pending instead of inventing 100%.
+        let decisions = vec![
+            summary_record(
+                "gain",
+                "L",
+                DecisionStatus::Applied,
+                DecisionAction::GainAdjust,
+                DecisionStage::Final,
+            ),
+            summary_record(
+                "provisional",
+                "L",
+                DecisionStatus::Applied,
+                DecisionAction::Equalize,
+                DecisionStage::Provisional,
+            ),
+        ];
+        assert!(operational_summaries(&decisions).is_empty());
+        assert!(operational_summaries(&[]).is_empty());
+    }
+
+    #[test]
+    fn model_channel_summary_validation_rejects_incoherent_shares() {
+        let mut summary = ChannelOperationalSummary {
+            channel: String::from("L"),
+            operational_response_pct: Some(50.0),
+            decided_equalize: 2,
+            delivered_equalize: 1,
+        };
+        assert!(summary.validate().is_ok());
+        summary.channel = String::from("  ");
+        assert!(summary.validate().is_err());
+        summary.channel = String::from("L");
+        summary.delivered_equalize = 3;
+        assert!(summary.validate().is_err());
+        summary.delivered_equalize = 1;
+        summary.decided_equalize = 0;
+        assert!(summary.validate().is_err());
+        summary.operational_response_pct = None;
+        summary.delivered_equalize = 0;
+        assert!(summary.validate().is_ok());
+        summary.decided_equalize = 2;
+        assert!(summary.validate().is_err());
+        summary.operational_response_pct = Some(f64::NAN);
+        assert!(summary.validate().is_err());
+    }
+
+    #[test]
+    fn model_ledger_with_summaries_roundtrips_and_validates() {
+        let decisions = vec![summary_record(
+            "applied",
+            "L",
+            DecisionStatus::Applied,
+            DecisionAction::Equalize,
+            DecisionStage::Final,
+        )];
+        let ledger = CorrectionDecisionLedger {
+            acceptance_evidence: None,
+            payload_binding: None,
+            ledger_version: DECISION_LEDGER_VERSION.to_string(),
+            decisions,
+            channel_summaries: operational_summaries(&[]),
+        };
+        assert!(ledger.validate().is_ok());
+        let mut with_summary = ledger.clone();
+        with_summary.channel_summaries = operational_summaries(&ledger.decisions);
+        assert!(with_summary.validate().is_ok());
+        let back: CorrectionDecisionLedger =
+            serde_json::from_value(serde_json::to_value(&with_summary).unwrap()).unwrap();
+        assert_eq!(back, with_summary);
+        assert_eq!(back.channel_summaries.len(), 1);
+        // Legacy JSON without the additive field stays readable.
+        let legacy = serde_json::to_value(&ledger).unwrap();
+        assert!(
+            legacy.get("channel_summaries").is_none()
+                || legacy["channel_summaries"]
+                    .as_array()
+                    .is_some_and(Vec::is_empty)
+        );
+        let reread: CorrectionDecisionLedger = serde_json::from_value(legacy).unwrap();
+        assert!(reread.channel_summaries.is_empty());
+        // Duplicate channel entries fail closed.
+        let mut dup = with_summary.clone();
+        dup.channel_summaries.push(dup.channel_summaries[0].clone());
+        assert!(dup.validate().is_err());
     }
 
     #[test]

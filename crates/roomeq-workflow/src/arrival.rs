@@ -256,8 +256,12 @@ pub fn prepare_channel_input_with_frequency_samples(
             capture: source.provenance().capture,
         },
     );
-    if let Some(band) = source.provenance().valid_band_hz {
-        prepared = prepared.with_valid_band_hz(band)?;
+    if let Some(bands) = source.provenance().declared_support_bands()? {
+        // Multi-segment support flows into band-aware channel preparation:
+        // the engine optimizes and scores the union of declared segments,
+        // refuses filters centered in a gap, and reports per-segment scores
+        // with observed gap leakage.
+        prepared = prepared.with_valid_bands_hz(&bands)?;
     }
     Ok(prepared)
 }
@@ -409,6 +413,93 @@ mod tests {
     }
 
     #[test]
+    fn disjoint_support_optimizes_union_and_authorizes_segments() {
+        // Two usable segments inside the configured correction band, with a
+        // narrow deep notch in the first segment attracting the single PEQ.
+        // The 100 Hz gap bin is a display sample, never fitted or scored.
+        let frequencies = vec![20.0, 30.0, 45.0, 60.0, 100.0, 200.0, 300.0, 400.0, 500.0];
+        let magnitude_db = vec![80.0, 80.0, 68.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0];
+        let source = MeasurementSource::Single(MeasurementSingle {
+            measurement: MeasurementRef::Inline(InlineMeasurement {
+                frequencies,
+                magnitude_db,
+                phase_deg: None,
+                name: None,
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: None,
+            provenance: autoeq_core::MeasurementProvenance {
+                valid_bands_hz: vec![[20.0, 60.0], [200.0, 500.0]],
+                ..Default::default()
+            },
+        });
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 20.0;
+        config.optimizer.max_freq = 500.0;
+        config.optimizer.processing_mode = roomeq_model::ProcessingMode::LowLatency;
+        config.optimizer.num_filters = 1;
+        config.optimizer.max_iter = 50;
+        config.optimizer.population = 6;
+        config.optimizer.parallel_threads = Some(1);
+        config.optimizer.seed = Some(7);
+        let prepared = prepare_channel_input_with_frequency_samples(
+            "left", &source, &config, 48_000.0, None, 128,
+        )
+        .unwrap();
+        assert_eq!(prepared.valid_bands_hz(), &[[20.0, 60.0], [200.0, 500.0]]);
+        let execution = roomeq_engine::channel_execution::prepare_channel_execution(
+            "left", &prepared, &config, 48_000.0, None,
+        )
+        .unwrap();
+        // Hull clamp: the gap stays inside the target band but contributes
+        // no bins to optimization or scoring.
+        assert_eq!(execution.target().min_freq, 20.0);
+        assert_eq!(execution.target().max_freq, 500.0);
+        let result = roomeq_engine::channel_execution::execute_prepared_channel(
+            "left",
+            &prepared,
+            &config,
+            48_000.0,
+            &execution,
+            prepared.eq_resources(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(!result.filters.is_empty());
+        for filter in &result.filters {
+            assert!(
+                prepared.supports_frequency(filter.freq),
+                "filter centered at {} Hz escapes declared segments",
+                filter.freq
+            );
+        }
+        let report = result
+            .segment_support
+            .expect("multi-segment support reports authorization");
+        assert_eq!(report.bands_hz, vec![[20.0, 60.0], [200.0, 500.0]]);
+        assert_eq!(report.segments.len(), 2);
+        assert_eq!(report.segments[0].band_hz, [20.0, 60.0]);
+        assert_eq!(report.segments[1].band_hz, [200.0, 500.0]);
+        for segment in &report.segments {
+            assert!(segment.pre_score.is_finite(), "{segment:?}");
+            assert!(segment.post_score.is_finite(), "{segment:?}");
+        }
+        // The notch segment must improve; the flat segment must not regress
+        // into a worse absolute score than it started with.
+        assert!(
+            report.segments[0].post_score < report.segments[0].pre_score,
+            "notch segment did not improve: {:?}",
+            report.segments[0]
+        );
+        assert!(report.gap_points > 0);
+        assert!(report.gap_leakage_db_max.is_finite());
+        // Union post-score excludes the 100 Hz gap display sample.
+        assert!(result.post_score.is_finite());
+    }
+
+    #[test]
     fn probe_arrival_wins_without_a_wav() {
         let source = MeasurementSource::InMemory(curve());
         let arrival = prepare_channel_arrival_time(
@@ -523,6 +614,7 @@ mod tests {
                 }),
                 ..roomeq_model::OptimizerConfig::default()
             },
+            reporting: None,
             cea2034_cache: Some(HashMap::from([("Prepared speaker".to_string(), bundle)])),
             ..RoomConfig::default()
         };

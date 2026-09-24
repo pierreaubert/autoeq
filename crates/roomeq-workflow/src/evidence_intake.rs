@@ -18,9 +18,9 @@
 //!   spatial-magnitude captures without a stationary timing reference rule
 //!   out coherent/excess-phase work, and an absent policy preserves legacy
 //!   behavior (no new ceiling is imposed).
-//! - [`supported_overlap`] computes the explicit supported overlap of two
-//!   measurement grids. Disjoint support is an intake error, never a
-//!   zip-by-index average or an interpolation across a coverage gap.
+//! - [`supported_overlap`] computes the outer-grid overlap; intake additionally
+//!   checks per-bin validity so an internal coverage gap is not treated as
+//!   measured support.
 //!
 //! Direct calls into the analysis eligibility kernel
 //! (`roomeq_analysis::eligibility::evaluate_operation_eligibility`) are a
@@ -70,6 +70,11 @@ pub struct RawCaptureRef {
     pub artifact_hash: Option<String>,
     /// Declared measurement grid in Hz (positive, strictly increasing).
     pub grid_hz: Vec<f64>,
+    /// Valid measured bins on this grid. `None` means every bin is supported.
+    /// Adjacent valid bins establish an interpolable interval; a false bin
+    /// breaks support and must never be bridged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub validity_mask: Option<Vec<bool>>,
 }
 
 impl RawCaptureRef {
@@ -102,10 +107,20 @@ impl RawCaptureRef {
             }
             previous = *frequency;
         }
+        if self
+            .validity_mask
+            .as_ref()
+            .is_some_and(|mask| mask.len() != self.grid_hz.len())
+        {
+            return Err(format!(
+                "raw capture '{}' validity mask must match its grid length",
+                self.measurement_id
+            ));
+        }
         Ok(())
     }
 
-    /// Supported band of this capture: first to last grid bin.
+    /// Outer grid span; consult `validity_mask` for usable intervals.
     pub fn support_hz(&self) -> [f64; 2] {
         [self.grid_hz[0], self.grid_hz[self.grid_hz.len() - 1]]
     }
@@ -484,11 +499,12 @@ pub fn apply_operation_boundary(
     }
 }
 
-/// Explicit supported overlap of two measurement grids in Hz.
+/// Outer-grid overlap of two measurement grids in Hz.
 ///
-/// Returns the `[lo, hi]` intersection of the two grid supports, or `None`
+/// Returns the `[lo, hi]` intersection of the two grid spans, or `None`
 /// when either grid is empty/nonfinite or the supports are disjoint. There
-/// is no zip-by-index and no interpolation across invalid support.
+/// is no zip-by-index. Callers with per-bin validity must also check the
+/// supported intervals; outer endpoints alone cannot describe an internal gap.
 pub fn supported_overlap(grid_a: &[f64], grid_b: &[f64]) -> Option<[f64; 2]> {
     let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
     for grid in [grid_a, grid_b] {
@@ -514,7 +530,33 @@ pub fn supported_overlap(grid_a: &[f64], grid_b: &[f64]) -> Option<[f64; 2]> {
     }
 }
 
-/// Refuse intake grids with disjoint support.
+/// True when two captures share a positive-width interval backed by adjacent
+/// valid bins in both measurements. A gap bin breaks the interval.
+fn shares_supported_interval(left: &RawCaptureRef, right: &RawCaptureRef) -> bool {
+    let intervals = |capture: &RawCaptureRef| {
+        capture
+            .grid_hz
+            .windows(2)
+            .enumerate()
+            .filter_map(|(index, pair)| {
+                let valid = capture
+                    .validity_mask
+                    .as_ref()
+                    .is_none_or(|mask| mask[index] && mask[index + 1]);
+                valid.then_some([pair[0], pair[1]])
+            })
+            .collect::<Vec<_>>()
+    };
+    let left_intervals = intervals(left);
+    let right_intervals = intervals(right);
+    left_intervals.iter().any(|a| {
+        right_intervals
+            .iter()
+            .any(|b| a[0].max(b[0]) < a[1].min(b[1]))
+    })
+}
+
+/// Refuse intake grids without a shared valid interval.
 ///
 /// Every raw capture pair must share supported overlap before any
 /// multi-take path runs; a disjoint pair is an intake error naming both
@@ -525,9 +567,9 @@ pub fn validate_intake_grids(captures: &[RawCaptureRef]) -> Result<(), String> {
     }
     for (index, left) in captures.iter().enumerate() {
         for right in &captures[index + 1..] {
-            if supported_overlap(&left.grid_hz, &right.grid_hz).is_none() {
+            if !shares_supported_interval(left, right) {
                 return Err(format!(
-                    "captures '{}' and '{}' have disjoint frequency support \
+                    "captures '{}' and '{}' have disjoint valid frequency support \
                      ([{:.1}, {:.1}] vs [{:.1}, {:.1}] Hz); refusing index-aligned average",
                     left.measurement_id,
                     right.measurement_id,
@@ -716,6 +758,9 @@ pub struct ChannelEvidence {
     pub support_hz: [f64; 2],
     /// Retained sample support inside the declared band, not operation permission.
     pub valid_band_hz: [f64; 2],
+    /// Each independently supported interval. Gaps between these intervals
+    /// have no eligible correction or analysis records.
+    pub valid_bands_hz: Vec<[f64; 2]>,
     /// Whether the loaded curve carries phase data.
     pub has_phase_data: bool,
 }
@@ -750,14 +795,13 @@ pub fn build_channel_evidence(
     }
     let support_hz = [freq_hz[0], freq_hz[freq_hz.len() - 1]];
     let provenance = source.provenance();
-    let valid_band_hz = match provenance.valid_band_hz {
-        None => support_hz,
-        Some([lo, hi]) => {
-            if !lo.is_finite() || !hi.is_finite() || lo <= 0.0 || hi <= lo {
-                return Err(format!(
-                    "channel '{channel}' declared valid band must satisfy 0 < lo < hi with finite bounds"
-                ));
-            }
+    let declared = provenance
+        .declared_support_bands()
+        .map_err(|reason| format!("channel '{channel}' {reason}"))?
+        .unwrap_or_else(|| vec![support_hz]);
+    let valid_bands_hz: Vec<_> = declared
+        .into_iter()
+        .map(|[lo, hi]| {
             let first = freq_hz.partition_point(|frequency| *frequency < lo);
             let end = freq_hz.partition_point(|frequency| *frequency <= hi);
             if end - first < 2 {
@@ -766,15 +810,20 @@ pub fn build_channel_evidence(
                     support_hz[0], support_hz[1]
                 ));
             }
-            [freq_hz[first], freq_hz[end - 1]]
-        }
-    };
+            Ok([freq_hz[first], freq_hz[end - 1]])
+        })
+        .collect::<Result<_, _>>()?;
+    let valid_band_hz = [
+        valid_bands_hz[0][0],
+        valid_bands_hz[valid_bands_hz.len() - 1][1],
+    ];
     Ok(ChannelEvidence {
         channel,
         measurement_id: source_measurement_id(source),
         provenance,
         support_hz,
         valid_band_hz,
+        valid_bands_hz,
         has_phase_data,
     })
 }
@@ -857,11 +906,17 @@ pub fn assess_direct_capture(
         .filter(|rate| rate.is_finite() && *rate > 0.0)
         .ok_or_else(|| String::from("missing_or_invalid_direct_capture_sample_rate"))?;
     let mut supported = band_hz;
-    if let Some([lo, hi]) = provenance.valid_band_hz {
-        if !lo.is_finite() || !hi.is_finite() || lo <= 0.0 || lo >= hi {
-            return Err(String::from("invalid_declared_direct_band"));
+    if let Some(bands) = provenance.declared_support_bands()? {
+        let intersections: Vec<_> = bands
+            .iter()
+            .map(|[lo, hi]| [band_hz[0].max(*lo), band_hz[1].min(*hi)])
+            .filter(|[lo, hi]| lo < hi)
+            .collect();
+        match intersections.as_slice() {
+            [segment] => supported = *segment,
+            [] => return Err(String::from("no_usable_direct_capture_band")),
+            _ => return Err(String::from("direct_capture_band_crosses_coverage_gap")),
         }
-        supported = [supported[0].max(lo), supported[1].min(hi)];
     }
     supported[1] = supported[1].min(sample_rate / 2.0);
     if let Some(lower) = facts.valid_lower_bound_hz(policy.cycles_for_valid_band) {
@@ -890,8 +945,6 @@ pub fn assess_direct_capture(
         },
         policy,
     )?;
-    // The gate-derived lower bound must not enlarge declared/grid support.
-    report.valid_lower_hz = report.valid_lower_hz.map(|lower| lower.max(supported[0]));
     if supported != band_hz {
         report
             .reason_codes
@@ -1035,13 +1088,10 @@ pub(crate) fn crossover_timing_reference(
                     "source '{key}' has an incompatible timing reference"
                 ));
             }
-            if let Some(valid) = provenance.valid_band_hz
-                && (!valid[0].is_finite()
-                    || !valid[1].is_finite()
-                    || valid[0] <= 0.0
-                    || valid[1] <= valid[0]
-                    || valid[0] > band_hz[0]
-                    || valid[1] < band_hz[1])
+            if let Some(bands) = provenance.declared_support_bands()?
+                && !bands
+                    .iter()
+                    .any(|valid| valid[0] <= band_hz[0] && valid[1] >= band_hz[1])
             {
                 return Err(format!(
                     "source '{key}' does not support the crossover overlap band"
@@ -1196,6 +1246,58 @@ pub fn gate_channel_operations(
     common_reference_matched: bool,
 ) -> ChannelOperationGate {
     use roomeq_engine::analysis::quasi_anechoic::{DetailVerdict, PhaseSourceVerdict};
+
+    if evidence.valid_bands_hz.len() > 1 {
+        let mut records = Vec::new();
+        for band in &evidence.valid_bands_hz {
+            let mut segment = evidence.clone();
+            segment.support_hz = *band;
+            segment.valid_band_hz = *band;
+            segment.valid_bands_hz = vec![*band];
+            records.extend(
+                gate_channel_operations(&segment, policy, budgets, common_reference_matched)
+                    .records,
+            );
+        }
+        for adjacent in evidence.valid_bands_hz.windows(2) {
+            let gap = [adjacent[0][1], adjacent[1][0]];
+            for operation in [
+                CorrectionOperation::ExcessPhaseCorrection,
+                CorrectionOperation::CoherentSummation,
+                CorrectionOperation::DirectSoundSpeakerCorrection,
+                CorrectionOperation::MagnitudeCorrection,
+                CorrectionOperation::DecayAnalysis,
+                CorrectionOperation::AbsoluteLoudnessAnalysis,
+            ] {
+                records.push(unsupported_record(
+                    &evidence.channel,
+                    &evidence.measurement_id,
+                    operation,
+                    gap,
+                    String::from("internal gap outside declared usable measurement support"),
+                ));
+            }
+        }
+        // Existing correction dispatch consumes a channel-wide authorization
+        // boolean. Until it requests an explicit band, a successful segment
+        // verdict could incorrectly authorize correction inside the gap.
+        for record in &mut records {
+            if matches!(
+                record.verdict,
+                EligibilityVerdict::Eligible | EligibilityVerdict::Limited
+            ) {
+                record.verdict = EligibilityVerdict::Unsupported;
+                record.observations.push(String::from(
+                    "disjoint support requires band-aware correction dispatch",
+                ));
+            }
+        }
+        return ChannelOperationGate {
+            channel: evidence.channel.clone(),
+            measurement_id: evidence.measurement_id.clone(),
+            records,
+        };
+    }
 
     let direct_required = evidence.provenance.capture_kind == ProvenanceCaptureKind::DirectSound
         || evidence.provenance.direct_sound.is_some();
@@ -1603,6 +1705,7 @@ mod tests {
             calibration_id: None,
             artifact_hash: None,
             grid_hz: vec![first_hz, (first_hz + last_hz) / 2.0, last_hz],
+            validity_mask: None,
         }
     }
 
@@ -1934,9 +2037,54 @@ mod tests {
                 calibration_id: None,
                 artifact_hash: None,
                 grid_hz: vec![500.0, 100.0],
+                validity_mask: None,
             },
         ];
         assert!(validate_intake_grids(&invalid).is_err());
+    }
+
+    #[test]
+    fn workflow_intake_grids_do_not_bridge_an_internal_coverage_gap() {
+        let mut gapped = raw_ref(
+            "gapped",
+            "left",
+            "seat-a",
+            "take-0",
+            CaptureKind::StationaryIr,
+            20.0,
+            20_000.0,
+        );
+        gapped.grid_hz = vec![20.0, 100.0, 500.0, 1000.0, 5000.0, 20_000.0];
+        gapped.validity_mask = Some(vec![true, true, false, false, true, true]);
+        let mut inside_gap = raw_ref(
+            "inside-gap",
+            "left",
+            "seat-b",
+            "take-0",
+            CaptureKind::StationaryIr,
+            200.0,
+            2000.0,
+        );
+        inside_gap.grid_hz = vec![200.0, 800.0, 2000.0];
+        assert_eq!(
+            supported_overlap(&gapped.grid_hz, &inside_gap.grid_hz),
+            Some([200.0, 2000.0])
+        );
+        let error = validate_intake_grids(&[gapped.clone(), inside_gap]).unwrap_err();
+        assert!(error.contains("gapped") && error.contains("inside-gap"));
+        let mut overlapping = raw_ref(
+            "overlapping",
+            "left",
+            "seat-c",
+            "take-0",
+            CaptureKind::StationaryIr,
+            50.0,
+            75.0,
+        );
+        overlapping.grid_hz = vec![50.0, 75.0];
+        assert!(validate_intake_grids(&[gapped.clone(), overlapping]).is_ok());
+        gapped.validity_mask = Some(vec![true]);
+        assert!(gapped.validate().unwrap_err().contains("validity mask"));
     }
 
     use crate::optimize_room;
@@ -1976,6 +2124,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
@@ -2028,6 +2177,7 @@ mod tests {
                             calibration_id: None,
                             artifact_hash: None,
                             grid_hz,
+                            validity_mask: None,
                         },
                         Take {
                             take_id: String::from("take-0"),
@@ -2348,6 +2498,72 @@ mod tests {
     }
 
     #[test]
+    fn workflow_f05_disjoint_gap_optimizes_with_segment_authorization() {
+        // Disjoint support reaches the real `optimize_room` entry point:
+        // each segment is conditioned independently, the union is corrected
+        // and scored, and gap-centered filters would refuse the channel.
+        // Curve-only single-curve loaders still refuse this source (see
+        // `curve_only_workflow_load_refuses_disjoint_support` in
+        // `measurement.rs`); the support-aware channel path accepts it.
+        let source = MeasurementSource::Single(autoeq_core::MeasurementSingle {
+            measurement: autoeq_core::MeasurementRef::Inline(autoeq_core::InlineMeasurement {
+                frequencies: vec![20.0, 30.0, 45.0, 60.0, 100.0, 200.0, 300.0, 400.0, 500.0],
+                magnitude_db: vec![80.0, 80.0, 68.0, 80.0, 80.0, 80.0, 80.0, 80.0, 80.0],
+                phase_deg: None,
+                name: Some(String::from("left")),
+                wav_path: None,
+                csv_path: None,
+            }),
+            speaker_name: None,
+            provenance: MeasurementProvenance {
+                valid_bands_hz: vec![[20.0, 60.0], [200.0, 500.0]],
+                ..Default::default()
+            },
+        });
+        let config = room_config(
+            HashMap::from([("left".to_string(), SpeakerConfig::Single(source))]),
+            None,
+        );
+        let result = optimize_room(&config, 48_000.0, None, None)
+            .expect("F05 disjoint support optimizes end to end");
+        assert!(
+            !result.channels.is_empty(),
+            "expected a corrected channel for disjoint support"
+        );
+    }
+
+    #[test]
+    fn direct_capture_assessment_does_not_bridge_disjoint_support() {
+        let provenance = MeasurementProvenance {
+            capture_kind: ProvenanceCaptureKind::DirectSound,
+            valid_bands_hz: vec![[1200.0, 2000.0], [4000.0, 8000.0]],
+            direct_sound: Some(autoeq_core::direct_sound::DirectSoundEvidence {
+                facts: autoeq_core::direct_sound::DirectSoundCaptureFacts {
+                    gate_s: Some(0.002),
+                    direct_path_m: Some(1.0),
+                    first_reflection_path_m: Some(40.0),
+                    averaging: autoeq_core::direct_sound::AveragingMethod::Stationary,
+                    capture_kind: autoeq_core::evidence::CaptureKind::DirectSound,
+                    sample_rate_hz: Some(48_000.0),
+                    ..Default::default()
+                },
+                policy: Some(autoeq_core::direct_sound::QuasiAnechoicPolicy::v1()),
+            }),
+            ..Default::default()
+        };
+        let error = assess_direct_capture(&provenance, [1500.0, 5000.0], "take-1").unwrap_err();
+        assert!(error.contains("coverage_gap"), "{error}");
+        assert!(assess_direct_capture(&provenance, [2500.0, 3500.0], "take-1").is_err());
+        let segment = assess_direct_capture(&provenance, [4500.0, 6000.0], "take-1").unwrap();
+        assert_eq!(segment.valid_lower_hz, Some(4500.0));
+        assert_eq!(segment.valid_upper_hz, Some(6000.0));
+        assert_eq!(
+            segment.gate_label(3000.0),
+            roomeq_engine::analysis::quasi_anechoic::GateLabel::ReflectionContaminated
+        );
+    }
+
+    #[test]
     fn roadmap_correction_unknown_timing_label_cannot_authorize_phase() {
         for reference in ["unknown", " UnKnOwN ", "", " "] {
             let source = inline_single(MeasurementProvenance {
@@ -2583,6 +2799,36 @@ mod tests {
         disjoint.valid_band_hz = Some([30000.0, 40000.0]);
         let source = inline_single(disjoint);
         assert!(build_channel_evidence("left", &source, &[20.0, 20000.0], true).is_err());
+    }
+
+    #[test]
+    fn disjoint_support_gap_cannot_authorize_channel_wide_correction() {
+        let source = inline_single(MeasurementProvenance {
+            valid_bands_hz: vec![[100.0, 200.0], [500.0, 600.0]],
+            ..Default::default()
+        });
+        let evidence = build_channel_evidence(
+            "left",
+            &source,
+            &[100.0, 150.0, 200.0, 300.0, 400.0, 500.0, 550.0, 600.0],
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            evidence.valid_bands_hz,
+            vec![[100.0, 200.0], [500.0, 600.0]]
+        );
+        let gate = gate_channel_operations(&evidence, None, &INTAKE_BOUNDARY_BUDGETS, false);
+        assert!(gate.records.iter().any(|record| {
+            record.band_hz == Some([200.0, 500.0])
+                && record
+                    .observations
+                    .iter()
+                    .any(|note| note.contains("internal gap"))
+        }));
+        assert!(gate.records.iter().all(|record| record.validate().is_ok()));
+        assert!(!gate.authorizes(CorrectionOperation::MagnitudeCorrection));
+        assert!(!gate.authorizes(CorrectionOperation::ExcessPhaseCorrection));
     }
 
     #[test]

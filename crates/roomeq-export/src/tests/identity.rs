@@ -153,6 +153,7 @@ fn export_identity_stable_under_metadata_and_map_order() {
         payload_binding: None,
         ledger_version: DECISION_LEDGER_VERSION.to_string(),
         decisions: vec![DecisionRecord::example(DecisionStatus::Applied)],
+        channel_summaries: Vec::new(),
     });
     relabeled.version = "9.9.9".to_string();
     assert_eq!(

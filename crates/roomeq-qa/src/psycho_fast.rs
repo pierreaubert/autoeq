@@ -31,9 +31,8 @@ fn real_benefit() -> EvidenceProvenance {
 }
 
 /// F04: proxy metrics, synthetic trials, and inconclusive outcomes never
-/// promote perceptual or listening claims. Only a pinned independent
-/// reference validates a model, and only sufficient real trials with a
-/// demonstrated outcome demonstrate benefit.
+/// promote perceptual or listening claims. A descriptive reference or
+/// trial descriptor also cannot replace verified external evidence.
 #[test]
 fn psycho_fast_f04_proxy_and_synthetic_never_promote() {
     let proxy = EvidenceProvenance::ExperimentalProxy {
@@ -60,8 +59,8 @@ fn psycho_fast_f04_proxy_and_synthetic_never_promote() {
     };
     assert!(!assess_listening_gate(&underpowered, false).passed);
 
-    assert!(assess_perceptual_gate(&independent_reference()).passed);
-    assert!(assess_listening_gate(&real_benefit(), false).passed);
+    assert!(!assess_perceptual_gate(&independent_reference()).passed);
+    assert!(!assess_listening_gate(&real_benefit(), false).passed);
 }
 
 /// F04/E04: unsupported domains fail closed on every field. An empty
@@ -110,7 +109,7 @@ fn psycho_fast_f04_intent_mismatch_never_promotes() {
         sufficient: true,
         outcome: TrialOutcome::Equivalence,
     };
-    assert!(assess_listening_gate(&equivalence, true).passed);
+    assert!(!assess_listening_gate(&equivalence, true).passed);
     assert!(!assess_listening_gate(&equivalence, false).passed);
 }
 
@@ -123,6 +122,9 @@ fn verdict(condition: &str, synthetic: bool, decision: &str) -> ClaimVerdict {
         ci95: [0.7, 1.0],
         p_value: 1.0 / 1_024.0,
         reference_p_value: Some(1.0 / 1_024.0),
+        setup_hash: Some(String::from("fixture-frozen-setup")),
+        intent: Some(roomeq_quality::ComparisonIntent::Detectability),
+        equivalence_bound_p_correct: None,
         decision: decision.to_string(),
         synthetic,
     }

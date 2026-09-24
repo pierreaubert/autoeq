@@ -48,7 +48,7 @@ pub(super) fn validated_sources(
         .get(source_name)
         .ok_or("parallel waveform timing unavailable: missing source mapping")?;
     let drivers = chain.drivers.as_deref().unwrap_or_default();
-    let mut array_names = None;
+    let mut array_names: Option<Vec<String>> = None;
     let sources: Vec<MeasurementSource> = match speaker {
         SpeakerConfig::Group(group) => group.measurements.clone(),
         SpeakerConfig::MultiSub(group) => group.subwoofers.clone(),
@@ -58,11 +58,14 @@ pub(super) fn validated_sources(
             }
             // Production emits two aggregate branches, not one branch per
             // cabinet. Timing must nevertheless cover every contributing source.
-            array_names = Some(["Front Array", "Rear Array"]);
+            array_names = Some(vec![
+                String::from("Front Array"),
+                String::from("Rear Array"),
+            ]);
             group.front.iter().chain(&group.rear).cloned().collect()
         }
         SpeakerConfig::Cardioid(group) => {
-            array_names = Some(["Front Sub", "Rear Sub"]);
+            array_names = Some(vec![String::from("Front Sub"), String::from("Rear Sub")]);
             vec![group.front.clone(), group.rear.clone()]
         }
         SpeakerConfig::Topology(topology) => {
@@ -92,15 +95,42 @@ pub(super) fn validated_sources(
     };
     let indices: std::collections::BTreeSet<_> =
         drivers.iter().map(|driver| driver.index).collect();
-    let expected_count = if let Some(names) = array_names {
+    let expected_count = if let Some(default_names) = array_names {
+        let routed_names: Vec<_> = config
+            .system
+            .as_ref()
+            .and_then(|system| system.subwoofers.as_ref())
+            .into_iter()
+            .flat_map(|subwoofers| &subwoofers.outputs)
+            .filter(|output| output.speaker == source_name)
+            .map(|output| output.id.clone())
+            .collect();
+        let names = if routed_names.is_empty() {
+            default_names
+        } else {
+            if routed_names.len() != default_names.len() {
+                return Err(format!(
+                    "parallel waveform timing unavailable: array has {} aggregate branches but {} physical outputs are declared for '{source_name}'",
+                    default_names.len(),
+                    routed_names.len(),
+                ));
+            }
+            routed_names
+        };
         if drivers.iter().any(|driver| {
             names
                 .get(driver.index)
                 .is_none_or(|name| *name != driver.name)
         }) {
-            return Err(
-                "parallel waveform timing unavailable: array branch identity mismatch".into(),
-            );
+            let observed = drivers
+                .iter()
+                .map(|driver| format!("{}:{}", driver.index, driver.name))
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(format!(
+                "parallel waveform timing unavailable: array branch identity mismatch for '{}': expected {:?}, observed [{observed}]",
+                chain.channel, names
+            ));
         }
         names.len()
     } else {

@@ -293,9 +293,8 @@ pub(in super::super) fn assess_phase_support(
                 .evidence_refs
                 .extend(record.evidence_refs.iter().cloned());
         }
-        if let Some(target_id) = &report.resolution.user_target_id {
-            decision.evidence_refs.push(target_id.clone());
-        }
+        // The enforced user-target identity already rides in
+        // `evidence_refs` from target reconciliation; never push it again.
         decision.seat_refs.sort();
         decision.seat_refs.dedup();
         decision.evidence_refs.sort();

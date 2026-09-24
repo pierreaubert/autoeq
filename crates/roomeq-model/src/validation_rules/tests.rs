@@ -95,6 +95,7 @@ fn test_validate_empty_speakers() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -129,6 +130,7 @@ fn test_validate_min_freq_greater_than_max() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -168,6 +170,7 @@ fn test_validate_cea2034_score_mode_is_invalid_for_roomeq() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -207,6 +210,7 @@ fn test_validate_warped_iir_mode_is_valid() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -253,6 +257,7 @@ fn test_validate_crossover_reference() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -335,6 +340,7 @@ fn test_validate_speaker_name() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -392,6 +398,7 @@ fn validate_bass_management_rejects_negative_headroom_and_boost() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -440,6 +447,7 @@ fn validate_role_targets_rejects_invalid_bands_and_distances() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -537,6 +545,7 @@ fn mso_two_sub_config(crossover: Option<SubwooferCrossoverRef>) -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }

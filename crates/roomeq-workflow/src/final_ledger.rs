@@ -29,7 +29,7 @@
 
 use roomeq_model::decision_ledger::{
     CorrectionDecisionLedger, DECISION_LEDGER_VERSION, DecisionAction, DecisionRecord,
-    DecisionStage, DecisionStatus, ObservedQuantity,
+    DecisionStage, DecisionStatus, ObservedQuantity, operational_summaries,
 };
 use roomeq_model::{CorrectionAcceptanceReport, DspGraph};
 use serde::{Deserialize, Serialize};
@@ -632,11 +632,16 @@ pub fn reconcile_ledger(
         });
     }
 
+    // Per-channel delivered-scope shares (req R6) derive from the reconciled
+    // final records: they inherit the delivery binding below without changing
+    // the bound payload identity (ledgers never cover themselves).
+    let channel_summaries = operational_summaries(&decisions);
     CorrectionDecisionLedger {
         acceptance_evidence: None,
         payload_binding: None,
         ledger_version: DECISION_LEDGER_VERSION.to_string(),
         decisions,
+        channel_summaries,
     }
 }
 
@@ -1016,6 +1021,43 @@ mod tests {
     }
 
     #[test]
+    fn roadmap_correction_reconciled_ledger_carries_operational_summaries() {
+        // Req R6: the reconciled ledger derives per-channel delivered-scope
+        // shares from its own final records, inheriting the delivery binding.
+        // The rolled-back band contributes a final Reverted successor (F10:
+        // attempted benefit never delivered), which counts as undecided scope.
+        let (_, identity) = delivered_graph();
+        let mut gain = provisional_applied("trim", "left", None);
+        gain.action = DecisionAction::GainAdjust;
+        gain.decision_id = String::from("trim-left");
+        let ledger = reconcile_ledger(
+            &[
+                provisional_applied("eq-band", "left", Some([40.0, 400.0])),
+                provisional_applied("weak-band", "left", Some([100.0, 400.0])),
+                gain.clone(),
+            ],
+            &identity,
+            &ReconciliationEvents {
+                rolled_back_ids: vec![String::from("weak-band")],
+                ..Default::default()
+            },
+        );
+        assert!(verify_final_binding(&ledger, &identity).is_ok());
+        assert!(ledger.validate().is_ok());
+        assert_eq!(ledger.channel_summaries.len(), 1);
+        let summary = &ledger.channel_summaries[0];
+        assert_eq!(summary.channel, "left");
+        assert_eq!(summary.decided_equalize, 2);
+        assert_eq!(summary.delivered_equalize, 1);
+        assert_eq!(summary.operational_response_pct, Some(50.0));
+        // A channel without decided equalization scope has no entry: the
+        // viewer renders pending instead of inventing 100%.
+        let scoped = reconcile_ledger(&[gain], &identity, &ReconciliationEvents::default());
+        assert!(scoped.validate().is_ok());
+        assert!(scoped.channel_summaries.is_empty());
+    }
+
+    #[test]
     fn roadmap_correction_public_snapshot_invalidates_later_mutation() {
         let mut result = crate::test_fixtures::single_channel_room_result("left");
         result
@@ -1340,6 +1382,7 @@ mod tests {
             payload_binding: None,
             ledger_version: DECISION_LEDGER_VERSION.to_string(),
             decisions: vec![stale],
+            channel_summaries: Vec::new(),
         });
         let provisional = vec![provisional_applied(
             "dec-eq-left",

@@ -77,29 +77,31 @@ def run(manifest_path):
         "--file", mutation["file"], "--re", mutation["selector"],
         "--baseline", "run", "--timeout", "120", "--build-timeout", "600",
         "--cargo-arg=--offline", "--cargo-arg=--lib", "--cargo-arg=--package=" + manifest["regression_test"]["package"],
-        "--cargo-test-arg=" + manifest["regression_test"]["name"],
-        "--cargo-test-arg=--", "--cargo-test-arg=--exact",
         "-o", str(output),
     ]
+    # cargo-mutants 25.x forwards arguments following `--` to `cargo test`.
+    # Keep discovery flags before this separator, or `--list --json` would be
+    # forwarded to the test binary instead of selecting exactly one mutant.
+    test_args = ["--", manifest["regression_test"]["name"], "--", "--exact"]
     if "scope_diff" in mutation:
         scope = (ROOT / mutation["scope_diff"]).resolve()
         if not scope.is_relative_to(ROOT):
             raise ValueError("mutation scope must stay in the repository")
         hashes[str(scope.relative_to(ROOT))] = hashlib.sha256(scope.read_bytes()).hexdigest()
         command.extend(["--in-diff", mutation["scope_diff"]])
-    discovery = subprocess.run(command + ["--list", "--json"], cwd=ROOT,
+    discovery = subprocess.run(command + ["--list", "--json"] + test_args, cwd=ROOT,
                                text=True, capture_output=True, check=False)
     if discovery.returncode:
         raise ValueError("mutation discovery failed\n" + discovery.stderr)
     require_single_mutant(json.loads(discovery.stdout))
-    result = subprocess.run(command, cwd=ROOT, check=False)
+    result = subprocess.run(command + test_args, cwd=ROOT, check=False)
     report = json.loads((output / "mutants.out/outcomes.json").read_text())
     require_caught(report)
     log_hashes = verify_execution_logs(report, output / "mutants.out", manifest["regression_test"]["name"])
     if result.returncode:
         raise ValueError(f"mutation runner exited {result.returncode}")
     evidence = {"defect": manifest["id"], "regression": regression,
-                "source_sha256": hashes, "execution_log_sha256": log_hashes, "mutation_command": command,
+                "source_sha256": hashes, "execution_log_sha256": log_hashes, "mutation_command": command + test_args,
                 "outcomes": report}
     artifact = output / "evidence.json"
     artifact.write_text(json.dumps(evidence, indent=2) + "\n")

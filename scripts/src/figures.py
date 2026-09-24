@@ -2277,16 +2277,18 @@ def create_smoothed_figure(
 
 
 def create_tof_figure(tof_rows: list[dict], after: bool = False) -> go.Figure | None:
-    """Time-of-flight bar chart before (measured) or after (final) DSP."""
+    """Time-of-flight bar chart before (measured) or after (calculated) DSP."""
     names = [r["name"] for r in tof_rows]
     key = "after_ms" if after else "before_ms"
     vals = [r.get(key) for r in tof_rows]
-    if not names or not any(isinstance(v, (int, float)) for v in vals):
+    values = [v if isinstance(v, (int, float)) and not isinstance(v, bool)
+              and math.isfinite(v) else None for v in vals]
+    if not names or all(value is None for value in values):
         return None
-    title = "Time of flight after DSP" if after else "Time of flight before DSP"
+    title = ("Calculated arrival after DSP" if after
+             else "Measured arrival before DSP")
     fig = go.Figure()
-    fig.add_trace(go.Bar(name=title, x=names, y=[
-        v if isinstance(v, (int, float)) else 0.0 for v in vals],
+    fig.add_trace(go.Bar(name=title, x=names, y=values,
         marker_color="rgba(100, 200, 100, 0.8)" if after else "rgba(255, 100, 100, 0.8)"))
     fig.update_layout(
         title=dict(text=title, font=dict(size=14)),
@@ -2310,7 +2312,7 @@ def create_symmetric_pair_figure(
                              name=f"{label} magnitude sum",
                              line=dict(color="rgba(74, 144, 217, 0.9)", width=2)))
     fig.add_trace(go.Scatter(x=freq, y=diff_spl, mode="lines",
-                             name=f"{label} difference",
+                             name=f"{label} |magnitude difference|",
                              line=dict(color="rgba(255, 150, 50, 0.9)", width=2,
                                        dash="dash")))
     freq_axis = get_freq_axis_config()
@@ -2327,5 +2329,63 @@ def create_symmetric_pair_figure(
         legend=dict(font=dict(size=10)),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=60, r=40, t=60, b=60), height=360,
+    )
+    return fig
+
+
+def create_early_late_figure(label: str, report: dict | None) -> go.Figure | None:
+    """Render emitted third-octave energy contributions on a shared reference."""
+    if not isinstance(report, dict) or report.get("method") != "incoherent_band_energy":
+        return None
+    if report.get("reference") != "full_peak_band":
+        return None
+    if report.get("smoothing") != "third_octave" or report.get("split_ms") != 20.0:
+        return None
+    curves = [report.get(key) for key in ("full", "early", "late")]
+    if not all(isinstance(curve, dict) for curve in curves):
+        return None
+    frequency = curves[0].get("freq")
+    if not isinstance(frequency, list) or not frequency:
+        return None
+    if not all(isinstance(f, (int, float)) and math.isfinite(f) and f > 0 for f in frequency):
+        return None
+    for curve in curves:
+        spl = curve.get("spl")
+        if (curve.get("freq") != frequency or not isinstance(spl, list)
+                or len(spl) != len(frequency)
+                or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in spl)):
+            return None
+    fig = go.Figure()
+    for name, curve, color in zip(("Full", "Early", "Late"), curves,
+                                  ("#333333", "#3089c5", "#e38836")):
+        fig.add_trace(go.Scatter(x=frequency, y=curve["spl"], mode="lines",
+                                 name=name, line=dict(color=color, width=2)))
+    fig.update_layout(
+        title=dict(text=f"{label}: early vs late band energy (20 ms split)", font=dict(size=14)),
+        xaxis=get_freq_axis_config(), yaxis=dict(title="Level vs full peak band (dB)"),
+        plot_bgcolor="white", paper_bgcolor="white", height=360,
+        margin=dict(l=60, r=40, t=60, b=60),
+    )
+    return fig
+
+
+def create_t60_octaves_figure(label: str, rows: list[dict] | None) -> go.Figure | None:
+    """Plot only valid measured-room octave T60 estimates."""
+    if not rows or not any(row["t60_s"] is not None for row in rows):
+        return None
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=[row["centre_hz"] for row in rows],
+        y=[row["t60_s"] for row in rows],
+        mode="lines+markers", name="T60",
+        line=dict(color="#3089c5", width=2),
+        connectgaps=False,
+    ))
+    fig.update_layout(
+        title=dict(text=f"{label}: measured octave-band T60", font=dict(size=14)),
+        xaxis=dict(type="log", title="Octave centre (Hz)", tickvals=[row["centre_hz"] for row in rows]),
+        yaxis=dict(title="T60 (s)", rangemode="tozero"),
+        plot_bgcolor="white", paper_bgcolor="white", height=360,
+        margin=dict(l=60, r=40, t=60, b=60),
     )
     return fig

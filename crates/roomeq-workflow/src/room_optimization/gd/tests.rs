@@ -433,6 +433,12 @@ fn dsp_chain(name: &str) -> ChannelDspChain {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
     }
 }
 
@@ -447,6 +453,7 @@ fn room_config_with_in_memory_speakers(speakers: HashMap<String, SpeakerConfig>)
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }

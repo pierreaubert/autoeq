@@ -32,6 +32,7 @@ fn room_config_with_optimizer(
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -229,6 +230,7 @@ fn stereo_2_1_config() -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -369,6 +371,12 @@ fn assemble_generic_result_non_empty_success() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     let mut channel_results = HashMap::new();

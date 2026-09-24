@@ -1,7 +1,9 @@
 //! Retained parsed inputs used by final-seat replay, without acquisition claims.
 
 use super::{Capture, invalid};
-use crate::evidence_intake::{RawCaptureRef, WorkflowIntake, provenance_capture_kind};
+use crate::evidence_intake::{
+    RawCaptureRef, WorkflowIntake, provenance_capture_kind, validate_intake_grids,
+};
 use autoeq_core::MeasurementProvenance;
 use autoeq_measurements::{Take, TakeDecision};
 use roomeq_model::decision_ledger::canonical_value_identity;
@@ -23,11 +25,45 @@ mod tests {
     use std::collections::HashMap;
 
     #[test]
+    fn receipt_retains_disjoint_support_gap() {
+        let mut receipt = Receipt::default();
+        let curve = roomeq_model::Curve {
+            freq: vec![100.0, 200.0, 300.0, 400.0, 500.0, 600.0].into(),
+            spl: vec![80.0; 6].into(),
+            ..Default::default()
+        };
+        receipt
+            .record(
+                "training",
+                None,
+                &Capture {
+                    channel: "left".into(),
+                    driver: None,
+                    curves: vec![curve],
+                    seat_labels: None,
+                },
+                MeasurementProvenance {
+                    valid_bands_hz: vec![[100.0, 200.0], [500.0, 600.0]],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let stage = receipt.into_stage();
+        let payload: serde_json::Value =
+            serde_json::from_str(stage.checks[0].diagnostic.as_ref().unwrap()).unwrap();
+        assert_eq!(
+            payload["raw_refs"][0]["validity_mask"],
+            serde_json::json!([true, true, false, false, true, true])
+        );
+    }
+
+    #[test]
     fn receipt_preserves_declarations_without_inventing_acquisition_or_gain_reference() {
         let provenance = MeasurementProvenance {
             capture_kind: ProvenanceCaptureKind::StationaryIr,
             calibration_id: Some("declared-calibration".into()),
             timing_reference_id: Some("declared-timing-only".into()),
+            valid_band_hz: Some([40.0, 80.0]),
             ..Default::default()
         };
         let source = MeasurementSource::Single(MeasurementSingle {
@@ -60,6 +96,10 @@ mod tests {
         );
         assert!(payload["takes"][0]["reference_id"].is_null());
         assert!(payload["raw_refs"][0]["artifact_hash"].is_null());
+        assert_eq!(
+            payload["raw_refs"][0]["validity_mask"],
+            serde_json::json!([true, true, false])
+        );
         assert!(
             payload["raw_refs"][0]["measurement_id"]
                 .as_str()
@@ -95,6 +135,7 @@ impl Receipt {
             "loaded-source:{}",
             canonical_value_identity(&source).fingerprint
         );
+        let bands = provenance.declared_support_bands().map_err(invalid)?;
         let mut intake = WorkflowIntake::default();
         for (index, curve) in capture.curves.iter().enumerate() {
             curve.validate("retained final-seat input")?;
@@ -118,6 +159,13 @@ impl Receipt {
                         calibration_id: provenance.calibration_id.clone(),
                         artifact_hash: None,
                         grid_hz: curve.freq.to_vec(),
+                        validity_mask: bands.as_ref().map(|bands| {
+                            curve
+                                .freq
+                                .iter()
+                                .map(|f| bands.iter().any(|[low, high]| *f >= *low && *f <= *high))
+                                .collect()
+                        }),
                     },
                     Take {
                         take_id,
@@ -133,6 +181,7 @@ impl Receipt {
                 )
                 .map_err(invalid)?;
         }
+        validate_intake_grids(&intake.raw_refs).map_err(invalid)?;
         let payload = serde_json::json!({
             "version": 1,
             "evidence_kind": "loaded_response_snapshot",

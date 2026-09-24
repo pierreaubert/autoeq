@@ -1368,7 +1368,8 @@ mod tests {
     }
 
     #[test]
-    fn tmp_probe_nightly_matrix() {
+    #[ignore = "nightly decision matrix; run explicitly with a writable ROOMEQ_QA_DIR"]
+    fn nightly_decision_matrix() {
         let rows = run_release_decision_matrix_for(QaTier::Nightly);
         let expected = release_decision_case_count(QaTier::Nightly);
         let directory = crate::qa_evidence_dir();

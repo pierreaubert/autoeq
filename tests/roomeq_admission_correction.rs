@@ -17,6 +17,17 @@ use autoeq::roomeq::{
 };
 use std::collections::HashMap;
 
+fn test_temp_root() -> std::path::PathBuf {
+    let preferred = std::path::PathBuf::from("/Volumes/home_tmp/tmp");
+    if preferred.is_dir() {
+        return preferred;
+    }
+    let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/qa/admission-correction-tmp");
+    std::fs::create_dir_all(&fallback).unwrap();
+    fallback
+}
+
 fn phased_curve(base_level: f64, delay_s: f64) -> Curve {
     let n = 60;
     let freq: Vec<f64> = (0..n)
@@ -76,6 +87,7 @@ fn stereo_config() -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -442,6 +454,7 @@ fn home_cinema_config() -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -797,7 +810,7 @@ fn roadmap_correction_admission_snapshot_survives_source_file_change() {
         atomic::{AtomicBool, Ordering},
     };
 
-    let directory = tempfile::tempdir_in("/Volumes/home_tmp/tmp").unwrap();
+    let directory = tempfile::tempdir_in(test_temp_root()).unwrap();
     let path = directory.path().join("source.csv");
     let original = phased_curve(80.0, 0.0);
     let mut csv = String::from("freq,spl,phase\n");
@@ -1113,7 +1126,7 @@ fn roadmap_correction_admission_report_binds_production_payload() {
     // Python independently recomputes the digest from the actual serialized
     // public output; it does not receive an oracle pass flag from Rust.
     let script = r#"
-import copy, json, sys, tempfile
+import copy, json, os, sys, tempfile
 from pathlib import Path
 from scripts.src.payload_binding import verify_payload_binding
 from scripts.src.correction_explanation import correction_explanation_html
@@ -1139,7 +1152,7 @@ assert not verify_payload_binding(changed)[0]
 assert 'Delivered payload changed' in correction_explanation_html(changed)
 assert '0 applied delivery claims' in correction_explanation_html(changed)
 assert 'Delivered payload changed' in acceptance_views_html(changed)
-with tempfile.TemporaryDirectory(dir='/Volumes/home_tmp/tmp') as directory:
+with tempfile.TemporaryDirectory(dir=os.environ['ROOMEQ_TEST_TMP_ROOT']) as directory:
     root = Path(directory)
     result_path = root / 'production.json'
     result_path.write_text(json.dumps(data), encoding='utf-8')
@@ -1177,6 +1190,7 @@ fn assert_python_report(output: &autoeq::roomeq::DspChainOutput, script: &str) {
         .arg("-c")
         .arg(script)
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env("ROOMEQ_TEST_TMP_ROOT", test_temp_root())
         .current_dir(env!("CARGO_MANIFEST_DIR"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -1206,7 +1220,7 @@ fn roadmap_correction_admission_phase_application_survives_finalization() {
     // These are synthetic declarations, not independently validated acoustic captures.
     // The idealized 125 ms gate and 50 m first-reflection path deliberately
     // supply full-band support for this numerical fixture, not a room setup recipe.
-    let temp = tempfile::TempDir::new_in("/Volumes/home_tmp/tmp").unwrap();
+    let temp = tempfile::TempDir::new_in(test_temp_root()).unwrap();
     for (generic, retained) in [(false, true), (true, true), (false, false), (true, false)] {
         let output_dir = temp
             .path()
@@ -1534,6 +1548,7 @@ fn multisub_room_config() -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -2641,7 +2656,7 @@ fn assert_joint_rejection_ledger(output: &autoeq::roomeq::DspChainOutput, reason
     assert_python_report(
         output,
         r#"
-import json, sys, tempfile
+import json, os, sys, tempfile
 from pathlib import Path
 from scripts.src.payload_binding import verify_payload_binding
 from scripts.src.correction_explanation import correction_explanation_html
@@ -2656,7 +2671,7 @@ assert 'seat_target_weighted_rms_regressed' in section
 assert 'fixture-clock:seat-index-0' in section
 assert 'subs_1' in section and 'subs_2' in section
 assert 'stage_correction_band_min' in section
-with tempfile.TemporaryDirectory(dir='/Volumes/home_tmp/tmp') as directory:
+with tempfile.TemporaryDirectory(dir=os.environ['ROOMEQ_TEST_TMP_ROOT']) as directory:
     root = Path(directory)
     path = root / 'joint.json'
     path.write_text(json.dumps(data))

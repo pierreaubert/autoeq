@@ -234,12 +234,32 @@ pub fn process_mixed_crossover(
     let (norm_range, mean_final) =
         roomeq_analysis::response_metrics::detect_passband_and_mean(&neutral_final);
     let normalized_final_spl = &neutral_final.spl - mean_final;
-    let post_score = autoeq_optim::loss::flat_loss(
-        &final_curve.freq,
-        &normalized_final_spl,
-        request.min_freq,
-        request.max_freq,
-    );
+    // Score on usable support only: multi-segment gap bins are display
+    // samples, not measurements. Prepared-aware mixed requests select the
+    // union of declared segments; the unprepared path keeps legacy scoring.
+    let post_score = match request.prepared {
+        Some(prepared) => {
+            let score_curve = Curve {
+                freq: final_curve.freq.clone(),
+                spl: normalized_final_spl.clone(),
+                phase: final_curve.phase.clone(),
+                ..Curve::default()
+            };
+            let usable = prepared.usable_curve(&score_curve)?;
+            autoeq_optim::loss::flat_loss(
+                &usable.freq,
+                &usable.spl,
+                request.min_freq,
+                request.max_freq,
+            )
+        }
+        None => autoeq_optim::loss::flat_loss(
+            &final_curve.freq,
+            &normalized_final_spl,
+            request.min_freq,
+            request.max_freq,
+        ),
+    };
     info!(
         "  Pre-score: {:.6}, Post-score: {:.6}",
         request.pre_score, post_score
@@ -287,6 +307,9 @@ pub fn process_mixed_crossover(
         optimizer_evidence: eq_result.optimizer_evidence,
         audibility_veto,
         veto_adjudication,
+        // Multi-segment authorization runs once per channel in
+        // `execute_prepared_channel`, after every processing mode assembles.
+        segment_support: None,
     })
 }
 

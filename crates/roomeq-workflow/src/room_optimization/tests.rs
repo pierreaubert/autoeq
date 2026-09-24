@@ -113,7 +113,13 @@ fn route_owned_topology_owns_main_sub_phase_alignment() {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
         target_curve: None,
+        early_late_curves: None,
     };
     let routed = HashMap::from([("LFE".to_string(), routed_chain)]);
 
@@ -135,6 +141,12 @@ fn routed_test_chain(target: &Curve) -> ChannelDspChain {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
     }
 }
 
@@ -533,7 +545,13 @@ fn topology_height_residual_is_added_after_existing_delay() {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
         target_curve: None,
+        early_late_curves: None,
     };
 
     assert!(insert_topology_height_residual_delay(
@@ -581,7 +599,13 @@ fn reported_curve_retains_user_preference_filters() {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
         target_curve: None,
+        early_late_curves: None,
     };
 
     let reported = reported_curve_with_user_preferences(&base_curve, &chain, 48_000.0);
@@ -815,6 +839,7 @@ fn minimal_room_config(processing_mode: ProcessingMode) -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -831,6 +856,7 @@ fn optimize_room_empty_speakers_fails_validation() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -1213,6 +1239,7 @@ fn optimize_room_stereo_2_0_workflow() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -1282,6 +1309,7 @@ fn base_room_config(
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }

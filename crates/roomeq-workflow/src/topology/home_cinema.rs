@@ -318,6 +318,12 @@ pub(super) fn realize_plugins_on_curve(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
     };
     crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs(
         &chain,
@@ -1844,6 +1850,7 @@ fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationRe
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
             provisional_decisions: Vec::new(),
         },
@@ -1992,6 +1999,7 @@ fn optimize_home_cinema_no_sub(
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
             provisional_decisions: Vec::new(),
         },
@@ -3473,10 +3481,12 @@ fn optimize_home_cinema_with_sub(
                 prepared_target.as_ref(),
                 role_xover_freq,
             );
-        let post_underfill_db = cancellation_underfill_db
-            .into_iter()
-            .chain(target_underfill_db)
-            .reduce(f64::max);
+        let pre_target_underfill_db =
+            roomeq_engine::topology::bass_management_max_underfill_db_with_target(
+                Some(&post_curve),
+                prepared_target.as_ref(),
+                role_xover_freq,
+            );
         log::debug!(
             "  {role} Post-EQ underfill: cancellation={cancellation_underfill_db:?} dB, target={target_underfill_db:?} dB"
         );
@@ -3519,11 +3529,26 @@ fn optimize_home_cinema_with_sub(
                 .entry(role.clone())
                 .or_default()
                 .append(&mut post_eq_result.optimizer_evidence);
-            if let Some(underfill_db) = post_underfill_db.filter(|_| !underfill_accepted) {
+            if let Some(cancellation) = cancellation_evidence
+                .as_ref()
+                .filter(|evidence| !evidence.accepted)
+            {
                 log::warn!(
-                    "  {} Post-EQ discarded: crossover underfill {:.3} dB exceeds {:.3} dB",
+                    "  {} Post-EQ discarded: crossover cancellation {:.3} dB refused ({}, baseline {:?} dB; target={target_underfill_db:?}, pre-target={pre_target_underfill_db:?})",
                     role,
-                    underfill_db,
+                    cancellation.final_db,
+                    cancellation.reason,
+                    cancellation.baseline_db,
+                );
+            } else if cancellation_evidence.is_none() {
+                log::warn!(
+                    "  {role} Post-EQ discarded: crossover cancellation evidence unavailable"
+                );
+            } else if let Some(underfill_db) = target_underfill_db.filter(|value| {
+                !roomeq_engine::topology::bass_management_underfill_is_acceptable(*value)
+            }) {
+                log::warn!(
+                    "  {role} Post-EQ discarded: target-relative underfill {underfill_db:.3} dB exceeds {:.3} dB (pre-target={pre_target_underfill_db:?})",
                     roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB,
                 );
             } else if !output_preserved {
@@ -3775,6 +3800,12 @@ fn optimize_home_cinema_with_sub(
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
             target_curve: routed_target_curves
                 .get(role)
                 .cloned()
@@ -3982,6 +4013,14 @@ fn optimize_home_cinema_with_sub(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: sub_preprocess.joint_sub.clone(),
+        // Bass-managed sub chains combine drivers and routing; they carry
+        // no single measured-IR acoustic report.
+        early_late_curves: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
         target_curve: pre_eq_target_curves.get(&sub_role).cloned(),
     };
     channel_chains.insert(sub_role.clone(), sub_chain);
@@ -4417,6 +4456,7 @@ fn optimize_home_cinema_with_sub(
             },
             qa_seed_distribution: None,
             effective_config: None,
+            t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
             provisional_decisions: crossover_provisional,
         },
@@ -4558,6 +4598,12 @@ mod post_dsp_level_tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
             target_curve: None,
         }
     }
@@ -5843,6 +5889,28 @@ mod post_dsp_level_tests {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn supporting_only_result_carries_declared_t60_tolerance() {
+        // The operator-declared report tolerance reaches output metadata so
+        // the viewer flatness cell can light up; absent stays pending and
+        // changes no acceptance math.
+        let mut config = roomeq_model::RoomConfig::default();
+        assert_eq!(config.report_t60_tolerance_s(), None);
+        assert!(
+            super::supporting_only_home_cinema_result(&config)
+                .metadata
+                .t60_flatness_tolerance_s
+                .is_none()
+        );
+        config.reporting = Some(roomeq_model::ReportingConfig {
+            t60_flatness_tolerance_s: Some(0.05),
+        });
+        // Structural validation of the knob itself lives in the model suite;
+        // here only the config-to-metadata plumbing is under test.
+        let result = super::supporting_only_home_cinema_result(&config);
+        assert_eq!(result.metadata.t60_flatness_tolerance_s, Some(0.05));
+    }
+
+    #[test]
     fn physical_sub_group_preserves_topology_and_requires_complete_outputs() {
         let mut config = roomeq_model::RoomConfig::default();
         config.speakers.insert(
@@ -6132,6 +6200,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
@@ -6240,6 +6309,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6473,6 +6543,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6523,6 +6594,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6571,6 +6643,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6623,6 +6696,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6665,6 +6739,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6727,6 +6802,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
 
@@ -6922,6 +6998,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let mut assembly = make_assembly(&config, config.system.as_ref().unwrap());
@@ -6989,6 +7066,12 @@ mod splice_revert_tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
             target_curve: None,
         }
     }

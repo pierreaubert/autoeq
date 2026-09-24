@@ -1,11 +1,14 @@
 //! Corpus membership, held-out separation, and comparison binding (Q3).
 //!
-//! Pure validation over acoustic-corpus entries. Reference vectors supplied
-//! independently of the programme stay distinct from generated controls, and
-//! baseline/candidate comparisons bind to identical inputs and budgets.
+//! Validation over acoustic-corpus entries. Independently supplied reference
+//! files are hashed and kept distinct from generated controls; baseline and
+//! candidate comparisons bind to identical inputs and budgets.
 
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::io::Read;
+use std::path::PathBuf;
 
 // Rust guideline compliant 2026-02-21
 
@@ -90,7 +93,11 @@ pub fn validate_corpus(captures: &[CorpusCapture]) -> Result<(), String> {
             if !same_seat {
                 return Err(format!(
                     "capture hash '{}' shared by '{}:{}' and '{}:{}': seats must not duplicate captures",
-                    capture.capture_hash, first.scenario, first.seat, capture.scenario, capture.seat
+                    capture.capture_hash,
+                    first.scenario,
+                    first.seat,
+                    capture.scenario,
+                    capture.seat
                 ));
             }
         }
@@ -131,9 +138,7 @@ pub fn validate_held_out_separation(
         *per_scenario.entry((*scenario).to_string()).or_default() += 1;
     }
     for capture in captures {
-        if capture.trains_candidate
-            && !per_scenario.contains_key(capture.scenario.as_str())
-        {
+        if capture.trains_candidate && !per_scenario.contains_key(capture.scenario.as_str()) {
             return Err(format!(
                 "scenario '{}' trains a candidate with no held-out seat",
                 capture.scenario
@@ -146,19 +151,35 @@ pub fn validate_held_out_separation(
 /// A reference vector with its supply-line identity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceVector {
+    /// Pinned set identity shared by all vectors used for one model claim.
+    pub set_id: String,
     /// Stable vector id.
     pub id: String,
-    /// Content hash of the vector payload.
+    /// SHA-256 of the exact vector payload.
     pub hash: String,
+    /// Local artifact containing the exact independent vector payload.
+    pub artifact_path: PathBuf,
+    /// Pinned edition of the reference model or published vector set.
+    pub edition: String,
+    /// License identifier governing use of the vector payload.
+    pub license_id: String,
     /// True only for vectors supplied independently of the programme.
     pub independent: bool,
 }
 
+fn sha256_hex(bytes: impl AsRef<[u8]>) -> String {
+    bytes
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Keep independently supplied references distinct from generated controls.
 ///
-/// Independent vectors must carry the independent flag and must not share a
-/// content hash with a generated control; otherwise a programme artifact
-/// could masquerade as external validation.
+/// Independent vectors need edition/license metadata and an artifact whose
+/// bytes match the declared SHA-256. They must not share that digest with a
+/// generated control; a descriptor alone cannot establish external evidence.
 pub fn validate_reference_separation(
     independent: &[ReferenceVector],
     generated: &[ReferenceVector],
@@ -166,21 +187,71 @@ pub fn validate_reference_separation(
     if independent.is_empty() {
         return Err(String::from("no independent reference vectors registered"));
     }
+    let mut ids = HashSet::new();
+    let first = &independent[0];
     for vector in independent {
+        if vector.set_id.trim().is_empty() {
+            return Err(String::from("reference vector needs a nonempty set id"));
+        }
         if !vector.independent {
             return Err(format!(
                 "reference '{}' is not flagged as independently supplied",
                 vector.id
             ));
         }
-        if vector.id.trim().is_empty() || vector.hash.trim().is_empty() {
-            return Err(String::from("reference vector needs an id and a hash"));
+        if vector.id.trim().is_empty() || !ids.insert(vector.id.as_str()) {
+            return Err(String::from("reference vector needs a unique nonempty id"));
+        }
+        if vector.edition.trim().is_empty() || vector.license_id.trim().is_empty() {
+            return Err(format!(
+                "reference '{}' needs a declared edition and license",
+                vector.id
+            ));
+        }
+        if vector.set_id != first.set_id
+            || vector.edition != first.edition
+            || vector.license_id != first.license_id
+        {
+            return Err(String::from(
+                "independent vectors in one set need matching set, edition and license",
+            ));
+        }
+        if vector.hash.len() != 64 || !vector.hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+            return Err(format!("reference '{}' needs a SHA-256 hash", vector.id));
+        }
+        let mut artifact = std::fs::File::open(&vector.artifact_path).map_err(|error| {
+            format!(
+                "reference '{}' artifact '{}' cannot be opened: {error}",
+                vector.id,
+                vector.artifact_path.display()
+            )
+        })?;
+        let mut hasher = Sha256::new();
+        let mut chunk = [0_u8; 64 * 1024];
+        let mut bytes_read = 0_u64;
+        loop {
+            let count = artifact.read(&mut chunk).map_err(|error| {
+                format!("reference '{}' artifact read failed: {error}", vector.id)
+            })?;
+            if count == 0 {
+                break;
+            }
+            bytes_read += count as u64;
+            hasher.update(&chunk[..count]);
+        }
+        if bytes_read == 0 {
+            return Err(format!("reference '{}' artifact is empty", vector.id));
+        }
+        if sha256_hex(hasher.finalize()) != vector.hash.to_ascii_lowercase() {
+            return Err(format!("reference '{}' artifact hash mismatch", vector.id));
         }
     }
-    let generated_hashes: HashSet<&str> =
-        generated.iter().map(|vector| vector.hash.as_str()).collect();
+    let generated_hashes: HashSet<String> = generated
+        .iter()
+        .map(|vector| vector.hash.to_ascii_lowercase())
+        .collect();
     for vector in independent {
-        if generated_hashes.contains(vector.hash.as_str()) {
+        if generated_hashes.contains(&vector.hash.to_ascii_lowercase()) {
             return Err(format!(
                 "reference '{}' shares content hash with a generated control",
                 vector.id
@@ -217,7 +288,9 @@ pub fn validate_comparison_binding(binding: &ComparisonBinding) -> Result<(), St
     if binding.baseline_graph_hash.trim().is_empty()
         || binding.candidate_graph_hash.trim().is_empty()
     {
-        return Err(String::from("comparison needs baseline and candidate graph hashes"));
+        return Err(String::from(
+            "comparison needs baseline and candidate graph hashes",
+        ));
     }
     if binding.input_hash.trim().is_empty() {
         return Err(String::from("comparison needs an input hash"));
@@ -226,7 +299,9 @@ pub fn validate_comparison_binding(binding: &ComparisonBinding) -> Result<(), St
         return Err(String::from("comparison needs a limits version"));
     }
     if !binding.sample_rate.is_finite() || binding.sample_rate <= 0.0 {
-        return Err(String::from("comparison needs a finite positive sample rate"));
+        return Err(String::from(
+            "comparison needs a finite positive sample rate",
+        ));
     }
     if binding.budget_evals == 0 {
         return Err(String::from("comparison needs a nonzero evaluation budget"));
@@ -254,7 +329,9 @@ pub fn validate_comparison_pair(
         return Err(String::from("comparison legs declare different budgets"));
     }
     if baseline_leg.limits_version != candidate_leg.limits_version {
-        return Err(String::from("comparison legs use different limits versions"));
+        return Err(String::from(
+            "comparison legs use different limits versions",
+        ));
     }
     Ok(())
 }
@@ -333,9 +410,8 @@ mod corpus_tests {
         // scenario carries known provenance, held-out paths are unique per
         // scenario, and scenarios without held-out seats are measured
         // single-position captures (report-only, never training).
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(
-            "../../data_tests/roomeq/acoustic_corpus/manifest.json",
-        );
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../data_tests/roomeq/acoustic_corpus/manifest.json");
         let raw = std::fs::read_to_string(&path).unwrap();
         let manifest: serde_json::Value = serde_json::from_str(&raw).unwrap();
         let scenarios = manifest["scenarios"].as_array().unwrap();
@@ -349,13 +425,22 @@ mod corpus_tests {
                 "scenario '{id}' has unknown provenance '{provenance}'"
             );
             let rate = scenario["sample_rate"].as_f64().unwrap_or(0.0);
-            assert!(rate.is_finite() && rate > 0.0, "scenario '{id}' has no rate");
+            assert!(
+                rate.is_finite() && rate > 0.0,
+                "scenario '{id}' has no rate"
+            );
             let held_out = scenario["held_out"].as_array();
             let mut paths = std::collections::HashSet::new();
             for entry in held_out.into_iter().flatten() {
                 let capture = entry["path"].as_str().unwrap_or("");
-                assert!(!capture.trim().is_empty(), "scenario '{id}' held-out without path");
-                assert!(paths.insert(capture), "scenario '{id}' duplicates held-out '{capture}'");
+                assert!(
+                    !capture.trim().is_empty(),
+                    "scenario '{id}' held-out without path"
+                );
+                assert!(
+                    paths.insert(capture),
+                    "scenario '{id}' duplicates held-out '{capture}'"
+                );
             }
             if paths.is_empty() {
                 assert_eq!(
@@ -368,32 +453,78 @@ mod corpus_tests {
 
     #[test]
     fn qa_reference_vectors_distinct_from_generated_controls() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("test-vector.json");
+        std::fs::write(&path, b"independent test vector").unwrap();
+        let hash = sha256_hex(Sha256::digest(b"independent test vector"));
         let independent = vec![ReferenceVector {
-            id: "iso-226-2024".to_string(),
-            hash: "ref-hash-1".to_string(),
+            set_id: "test-vectors".to_string(),
+            id: "test-vector".to_string(),
+            hash: hash.clone(),
+            artifact_path: path.clone(),
+            edition: "test-edition".to_string(),
+            license_id: "test-license".to_string(),
             independent: true,
         }];
         let generated = vec![ReferenceVector {
+            set_id: "synthetic-controls".to_string(),
             id: "synthetic-control-1".to_string(),
-            hash: "gen-hash-1".to_string(),
+            hash: sha256_hex(Sha256::digest(b"generated control")),
+            artifact_path: temp.path().join("generated-control.json"),
+            edition: "synthetic".to_string(),
+            license_id: "test-license".to_string(),
             independent: false,
         }];
         assert!(validate_reference_separation(&independent, &generated).is_ok());
         // A shared content hash means the "reference" is a programme copy.
-        let masquerading = vec![ReferenceVector {
-            id: "iso-226-2024".to_string(),
-            hash: "gen-hash-1".to_string(),
-            independent: true,
-        }];
-        let error = validate_reference_separation(&masquerading, &generated).unwrap_err();
+        let mut copied_control = generated.clone();
+        copied_control[0].hash = hash.clone();
+        let error = validate_reference_separation(&independent, &copied_control).unwrap_err();
         assert!(error.contains("shares content hash"), "{error}");
         // An unflagged vector is not independent evidence.
-        let unflagged = vec![ReferenceVector {
-            id: "iso-226-2024".to_string(),
-            hash: "ref-hash-1".to_string(),
-            independent: false,
-        }];
+        let mut unflagged = independent.clone();
+        unflagged[0].independent = false;
         assert!(validate_reference_separation(&unflagged, &generated).is_err());
+        let mut unlicensed = independent.clone();
+        unlicensed[0].license_id.clear();
+        assert!(validate_reference_separation(&unlicensed, &generated).is_err());
+        let mut uneditioned = independent.clone();
+        uneditioned[0].edition.clear();
+        assert!(validate_reference_separation(&uneditioned, &generated).is_err());
+        let mut mismatched = independent.clone();
+        mismatched[0].hash = "0".repeat(64);
+        assert!(
+            validate_reference_separation(&mismatched, &generated)
+                .unwrap_err()
+                .contains("hash mismatch")
+        );
+        let mut missing = independent.clone();
+        missing[0].artifact_path = temp.path().join("missing.json");
+        assert!(
+            validate_reference_separation(&missing, &generated)
+                .unwrap_err()
+                .contains("cannot be opened")
+        );
+        let empty_path = temp.path().join("empty.json");
+        std::fs::write(&empty_path, b"").unwrap();
+        let mut empty = independent.clone();
+        empty[0].artifact_path = empty_path;
+        empty[0].hash = sha256_hex(Sha256::digest(b""));
+        assert!(
+            validate_reference_separation(&empty, &generated)
+                .unwrap_err()
+                .contains("artifact is empty")
+        );
+        let duplicate = [independent[0].clone(), independent[0].clone()];
+        assert!(validate_reference_separation(&duplicate, &generated).is_err());
+        let mut mixed_set = independent[0].clone();
+        mixed_set.id = "another-vector".to_string();
+        mixed_set.set_id = "other-set".to_string();
+        assert!(
+            validate_reference_separation(&[independent[0].clone(), mixed_set], &generated)
+                .unwrap_err()
+                .contains("matching set")
+        );
         // No references registered means no external validation.
         assert!(validate_reference_separation(&[], &generated).is_err());
     }

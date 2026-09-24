@@ -543,6 +543,12 @@ mod tests {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         )
     }
@@ -703,6 +709,7 @@ mod tests {
             payload_binding: None,
             ledger_version: DECISION_LEDGER_VERSION.to_string(),
             decisions: vec![applied, provisional],
+            channel_summaries: Vec::new(),
         });
         let resources = vec![ConvolutionResource {
             reference: "a.wav".to_string(),
@@ -795,6 +802,7 @@ mod tests {
             decisions: vec![record, history.clone()],
             acceptance_evidence: None,
             payload_binding: None,
+            channel_summaries: Vec::new(),
         });
         let resources = [ConvolutionResource {
             reference: "source/a:phase.wav".into(),
@@ -856,6 +864,7 @@ mod tests {
                 }),
                 ledger_version: DECISION_LEDGER_VERSION.to_owned(),
                 decisions: vec![record.clone()],
+                channel_summaries: Vec::new(),
             });
             changed.global_plugins.push(PluginConfigWrapper {
                 plugin_type: "gain".to_owned(),

@@ -4,12 +4,13 @@ use super::consts::QA_MAXEVAL;
 use super::consts::SEED;
 use super::types::DifficultyLevel;
 use super::types::SubTopology;
+use autoeq_core::{MeasurementProvenance, ProvenanceCaptureKind};
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use roomeq_model::{
-    CardioidConfig, CrossoverConfig, Curve, DBAConfig, FirConfig, MeasurementRef,
-    MeasurementSource, MixedPhaseSerdeConfig, MultiSubGroup, OptimizerConfig, ProcessingMode,
-    RoomConfig, SpeakerConfig, SubwooferStrategy, SubwooferSystemConfig, SystemConfig,
-    default_config_version,
+    CardioidConfig, CrossoverConfig, Curve, DBAConfig, FirConfig, InlineMeasurement,
+    MeasurementRef, MeasurementSingle, MeasurementSource, MixedPhaseSerdeConfig, MultiSubGroup,
+    OptimizerConfig, ProcessingMode, RoomConfig, SpeakerConfig, SubwooferStrategy,
+    SubwooferSystemConfig, SystemConfig, default_config_version,
 };
 use roomeq_synthetic::{
     generate_cardioid_scenario, generate_channel_curve, generate_dba_scenario,
@@ -38,6 +39,7 @@ pub(super) fn build_config(degraded: &Curve, mode: ProcessingMode) -> RoomConfig
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -243,7 +245,36 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
     let mut speakers = HashMap::new();
     let subwoofers: Vec<MeasurementSource> = sub_curves
         .iter()
-        .map(|c| MeasurementSource::InMemory(c.clone()))
+        .enumerate()
+        .map(|(index, curve)| {
+            if !allpass {
+                return MeasurementSource::InMemory(curve.clone());
+            }
+            let phase = curve
+                .phase
+                .as_ref()
+                .expect("analytic all-pass fixture needs phase");
+            assert_eq!(phase.len(), curve.freq.len());
+            // The analytic generator uses one time origin for every sub. Declare
+            // that synthetic reference explicitly so the production provenance
+            // gate can exercise the all-pass path without accepting unknown data.
+            MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: curve.freq.to_vec(),
+                    magnitude_db: curve.spl.to_vec(),
+                    phase_deg: Some(phase.to_vec()),
+                    name: Some("synthetic-seat-0".to_string()),
+                    wav_path: None,
+                    csv_path: None,
+                }),
+                speaker_name: Some(format!("synthetic-sub-{}", index + 1)),
+                provenance: MeasurementProvenance {
+                    capture_kind: ProvenanceCaptureKind::StationaryIr,
+                    timing_reference_id: Some("synthetic-shared-clock".to_string()),
+                    ..Default::default()
+                },
+            })
+        })
         .collect();
 
     speakers.insert(
@@ -267,6 +298,7 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -277,6 +309,7 @@ pub(super) fn build_multisub_config(sub_curves: &[Curve], allpass: bool) -> Room
     config.optimizer.seed = Some(SEED);
     config.optimizer.processing_mode = ProcessingMode::LowLatency;
     config.optimizer.num_filters = 3;
+    config.optimizer.finalization.default_input_peak = super::consts::POSITIVE_ROUTED_INPUT_PEAK;
     config.optimizer.min_freq = 20.0;
     config.optimizer.max_freq = 200.0;
 
@@ -585,6 +618,7 @@ pub(super) fn build_multichannel_config(
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -597,6 +631,10 @@ pub(super) fn build_multichannel_config(
     config.optimizer.num_filters = 3;
     config.optimizer.min_freq = 20.0;
     config.optimizer.max_freq = 20000.0;
+    if sub_topo.is_some() {
+        config.optimizer.finalization.default_input_peak =
+            super::consts::POSITIVE_ROUTED_INPUT_PEAK;
+    }
 
     config
 }
@@ -620,6 +658,10 @@ mod tests {
                     48_000.0,
                 );
                 config.validate_structure().unwrap();
+                assert_eq!(
+                    config.optimizer.finalization.default_input_peak,
+                    crate::synthetic::consts::POSITIVE_ROUTED_INPUT_PEAK
+                );
                 let system = config.system.as_ref().unwrap();
                 assert!(!system.speakers.contains_key("LFE"));
                 let subs = system.subwoofers.as_ref().unwrap();
@@ -630,6 +672,59 @@ mod tests {
                 assert_eq!(crossovers.len(), subs.outputs.len());
                 assert!(!subs.outputs.is_empty());
             }
+        }
+        let stereo = ALL_LAYOUTS
+            .iter()
+            .find(|layout| layout.name == "2.0")
+            .unwrap();
+        let no_routing = build_multichannel_config(
+            stereo,
+            None,
+            &EASY,
+            &base,
+            ProcessingMode::LowLatency,
+            48_000.0,
+        );
+        assert_eq!(no_routing.optimizer.finalization.default_input_peak, 1.0);
+    }
+
+    #[test]
+    #[ignore = "full DBA optimization and branch replay diagnostic"]
+    fn synthetic_dba_output_branch_mapping() {
+        let layout = super::super::consts::ALL_LAYOUTS
+            .iter()
+            .find(|layout| layout.name == "2.1")
+            .unwrap();
+        let base =
+            roomeq_synthetic::generate_speaker_rolloff_curve(20.0, 20_000.0, 200, 80.0, -6.0);
+        let config = build_multichannel_config(
+            layout,
+            Some(&super::super::consts::SUB_DBA),
+            &EASY,
+            &base,
+            ProcessingMode::LowLatency,
+            48_000.0,
+        );
+        let result = super::super::run::run_optimization(&config).unwrap();
+        let outputs = &config
+            .system
+            .as_ref()
+            .unwrap()
+            .subwoofers
+            .as_ref()
+            .unwrap()
+            .outputs;
+        let drivers = result
+            .channels
+            .get("Sub1")
+            .unwrap()
+            .drivers
+            .as_ref()
+            .unwrap();
+        assert_eq!(drivers.len(), outputs.len());
+        for (index, (driver, output)) in drivers.iter().zip(outputs).enumerate() {
+            assert_eq!(driver.index, index);
+            assert_eq!(driver.name, output.id);
         }
     }
 
@@ -729,7 +824,102 @@ mod tests {
     }
 
     use crate::synthetic::consts::{EASY, LAYOUT_2_0, LAYOUT_7_1_6, SUB_MSO_8};
-    use roomeq_synthetic::generate_flat_curve;
+    use roomeq_synthetic::{generate_flat_curve, generate_sub_curve_with_phase};
+
+    #[test]
+    fn allpass_fixture_declares_shared_synthetic_timing_and_seat() {
+        let curves = [
+            generate_sub_curve_with_phase(20.0, 200.0, 100, 1.0),
+            generate_sub_curve_with_phase(20.0, 200.0, 100, 2.0),
+        ];
+        let config = build_multisub_config(&curves, true);
+        let SpeakerConfig::MultiSub(group) = config.speakers.get("LFE").unwrap() else {
+            panic!("expected a multi-sub group");
+        };
+        assert!(group.allpass_optimization);
+        for source in &group.subwoofers {
+            let MeasurementSource::Single(single) = source else {
+                panic!("expected a provenance-bearing synthetic measurement");
+            };
+            assert_eq!(
+                single.provenance.capture_kind,
+                ProvenanceCaptureKind::StationaryIr
+            );
+            assert_eq!(
+                single.provenance.timing_reference_id.as_deref(),
+                Some("synthetic-shared-clock")
+            );
+            let MeasurementRef::Inline(inline) = &single.measurement else {
+                panic!("expected inline synthetic samples");
+            };
+            assert_eq!(inline.name.as_deref(), Some("synthetic-seat-0"));
+            assert_eq!(
+                inline.phase_deg.as_ref().unwrap().len(),
+                inline.frequencies.len()
+            );
+        }
+
+        let config = build_multisub_config(&curves, false);
+        assert_eq!(
+            config.optimizer.finalization.default_input_peak,
+            crate::synthetic::consts::POSITIVE_ROUTED_INPUT_PEAK
+        );
+        let SpeakerConfig::MultiSub(group) = config.speakers.get("LFE").unwrap() else {
+            panic!("expected a multi-sub group");
+        };
+        assert!(
+            group
+                .subwoofers
+                .iter()
+                .all(|source| matches!(source, MeasurementSource::InMemory(_)))
+        );
+    }
+
+    #[test]
+    #[ignore = "runs the five-seed room optimizer"]
+    fn allpass_fixture_passes_multisub_qa_case() {
+        use crate::synthetic::consts::{MS_EASY, SAMPLE_RATE, SEED};
+        use crate::synthetic::run::run_multisub_test;
+        use crate::synthetic::types::MultiSubTopology;
+
+        let shared = MS_EASY
+            .shared_modes
+            .iter()
+            .map(|&(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
+            .collect::<Vec<_>>();
+        let per_sub = MS_EASY
+            .per_sub_modes
+            .iter()
+            .map(|modes| {
+                modes
+                    .iter()
+                    .map(|&(freq, q, gain)| {
+                        Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain)
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        let scenario = generate_multisub_scenario(
+            "multisub/easy",
+            MS_EASY.n_subs,
+            &shared,
+            &per_sub,
+            MS_EASY.delays_ms,
+            MS_EASY.noise_rms,
+            SEED,
+            SAMPLE_RATE,
+        );
+        let result = run_multisub_test(
+            &scenario.sub_curves,
+            &MultiSubTopology {
+                name: "allpass",
+                allpass: true,
+            },
+            &[],
+            &MS_EASY,
+        );
+        assert!(result.passed, "{}: {}", result.name, result.reason);
+    }
 
     #[test]
     fn processing_modes_install_required_qa_configuration() {

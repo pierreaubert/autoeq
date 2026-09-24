@@ -27,6 +27,29 @@ impl PreparedChannelExecution {
     }
 }
 
+/// Reference curve for from-measurement slope inference.
+///
+/// Single-band and unrestricted channels score the usable curve directly.
+/// Multi-segment support restricts inference to the widest segment in
+/// octaves so the internal gap never tilts the estimate.
+fn slope_reference_curve<'a>(
+    prepared: &PreparedChannelInput,
+    curve: &'a Curve,
+) -> std::borrow::Cow<'a, Curve> {
+    let bands = prepared.valid_bands_hz();
+    if bands.len() < 2 {
+        return std::borrow::Cow::Borrowed(curve);
+    }
+    let widest = bands
+        .iter()
+        .max_by(|a, b| (a[1] / a[0]).total_cmp(&(b[1] / b[0])))
+        .copied();
+    widest
+        .and_then(|band| curve.select_frequency_band(band).ok())
+        .map(std::borrow::Cow::Owned)
+        .unwrap_or_else(|| std::borrow::Cow::Borrowed(curve))
+}
+
 /// Build deterministic execution state from a workflow-prepared channel.
 pub fn prepare_channel_execution(
     channel_name: &str,
@@ -52,8 +75,10 @@ pub fn prepare_channel_execution(
 
     // Keep the requested target on the original reporting grid. Only measured
     // slope inference is restricted; level and score are recomputed below.
+    // Multi-segment support infers slope on the widest segment in octaves so
+    // the internal gap never tilts the estimate.
     let mut target_config = std::borrow::Cow::Borrowed(room_config);
-    if prepared.valid_band_hz().is_some()
+    if prepared.has_valid_bands()
         && room_config
             .optimizer
             .from_measurement_slope_override
@@ -70,7 +95,7 @@ pub fn prepare_channel_execution(
             .optimizer
             .from_measurement_slope_override = Some(
             roomeq_analysis::slope::estimate_slope_db_per_octave(
-                curve,
+                slope_reference_curve(prepared, curve).as_ref(),
                 roomeq_analysis::slope::DEFAULT_SLOPE_MIN_FREQ,
                 roomeq_analysis::slope::DEFAULT_SLOPE_MAX_FREQ,
             )
@@ -90,9 +115,15 @@ pub fn prepare_channel_execution(
     // warning that such filters will be "ignored" does not make them harmless.
     target.min_freq = target.min_freq.max(curve.freq[0]);
     target.max_freq = target.max_freq.min(curve.freq[curve.freq.len() - 1]);
-    if let Some([low, high]) = prepared.valid_band_hz() {
-        target.min_freq = target.min_freq.max(low);
-        target.max_freq = target.max_freq.min(high);
+    // Clamp to the support hull. Gap bins are absent from the usable curve,
+    // so scoring and optimization never consume them; the post-realization
+    // segment check additionally refuses filters centered in a gap.
+    if let (Some([first_low, _]), Some([_, last_high])) = (
+        prepared.valid_bands_hz().first(),
+        prepared.valid_bands_hz().last(),
+    ) {
+        target.min_freq = target.min_freq.max(*first_low);
+        target.max_freq = target.max_freq.min(*last_high);
     }
     if target.min_freq >= target.max_freq {
         return Err(AutoeqError::InvalidMeasurement {
@@ -138,7 +169,9 @@ pub fn execute_prepared_channel(
     sidecar_reference: Option<ConvolutionSidecarReference>,
     callback: Option<OptimProgressCallback>,
 ) -> Result<ChannelProcessingResult> {
-    match room_config.optimizer.processing_mode {
+    // Multi-segment authorization runs once per channel, after every
+    // processing mode assembles its realized result.
+    let mut result = match room_config.optimizer.processing_mode {
         ProcessingMode::PhaseLinear => process_fir_channel(FirChannelRequest {
             mode: FirChannelMode::PhaseLinear,
             channel_name,
@@ -237,7 +270,44 @@ pub fn execute_prepared_channel(
             eq_resources,
             callback,
         ),
+    }?;
+    result.segment_support = crate::segment_support::assess_segment_support(
+        channel_name,
+        prepared,
+        &result.raw_pre_eq_curve,
+        &result.raw_post_eq_curve,
+        &result.filters,
+        result.fir_coeffs.as_deref(),
+        sample_rate,
+    )?;
+    // Measured-room acoustics ride with the delivered chain when the channel
+    // declared an optimization-time IR. Incomplete IRs leave the fields
+    // absent and the report cells pending.
+    if let Some(impulse) = prepared.eq_resources().impulse_response.as_ref() {
+        if result.channel.early_reflections.is_none() {
+            result.channel.early_reflections = crate::ir_acoustics::measured_early_reflections(
+                &impulse.samples,
+                impulse.sample_rate,
+            );
+        }
+        if result.channel.t60_octaves.is_none() {
+            result.channel.t60_octaves =
+                crate::ir_acoustics::measured_octave_t60(&impulse.samples, impulse.sample_rate);
+        }
+        if result.channel.waterfall.is_none() || result.channel.resonance_decays.is_none() {
+            if let Some((waterfall, decays)) =
+                crate::ir_acoustics::measured_waterfall(&impulse.samples, impulse.sample_rate)
+            {
+                result.channel.waterfall = Some(waterfall);
+                result.channel.resonance_decays = Some(decays);
+            }
+        }
+        if result.channel.wavelet.is_none() {
+            result.channel.wavelet =
+                crate::ir_acoustics::measured_wavelet(&impulse.samples, impulse.sample_rate);
+        }
     }
+    Ok(result)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -435,6 +505,96 @@ mod tests {
             crate::PreparedCea2034::default(),
             EqResources::default(),
         )
+    }
+
+    /// One-second 200 Hz decaying tone (τ = 0.2 s): a declared
+    /// optimization-time IR with a complete 500 ms post-peak window.
+    fn decaying_tone_impulse() -> crate::eq::PreparedImpulseResponse {
+        let rate = 48_000.0;
+        let samples = (0..48_000)
+            .map(|i| {
+                let t = f64::from(i) / rate;
+                (2.0 * std::f64::consts::PI * 200.0 * t).cos() as f32 * (-t / 0.2).exp() as f32
+            })
+            .collect();
+        crate::eq::PreparedImpulseResponse {
+            samples,
+            sample_rate: rate,
+        }
+    }
+
+    #[test]
+    fn declared_ir_populates_measured_room_acoustics() {
+        let curve = Curve {
+            freq: Array1::logspace(10.0, f64::log10(20.0), f64::log10(500.0), 64),
+            spl: Array1::from_elem(64, 80.0),
+            ..Curve::default()
+        };
+        let resources = EqResources {
+            impulse_response: Some(decaying_tone_impulse()),
+            ..EqResources::default()
+        };
+        let prepared = PreparedChannelInput::new(
+            crate::PreparedChannelMeasurements::new(curve.clone(), vec![curve], false),
+            None,
+            crate::PreparedCea2034::default(),
+            resources,
+        );
+        let mut config = RoomConfig::default();
+        config.optimizer.processing_mode = ProcessingMode::LowLatency;
+        config.optimizer.min_freq = 50.0;
+        config.optimizer.max_freq = 200.0;
+        config.optimizer.num_filters = 1;
+        config.optimizer.max_iter = 10;
+        config.optimizer.population = 6;
+        config.optimizer.refine = false;
+        config.optimizer.seed = Some(7);
+        config.optimizer.parallel_threads = Some(1);
+        let execution =
+            prepare_channel_execution("left", &prepared, &config, 48_000.0, None).unwrap();
+        let result = execute_prepared_channel(
+            "left",
+            &prepared,
+            &config,
+            48_000.0,
+            &execution,
+            prepared.eq_resources(),
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(
+            result.channel.early_reflections.is_some(),
+            "declared IR must report early reflections"
+        );
+        assert!(
+            result.channel.t60_octaves.is_some(),
+            "declared IR must report octave T60"
+        );
+        let waterfall = result
+            .channel
+            .waterfall
+            .as_ref()
+            .expect("declared IR must report a waterfall grid");
+        assert_eq!(waterfall.method, "hann_stft_waterfall_v1");
+        assert_eq!(waterfall.reference, "full_grid_peak");
+        let decays = result
+            .channel
+            .resonance_decays
+            .as_ref()
+            .expect("declared IR must report resonance decays");
+        assert_eq!(decays.slice_ms, 60.0);
+        assert!(
+            !decays.decays.is_empty(),
+            "decaying tone is a 60 ms resonance"
+        );
+        let wavelet = result
+            .channel
+            .wavelet
+            .as_ref()
+            .expect("declared IR must report a wavelet heatmap");
+        assert_eq!(wavelet.method, "complex_morlet_three_cycle_v1");
+        assert_eq!(wavelet.display_range_db, [-30.0, 0.0]);
     }
 
     #[test]

@@ -5,7 +5,7 @@
 alias qa-roomeq := qa-roomeq-all
 
 # Registry-driven tiers. The scenario inventory, claims, and expectations live
-# in qa/registry/roomeq.json; recipes only select cost tier.
+# in crates/roomeq-qa/src/registry.json; recipes only select cost tier.
 [group('qa-roomeq')]
 qa-roomeq-pr:
 	cargo run --features qa --bin roomeq-qa-coverage --release -- --tier pr
@@ -22,7 +22,7 @@ qa-roomeq-stage-contracts:
 	cargo test --release -p roomeq-engine per_driver_fir --lib
 	cargo test --release -p roomeq-workflow per_driver --lib
 	cargo test --release -p roomeq-qa stage_contracts --lib
-	cargo test --release -p roomeq-workflow dsp_realization --lib
+	cargo test --release -p roomeq-workflow final_safety_gate_enforces_canonical_realization_error --lib
 	cargo test --release -p roomeq-engine dsp_realization --lib
 	python3 -m unittest scripts.test_dsp
 

@@ -4146,6 +4146,7 @@ fn assemble_generic_result_with_frequency_samples(
         stage_outcomes,
         qa_seed_distribution: None,
         effective_config: None,
+        t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
         operation_gates: None,
 
         provisional_decisions: phase_refusals,
@@ -4263,6 +4264,7 @@ pub fn optimize_speaker(
         optimizer: optimizer_config,
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
         provenance: Default::default(),
     };
@@ -4308,6 +4310,10 @@ pub fn optimize_speaker(
         audibility_veto,
         veto_adjudication,
         measurement_conditioning,
+        // Multi-segment authorization is enforced in-engine; the per-segment
+        // report is visible at the single-channel boundary and is not
+        // re-published down this chain.
+        _segment_support,
     ) = process_speaker_internal(
         channel_name,
         speaker_config,

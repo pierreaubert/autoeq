@@ -159,6 +159,7 @@ mod tests {
             crossovers: None,
             provenance: Default::default(),
             recording_config: None,
+            reporting: None,
             cea2034_cache: None,
             ctc: None,
         }
@@ -309,6 +310,7 @@ mod tests {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
@@ -381,6 +383,7 @@ mod tests {
             stage_outcomes: Vec::new(),
             qa_seed_distribution: None,
             effective_config: None,
+            t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
 
             provisional_decisions: Vec::new(),

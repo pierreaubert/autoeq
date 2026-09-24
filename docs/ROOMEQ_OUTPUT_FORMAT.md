@@ -62,6 +62,30 @@ an unsupported `ledger_version`, empty IDs, unordered/nonfinite bands, or a
 final stage without a delivered-graph identity are invalid; reports render
 them as unverified, never as delivered correction.
 
+### Operational Response Share (`channel_summaries`)
+
+`correction_decisions.channel_summaries` carries one entry per delivered
+physical output with decided final equalization scope, derived by workflow
+reconciliation from the ledger's own final records (report Section 1,
+"Operational room response (%)"):
+
+- scope: final-stage records (`stage: final` with a delivered-graph identity)
+  with action `equalize`, grouped by `physical_output`;
+- a record superseded by another record in the same ledger (its `decision_id`
+  appears in another record's `supersedes_ids`) is no longer operative and is
+  excluded from both counts;
+- delivered: scope records with status `applied`, `already_acceptable`, or
+  `constrained` — the same delivery-claim set reconciliation binds to the
+  delivered graph. `reverted`, `insufficient_evidence`, `outside_scope`, and
+  `unresolved` scope lower the share; provisional history never enters it;
+- `operational_response_pct` is `100 * delivered_equalize / decided_equalize`.
+
+This is a ledger-delivery share with provenance-bound bands, not a measured
+band-compliance percentage. A channel with no decided final equalization scope
+has no entry; readers render that as pending, never as 100%. Viewer colour
+thresholds follow `reviews/feat-report.md`: above 90 green, 80–90 yellow,
+below 80 red.
+
 ### Effective merged configuration
 
 When the CLI is invoked with `--override-config`,
@@ -179,6 +203,12 @@ Each channel contains an ordered list of plugins that process audio in sequence.
 | `post_ir` | IrWaveform or null | Impulse response after correction (requires phase data) |
 | `fir_temporal_masking` | TemporalIrMaskingMetrics or null | True FIR impulse-response temporal masking metrics for FIR, mixed-phase, hybrid, or standalone phase-correction filters. |
 | `direct_early_late_correction` | object or null | Direct/early/late correction-energy diagnostic, when that policy is enabled. |
+| `early_late_curves` | ChannelEarlyLateCurves or null | Third-octave early/late band energies from the channel's measured room IR (pre-correction), when a complete IR was declared at optimization time. Method is `incoherent_band_energy` with `full_peak_band` reference, `third_octave` smoothing, and a 20 ms split after the direct reference (`broadband envelope peak`, or `120 Hz lowpass envelope peak` for subwoofer/LFE). Absent renders as pending in the report; never invent acoustics for it. |
+| `early_reflections` | ChannelEarlyReflections or null | Band-limited 1–8 kHz early-reflection table from the measured room IR, when a complete IR was declared at optimization time (`bandlimited_early_reflection_table_v1`, −15 dBFS threshold, 15 ms window, gains in dBFS relative to the filtered direct peak, times post-direct). Only the pre-correction side exists at optimization time; `post` stays empty until a post-correction IR is measured. Absent renders as pending. |
+| `t60_octaves` | ChannelOctaveT60 or null | Nine-band Schroeder octave T60 (63 Hz–16 kHz) from the measured room IR, when a complete IR was declared at optimization time. Valid rows carry `T20`/`T30` fits above `min_r2`; invalid rows carry a nonempty reason with no plotted value (EDT-only fits stay invalid because EDT alone is not late-decay T60). Absent renders as pending. |
+| `waterfall` | ChannelWaterfall or null | STFT waterfall decay grid from the measured room IR (pre-correction), when a complete 500 ms post-peak window was declared at optimization time. Method is `hann_stft_waterfall_v1` (32 ms window, 2 ms hop, −5…500 ms rel. direct peak, max-pooled to 100 frames × 64 bins) with `full_grid_peak` reference: levels are relative to the grid's own peak and do not compare between channels. Absent renders as pending. |
+| `resonance_decays` | ChannelResonanceDecays or null | Prominent-resonance decay slices accompanying `waterfall`: 60 ms slice peaks with 20–200 ms fitted decay times (`decay_time_s` null when unfittable). An empty `decays` list means the analysis ran and found no prominent resonances. Absent renders as pending. |
+| `wavelet` | ChannelWavelet or null | Three-cycle complex-Morlet wavelet heatmap from the measured room IR (pre-correction), when a complete post-peak window was declared at optimization time. Method is `complex_morlet_three_cycle_v1` (6 log centres per octave, 1 ms hop, max 64 freqs × 100 frames) with `full_grid_peak` reference on the −30…0 dB display range. Absent renders as pending. |
 
 ---
 
@@ -626,6 +656,7 @@ Information about the optimization process.
 | `correction_acceptance` | object or null | Versioned final runtime decision. Includes enforced spectral/spatial/boost/headroom/temporal/realization limits, violations, and correction stages reverted before output. Mixed-phase output is exempt from the pre-ringing budget: its unity-magnitude excess-phase FIR carries the phase correction in its precursor by design (budget enforced at design time via `pre_ringing_threshold_db`). |
 | `optimizer_evidence` | object or null | Versioned room-level optimizer confidence plus every per-channel backend run. Each run records termination, convergence/best-effort status, objective, evaluation count/limit, seed, bound violation, restart history, and whether it supplied the emitted parameters. Selected `unusable` evidence cannot pass production acceptance. |
 | `stage_outcomes` | array | Machine-readable applied/skipped/degraded/failed outcomes for optional processing and safety stages. Each outcome may include additive `checks` entries (`id`, `kind`, `passed`, optional `observed`/`limit`, and diagnostic). |
+| `t60_flatness_tolerance_s` | number or null | Declared ±tolerance in seconds for the report Section 1 T60 flatness share, carried from the input `reporting` policy. When absent the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of ±0.05 s and labels the cell accordingly; it changes no acceptance math. |
 
 `optimizer_evidence.confidence` is derived only from runs with
 `selected_for_output: true`. Superseded adaptive passes and rejected local

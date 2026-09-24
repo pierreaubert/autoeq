@@ -413,9 +413,8 @@ fn validate_phase_target(
             record
                 .reason_codes
                 .push("phase_requested_scope_not_realized_support".into());
-            if let Some(id) = &report.resolution.user_target_id {
-                record.evidence_refs.push(id.clone());
-            }
+            // The enforced user-target identity already rides in
+            // `evidence_refs` from target reconciliation; never push it again.
         }
         decisions.extend(records);
     }
@@ -1513,6 +1512,53 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn roadmap_correction_dba_timing_uses_routed_output_ids() {
+        let (mut chain, mut config, target) = setup();
+        let roomeq_model::SpeakerConfig::Topology(topology) = config.speakers.remove("L").unwrap()
+        else {
+            unreachable!()
+        };
+        config.speakers.insert(
+            "lfe".into(),
+            roomeq_model::SpeakerConfig::Dba(roomeq_model::DBAConfig {
+                name: "fixture".into(),
+                speaker_name: None,
+                front: vec![topology.drivers[0].measurement.clone()],
+                rear: vec![topology.drivers[1].measurement.clone()],
+            }),
+        );
+        config.system = Some(roomeq_model::SystemConfig {
+            subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                config: roomeq_model::SubwooferStrategy::Dba,
+                crossover: None,
+                routing: Default::default(),
+                outputs: ["Sub1", "Sub2"]
+                    .into_iter()
+                    .map(|id| roomeq_model::SubwooferOutput {
+                        id: id.into(),
+                        speaker: "lfe".into(),
+                    })
+                    .collect(),
+            }),
+            ..Default::default()
+        });
+        chain.channel = "Sub1".into();
+        for (driver, id) in chain
+            .drivers
+            .as_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(["Sub1", "Sub2"])
+        {
+            driver.name = id.into();
+        }
+        assert!(super::super::parallel_timing::validate(&chain, &config, &target).is_ok());
+        chain.drivers.as_mut().unwrap()[1].name = "Rear Array".into();
+        let error = super::super::parallel_timing::validate(&chain, &config, &target).unwrap_err();
+        assert!(error.contains("array branch identity mismatch"), "{error}");
     }
 
     #[test]

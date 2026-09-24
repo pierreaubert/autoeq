@@ -1139,6 +1139,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "weekly Sonium phase check; run explicitly with the weekly QA tier"]
     fn sonium_cinema_phase_supports_arrival_estimation() {
         let test_case = build_home_cinema_matrix(QaTier::Weekly, Some("fast-hybrid"), Some("iir"))
             .into_iter()

@@ -370,6 +370,7 @@ fn validate_room_optimization_empty_speakers_fails() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
     let observer = observer_none();
@@ -421,6 +422,7 @@ fn stereo_2_0_config() -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -663,6 +665,7 @@ fn home_cinema_5_1_4_config() -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -776,6 +779,7 @@ fn execute_topology_workflow_home_cinema_without_sub() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
     let sys = config.system.as_ref().unwrap();
@@ -1018,6 +1022,7 @@ fn crossover_reconstruction_config(
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }

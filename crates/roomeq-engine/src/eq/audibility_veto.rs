@@ -1603,12 +1603,8 @@ mod audibility_veto_tests {
         assert_eq!(held.kept.len(), 2, "local 0.9 dB moves exceed the 0.5 cap");
         assert!(held.removed.is_empty());
         let (freqs, mut verdicts) = nominate(&filters);
-        let freed = adjudicate_veto_removals(
-            filters,
-            &mut verdicts,
-            &freqs,
-            &tight_config(1.0, 0.05),
-        );
+        let freed =
+            adjudicate_veto_removals(filters, &mut verdicts, &freqs, &tight_config(1.0, 0.05));
         assert_eq!(freed.removed.len(), 2, "control: 1.0 cap accepts");
         assert!(freed.max_local_deviation_db <= 1.0 + 1e-9);
     }
@@ -1649,11 +1645,18 @@ mod audibility_veto_tests {
             .map(|(a, b)| (a - b).abs())
             .fold(0.0_f64, f64::max);
         assert!(worst <= 1e-9, "rollback must reproduce F0, drift {worst}");
-        let mut indices: Vec<usize> =
-            adjudication.removed.iter().map(|entry| entry.index).collect();
+        let mut indices: Vec<usize> = adjudication
+            .removed
+            .iter()
+            .map(|entry| entry.index)
+            .collect();
         indices.sort_unstable();
         indices.dedup();
-        assert_eq!(indices.len(), adjudication.removed.len(), "stable unique indices");
+        assert_eq!(
+            indices.len(),
+            adjudication.removed.len(),
+            "stable unique indices"
+        );
     }
 
     fn condition_set<'a>(
@@ -1725,12 +1728,8 @@ mod audibility_veto_tests {
         assert!(enforced.enforced);
 
         let (_, mut verdicts) = nominate(&filters);
-        let advisory = adjudicate_veto_removals(
-            filters,
-            &mut verdicts,
-            &freqs,
-            &adjudicate_config(false),
-        );
+        let advisory =
+            adjudicate_veto_removals(filters, &mut verdicts, &freqs, &adjudicate_config(false));
         assert_eq!(advisory.kept.len(), 2, "report-only keeps everything");
         assert!(advisory.removed.is_empty());
         assert!(!advisory.enforced);
@@ -1785,7 +1784,10 @@ mod audibility_veto_tests {
     fn psycho_fast_c01_common_eq_preserves_seat_difference() {
         let freqs = grid();
         let seat_a = Array1::from(
-            freqs.iter().map(|f| 3.0 * (f.ln() / 1_000.0_f64.ln()).sin()).collect::<Vec<_>>(),
+            freqs
+                .iter()
+                .map(|f| 3.0 * (f.ln() / 1_000.0_f64.ln()).sin())
+                .collect::<Vec<_>>(),
         );
         let seat_b = Array1::from(
             freqs
@@ -1795,7 +1797,10 @@ mod audibility_veto_tests {
         );
         let common = filter_db_response(&peak(-4.0, 120.0, 1.5), &freqs);
         let drift = (&seat_a + &common) - (&seat_b + &common) - (&seat_a - &seat_b);
-        let worst = drift.iter().map(|value| value.abs()).fold(0.0_f64, f64::max);
+        let worst = drift
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0_f64, f64::max);
         assert!(worst <= 1e-12, "common EQ moved relative seats by {worst}");
     }
 

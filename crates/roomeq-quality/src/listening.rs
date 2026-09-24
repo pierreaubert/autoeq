@@ -16,6 +16,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::protocol::{BlindedProtocol, ComparisonIntent};
+use super::sha256_hex;
 
 /// What the comparison is staged to claim. Preference outcomes never
 /// support inaudibility claims; only the matching intent does.
@@ -166,6 +167,15 @@ impl ChainStimulusBinding {
     }
 }
 
+/// One participant allocation frozen before a scheduled trial is run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TrialParticipantAssignment {
+    /// Trial identity from the protocol's frozen presentation schedule.
+    pub trial_id: String,
+    /// Pseudonymous participant assigned before trial collection.
+    pub participant_id: String,
+}
+
 /// A frozen listening setup: preregistered protocol plus the arms,
 /// conditions, holdout programmes and chain/stimulus binding it covers.
 /// Carries no outcome: outcomes arrive only through validated trial import.
@@ -179,13 +189,68 @@ pub struct ListeningSetup {
     pub holdout_programmes: Vec<String>,
     /// Immutable chain/stimulus binding.
     pub binding: ChainStimulusBinding,
+    /// Model and edition/version used to prepare the comparison.
+    pub model_id: String,
+    pub model_version: String,
+    /// Declared listener population and current room; participants and
+    /// rooms reserved for holdout must be fixed before any tuning.
+    pub listener_population: String,
+    pub room_id: String,
+    #[serde(default)]
+    pub holdout_rooms: Vec<String>,
+    #[serde(default)]
+    pub holdout_participants: Vec<String>,
+    /// Pseudonymous participants enrolled in this trial round.
+    #[serde(default)]
+    pub participant_ids: Vec<String>,
+    /// Frozen allocation of each scheduled trial to one enrolled participant.
+    #[serde(default)]
+    pub trial_participants: Vec<TrialParticipantAssignment>,
+    /// Calibrated absolute playback level and how arm levels were matched.
+    pub absolute_playback_level_db_spl: f64,
+    pub level_matching_method: String,
+    pub maximum_level_mismatch_db: f64,
+    /// Explicit programme coverage, with IDs drawn from staged conditions.
+    #[serde(default)]
+    pub sustained_programmes: Vec<String>,
+    #[serde(default)]
+    pub transient_programmes: Vec<String>,
+    #[serde(default)]
+    pub representative_programmes: Vec<String>,
+    /// SHA-256 over this setup, including the protocol and binding, with
+    /// this field blank. Trial imports bind to this as well as protocol hash.
+    #[serde(default)]
+    pub setup_hash: String,
 }
 
 impl ListeningSetup {
+    /// Freeze the complete setup before collection.
+    pub fn freeze(mut self) -> Result<Self, String> {
+        self.validate_structure()?;
+        self.setup_hash = self.canonical_hash()?;
+        Ok(self)
+    }
+
+    fn canonical_hash(&self) -> Result<String, String> {
+        let mut value = self.clone();
+        value.setup_hash.clear();
+        let bytes = serde_json::to_vec(&value)
+            .map_err(|error| format!("listening setup serialize error: {error}"))?;
+        Ok(sha256_hex(&bytes))
+    }
+
     /// Freeze validation: proves preregistration, binds every condition id
     /// to the protocol, requires both arms, distinct presentations, held-out
     /// programmes and complete binding identities.
     pub fn validate(&self) -> Result<(), String> {
+        self.validate_structure()?;
+        if self.setup_hash != self.canonical_hash()? {
+            return Err(String::from("listening setup changed after registration"));
+        }
+        Ok(())
+    }
+
+    fn validate_structure(&self) -> Result<(), String> {
         self.protocol.verify_prereg()?;
         if self.conditions.is_empty() {
             return Err(String::from("listening setup needs at least one condition"));
@@ -233,6 +298,12 @@ impl ListeningSetup {
                 .holdout_programmes
                 .iter()
                 .any(|programme| programme.trim().is_empty())
+            || self
+                .holdout_programmes
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                != self.holdout_programmes.len()
         {
             return Err(String::from(
                 "listening setup needs non-blank holdout programmes fixed before tuning",
@@ -246,6 +317,128 @@ impl ListeningSetup {
             {
                 return Err(format!(
                     "holdout programme {programme} is also a trial programme: holdouts must stay disjoint from staged material"
+                ));
+            }
+        }
+        for (name, value) in [
+            ("model id", &self.model_id),
+            ("model version", &self.model_version),
+            ("listener population", &self.listener_population),
+            ("room id", &self.room_id),
+            ("level matching method", &self.level_matching_method),
+        ] {
+            if value.trim().is_empty() {
+                return Err(format!("listening setup needs a {name}"));
+            }
+        }
+        if !self.absolute_playback_level_db_spl.is_finite()
+            || self.absolute_playback_level_db_spl <= 0.0
+            || !self.maximum_level_mismatch_db.is_finite()
+            || self.maximum_level_mismatch_db < 0.0
+        {
+            return Err(String::from(
+                "listening setup needs finite positive absolute playback level and nonnegative matching tolerance",
+            ));
+        }
+        for (name, ids) in [
+            ("holdout rooms", &self.holdout_rooms),
+            ("holdout participants", &self.holdout_participants),
+        ] {
+            let mut unique = std::collections::HashSet::new();
+            if ids.is_empty()
+                || ids
+                    .iter()
+                    .any(|id| id.trim().is_empty() || !unique.insert(id))
+            {
+                return Err(format!("listening setup needs unique non-blank {name}"));
+            }
+        }
+        if self.holdout_rooms.iter().any(|room| room == &self.room_id) {
+            return Err(String::from("trial room cannot also be a held-out room"));
+        }
+        let mut participants = std::collections::HashSet::new();
+        if self.participant_ids.is_empty()
+            || self
+                .participant_ids
+                .iter()
+                .any(|id| id.trim().is_empty() || !participants.insert(id.as_str()))
+        {
+            return Err(String::from(
+                "listening setup needs unique non-blank participant IDs",
+            ));
+        }
+        if self
+            .holdout_participants
+            .iter()
+            .any(|id| participants.contains(id.as_str()))
+        {
+            return Err(String::from(
+                "trial participants cannot also be held-out participants",
+            ));
+        }
+        if self.protocol.trial_assignments.is_empty() {
+            if !self.trial_participants.is_empty() {
+                return Err(String::from(
+                    "participant allocation needs a frozen protocol trial schedule",
+                ));
+            }
+        } else {
+            let scheduled: std::collections::HashSet<_> = self
+                .protocol
+                .trial_assignments
+                .iter()
+                .map(|assignment| assignment.trial_id.as_str())
+                .collect();
+            let mut allocated = std::collections::HashSet::new();
+            let mut participant_conditions = std::collections::HashSet::new();
+            if self.trial_participants.len() != scheduled.len() {
+                return Err(String::from(
+                    "every preregistered trial needs a participant allocation",
+                ));
+            }
+            for allocation in &self.trial_participants {
+                if !scheduled.contains(allocation.trial_id.as_str())
+                    || !allocated.insert(allocation.trial_id.as_str())
+                    || !participants.contains(allocation.participant_id.as_str())
+                {
+                    return Err(String::from(
+                        "participant allocation has an unknown or repeated trial or participant",
+                    ));
+                }
+                let condition = &self
+                    .protocol
+                    .trial_assignments
+                    .iter()
+                    .find(|assignment| assignment.trial_id == allocation.trial_id)
+                    .expect("scheduled trial was checked above")
+                    .condition;
+                if !participant_conditions
+                    .insert((condition.as_str(), allocation.participant_id.as_str()))
+                {
+                    return Err(String::from(
+                        "a participant cannot repeat a trial within one condition under the exact binomial rule",
+                    ));
+                }
+            }
+        }
+        for (name, ids) in [
+            ("sustained", &self.sustained_programmes),
+            ("transient", &self.transient_programmes),
+            ("representative", &self.representative_programmes),
+        ] {
+            let mut unique = std::collections::HashSet::new();
+            if ids.is_empty()
+                || ids.iter().any(|id| {
+                    id.trim().is_empty()
+                        || !unique.insert(id)
+                        || !self
+                            .conditions
+                            .iter()
+                            .any(|condition| &condition.programme_id == id)
+                })
+            {
+                return Err(format!(
+                    "listening setup needs unique staged {name} programme IDs"
                 ));
             }
         }
@@ -264,6 +457,19 @@ impl ListeningSetup {
         if !self.binding.sample_rate_hz.is_finite() || self.binding.sample_rate_hz <= 0.0 {
             return Err(String::from(
                 "listening binding needs a positive sample rate",
+            ));
+        }
+        if self.binding.baseline_graph_id == self.binding.candidate_graph_id
+            || self
+                .binding
+                .pruned_graph_id
+                .as_deref()
+                .is_none_or(|pruned| {
+                    pruned.trim().is_empty() || pruned == self.binding.full_graph_id
+                })
+        {
+            return Err(String::from(
+                "listening setup needs distinct baseline/candidate and pruned/full chains",
             ));
         }
         Ok(())
@@ -289,10 +495,11 @@ mod listening_tests {
             },
             equivalence_bound: match intent {
                 ComparisonIntent::Equivalence => {
-                    Some(String::from("d-prime below 0.5 at 80% power"))
+                    Some(String::from("ABX correct-response rate below 0.75"))
                 }
                 _ => None,
             },
+            equivalence_max_p_correct: (intent == ComparisonIntent::Equivalence).then_some(0.75),
             reference: ReferenceKind::IndependentImplementation {
                 description: String::from(
                     "second trial-analysis implementation agrees within 1e-12",
@@ -365,7 +572,24 @@ mod listening_tests {
             conditions: staged,
             holdout_programmes: vec![String::from("heldout-piano-09")],
             binding: binding(),
+            model_id: String::from("paired-auditory-model"),
+            model_version: String::from("fixture-v1"),
+            listener_population: String::from("trained adult listeners"),
+            room_id: String::from("room-a"),
+            holdout_rooms: vec![String::from("room-b")],
+            holdout_participants: vec![String::from("participant-heldout-1")],
+            participant_ids: vec![String::from("participant-0000")],
+            trial_participants: Vec::new(),
+            absolute_playback_level_db_spl: 75.0,
+            level_matching_method: String::from("calibrated programme-integrated level"),
+            maximum_level_mismatch_db: 0.2,
+            sustained_programmes: vec![String::from("resonance-strings-01")],
+            transient_programmes: vec![String::from("transient-drums-02")],
+            representative_programmes: vec![String::from("resonance-strings-01")],
+            setup_hash: String::new(),
         }
+        .freeze()
+        .unwrap()
     }
 
     #[test]
@@ -424,15 +648,11 @@ mod listening_tests {
         let mut changed = frozen.clone();
         changed.processing_state = String::from("preview");
         assert!(frozen.verify_unchanged(&changed).is_err());
-        // The setup validates while bound, and any rebinding needs a new
-        // preregistration: editing the protocol hash voids validation.
+        // The setup validates while bound; rebinding invalidates its hash.
         assert!(setup().validate().is_ok());
         let mut rebound = setup();
         rebound.binding = changed;
-        assert!(
-            rebound.validate().is_ok(),
-            "binding content is checked at trial import"
-        );
+        assert!(rebound.validate().is_err());
         let mut tampered = setup();
         tampered.protocol.trials_per_condition = 40;
         assert!(tampered.validate().is_err());
@@ -490,5 +710,34 @@ mod listening_tests {
             protocol_for(&staged).prereg_hash,
             frozen.protocol.prereg_hash
         );
+    }
+
+    #[test]
+    fn listening_setup_freezes_level_population_programmes_and_binding() {
+        let frozen = setup();
+        let json = serde_json::to_vec(&frozen).unwrap();
+        let restored: ListeningSetup = serde_json::from_slice(&json).unwrap();
+        assert!(restored.validate().is_ok());
+        let mut changed = frozen.clone();
+        changed.absolute_playback_level_db_spl = 80.0;
+        assert!(changed.validate().is_err());
+        let mut changed = frozen.clone();
+        changed.listener_population = String::from("different population");
+        assert!(changed.validate().is_err());
+        let mut changed = frozen.clone();
+        changed.binding.stimulus_hash = String::from("different stimulus");
+        assert!(changed.validate().is_err());
+        let mut changed = frozen.clone();
+        changed.participant_ids[0] = String::from("different-participant");
+        assert!(changed.validate().is_err());
+        let mut changed = frozen.clone();
+        changed.transient_programmes.clear();
+        assert!(changed.freeze().is_err());
+        let mut changed = frozen.clone();
+        changed.holdout_rooms = vec![changed.room_id.clone()];
+        assert!(changed.freeze().is_err());
+        let mut changed = frozen;
+        changed.maximum_level_mismatch_db = f64::NAN;
+        assert!(changed.freeze().is_err());
     }
 }

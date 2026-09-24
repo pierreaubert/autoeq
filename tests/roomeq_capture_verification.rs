@@ -95,7 +95,7 @@ fn generate_binary(
     dest: &str,
 ) -> Output {
     Command::new(env!("CARGO_BIN_EXE_roomeq"))
-        .env("TMPDIR", "/Volumes/home_tmp/tmp")
+        .env("TMPDIR", fixture.dir.path())
         .args(["--verification-graph"])
         .arg(graph)
         .arg("--verification-prediction-inputs")
@@ -470,8 +470,16 @@ fn roadmap_correction_generated_prediction_binary_refuses_invalid_inputs() {
 
 impl Fixture {
     fn new(synthetic: bool, amplitude: f32, delay_samples: usize) -> Self {
-        // Explicit directory: unavailable storage fails instead of falling back to /tmp.
-        let dir = tempfile::TempDir::new_in("/Volumes/home_tmp/tmp").unwrap();
+        let preferred = std::path::PathBuf::from("/Volumes/home_tmp/tmp");
+        let temp_root = if preferred.is_dir() {
+            preferred
+        } else {
+            let fallback = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("target/qa/capture-verification-tmp");
+            std::fs::create_dir_all(&fallback).unwrap();
+            fallback
+        };
+        let dir = tempfile::TempDir::new_in(temp_root).unwrap();
         let mut graph = roomeq_model::DspGraph::new("capture-test");
         graph.add_channel("left", Vec::new());
         graph.add_channel("right", Vec::new());
@@ -555,7 +563,7 @@ impl Fixture {
 
     fn run(&self) -> Output {
         Command::new(env!("CARGO_BIN_EXE_roomeq"))
-            .env("TMPDIR", "/Volumes/home_tmp/tmp")
+            .env("TMPDIR", self.dir.path())
             .arg("--verify-captures")
             .arg(&self.manifest)
             .arg("--coverage-plan")

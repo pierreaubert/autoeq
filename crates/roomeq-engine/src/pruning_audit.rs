@@ -179,8 +179,10 @@ pub fn rollback_restore(
             )));
         }
     }
-    let removed_at: std::collections::BTreeMap<usize, &Biquad> =
-        ordered.iter().map(|entry| (entry.index, &entry.filter)).collect();
+    let removed_at: std::collections::BTreeMap<usize, &Biquad> = ordered
+        .iter()
+        .map(|entry| (entry.index, &entry.filter))
+        .collect();
     let mut kept_queue = kept.iter();
     let mut full = Vec::with_capacity(expected_total);
     for index in 0..expected_total {
@@ -290,9 +292,7 @@ pub fn check_shared_bass_summation(
     tolerance_db: f64,
 ) -> Result<SummationVerdict, AuditError> {
     if !expected_sum_db.is_finite() || !measured_sum_db.is_finite() {
-        return Err(AuditError(String::from(
-            "summation levels must be finite",
-        )));
+        return Err(AuditError(String::from("summation levels must be finite")));
     }
     if !tolerance_db.is_finite() || tolerance_db < 0.0 {
         return Err(AuditError(String::from(
@@ -303,9 +303,7 @@ pub fn check_shared_bass_summation(
     if delta >= -tolerance_db {
         Ok(SummationVerdict::Consistent { delta_db: delta })
     } else {
-        Ok(SummationVerdict::CancellationFlagged {
-            deficit_db: -delta,
-        })
+        Ok(SummationVerdict::CancellationFlagged { deficit_db: -delta })
     }
 }
 
@@ -403,10 +401,12 @@ mod pruning_audit_tests {
     }
 
     fn composite(filters: &[Biquad], freqs: &Array1<f64>) -> Array1<f64> {
-        filters.iter().fold(Array1::zeros(freqs.len()), |mut sum, filter| {
-            sum += &filter.np_log_result(freqs);
-            sum
-        })
+        filters
+            .iter()
+            .fold(Array1::zeros(freqs.len()), |mut sum, filter| {
+                sum += &filter.np_log_result(freqs);
+                sum
+            })
     }
 
     #[test]
@@ -432,7 +432,11 @@ mod pruning_audit_tests {
             BudgetAggregation::Sum,
         )
         .expect("valid audit");
-        assert_eq!(open.removed.len(), 2, "open budget removes both nominations");
+        assert_eq!(
+            open.removed.len(),
+            2,
+            "open budget removes both nominations"
+        );
         assert!(open.cumulative_loudness_delta_sones > 0.0);
         assert!(!open.f0_reference_id.is_empty());
 
@@ -543,12 +547,8 @@ mod pruning_audit_tests {
         assert_eq!(coherent_sum_gain_db(1), 0.0);
         let consistent =
             check_shared_bass_summation(expected, expected - 0.1, 0.5).expect("valid check");
-        assert!(matches!(
-            consistent,
-            SummationVerdict::Consistent { .. }
-        ));
-        let opposed =
-            check_shared_bass_summation(expected, -40.0, 0.5).expect("valid check");
+        assert!(matches!(consistent, SummationVerdict::Consistent { .. }));
+        let opposed = check_shared_bass_summation(expected, -40.0, 0.5).expect("valid check");
         match opposed {
             SummationVerdict::CancellationFlagged { deficit_db } => {
                 assert!(deficit_db > 40.0);
@@ -621,7 +621,10 @@ mod pruning_audit_tests {
             .zip(f0.iter())
             .map(|(a, b)| (a - b).abs())
             .fold(0.0, f64::max);
-        assert_eq!(worst, 0.0, "rollback must reproduce the frozen chain exactly");
+        assert_eq!(
+            worst, 0.0,
+            "rollback must reproduce the frozen chain exactly"
+        );
         assert_eq!(history.restored_indices, vec![1]);
         assert_eq!(history.restored_count, 1);
         assert_eq!(history.f0_reference_id, adjudication.f0_reference_id);
@@ -649,8 +652,6 @@ mod pruning_audit_tests {
                 missing: "measured_phase",
             })
         );
-        assert!(
-            require_realization_evidence(RealizationKind::Hybrid, true, true).is_ok()
-        );
+        assert!(require_realization_evidence(RealizationKind::Hybrid, true, true).is_ok());
     }
 }

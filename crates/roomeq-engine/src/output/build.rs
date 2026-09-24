@@ -160,6 +160,12 @@ pub fn build_channel_dsp_chain_with_curves(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: None,
     }
 }
@@ -306,6 +312,12 @@ pub fn build_multidriver_dsp_chain_with_curves(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: None,
     }
 }
@@ -402,6 +414,12 @@ pub fn build_topology_dsp_chain_with_curves(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: None,
     }
 }
@@ -604,6 +622,12 @@ pub fn build_multisub_dsp_chain_advanced(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: None,
     }
 }
@@ -693,6 +717,12 @@ fn build_dual_driver_array_chain(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: None,
     }
 }
@@ -883,6 +913,12 @@ pub fn build_mixed_mode_crossover_chain_with_post_merge_eq(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: None,
     }
 }
@@ -915,6 +951,12 @@ pub fn build_supporting_source_dsp_chains(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: constrained_target.map(|c| c.into()),
     };
 
@@ -939,6 +981,12 @@ pub fn build_supporting_source_dsp_chains(
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
         target_curve: constrained_target.map(|c| c.into()),
     };
 

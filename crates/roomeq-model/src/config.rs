@@ -45,6 +45,7 @@ mod policy;
 mod provenance_config;
 mod pruning_evaluation;
 mod report_outcome;
+mod reporting_config;
 mod role_target_config;
 mod room_config;
 mod room_config_builder;
@@ -106,6 +107,7 @@ pub use provenance_config::*;
 #[doc(inline)]
 pub use pruning_evaluation::{PruningEvaluation, PruningEvaluationVersion, PruningProgramme};
 pub use report_outcome::*;
+pub use reporting_config::*;
 pub use role_target_config::*;
 pub use room_config::*;
 pub use room_config_builder::*;

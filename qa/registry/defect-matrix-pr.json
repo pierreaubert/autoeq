@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "pairwise_manifest": "qa/registry/parameter-matrix-pr.json",
+  "pairwise_test": {"package": "roomeq-qa", "filter": "matrix_is_bounded_and_covers_all_valid_pairs"},
+  "cases": [
+    {"id": "F01", "tests": [{"package": "roomeq-qa", "filter": "f01_clock_rate_error_accumulates_signed_offset"}], "coverage": "analytic"},
+    {"id": "F02", "tests": [{"package": "roomeq-qa", "filter": "f02_timing_uncertainty_maps_to_phase"}], "coverage": "analytic"},
+    {"id": "F03", "tests": [{"package": "roomeq-qa", "filter": "f03_equal_sources_sum_and_opposite_polarity_cancels"}], "coverage": "analytic"},
+    {"id": "F04", "tests": [{"package": "roomeq-qa", "filter": "f04_common_eq_preserves_relative_seat_difference"}], "coverage": "analytic"},
+    {"id": "F05", "tests": [{"package": "autoeq-core", "filter": "core_evidence_alignment_preserves_gap"}, {"package": "roomeq-workflow", "filter": "workflow_f05_disjoint_gap_refuses_curve_only_optimization"}], "coverage": "partial", "remaining": "PreparedChannelInput and correction/scoring dispatch still accept one contiguous band; disjoint support is safely refused at optimize_room."},
+    {"id": "F06", "tests": [{"package": "roomeq-analysis", "filter": "low_snr_returns_unknown_and_blocks_correction"}, {"package": "roomeq-quality", "filter": "quality_missing_band_is_unassessed"}], "coverage": "scoped"},
+    {"id": "F07", "tests": [{"package": "roomeq-workflow", "filter": "workflow_mmm_does_not_enable_phase_processing"}], "coverage": "workflow"},
+    {"id": "F08", "tests": [{"package": "roomeq-quality", "filter": "quality_mean_improvement_cannot_hide_worst_seat"}, {"package": "roomeq-workflow", "filter": "workflow_cumulative_pruning_all_conditions_final_graph"}], "coverage": "workflow"},
+    {"id": "F09", "tests": [{"package": "roomeq-workflow", "filter": "workflow_cumulative_pruning_all_conditions_final_graph"}, {"package": "roomeq-workflow", "filter": "workflow_missing_condition_retains_filters"}], "coverage": "workflow"},
+    {"id": "F10", "tests": [{"package": "roomeq-workflow", "filter": "workflow_reversion_supersedes_applied_candidate"}], "coverage": "workflow"},
+    {"id": "F11", "tests": [{"package": "roomeq-quality", "filter": "quality_normalization_cannot_hide_output_loss"}], "coverage": "quality"},
+    {"id": "F12", "tests": [{"package": "roomeq-quality", "filter": "promotion_equal_loudness_claim_rejected"}], "coverage": "quality"},
+    {"id": "F13", "tests": [{"package": "roomeq-workflow", "filter": "workflow_capture_manifest_mismatch_not_accepted"}], "coverage": "workflow"},
+    {"id": "F14", "tests": [{"package": "roomeq-quality", "filter": "quality_bass_only_keeps_upper_evaluation_band"}], "coverage": "quality"},
+    {"id": "F15", "tests": [{"package": "roomeq-workflow", "filter": "workflow_evidence_gaps_and_unknowns_pass_through_optimize_room"}, {"package": "roomeq-analysis", "filter": "analysis_uncalibrated_input_disallows_absolute_loudness"}], "coverage": "workflow"}
+  ],
+  "high_risk_mutations": [
+    {"mutation": "drop_held_out_or_zero_weight_seat", "test": {"package": "roomeq-workflow", "filter": "workflow_source_seat_matrix_not_collapsed_by_average"}},
+    {"mutation": "flip_shared_bass_polarity", "test": {"package": "autoeq", "target": "roomeq_capture_verification", "features": "cli", "filter": "roadmap_correction_generated_prediction_routes_and_correlated_inputs"}},
+    {"mutation": "change_source_graph_seat_stimulus_or_calibration_binding", "test": {"package": "roomeq-workflow", "filter": "workflow_capture_manifest_mismatch_not_accepted"}},
+    {"mutation": "publish_reverted_candidate_as_applied", "test": {"package": "roomeq-workflow", "filter": "workflow_reversion_supersedes_applied_candidate"}},
+    {"mutation": "hide_native_output_loss_by_normalization", "test": {"package": "roomeq-quality", "filter": "quality_normalization_cannot_hide_output_loss"}},
+    {"mutation": "remove_pruning_condition", "test": {"package": "roomeq-workflow", "filter": "workflow_missing_condition_retains_filters"}}
+  ]
+}

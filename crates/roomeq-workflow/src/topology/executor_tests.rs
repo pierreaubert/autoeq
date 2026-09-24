@@ -138,6 +138,7 @@ fn stereo_21_room_config(
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -205,6 +206,7 @@ fn stereo_veto_result(enforce: bool) -> roomeq_engine::room_result::RoomOptimiza
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
     let mut assembly = make_assembly(&config, &sys);
@@ -318,6 +320,7 @@ fn stereo_2_0_executor_runs() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -362,6 +365,7 @@ fn home_cinema_executor_without_sub_runs() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -403,6 +407,7 @@ fn generic_executor_single_speaker_runs() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -472,6 +477,7 @@ fn home_cinema_executor_with_sub_runs() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 
@@ -539,6 +545,7 @@ fn stereo_2_1_executor_runs() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 

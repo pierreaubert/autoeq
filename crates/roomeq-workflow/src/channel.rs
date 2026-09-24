@@ -31,6 +31,7 @@ pub type ChannelWorkflowResult = (
     Vec<roomeq_model::FilterVetoVerdict>,
     Option<roomeq_model::VetoAdjudicationReport>,
     Option<roomeq_engine::channel_measurements::MeasurementConditioningReceipt>,
+    Option<roomeq_engine::segment_support::SegmentSupportReport>,
 );
 
 /// Load resources, execute one channel, and persist any generated sidecar.
@@ -130,7 +131,7 @@ pub fn process_single_channel_with_frequency_samples(
         .as_ref()
         .map(|reservation| reservation.reference().clone());
 
-    let result = execute_prepared_channel(
+    let mut result = execute_prepared_channel(
         channel_name,
         &prepared,
         room_config,
@@ -140,6 +141,23 @@ pub fn process_single_channel_with_frequency_samples(
         sidecar_reference,
         if phase_linear { None } else { callback.take() },
     )?;
+    // Measured-room acoustics ride with the delivered chain: a declared
+    // optimization-time IR yields third-octave early/late energies, while
+    // channels without one keep the viewer "pending" state.
+    if result.channel.early_late_curves.is_none() {
+        let sub_or_lfe = roomeq_model::home_cinema::role_for_channel(channel_name).is_sub_or_lfe();
+        result.channel.early_late_curves = prepared
+            .eq_resources()
+            .impulse_response
+            .as_ref()
+            .and_then(|ir| {
+                crate::channel_acoustics::measured_early_late_curves(
+                    &ir.samples,
+                    ir.sample_rate,
+                    sub_or_lfe,
+                )
+            });
+    }
 
     if let Some(generated) = result.convolution_sidecar.as_ref() {
         let reservation =
@@ -199,6 +217,7 @@ fn result_tuple(
         result.audibility_veto,
         result.veto_adjudication,
         Some(conditioning),
+        result.segment_support,
     )
 }
 

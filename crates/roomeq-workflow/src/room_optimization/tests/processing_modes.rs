@@ -64,6 +64,7 @@ fn stereo_config_for_mode(processing_mode: ProcessingMode) -> RoomConfig {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     }
 }
@@ -104,6 +105,7 @@ fn stationary_provenance() -> autoeq_core::MeasurementProvenance {
         timing_reference_id: Some(String::from("loopback-1")),
         has_measured_spl: false,
         valid_band_hz: None,
+        valid_bands_hz: Vec::new(),
         has_direct_angular: false,
         direct_sound: None,
         capture: None,
@@ -157,8 +159,9 @@ fn roadmap_measurement_receipts_reach_iir_fir_and_hybrid_reports() {
         ProcessingMode::Hybrid,
     ] {
         let config = stereo_config_for_mode(mode.clone());
-        let output_dir = tempfile::tempdir_in("/Volumes/home_tmp/tmp").unwrap();
-        let result = crate::optimize_room(&config, 48_000.0, None, Some(output_dir.path())).unwrap();
+        let output_dir = tempfile::tempdir().unwrap();
+        let result =
+            crate::optimize_room(&config, 48_000.0, None, Some(output_dir.path())).unwrap();
         let stage = result
             .metadata
             .stage_outcomes

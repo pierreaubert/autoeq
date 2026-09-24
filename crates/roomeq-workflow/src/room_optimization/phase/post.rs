@@ -574,7 +574,13 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
             target_curve: None,
+            early_late_curves: None,
         };
         let mut config = OptimizerConfig {
             processing_mode: roomeq_model::ProcessingMode::Hybrid,

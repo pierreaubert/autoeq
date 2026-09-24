@@ -168,6 +168,7 @@ impl WorkflowExecutor for GenericExecutor {
                 stage_outcomes: Vec::new(),
                 qa_seed_distribution: None,
                 effective_config: None,
+                t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
                 operation_gates: None,
 
                 provisional_decisions: Vec::new(),

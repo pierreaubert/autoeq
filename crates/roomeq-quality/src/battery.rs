@@ -15,9 +15,13 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::listening::SourcePresentation;
+use super::listening::{ListeningArm, ListeningCondition, ListeningSetup, SourcePresentation};
 use super::protocol::ComparisonIntent;
-use super::trial_import::{ClaimVerdict, qualifies_for_listening_claim};
+use super::sha256_hex;
+use super::trial_import::{
+    ClaimVerdict, TrialImport, qualifies_for_listening_claim, summarize_claims,
+    validate_trial_import_with_setup,
+};
 
 /// Material class of one battery cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -74,6 +78,8 @@ impl LevelMatch {
 /// One staged battery cell.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BatteryCell {
+    /// Correction pair under test; part of the frozen condition identity.
+    pub arm: ListeningArm,
     /// Source presentation under test.
     pub presentation: SourcePresentation,
     /// Material class under test.
@@ -91,6 +97,8 @@ pub struct BatteryCell {
     pub level_match: LevelMatch,
     /// Preregistration hash of the protocol scoring this cell.
     pub protocol_hash: String,
+    /// Hash of the complete frozen listening setup for this trial round.
+    pub setup_hash: String,
 }
 
 impl BatteryCell {
@@ -106,9 +114,9 @@ impl BatteryCell {
                 "battery cells need programme and seat identities",
             ));
         }
-        if self.protocol_hash.trim().is_empty() {
+        if self.protocol_hash.trim().is_empty() || self.setup_hash.trim().is_empty() {
             return Err(String::from(
-                "battery cells need their protocol preregistration hash",
+                "battery cells need protocol and frozen setup hashes",
             ));
         }
         self.level_match.validate()?;
@@ -205,6 +213,92 @@ impl ListeningBattery {
         }
         Ok(())
     }
+
+    /// Bind every battery cell to exactly one frozen setup condition.
+    ///
+    /// A battery's own setup hashes and level declarations are only
+    /// claims until checked against the preregistered setup records.
+    pub fn validate_against_setups(&self, setups: &[ListeningSetup]) -> Result<(), String> {
+        self.validate()?;
+        if setups.is_empty() {
+            return Err(String::from("listening battery needs frozen setups"));
+        }
+        let mut hashes = std::collections::HashSet::new();
+        for setup in setups {
+            setup.validate()?;
+            if !hashes.insert(setup.setup_hash.as_str()) {
+                return Err(String::from("listening battery repeats a frozen setup"));
+            }
+        }
+        let mut covered = std::collections::HashSet::new();
+        for cell in &self.cells {
+            let setup = setups
+                .iter()
+                .find(|setup| setup.setup_hash == cell.setup_hash)
+                .ok_or_else(|| {
+                    format!(
+                        "battery cell has no frozen setup for hash {}",
+                        cell.setup_hash
+                    )
+                })?;
+            if cell.protocol_hash != setup.protocol.prereg_hash
+                || cell.intent != setup.protocol.comparison.intent
+                || self.randomization_seed != setup.protocol.randomization_seed
+                || self.alpha != setup.protocol.alpha
+                || self.target_power != setup.protocol.target_power
+                || self.trials_per_condition != setup.protocol.trials_per_condition
+            {
+                return Err(String::from(
+                    "battery intent, randomization or trial sizing differs from its frozen protocol",
+                ));
+            }
+            if cell.level_match.matching_method != setup.level_matching_method
+                || cell.level_match.matched_within_db > setup.maximum_level_mismatch_db
+                || cell.level_match.absolute_level_db_spl != setup.absolute_playback_level_db_spl
+                || cell.level_match.calibration_id != setup.binding.calibration_id
+            {
+                return Err(String::from(
+                    "battery level match differs from its frozen setup",
+                ));
+            }
+            if cell.equivalence_bound != setup.protocol.comparison.equivalence_bound {
+                return Err(String::from(
+                    "battery equivalence bound differs from its frozen protocol",
+                ));
+            }
+            let condition = setup
+                .conditions
+                .iter()
+                .find(|condition| {
+                    condition.arm == cell.arm
+                        && condition.presentation == cell.presentation
+                        && condition.programme_id == cell.programme_id
+                        && condition.seat_id == cell.seat_id
+                })
+                .ok_or_else(|| String::from("battery cell is absent from its frozen setup"))?;
+            let allowed_programmes = match cell.material {
+                MaterialClass::ResonanceSustained => &setup.sustained_programmes,
+                MaterialClass::Transient => &setup.transient_programmes,
+                MaterialClass::RepresentativeProgramme => &setup.representative_programmes,
+            };
+            if !allowed_programmes.contains(&cell.programme_id) {
+                return Err(String::from(
+                    "battery material class differs from its frozen programme scope",
+                ));
+            }
+            if !covered.insert((cell.setup_hash.as_str(), condition.condition_id())) {
+                return Err(String::from("battery repeats a frozen setup condition"));
+            }
+        }
+        for setup in setups {
+            for condition in &setup.conditions {
+                if !covered.contains(&(setup.setup_hash.as_str(), condition.condition_id())) {
+                    return Err(String::from("battery misses a frozen setup condition"));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Battery-level verdict over scored cells.
@@ -216,6 +310,10 @@ pub struct BatteryVerdict {
     pub all_success: bool,
     /// Whether an equivalence claim is supported (never on negatives).
     pub equivalence_supported: bool,
+    /// Content hashes of validated typed imports, in setup order.
+    /// Empty for verdict-only descriptive scoring.
+    #[serde(default)]
+    pub import_sha256: Vec<String>,
 }
 
 /// Score a battery from validated per-cell verdicts.
@@ -235,30 +333,132 @@ pub fn score_battery(verdicts: &[ClaimVerdict]) -> Result<BatteryVerdict, String
     Ok(BatteryVerdict {
         cells: verdicts.to_vec(),
         all_success,
-        equivalence_supported: false,
+        equivalence_supported: check_battery_equivalence(verdicts).is_ok(),
+        import_sha256: Vec::new(),
     })
+}
+
+/// Recompute a battery verdict from raw imports bound to frozen setups.
+///
+/// Exactly one import is required per setup. All cells are returned in
+/// battery order, and the imported rows are validated before scoring.
+/// An operator must still establish that rows marked real came from actual
+/// listeners; this function cannot authenticate the person or session.
+pub fn score_battery_imports(
+    battery: &ListeningBattery,
+    setups: &[ListeningSetup],
+    imports: &[TrialImport],
+) -> Result<BatteryVerdict, String> {
+    battery.validate_against_setups(setups)?;
+    if imports.len() != setups.len() {
+        return Err(String::from(
+            "battery needs exactly one trial import per setup",
+        ));
+    }
+    let mut verdicts_by_condition = std::collections::HashMap::new();
+    let mut import_sha256 = Vec::with_capacity(setups.len());
+    for setup in setups {
+        let matching: Vec<_> = imports
+            .iter()
+            .filter(|import| import.setup_hash.as_deref() == Some(setup.setup_hash.as_str()))
+            .collect();
+        if matching.len() != 1 {
+            return Err(String::from(
+                "battery needs one import for each frozen setup",
+            ));
+        }
+        let validated = validate_trial_import_with_setup(matching[0], setup)?;
+        let import_bytes = serde_json::to_vec(matching[0])
+            .map_err(|error| format!("battery trial import serialization failed: {error}"))?;
+        import_sha256.push(format!(
+            "{}:{}",
+            setup.setup_hash,
+            sha256_hex(&import_bytes)
+        ));
+        for verdict in summarize_claims(&validated, &setup.protocol)? {
+            if verdicts_by_condition
+                .insert(
+                    (setup.setup_hash.as_str(), verdict.condition.clone()),
+                    verdict,
+                )
+                .is_some()
+            {
+                return Err(String::from("battery trial import repeats a condition"));
+            }
+        }
+    }
+    let mut ordered = Vec::with_capacity(battery.cells.len());
+    for cell in &battery.cells {
+        let condition = ListeningCondition {
+            arm: cell.arm,
+            presentation: cell.presentation,
+            programme_id: cell.programme_id.clone(),
+            seat_id: cell.seat_id.clone(),
+        }
+        .condition_id();
+        let verdict = verdicts_by_condition
+            .remove(&(cell.setup_hash.as_str(), condition))
+            .ok_or_else(|| String::from("battery import misses a staged cell"))?;
+        ordered.push(verdict);
+    }
+    if !verdicts_by_condition.is_empty() {
+        return Err(String::from("battery import contains unstaged conditions"));
+    }
+    let mut scored = score_battery(&ordered)?;
+    // The verdict-only scorer requires one common setup hash because it
+    // cannot verify provenance. Here each round was checked against its own
+    // frozen setup and raw import, so separate rooms may share a protocol.
+    scored.all_success = ordered.iter().all(|verdict| {
+        !verdict.synthetic
+            && verdict
+                .setup_hash
+                .as_deref()
+                .is_some_and(|hash| !hash.trim().is_empty())
+            && verdict.decision == "success"
+    });
+    scored.equivalence_supported = scored.all_success
+        && ordered.iter().all(|verdict| {
+            verdict.intent == Some(ComparisonIntent::Equivalence)
+                && verdict
+                    .equivalence_bound_p_correct
+                    .is_some_and(|bound| bound.is_finite() && (0.5..1.0).contains(&bound))
+        });
+    scored.import_sha256 = import_sha256;
+    Ok(scored)
 }
 
 /// Check whether scored verdicts support an equivalence claim.
 ///
-/// Equivalence needs every equivalence cell to meet its prespecified
-/// bound with real successes; this scaffolding records the verdicts
-/// and refuses the claim until that evidence exists. Synthetic tables
-/// fail closed here.
+/// Equivalence needs every real cell to succeed under the numeric ABX
+/// equivalence rule. A successful detectability table cannot satisfy it.
 ///
 /// # Errors
 ///
-/// Returns an error on empty input, any non-success, or any synthetic
-/// verdict: a nonsignificant ABX never proves equivalence.
+/// Returns an error on empty, synthetic, non-success or non-equivalence cells.
 pub fn check_battery_equivalence(verdicts: &[ClaimVerdict]) -> Result<(), String> {
     qualifies_for_listening_claim(verdicts).map_err(|error| {
         format!("battery equivalence unsupported: {error}: a nonsignificant ABX never proves equivalence")
-    })
+    })?;
+    if verdicts.iter().any(|verdict| {
+        verdict.intent != Some(ComparisonIntent::Equivalence)
+            || verdict
+                .equivalence_bound_p_correct
+                .is_none_or(|bound| !bound.is_finite() || !(0.5..1.0).contains(&bound))
+    }) {
+        return Err(String::from(
+            "battery equivalence needs real successes from a numeric preregistered equivalence rule",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
 mod battery_tests {
     use super::*;
+    use crate::{
+        AbxAnswer, BlindedProtocol, ChainStimulusBinding, ComparisonDesign, ComparisonSpec,
+        DecisionRule, ImportedTrial, ListeningCondition, ReferenceKind, TrialParticipantAssignment,
+    };
 
     fn matched() -> LevelMatch {
         LevelMatch {
@@ -275,6 +475,11 @@ mod battery_tests {
         intent: ComparisonIntent,
     ) -> BatteryCell {
         BatteryCell {
+            arm: if presentation == SourcePresentation::Spatial {
+                ListeningArm::PrunedVsFull
+            } else {
+                ListeningArm::BaselineVsCorrected
+            },
             presentation,
             material,
             programme_id: String::from("programme-01"),
@@ -286,6 +491,7 @@ mod battery_tests {
             },
             level_match: matched(),
             protocol_hash: String::from("prereg-hash"),
+            setup_hash: String::from("frozen-setup-hash"),
         }
     }
 
@@ -316,6 +522,228 @@ mod battery_tests {
         }
     }
 
+    fn bound_battery() -> (ListeningBattery, ListeningSetup) {
+        let mut battery = battery();
+        for (index, cell) in battery.cells.iter_mut().enumerate() {
+            cell.programme_id = format!("programme-{:02}", index + 1);
+        }
+        let conditions: Vec<_> = battery
+            .cells
+            .iter()
+            .map(|cell| ListeningCondition {
+                arm: cell.arm,
+                presentation: cell.presentation,
+                programme_id: cell.programme_id.clone(),
+                seat_id: cell.seat_id.clone(),
+            })
+            .collect();
+        let protocol = BlindedProtocol::preregister(
+            ComparisonDesign::Abx,
+            ComparisonSpec {
+                name: String::from("battery-detectability"),
+                intent: ComparisonIntent::Detectability,
+                attributes: vec![String::from("detectability")],
+                equivalence_bound: None,
+                equivalence_max_p_correct: None,
+                reference: ReferenceKind::IndependentImplementation {
+                    description: String::from("separate binomial reference within 1e-12"),
+                },
+                validated_domain: String::from("unvalidated"),
+            },
+            conditions
+                .iter()
+                .map(ListeningCondition::condition_id)
+                .collect(),
+            30,
+            0.05,
+            0.8,
+            0.75,
+            DecisionRule::Abx {
+                min_correct: 20,
+                trials: 30,
+                alpha: 0.05,
+            },
+            11,
+        )
+        .unwrap();
+        for cell in &mut battery.cells {
+            cell.protocol_hash = protocol.prereg_hash.clone();
+        }
+        let setup = ListeningSetup {
+            protocol,
+            conditions,
+            holdout_programmes: vec![String::from("heldout-02")],
+            binding: ChainStimulusBinding {
+                baseline_graph_id: String::from("baseline-graph"),
+                candidate_graph_id: String::from("candidate-graph"),
+                full_graph_id: String::from("full-graph"),
+                pruned_graph_id: Some(String::from("pruned-graph")),
+                stimulus_hash: String::from("rendered-stimulus"),
+                sample_rate_hz: 48_000.0,
+                calibration_id: String::from("spl-cal-94db"),
+                processing_state: String::from("final-delivered"),
+            },
+            model_id: String::from("fixture-model"),
+            model_version: String::from("fixture-v1"),
+            listener_population: String::from("adult listeners"),
+            room_id: String::from("room-a"),
+            holdout_rooms: vec![String::from("room-b")],
+            holdout_participants: vec![String::from("heldout-listener")],
+            participant_ids: vec![String::from("listener-01")],
+            trial_participants: Vec::new(),
+            absolute_playback_level_db_spl: 76.0,
+            level_matching_method: String::from("loudness-matched-at-1khz"),
+            maximum_level_mismatch_db: 0.2,
+            sustained_programmes: vec![String::from("programme-01")],
+            transient_programmes: vec![String::from("programme-02")],
+            representative_programmes: vec![String::from("programme-03")],
+            setup_hash: String::new(),
+        }
+        .freeze()
+        .unwrap();
+        for cell in &mut battery.cells {
+            cell.setup_hash = setup.setup_hash.clone();
+        }
+        (battery, setup)
+    }
+
+    #[test]
+    fn battery_cells_bind_to_frozen_setup_conditions_and_levels() {
+        let (battery, setup) = bound_battery();
+        assert!(battery.validate_against_setups(&[setup.clone()]).is_ok());
+        let mut stale = battery.clone();
+        stale.cells[0].protocol_hash = String::from("stale-hash");
+        assert!(stale.validate_against_setups(&[setup.clone()]).is_err());
+        let mut wrong_arm = battery.clone();
+        wrong_arm.cells[0].arm = ListeningArm::PrunedVsFull;
+        assert!(wrong_arm.validate_against_setups(&[setup.clone()]).is_err());
+        let mut wrong_level = battery.clone();
+        wrong_level.cells[0].level_match.absolute_level_db_spl += 1.0;
+        assert!(
+            wrong_level
+                .validate_against_setups(&[setup.clone()])
+                .is_err()
+        );
+        let mut wrong_material = battery.clone();
+        wrong_material.cells[0].material = MaterialClass::Transient;
+        wrong_material.cells[1].material = MaterialClass::ResonanceSustained;
+        assert!(
+            wrong_material
+                .validate_against_setups(&[setup.clone()])
+                .is_err()
+        );
+        let mut repeated = battery.clone();
+        repeated.cells.push(repeated.cells[0].clone());
+        assert!(repeated.validate_against_setups(&[setup.clone()]).is_err());
+        let mut tampered = setup;
+        tampered.binding.stimulus_hash = String::from("changed-stimulus");
+        assert!(battery.validate_against_setups(&[tampered]).is_err());
+    }
+
+    #[test]
+    fn battery_scores_only_complete_setup_bound_trial_imports() {
+        let (mut battery, mut setup) = bound_battery();
+        let assignments = setup.protocol.abx_assignment_template().unwrap();
+        setup.protocol = setup.protocol.with_trial_assignments(assignments).unwrap();
+        setup.participant_ids = (0..30)
+            .map(|order| format!("participant-{order:04}"))
+            .collect();
+        setup.trial_participants = setup
+            .protocol
+            .trial_assignments
+            .iter()
+            .map(|assignment| TrialParticipantAssignment {
+                trial_id: assignment.trial_id.clone(),
+                participant_id: format!("participant-{:04}", assignment.presentation_order),
+            })
+            .collect();
+        setup = setup.freeze().unwrap();
+        for cell in &mut battery.cells {
+            cell.protocol_hash = setup.protocol.prereg_hash.clone();
+            cell.setup_hash = setup.setup_hash.clone();
+        }
+        let rows = setup
+            .protocol
+            .trial_assignments
+            .iter()
+            .map(|assignment| {
+                let correct = assignment.presentation_order < 20;
+                ImportedTrial {
+                    trial_id: assignment.trial_id.clone(),
+                    participant_id: format!("participant-{:04}", assignment.presentation_order),
+                    condition: assignment.condition.clone(),
+                    presentation_order: assignment.presentation_order,
+                    correct,
+                    response: Some(if correct {
+                        assignment.answer
+                    } else if assignment.answer == AbxAnswer::A {
+                        AbxAnswer::B
+                    } else {
+                        AbxAnswer::A
+                    }),
+                }
+            })
+            .collect();
+        let mut import = TrialImport {
+            protocol_hash: setup.protocol.prereg_hash.clone(),
+            setup_hash: Some(setup.setup_hash.clone()),
+            comparison: setup.protocol.comparison.name.clone(),
+            claimed_intent: Some(ComparisonIntent::Detectability),
+            binding: setup.binding.clone(),
+            synthetic: false,
+            rows,
+        };
+        let scored = score_battery_imports(&battery, &[setup.clone()], &[import.clone()]).unwrap();
+        assert!(scored.all_success);
+        assert_eq!(scored.cells.len(), battery.cells.len());
+        assert_eq!(scored.import_sha256.len(), 1);
+        assert!(scored.import_sha256[0].starts_with(&setup.setup_hash));
+        assert!(
+            scored
+                .cells
+                .iter()
+                .zip(&battery.cells)
+                .all(|(verdict, cell)| {
+                    verdict.condition
+                        == ListeningCondition {
+                            arm: cell.arm,
+                            presentation: cell.presentation,
+                            programme_id: cell.programme_id.clone(),
+                            seat_id: cell.seat_id.clone(),
+                        }
+                        .condition_id()
+                })
+        );
+        let mut second_setup = setup.clone();
+        second_setup.room_id = String::from("room-c");
+        second_setup = second_setup.freeze().unwrap();
+        let mut second_import = import.clone();
+        second_import.setup_hash = Some(second_setup.setup_hash.clone());
+        let mut two_rounds = battery.clone();
+        let mut second_cells = battery.cells.clone();
+        for cell in &mut second_cells {
+            cell.setup_hash = second_setup.setup_hash.clone();
+        }
+        two_rounds.cells.extend(second_cells);
+        let paired = score_battery_imports(
+            &two_rounds,
+            &[setup.clone(), second_setup],
+            &[import.clone(), second_import],
+        )
+        .unwrap();
+        assert!(paired.all_success);
+        assert_eq!(paired.import_sha256.len(), 2);
+        import.synthetic = true;
+        assert!(
+            !score_battery_imports(&battery, &[setup.clone()], &[import.clone()])
+                .unwrap()
+                .all_success
+        );
+        import.synthetic = false;
+        import.rows.pop();
+        assert!(score_battery_imports(&battery, &[setup], &[import]).is_err());
+    }
+
     fn verdict(condition: &str, correct: u32, synthetic: bool) -> ClaimVerdict {
         ClaimVerdict {
             condition: String::from(condition),
@@ -325,6 +753,9 @@ mod battery_tests {
             ci95: [0.4, 0.8],
             p_value: 0.02,
             reference_p_value: None,
+            setup_hash: Some(String::from("fixture-frozen-setup")),
+            intent: Some(ComparisonIntent::Detectability),
+            equivalence_bound_p_correct: None,
             decision: if correct >= 20 {
                 String::from("success")
             } else {
@@ -394,6 +825,8 @@ mod battery_tests {
         ];
         let scored = score_battery(&passing).unwrap();
         assert!(scored.all_success);
+        assert!(!scored.equivalence_supported);
+        assert!(check_battery_equivalence(&passing).is_err());
     }
 
     #[test]

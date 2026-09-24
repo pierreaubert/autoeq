@@ -2,6 +2,7 @@ use super::ctc_config::CtcConfig;
 use super::default::{default_config_version, validate_config_version};
 use super::optimizer_config::OptimizerConfig;
 use super::provenance_config::ProvenanceConfig;
+use super::reporting_config::ReportingConfig;
 use super::speaker_config::SpeakerConfig;
 use super::types::CrossoverConfig;
 use super::types::RecordingConfiguration;
@@ -14,6 +15,7 @@ use std::collections::HashMap;
 
 /// Complete room configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[schemars(transform = allow_legacy_description)]
 pub struct RoomConfig {
     /// Configuration schema version. Version 3.0.x intentionally rejects the
     /// legacy stereo-LFE representation.
@@ -42,10 +44,31 @@ pub struct RoomConfig {
     /// Cross-talk cancellation / binaural-aware correction configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ctc: Option<CtcConfig>,
+    /// Report-policy inputs needing an explicit operator declaration (for
+    /// example the T60 flatness tolerance). Absent policies leave the viewer
+    /// to its documented standard defaults; they change no acceptance math.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reporting: Option<ReportingConfig>,
     /// Pre-fetched CEA2034 data (runtime only, not serialized).
     #[serde(skip)]
     #[schemars(skip)]
     pub cea2034_cache: Option<HashMap<String, crate::SpinoramaBundle>>,
+}
+
+/// Older configuration fixtures carry a descriptive label that Serde accepts
+/// and ignores. Keep the generated input schema in sync with that accepted
+/// form without opening the schema to arbitrary unknown configuration keys.
+fn allow_legacy_description(schema: &mut schemars::Schema) {
+    schema
+        .ensure_object()
+        .entry("properties")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut()
+        .expect("RoomConfig schema properties are an object")
+        .insert(
+            "description".into(),
+            serde_json::json!({ "type": "string" }),
+        );
 }
 
 impl Default for RoomConfig {
@@ -60,12 +83,24 @@ impl Default for RoomConfig {
             provenance: ProvenanceConfig::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
 }
 
 impl RoomConfig {
+    /// Declared T60 flatness tolerance for report summary cells, if the
+    /// operator supplied a `reporting` policy. Structural validation rejects
+    /// nonfinite/nonpositive tolerances before any run, so topology plumbing
+    /// carries this value without re-checking it.
+    #[must_use]
+    pub fn report_t60_tolerance_s(&self) -> Option<f64> {
+        self.reporting
+            .as_ref()
+            .and_then(|reporting| reporting.t60_flatness_tolerance_s)
+    }
+
     /// Validate the serialized configuration schema version.
     pub fn validate_version(&self) -> Result<(), String> {
         validate_config_version(&self.version)
@@ -102,6 +137,11 @@ impl RoomConfig {
             errors.push(
                 "optimizer.max_crossover_cancellation_db must be finite and nonnegative".into(),
             );
+        }
+        if let Some(reporting) = &self.reporting
+            && let Err(error) = reporting.validate()
+        {
+            errors.push(error);
         }
         if let Err(error) = self.optimizer.finalization.validate() {
             errors.push(error);

@@ -13,7 +13,7 @@ from verify_routed_electrical import assess_bound_artifact, output_complex_trans
 
 
 TEST_NAME = "roadmap_correction_admission_routed_joint_sub_named_outputs_reach_refinement"
-SCRATCH_ROOT = Path("/Volumes/home_tmp/tmp")
+SCRATCH_ROOT = Path(os.environ.get("ROOMEQ_QA_SCRATCH_ROOT", "/Volumes/home_tmp/tmp"))
 FREQUENCIES_HZ = (40.0, 80.0, 120.0)
 
 

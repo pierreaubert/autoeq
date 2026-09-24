@@ -537,10 +537,13 @@ fn evaluate_variant(
             .any(|speaker| !matches!(speaker, roomeq_model::SpeakerConfig::Single(_)));
     let (validation_measurements, held_seat_labels) =
         align_held_out_captures(&scenario.held_out, &loaded_held_out, multi_output)?;
+    // Retain realized sidecars throughout evaluation, but isolate this QA
+    // scenario from other concurrent cases and from the repository root.
+    let scratch = tempfile::tempdir()?;
     let result = crate::optimize_room_with_validation(
         &room_config,
         scenario.sample_rate,
-        None,
+        Some(scratch.path()),
         validation_measurements.clone(),
     )
     .map_err(|error| anyhow!(error.to_string()))

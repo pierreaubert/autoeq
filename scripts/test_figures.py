@@ -10,7 +10,42 @@ from scripts.src.figures import (
     add_channel_response_overlays,
     create_bass_management_routing_figure,
     create_combined_figure,
+    create_early_late_figure,
+    create_t60_octaves_figure,
 )
+
+
+class EarlyLateFigureTests(unittest.TestCase):
+    def test_t60_figure_leaves_invalid_octave_unconnected(self):
+        rows = [{"centre_hz": 63, "t60_s": 0.5},
+                {"centre_hz": 125, "t60_s": None},
+                {"centre_hz": 250, "t60_s": 0.4}]
+        figure = create_t60_octaves_figure("L", rows)
+        self.assertEqual(list(figure.data[0].y), [0.5, None, 0.4])
+        self.assertFalse(figure.data[0].connectgaps)
+        self.assertIsNone(create_t60_octaves_figure("L", rows[1:2]))
+
+    def test_shared_reference_is_required_for_energy_contribution_plot(self):
+        freq = [100.0, 125.0, 160.0]
+        report = {
+            "method": "incoherent_band_energy",
+            "reference": "full_peak_band",
+            "smoothing": "third_octave", "split_ms": 20.0,
+            "full": {"freq": freq, "spl": [0.0, -2.0, -4.0]},
+            "early": {"freq": freq, "spl": [-1.0, -3.0, -5.0]},
+            "late": {"freq": freq, "spl": [-7.0, -9.0, -11.0]},
+        }
+        figure = create_early_late_figure("L", report)
+        self.assertEqual([trace.name for trace in figure.data], ["Full", "Early", "Late"])
+        self.assertEqual(list(figure.data[2].y), report["late"]["spl"])
+        report["reference"] = "each_segment_peak"
+        self.assertIsNone(create_early_late_figure("L", report))
+        report["reference"] = "full_peak_band"
+        report["split_ms"] = 15.0
+        self.assertIsNone(create_early_late_figure("L", report))
+        report["split_ms"] = 20.0
+        report["late"]["freq"] = [101.0, 126.0, 161.0]
+        self.assertIsNone(create_early_late_figure("L", report))
 
 
 def two_sub_overview_data():

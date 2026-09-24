@@ -62,6 +62,7 @@ pub(super) type MixedModeResult = (
     Vec<roomeq_model::FilterVetoVerdict>,
     Option<roomeq_model::VetoAdjudicationReport>,
     Option<roomeq_engine::channel_measurements::MeasurementConditioningReceipt>,
+    Option<roomeq_engine::segment_support::SegmentSupportReport>,
 );
 
 /// Action to take after progress callback

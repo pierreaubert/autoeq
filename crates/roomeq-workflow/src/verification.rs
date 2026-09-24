@@ -839,6 +839,12 @@ mod tests {
                 }) as Box<dyn Fn(&mut PlaybackBinding)>,
             ),
             (
+                "source",
+                Box::new(|binding: &mut PlaybackBinding| {
+                    binding.source_id = String::from("source-other");
+                }),
+            ),
+            (
                 "stimulus",
                 Box::new(|binding: &mut PlaybackBinding| {
                     binding.stimulus_hash = String::from("stim-other");

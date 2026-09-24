@@ -29,6 +29,18 @@ remain explicit deferrals in the
 No fixture, corpus membership, rights classification, baseline, or enforcement
 limit changes as part of that documentation update.
 
+## Independent perceptual reference vectors
+
+No independent perceptual reference vectors are registered in this corpus.
+Before a G7 submission can be considered, record each vector's source,
+set identity, model edition, license identifier, local artifact path, and
+SHA-256 digest.
+The QA intake verifies the artifact bytes against that digest and rejects
+missing edition/license metadata or a vector identical to a generated
+control. Passing intake only establishes traceability; model agreement still
+needs approved numeric reference evidence, and real listening trials remain
+a separate gate.
+
 ## Sources and redistribution
 
 The 2026-09-20 pruning implementation adds synthetic software regression rows
@@ -47,6 +59,15 @@ recalibrate acceptance limits, or establish listening-study evidence.
 | measured_stereo_ascilab1 | Contributor-supplied stereo room capture under ../measured/2.0_ascilab1/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; REW TXT and channel names only |
 | measured_stereo_ascilab2 | Contributor-supplied stereo room capture under ../measured/2.0_ascilab2/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; REW TXT and channel names only |
 | measured_stereo_ascilab3 | Contributor-supplied stereo room capture under ../measured/2.0_ascilab3/ | LicenseRef-SOTF-Project-Test-Data | Opaque device-family ID; REW TXT and channel names only |
+
+FEM held-out entries use `synthetic-heldout-1` and
+`synthetic-heldout-2` seat IDs. The generator applies the same indexed
+interpolation pattern to each channel at a given synthetic position, so
+coherent replay can join channels by an explicit generated identity. These IDs
+are virtual positions, not surveyed physical seats or real playback captures.
+The same generator now emits held-out curves for every declared FEM physical
+sub output; coherent replay requires the sub response at each synthetic seat
+and never broadcasts a single sub curve across seats.
 
 LicenseRef-SOTF-Project-Test-Data means the files are retained and exercised
 as part of this repository's test suite. It is not a grant to extract and

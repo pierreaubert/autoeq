@@ -81,11 +81,16 @@ pub struct ComparisonSpec {
     /// Preference is never a stand-in for inaudibility.
     #[serde(default)]
     pub attributes: Vec<String>,
-    /// Prespecified effect/detection bound for [`ComparisonIntent::Equivalence`],
-    /// e.g. `"d-prime below 0.5 at 80% power"`. Required for equivalence,
-    /// ignored otherwise.
+    /// Human-readable effect/detection bound for
+    /// [`ComparisonIntent::Equivalence`]. Required for that intent; the
+    /// machine-scored ABX threshold is the numeric bound in
+    /// [`DecisionRule::AbxEquivalence`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equivalence_bound: Option<String>,
+    /// Numeric ABX correct-response ceiling. Must agree with the bound in
+    /// [`DecisionRule::AbxEquivalence`] before a protocol is preregistered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equivalence_max_p_correct: Option<f64>,
     /// The reference this comparison is checked against.
     pub reference: ReferenceKind,
     /// Domain where the comparison is validated. `"unvalidated"` until
@@ -115,13 +120,22 @@ impl ComparisonSpec {
             return Err(String::from("comparison attributes must be non-blank"));
         }
         if self.intent == ComparisonIntent::Equivalence
-            && self
+            && (self
                 .equivalence_bound
                 .as_deref()
                 .is_none_or(|bound| bound.trim().is_empty())
+                || self
+                    .equivalence_max_p_correct
+                    .is_none_or(|bound| !bound.is_finite() || !(0.5..1.0).contains(&bound)))
         {
             return Err(String::from(
-                "equivalence needs a prespecified detection bound: a nonsignificant result alone is not proof of equivalence",
+                "equivalence needs a prespecified numeric detection bound: a nonsignificant result alone is not proof of equivalence",
+            ));
+        }
+        if self.intent != ComparisonIntent::Equivalence && self.equivalence_max_p_correct.is_some()
+        {
+            return Err(String::from(
+                "numeric equivalence bound belongs only to an equivalence comparison",
             ));
         }
         if self.intent == ComparisonIntent::Preference {
@@ -167,11 +181,40 @@ pub enum DecisionRule {
         /// One-sided significance level.
         alpha: f64,
     },
+    /// Establish equivalence when no more than `max_correct` ABX answers are
+    /// correct. The null is detection accuracy at least `max_p_correct`;
+    /// its exact lower-tail p value must meet the preregistered `alpha`.
+    AbxEquivalence {
+        max_correct: u32,
+        trials: u32,
+        alpha: f64,
+        max_p_correct: f64,
+        /// Correct-response rate under the prespecified alternative used
+        /// to verify that the trial count attains `target_power`.
+        alternative_p_correct: f64,
+    },
     /// Pass criterion written before data collection.
     Mushra {
         /// The criterion text, e.g. median thresholds and exclusion rules.
         criterion: String,
     },
+}
+
+/// The hidden X identity in one ABX presentation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AbxAnswer {
+    A,
+    B,
+}
+
+/// One assignment sealed into the preregistered protocol before real trials.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TrialAssignment {
+    pub trial_id: String,
+    pub condition: String,
+    pub presentation_order: u32,
+    pub answer: AbxAnswer,
 }
 
 /// A staged blinded protocol, preregistered by hash.
@@ -190,12 +233,20 @@ pub struct BlindedProtocol {
     pub alpha: f64,
     /// Target statistical power for `minimum_effect_p_correct`.
     pub target_power: f64,
-    /// Minimum correct-response rate the trial count is powered for.
+    /// Minimum correct-response rate for the detectability arm. An
+    /// equivalence arm declares its alternative in the decision rule.
     pub minimum_effect_p_correct: f64,
     /// Decision rule fixed before data collection.
     pub decision: DecisionRule,
     /// Seed for trial randomization.
     pub randomization_seed: u64,
+    /// Version of the seeded, balanced ABX assignment algorithm.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trial_assignment_algorithm: Option<String>,
+    /// Frozen answer key and presentation order for real ABX imports.
+    /// An empty schedule is staging-only and cannot qualify real rows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trial_assignments: Vec<TrialAssignment>,
     /// SHA-256 over the canonical protocol JSON (everything above).
     /// Recompute and compare before running or scoring: a mismatch means
     /// the rules moved after preregistration.
@@ -221,6 +272,15 @@ impl BlindedProtocol {
         if conditions.is_empty() {
             return Err(String::from("protocol needs at least one condition"));
         }
+        let mut unique_conditions = std::collections::HashSet::new();
+        if conditions
+            .iter()
+            .any(|condition| condition.trim().is_empty() || !unique_conditions.insert(condition))
+        {
+            return Err(String::from(
+                "protocol conditions must be unique and non-blank",
+            ));
+        }
         if trials_per_condition == 0 {
             return Err(String::from("trials_per_condition must be positive"));
         }
@@ -240,6 +300,87 @@ impl BlindedProtocol {
                 "trials_per_condition above exact-computation range",
             ));
         }
+        match (&comparison.intent, &decision) {
+            (
+                ComparisonIntent::Detectability,
+                DecisionRule::Abx {
+                    min_correct,
+                    trials,
+                    alpha: rule_alpha,
+                },
+            ) => {
+                if design != ComparisonDesign::Abx
+                    || *trials != trials_per_condition
+                    || *rule_alpha != alpha
+                    || *min_correct == 0
+                    || *min_correct > *trials
+                    || abx_p_value(*min_correct, *trials)? > alpha
+                    || 1.0
+                        - binomial_lower_tail(
+                            min_correct.saturating_sub(1),
+                            *trials,
+                            minimum_effect_p_correct,
+                        )?
+                        < target_power
+                {
+                    return Err(String::from(
+                        "detectability ABX rule needs matching design, trials and alpha, attainable exact alpha, and sufficient power at its declared minimum effect",
+                    ));
+                }
+            }
+            (
+                ComparisonIntent::Equivalence,
+                DecisionRule::AbxEquivalence {
+                    max_correct,
+                    trials,
+                    alpha: rule_alpha,
+                    max_p_correct,
+                    alternative_p_correct,
+                },
+            ) => {
+                if design != ComparisonDesign::Abx
+                    || *trials != trials_per_condition
+                    || *rule_alpha != alpha
+                {
+                    return Err(String::from(
+                        "equivalence rule trials and alpha must match the preregistered protocol",
+                    ));
+                }
+                if comparison.equivalence_max_p_correct != Some(*max_p_correct) {
+                    return Err(String::from(
+                        "numeric comparison bound and ABX equivalence rule disagree",
+                    ));
+                }
+                if !(0.5 < *max_p_correct && *max_p_correct < 1.0)
+                    || !(0.5..*max_p_correct).contains(alternative_p_correct)
+                    || *max_correct >= *trials
+                    || binomial_lower_tail(*max_correct, *trials, *max_p_correct)? > alpha
+                    || binomial_lower_tail(*max_correct, *trials, *alternative_p_correct)?
+                        < target_power
+                {
+                    return Err(String::from(
+                        "equivalence rule needs a numeric detection bound, attainable exact alpha and declared alternative with sufficient power",
+                    ));
+                }
+            }
+            (ComparisonIntent::Equivalence, _) => {
+                return Err(String::from(
+                    "equivalence needs a numeric preregistered ABX equivalence rule",
+                ));
+            }
+            (_, DecisionRule::AbxEquivalence { .. }) => {
+                return Err(String::from(
+                    "ABX equivalence rule cannot score another comparison intent",
+                ));
+            }
+            (ComparisonIntent::Preference, DecisionRule::Mushra { criterion })
+                if design == ComparisonDesign::Mushra && !criterion.trim().is_empty() => {}
+            _ => {
+                return Err(String::from(
+                    "comparison intent, trial design and decision rule must agree before preregistration",
+                ));
+            }
+        }
         let mut protocol = Self {
             design,
             comparison,
@@ -250,10 +391,141 @@ impl BlindedProtocol {
             minimum_effect_p_correct,
             decision,
             randomization_seed,
+            trial_assignment_algorithm: None,
+            trial_assignments: Vec::new(),
             prereg_hash: String::new(),
         };
         protocol.prereg_hash = protocol.canonical_hash()?;
         Ok(protocol)
+    }
+
+    /// Freeze an explicit ABX answer key before trial collection. This
+    /// changes the preregistration hash and must precede any import.
+    pub fn with_trial_assignments(
+        mut self,
+        assignments: Vec<TrialAssignment>,
+    ) -> Result<Self, String> {
+        self.verify_prereg()?;
+        self.trial_assignment_algorithm = Some(String::from("sha256-balanced-v1"));
+        self.trial_assignments = assignments;
+        self.validate_trial_assignments()?;
+        self.prereg_hash = self.canonical_hash()?;
+        Ok(self)
+    }
+
+    /// Produce the preregistered ABX schedule with stable trial IDs.
+    /// The seed fixes a balanced answer order independently per condition.
+    pub fn abx_assignment_template(&self) -> Result<Vec<TrialAssignment>, String> {
+        if self.design != ComparisonDesign::Abx {
+            return Err(String::from(
+                "ABX assignment template needs an ABX protocol",
+            ));
+        }
+        let mut assignments = Vec::new();
+        for condition in &self.conditions {
+            let answers = self.seeded_abx_answers(condition)?;
+            for (order, answer) in answers.into_iter().enumerate() {
+                assignments.push(TrialAssignment {
+                    trial_id: format!("{condition}-t{order:04}"),
+                    condition: condition.clone(),
+                    presentation_order: order as u32,
+                    answer,
+                });
+            }
+        }
+        Ok(assignments)
+    }
+
+    fn seeded_abx_answers(&self, condition: &str) -> Result<Vec<AbxAnswer>, String> {
+        let mut ranked = (0..self.trials_per_condition)
+            .map(|order| {
+                let input = serde_json::to_vec(&(
+                    "sha256-balanced-v1",
+                    self.randomization_seed,
+                    condition,
+                    order,
+                ))
+                .map_err(|error| format!("ABX assignment serialize error: {error}"))?;
+                Ok((sha256_hex(&input), order))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        ranked.sort_unstable();
+        let mut answers = vec![AbxAnswer::B; self.trials_per_condition as usize];
+        for (_, order) in ranked
+            .into_iter()
+            .take(self.trials_per_condition as usize / 2)
+        {
+            answers[order as usize] = AbxAnswer::A;
+        }
+        Ok(answers)
+    }
+
+    fn validate_trial_assignments(&self) -> Result<(), String> {
+        if self.trial_assignments.is_empty() {
+            if self.trial_assignment_algorithm.is_some() {
+                return Err(String::from("ABX assignment algorithm has no assignments"));
+            }
+            return Ok(());
+        }
+        if self.trial_assignment_algorithm.as_deref() != Some("sha256-balanced-v1") {
+            return Err(String::from("unsupported ABX assignment algorithm"));
+        }
+        if self.design != ComparisonDesign::Abx {
+            return Err(String::from("trial assignments require an ABX protocol"));
+        }
+        let mut ids = std::collections::HashSet::new();
+        for assignment in &self.trial_assignments {
+            if assignment.trial_id.trim().is_empty() || !ids.insert(&assignment.trial_id) {
+                return Err(String::from("trial assignments need unique non-blank ids"));
+            }
+            if !self.conditions.contains(&assignment.condition) {
+                return Err(format!(
+                    "trial assignment {} names an unknown condition",
+                    assignment.trial_id
+                ));
+            }
+        }
+        for condition in &self.conditions {
+            let expected_answers = self.seeded_abx_answers(condition)?;
+            let cell = self
+                .trial_assignments
+                .iter()
+                .filter(|assignment| &assignment.condition == condition)
+                .collect::<Vec<_>>();
+            let a_count = cell
+                .iter()
+                .filter(|assignment| assignment.answer == AbxAnswer::A)
+                .count();
+            if a_count.abs_diff(cell.len() - a_count) > 1 {
+                return Err(format!(
+                    "condition {condition}: preregistered ABX answers must be balanced"
+                ));
+            }
+            if cell.iter().any(|assignment| {
+                expected_answers.get(assignment.presentation_order as usize)
+                    != Some(&assignment.answer)
+            }) {
+                return Err(format!(
+                    "condition {condition}: ABX answers differ from the preregistered randomization seed"
+                ));
+            }
+            let mut orders = cell
+                .into_iter()
+                .map(|assignment| assignment.presentation_order)
+                .collect::<Vec<_>>();
+            orders.sort_unstable();
+            if orders.len() != self.trials_per_condition as usize
+                || orders
+                    .iter()
+                    .enumerate()
+                    .any(|(i, order)| *order != i as u32)
+            {
+                return Err(format!(
+                    "condition {condition}: trial assignments must cover every preregistered presentation order exactly once"
+                ));
+            }
+        }
+        Ok(())
     }
 
     /// Canonical JSON (prereg hash blanked) for hashing and comparison.
@@ -270,6 +542,21 @@ impl BlindedProtocol {
 
     /// Verify the stored preregistration hash against current content.
     pub fn verify_prereg(&self) -> Result<(), String> {
+        // A matching hash proves only that the bytes have not changed. An
+        // imported JSON protocol can be rehashed with invalid rules, so run
+        // the same registration checks again before any trial is scored.
+        Self::preregister(
+            self.design,
+            self.comparison.clone(),
+            self.conditions.clone(),
+            self.trials_per_condition,
+            self.alpha,
+            self.target_power,
+            self.minimum_effect_p_correct,
+            self.decision.clone(),
+            self.randomization_seed,
+        )?;
+        self.validate_trial_assignments()?;
         if self.canonical_hash()? == self.prereg_hash {
             Ok(())
         } else {
@@ -339,6 +626,33 @@ pub fn abx_p_value(k_correct: u32, n_trials: u32) -> Result<f64, String> {
         }
         Ok((1.0 - lower).clamp(0.0, 1.0))
     }
+}
+
+/// Exact binomial lower tail P(X <= k) at a preregistered detection bound.
+/// Log-sum-exp keeps extreme tails finite across the supported 1–5000 trials.
+pub fn binomial_lower_tail(k: u32, n: u32, p: f64) -> Result<f64, String> {
+    if n == 0 || n > 5_000 || k > n || !(0.0 < p && p < 1.0) {
+        return Err(String::from("invalid binomial lower-tail parameters"));
+    }
+    if k == n {
+        return Ok(1.0);
+    }
+    let ln_ratio = p.ln() - (1.0 - p).ln();
+    let mut log_term = f64::from(n) * (1.0 - p).ln();
+    let mut log_max = f64::NEG_INFINITY;
+    let mut scaled_sum = 0.0;
+    for i in 0..=k {
+        if log_term > log_max {
+            scaled_sum = scaled_sum * (log_max - log_term).exp() + 1.0;
+            log_max = log_term;
+        } else {
+            scaled_sum += (log_term - log_max).exp();
+        }
+        if i < k {
+            log_term += (f64::from(n - i) / f64::from(i + 1)).ln() + ln_ratio;
+        }
+    }
+    Ok((log_max.exp() * scaled_sum).clamp(0.0, 1.0))
 }
 
 /// Smallest k with `abx_p_value(k, n) <= alpha`.
@@ -563,6 +877,11 @@ pub fn score_abx_condition_under_protocol(
             trials,
             alpha,
         } => (*min_correct, *trials, *alpha),
+        DecisionRule::AbxEquivalence { .. } => {
+            return Err(String::from(
+                "ABX detectability scorer cannot score an equivalence rule",
+            ));
+        }
         DecisionRule::Mushra { .. } => {
             return Err(String::from(
                 "protocol embeds a MUSHRA rule: ABX counts cannot be scored against it",
@@ -640,6 +959,7 @@ mod protocol_tests {
             intent: ComparisonIntent::Detectability,
             attributes: vec![String::from("detectability")],
             equivalence_bound: None,
+            equivalence_max_p_correct: None,
             reference: ReferenceKind::IndependentImplementation {
                 description: String::from("log-domain reimplementation agrees within 1e-9 sones"),
             },
@@ -655,6 +975,8 @@ mod protocol_tests {
         unbound.intent = ComparisonIntent::Equivalence;
         assert!(unbound.validate().is_err());
         unbound.equivalence_bound = Some(String::from("d-prime below 0.5 at 80% power"));
+        assert!(unbound.validate().is_err());
+        unbound.equivalence_max_p_correct = Some(0.75);
         assert!(unbound.validate().is_ok());
         // Blank bounds are bounds in name only.
         unbound.equivalence_bound = Some(String::from("  "));
@@ -713,6 +1035,63 @@ mod protocol_tests {
         let mut edited = protocol.clone();
         edited.trials_per_condition = 40;
         assert!(edited.verify_prereg().is_err());
+        assert!(
+            edited
+                .with_trial_assignments(protocol.abx_assignment_template().unwrap())
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn preregistration_rejects_forged_but_self_consistently_hashed_rules() {
+        let protocol = abx_protocol();
+        for mut forged in [
+            {
+                let mut changed = protocol.clone();
+                changed.decision = DecisionRule::Abx {
+                    min_correct: 19,
+                    trials: 30,
+                    alpha: 0.05,
+                };
+                changed
+            },
+            {
+                let mut changed = protocol.clone();
+                changed.target_power = 0.95;
+                changed
+            },
+            {
+                let mut changed = protocol.clone();
+                changed.design = ComparisonDesign::Mushra;
+                changed
+            },
+            {
+                let mut changed = protocol.clone();
+                changed.conditions.push(changed.conditions[0].clone());
+                changed
+            },
+        ] {
+            forged.prereg_hash = forged.canonical_hash().unwrap();
+            assert!(forged.verify_prereg().is_err());
+        }
+        let mut preference = comparison();
+        preference.intent = ComparisonIntent::Preference;
+        preference.attributes = vec![String::from("timbre-preference")];
+        let staged = BlindedProtocol::preregister(
+            ComparisonDesign::Mushra,
+            preference,
+            vec![String::from("programme-a")],
+            30,
+            0.05,
+            0.8,
+            0.75,
+            DecisionRule::Mushra {
+                criterion: String::from("predeclared paired rating contrast"),
+            },
+            7,
+        )
+        .unwrap();
+        assert!(staged.verify_prereg().is_ok());
     }
 
     #[test]

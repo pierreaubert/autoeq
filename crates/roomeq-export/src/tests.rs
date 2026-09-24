@@ -140,6 +140,12 @@ fn test_camilladsp_uses_second_order_filters() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     let output = DspGraph {
@@ -194,6 +200,12 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     let output = DspGraph {
@@ -232,6 +244,12 @@ fn test_easyeffects_rejects_different_channel_gains() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     channels.insert(
@@ -252,6 +270,12 @@ fn test_easyeffects_rejects_different_channel_gains() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     let output = DspGraph {
@@ -286,6 +310,12 @@ fn test_unknown_channels_sort_alphabetically() {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         );
     }
@@ -321,6 +351,12 @@ fn standard_channel_order_places_rears_before_surrounds() {
                 fir_temporal_masking: None,
                 direct_early_late_correction: None,
                 joint_sub: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+                early_late_curves: None,
             },
         );
     }
@@ -429,6 +465,12 @@ fn test_export_with_drivers() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
 
@@ -514,6 +556,12 @@ fn per_driver_low_pass_survives_canonical_graph_paths() {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         },
     );
     let output = DspGraph {

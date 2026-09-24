@@ -129,13 +129,16 @@ Examples:
 
     parser.add_argument(
         "--capture-verification", type=Path, metavar="JSON",
-        help="Render matched raw IR/step diagnostics from a verification report; use -o for a new HTML file",
+        help="Include bound capture diagnostics with an optimization result, or render them alone with -o",
     )
     args = parser.parse_args()
 
-    if args.capture_verification:
-        if args.compare or args.output_json or args.html_output or args.base_config:
-            parser.error("--capture-verification cannot be mixed with optimization/comparison inputs")
+    if args.capture_verification and args.compare:
+        parser.error("--capture-verification cannot be combined with --compare")
+
+    if args.capture_verification and args.output_json is None:
+        if args.html_output or args.base_config:
+            parser.error("standalone --capture-verification uses -o and no base config")
         from src.capture_views import create_capture_report
         destination = args.output or args.capture_verification.with_name(args.capture_verification.stem + "_captures.html")
         create_capture_report(args.capture_verification, destination)
@@ -238,6 +241,8 @@ Examples:
     create_html_report(
         data, html_output_path, output_json_path,
         smoothed_octaves=args.smoothed_octave,
+        capture_verification=(json.loads(args.capture_verification.read_text(encoding="utf-8"))
+                              if args.capture_verification else None),
     )
 
 

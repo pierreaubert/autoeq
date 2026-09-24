@@ -80,7 +80,10 @@ class PayloadBindingTests(unittest.TestCase):
             payload_digest({"nan": float("nan")}, "graph-1")
 
     def test_resource_bytes_are_rechecked_without_cached_approval(self):
-        with tempfile.TemporaryDirectory(dir="/Volumes/home_tmp/tmp") as directory:
+        preferred = Path("/Volumes/home_tmp/tmp")
+        temp_root = preferred if preferred.is_dir() else Path(__file__).resolve().parents[1] / "target/qa/payload-binding-tmp"
+        temp_root.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=temp_root) as directory:
             root = Path(directory)
             resource = root / "impulse.bin"
             resource.write_bytes(b"fixture impulse bytes")

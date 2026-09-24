@@ -1,5 +1,111 @@
 # Unreleased
 
+- Optimize disjoint measurement support end to end (F05): declared
+  `valid_bands_hz` segments are conditioned independently with gap retention,
+  the engine optimizes and scores the union of measured segments (gap display
+  samples never fitted or scored), PEQ centers in an unmeasured gap refuse the
+  channel, and a per-channel segment report records per-segment pre/post
+  flatness plus observed PEQ+FIR gap leakage (no invented inaudibility
+  threshold; per-segment scores gate acceptance). Curve-only single-curve and
+  averaging loaders still refuse disjoint support; config validation and the
+  support-aware conditioning path accept it.
+- Emit per-channel `early_late_curves` (report R2) from the optimization-time
+  measured room IR: third-octave full/early/late band energies with the
+  shared-reference `incoherent_band_energy` method, `full_peak_band`
+  reference, `third_octave` smoothing, and 20 ms split (120 Hz lowpass
+  envelope-peak reference for subwoofer/LFE). Incomplete IRs leave the field
+  absent and the report cell pending. Output schema regenerated (additive).
+- Emit per-channel `early_reflections` (R1) and `t60_octaves` (R3) from the
+  optimization-time measured room IR with the capture-verification
+  vocabulary: band-limited 1–8 kHz reflection table at −15 dBFS/15 ms window
+  (pre-correction side only; `post` stays empty until a post-correction IR is
+  measured) and nine-band Schroeder octave T60 with the fit-range + `min_r2`
+  policy (EDT-only fits stay invalid; unfittable IRs report invalid rows
+  with reasons, never fabricated values). Output schema regenerated
+  (additive).
+- Emit per-channel `waterfall` + `resonance_decays` (report R4) and
+  `wavelet` (report R5) from the optimization-time measured room IR, and
+  render them in the HTML report: Hann-STFT waterfall grid (−5…500 ms,
+  32 ms window, 2 ms hop, ≤100×64, own-grid-peak reference) with 60 ms
+  resonance slices and fitted decay times, plus the three-cycle
+  complex-Morlet heatmap (−30…0 dB, 6 centres/octave). IRs without a
+  complete 500 ms post-peak window leave the fields absent and the report
+  cells pending. Output schema regenerated (additive for the new fields).
+- Cover the phase-gated group-crossover no-improvement revert with
+  deterministic unit tests: the revert decision is now a pure helper
+  (`revert_group_crossover_if_no_improvement`) tested for tie/worse/strictly-
+  better/None orderings, replacing the ignored placeholder stub. Call-site
+  semantics are unchanged.
+- Fix the routed realized-transfer reference for redirected inputs with no
+  input-side chain (e.g. LFE feeding a sub output): the reference treats the
+  missing chain as unity response with zero delay instead of panicking, so
+  the 16-row CamillaDSP matrix-backend replay passes on actual PCM
+  execution.
+- Carry the enforced user-target identity on every reconciled target-band
+  decision row (`evidence_refs`), owned by target reconciliation instead of
+  two post-hoc call-site pushes, so the respected target stays identifiable
+  without inferring it from bands or reasons. Rows without a named target
+  invent no identity.
+- Accept an explicit `reporting.t60_flatness_tolerance_s` input policy
+  (finite, positive) and carry it into output
+  `metadata.t60_flatness_tolerance_s` on every topology path. When absent,
+  the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of
+  ±0.05 s (labeled as default, overridable), so the report Section 1 T60
+  flatness cell can render once nine valid measured fits exist. The knob
+  changes no acceptance math.
+- Emit per-channel `correction_decisions.channel_summaries` with
+  `operational_response_pct` (report Section 1 "Operational room response"):
+  the share of decided final `equalize` scope delivered per physical output
+  (`applied`/`already_acceptable`/`constrained` over decided, superseded
+  records excluded, provisional history never counted). Empty scope has no
+  entry and renders pending, never 100%; viewer colours follow the
+  feat-report thresholds (>90 green, 80–90 yellow, <80 red).
+- Freeze V3 listening setups under a separate hash covering the protocol,
+  chain/stimulus binding, population, absolute level, matching method,
+  programme classes and predeclared holdouts. Real trial claim qualification
+  now requires a setup-bound import; a protocol-only verdict stays software
+  evidence even if its counts meet the statistical rule.
+- Revalidate imported listening protocols against their full preregistration
+  rules before scoring, including unique condition IDs, design/intent agreement,
+  attainable ABX alpha and declared power. A matching hash alone cannot make
+  an invalid imported rule scoreable.
+- Represent disjoint measurement support with ordered `valid_bands_hz`
+  intervals, align usable segments independently, and retain internal gaps in
+  loader and final-seat masks. Single-channel correction dispatch now consumes
+  band-specific authorization (see the F05 entry above); curve-only
+  single-curve and averaging loaders still refuse disjoint support.
+- Declare a −20 dBFS programme peak for positive synthetic multisub and
+  multichannel QA fixtures. The separate full-scale parameter matrix still
+  exercises expected safety refusals at the unchanged 12 dB attenuation cap.
+- Keep G7 listening conclusions intent-specific: ABX correct-response scoring
+  separates detectability from an exact-binomial equivalence rule with a
+  numeric preregistered detection bound and a declared alternative that
+  must attain the target power. An all-success detection battery
+  cannot satisfy equivalence, and synthetic equivalence rows cannot promote.
+  Real ABX imports now require a balanced, seed-derived answer key and
+  presentation mapping, with raw responses checked against that frozen key.
+- Register the three Ascilab held-out acoustic corpus cases in the embedded
+  RoomEQ QA inventory, keeping case order aligned with the corpus manifest.
+- Bind generated FEM held-out curves across channels with explicit synthetic
+  position IDs and generate held-out responses for every declared physical sub
+  output so coherent replay does not infer seats from list order or broadcast
+  one sub capture; keep real-capture claims separate from virtual positions.
+- Keep a correction-free structural fallback available when its optional final
+  channel-level alignment fails an acoustic check. The failed alignment runs
+  on a disposable graph copy and remains a degraded stage. A later finite
+  delivered-level spread over the unchanged limit also stays visible as a
+  rejected fallback check; electrical and final-seat checks still decide
+  whether the fallback can be published.
+- Keep the escaped-defect mutation runner compatible with cargo-mutants 25.x
+  argument forwarding and retarget its registered source diffs after code
+  movement; each scoped diff still discovers exactly one mutant.
+- Generate RoomEQ measurement-source schemas from the actual accepted JSON
+  forms, including legacy path strings and flat path/provenance objects; reject
+  malformed source fields while keeping the input/output schema baselines in
+  sync. Update the RW01 QA caller for the optional capture validity mask.
+- Accept legacy top-level RoomEQ `description` strings through the strict
+  config loader and generated schemas while continuing to reject misspelled
+  configuration fields and non-string descriptions.
 - Add `autoeq-qa`: Wolfram Engine cross-validation harness mirroring
   `math-qa` (oracle `.wls` + versioned golden + comparison test +
   manifest + `QA_RESULT:` record). Initial smoke cases cover catalogue
@@ -520,6 +626,12 @@
 - autoeq 0.5.74, autoeq-core 0.5.12, roomeq-analysis 0.5.10, roomeq-cli 0.5.8, roomeq-engine 0.5.82, roomeq-export 0.5.8, roomeq-model 0.5.13, roomeq-workflow 0.5.33.
 
 ## RoomEQ correctness and playback safety
+
+- Require G7 reference-vector files to match their SHA-256 declaration and carry edition/license metadata. Hold descriptive reference and trial records at unassessed in the QA release gate until approved numeric model evidence or verified real trial results exist.
+
+- Calculate the report's T60 flatness summary from all nine valid measured octave fits against a shared complete-channel room mean when an explicit time tolerance is supplied; leave incomplete or unbounded evidence pending.
+
+- Give the analytic all-pass multi-sub QA fixture an explicit shared synthetic timing reference and matching seat labels. Keep production phase provenance checks unchanged; the focused case passes, with useful output in one of five seeds.
 
 - Keep main/sub crossover alignment on the same configured primary seat while preserving all single-sub seats for spatial magnitude EQ. Check raw phase-quality evidence before sub-array processing, including per-group and per-sub crossover overrides. Reject known-bad coherence/SNR and report missing confidence metadata as unverified.
 

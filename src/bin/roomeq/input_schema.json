@@ -660,61 +660,6 @@
         }
       ]
     },
-    "CaptureCorrection": {
-      "description": "Clock correction actually applied to a saved take.",
-      "oneOf": [
-        {
-          "const": "none",
-          "description": "Samples remain on their original device clock.",
-          "type": "string"
-        },
-        {
-          "const": "resampled",
-          "description": "Samples were resampled to the declared timing reference.",
-          "type": "string"
-        }
-      ]
-    },
-    "CaptureGeometry": {
-      "description": "Interpretation of the microphone positions within a capture session.",
-      "oneOf": [
-        {
-          "const": "spread",
-          "description": "Independent listening seats for spatial magnitude measurements.",
-          "type": "string"
-        },
-        {
-          "const": "compact",
-          "description": "Surveyed microphone cluster for conditional direction estimation.",
-          "type": "string"
-        }
-      ]
-    },
-    "CaptureKind": {
-      "description": "How the underlying capture was acquired.\n\nMoving-microphone magnitude data cannot supply phase or impulse\nresponses; stationary captures keep a timing reference. `Unknown`\nis the default for legacy data and must never read as a claim.",
-      "oneOf": [
-        {
-          "const": "stationary_ir",
-          "description": "Stationary microphone sweep or impulse response.",
-          "type": "string"
-        },
-        {
-          "const": "spatial_magnitude",
-          "description": "Spatial magnitude capture (e.g. moving microphone).",
-          "type": "string"
-        },
-        {
-          "const": "direct_sound",
-          "description": "Gated/windowed direct-sound measurement.",
-          "type": "string"
-        },
-        {
-          "const": "unknown",
-          "description": "Capture mode was not recorded.",
-          "type": "string"
-        }
-      ]
-    },
     "CaptureArrival": {
       "additionalProperties": false,
       "description": "A detected event with explicit limits on its measured direction.",
@@ -798,6 +743,94 @@
       ],
       "type": "object"
     },
+    "CaptureCorrection": {
+      "description": "Clock correction actually applied to a saved take.",
+      "oneOf": [
+        {
+          "const": "none",
+          "description": "Samples remain on their original device clock.",
+          "type": "string"
+        },
+        {
+          "const": "resampled",
+          "description": "Samples were resampled to the declared timing reference.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureGeometry": {
+      "description": "Interpretation of the microphone positions within a capture session.",
+      "oneOf": [
+        {
+          "const": "spread",
+          "description": "Independent listening seats for spatial magnitude measurements.",
+          "type": "string"
+        },
+        {
+          "const": "compact",
+          "description": "Surveyed microphone cluster for conditional direction estimation.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureKind": {
+      "description": "How the underlying capture was acquired.\n\nMoving-microphone magnitude data cannot supply phase or impulse\nresponses; stationary captures keep a timing reference. `Unknown`\nis the default for legacy data and must never read as a claim.",
+      "oneOf": [
+        {
+          "const": "stationary_ir",
+          "description": "Stationary microphone sweep or impulse response.",
+          "type": "string"
+        },
+        {
+          "const": "spatial_magnitude",
+          "description": "Spatial magnitude capture (e.g. moving microphone).",
+          "type": "string"
+        },
+        {
+          "const": "direct_sound",
+          "description": "Gated/windowed direct-sound measurement.",
+          "type": "string"
+        },
+        {
+          "const": "unknown",
+          "description": "Capture mode was not recorded.",
+          "type": "string"
+        }
+      ]
+    },
+    "CaptureProvenance": {
+      "additionalProperties": false,
+      "description": "Capture provenance in exactly the associated measurement-reference order.",
+      "properties": {
+        "geometry": {
+          "$ref": "#/$defs/CaptureGeometry",
+          "description": "One geometry interpretation for the complete session."
+        },
+        "reflection_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CaptureReflectionReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Detected source arrivals and conditional measured directions."
+        },
+        "takes": {
+          "description": "One entry per measurement, including every failed timing fit.",
+          "items": {
+            "$ref": "#/$defs/CaptureTakeProvenance"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "geometry",
+        "takes"
+      ],
+      "type": "object"
+    },
     "CaptureReflectionReport": {
       "additionalProperties": false,
       "description": "Measured arrival candidates for one simultaneously captured source.",
@@ -836,39 +869,6 @@
         "source_id",
         "early_reflections",
         "issues"
-      ],
-      "type": "object"
-    },
-    "CaptureProvenance": {
-      "additionalProperties": false,
-      "description": "Capture provenance in exactly the associated measurement-reference order.",
-      "properties": {
-        "geometry": {
-          "$ref": "#/$defs/CaptureGeometry",
-          "description": "One geometry interpretation for the complete session."
-        },
-        "reflection_report": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/CaptureReflectionReport"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Detected source arrivals and conditional measured directions."
-        },
-        "takes": {
-          "description": "One entry per measurement, including every failed timing fit.",
-          "items": {
-            "$ref": "#/$defs/CaptureTakeProvenance"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "geometry",
-        "takes"
       ],
       "type": "object"
     },
@@ -2675,6 +2675,36 @@
       },
       "type": "object"
     },
+    "MeasurementInlineSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "inline": {
+          "$ref": "#/$defs/InlineMeasurement"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeasurementProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speaker_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "inline"
+      ],
+      "type": "object"
+    },
     "MeasurementMultiple": {
       "additionalProperties": false,
       "description": "Multiple measurements with metadata",
@@ -2699,6 +2729,43 @@
       },
       "required": [
         "measurements"
+      ],
+      "type": "object"
+    },
+    "MeasurementPathSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeasurementProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "speaker_name": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
       ],
       "type": "object"
     },
@@ -2767,6 +2834,19 @@
             "array",
             "null"
           ]
+        },
+        "valid_bands_hz": {
+          "description": "Ordered, disjoint usable intervals when the acquisition has internal\ncoverage gaps. Mutually exclusive with the legacy single valid band.",
+          "items": {
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "type": "array"
         }
       },
       "type": "object"
@@ -2835,28 +2915,17 @@
       "description": "Reference to a measurement file"
     },
     "MeasurementSingle": {
-      "additionalProperties": false,
-      "description": "Single measurement with metadata\n\nCustom implementation to support both string path and object with speaker_name",
-      "properties": {
-        "measurement": {
+      "anyOf": [
+        {
           "$ref": "#/$defs/MeasurementRef"
         },
-        "provenance": {
-          "$ref": "#/$defs/MeasurementProvenance",
-          "description": "Declared acquisition provenance (default unknown when absent)."
+        {
+          "$ref": "#/$defs/MeasurementPathSchema"
         },
-        "speaker_name": {
-          "type": [
-            "string",
-            "null"
-          ]
+        {
+          "$ref": "#/$defs/MeasurementInlineSchema"
         }
-      },
-      "required": [
-        "measurement",
-        "provenance"
-      ],
-      "type": "object"
+      ]
     },
     "MeasurementSource": {
       "anyOf": [
@@ -4869,6 +4938,21 @@
       },
       "type": "object"
     },
+    "ReportingConfig": {
+      "additionalProperties": false,
+      "description": "Report-policy inputs that need an explicit operator declaration.\n\nThese change no acceptance math: they declare the policy the viewer uses\nto render summary cells from emitted evidence. Absent stays pending.",
+      "properties": {
+        "t60_flatness_tolerance_s": {
+          "description": "Declared ±tolerance in seconds for the report Section 1 T60 flatness\nshare (nine measured octave fits within tolerance of the\ncomplete-channel room mean). When `None`, the viewer applies the\nITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of ±0.05 s and labels\nthe cell accordingly. A present value must be finite and positive.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "RirPrototypeConfig": {
       "additionalProperties": false,
       "description": "Configuration for building a distance- and directivity-weighted RIR prototype.",
@@ -6086,6 +6170,9 @@
       ],
       "description": "Cross-talk cancellation / binaural-aware correction configuration."
     },
+    "description": {
+      "type": "string"
+    },
     "optimizer": {
       "$ref": "#/$defs/OptimizerConfig",
       "default": {
@@ -6140,6 +6227,17 @@
         }
       ],
       "description": "Recording configuration (device settings, signal parameters used during capture)"
+    },
+    "reporting": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ReportingConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Report-policy inputs needing an explicit operator declaration (for\nexample the T60 flatness tolerance). Absent policies leave the viewer\nto its documented standard defaults; they change no acceptance math."
     },
     "speakers": {
       "additionalProperties": {

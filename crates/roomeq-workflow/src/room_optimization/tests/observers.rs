@@ -865,6 +865,12 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
         fir_temporal_masking: None,
         direct_early_late_correction: None,
         joint_sub: None,
+        early_reflections: None,
+        t60_octaves: None,
+        waterfall: None,
+        resonance_decays: None,
+        wavelet: None,
+        early_late_curves: None,
     };
     let mut channel_chains = HashMap::new();
     channel_chains.insert(left.clone(), chain(&left));

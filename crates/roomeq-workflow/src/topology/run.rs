@@ -214,6 +214,10 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         audibility_veto,
         veto_adjudication,
         measurement_conditioning,
+        // Multi-segment authorization is enforced in-engine; the per-segment
+        // report is visible at the single-channel boundary and is not
+        // re-published through the topology result chain.
+        _segment_support,
     ) = processed;
 
     // Prepend the alignment gain plugin without touching the inner chain's
@@ -237,6 +241,14 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         fir_temporal_masking: raw_chain.fir_temporal_masking,
         direct_early_late_correction: raw_chain.direct_early_late_correction,
         joint_sub: raw_chain.joint_sub,
+        // Measured-room acoustics carry through alignment: the prepended
+        // gain changes routing level, not the measured IR.
+        early_late_curves: raw_chain.early_late_curves,
+        early_reflections: raw_chain.early_reflections,
+        t60_octaves: raw_chain.t60_octaves,
+        waterfall: raw_chain.waterfall,
+        resonance_decays: raw_chain.resonance_decays,
+        wavelet: raw_chain.wavelet,
         target_curve: raw_chain.target_curve,
     };
 
@@ -307,6 +319,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
@@ -473,6 +486,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         };
         let seat0 = flat_curve();

@@ -612,6 +612,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
@@ -627,6 +628,7 @@ mod tests {
             provenance: Default::default(),
             recording_config: None,
             ctc: None,
+            reporting: None,
             cea2034_cache: None,
         }
     }
@@ -659,6 +661,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         (ch, chain)
     }
@@ -908,6 +916,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         assert_eq!(
             headroom_peak_boost_db(&HashMap::from([("left".to_string(), chain)])),
@@ -930,6 +944,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         assert!(headroom_peak_boost_db(&HashMap::from([("left".to_string(), chain)])).is_none());
     }
@@ -951,6 +971,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         let sub = ChannelDspChain {
             channel: "sub".to_string(),
@@ -985,6 +1011,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         let rough = dialog_band_roughness_rms_db(&HashMap::from([("center".to_string(), chain)]));
         assert!(rough.is_some_and(|v| v > 0.0));
@@ -1007,6 +1039,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         let b = ChannelDspChain {
             channel: "b".to_string(),
@@ -1037,6 +1075,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         let b = ChannelDspChain {
             channel: "b".to_string(),
@@ -1057,6 +1101,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         let rms = group_mean_deviation_rms_db(&[&a, &b], (20.0, 20_000.0));
         assert!(rms.is_none());
@@ -1334,6 +1384,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         assert_eq!(excursion_hpf_hz_from_chain(&chain), Some(85.0));
     }
@@ -1358,6 +1414,12 @@ mod tests {
             fir_temporal_masking: None,
             direct_early_late_correction: None,
             joint_sub: None,
+            early_reflections: None,
+            t60_octaves: None,
+            waterfall: None,
+            resonance_decays: None,
+            wavelet: None,
+            early_late_curves: None,
         };
         assert_eq!(excursion_hpf_hz_from_chain(&chain), None);
     }

@@ -169,6 +169,10 @@ pub struct MeasurementProvenance {
     /// (e.g. quasi-anechoic valid band). Absent means the full grid support.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub valid_band_hz: Option<[f64; 2]>,
+    /// Ordered, disjoint usable intervals when the acquisition has internal
+    /// coverage gaps. Mutually exclusive with the legacy single valid band.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub valid_bands_hz: Vec<[f64; 2]>,
     /// Whether off-axis/angular coverage backs direct-sound detail claims.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_direct_angular: bool,
@@ -181,15 +185,104 @@ pub struct MeasurementProvenance {
     pub capture: Option<crate::capture_provenance::CaptureProvenance>,
 }
 
+impl MeasurementProvenance {
+    /// Declared usable intervals, preserving gaps rather than treating the
+    /// outer endpoints as continuous support. `None` means the full grid.
+    pub fn declared_support_bands(&self) -> Result<Option<Vec<[f64; 2]>>, String> {
+        if self.valid_band_hz.is_some() && !self.valid_bands_hz.is_empty() {
+            return Err(String::from(
+                "valid_band_hz and valid_bands_hz are mutually exclusive",
+            ));
+        }
+        let bands: Vec<_> = self
+            .valid_band_hz
+            .into_iter()
+            .chain(self.valid_bands_hz.iter().copied())
+            .collect();
+        for (index, [low, high]) in bands.iter().copied().enumerate() {
+            if !low.is_finite() || !high.is_finite() || low <= 0.0 || high <= low {
+                return Err(format!(
+                    "valid support band {index} must satisfy finite 0 < low < high"
+                ));
+            }
+            if index > 0 && low <= bands[index - 1][1] {
+                return Err(String::from(
+                    "valid support bands must be ordered and disjoint",
+                ));
+            }
+        }
+        Ok((!bands.is_empty()).then_some(bands))
+    }
+
+    /// Whether a frequency is inside the declared usable support.
+    pub fn supports_frequency(&self, frequency_hz: f64) -> Result<bool, String> {
+        if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+            return Err(String::from("frequency must be finite and positive"));
+        }
+        Ok(self.declared_support_bands()?.is_none_or(|bands| {
+            bands
+                .iter()
+                .any(|[low, high]| frequency_hz >= *low && frequency_hz <= *high)
+        }))
+    }
+}
+
 /// Single measurement with metadata
 ///
 /// Custom implementation to support both string path and object with speaker_name
-#[derive(Debug, Clone, JsonSchema)]
+#[derive(Debug, Clone)]
 pub struct MeasurementSingle {
     pub measurement: MeasurementRef,
     pub speaker_name: Option<String>,
     /// Declared acquisition provenance (default unknown when absent).
     pub provenance: MeasurementProvenance,
+}
+
+// `MeasurementSingle` has a handwritten Serde representation: old inputs can
+// be bare paths, while provenance-bearing inputs put the measurement fields
+// beside `provenance`. Deriving JsonSchema from its Rust fields would instead
+// require a nonexistent nested `measurement` object.
+#[allow(dead_code)] // schema-only representation of the handwritten Serde format
+#[derive(JsonSchema)]
+#[serde(untagged)]
+enum MeasurementSingleSchema {
+    Bare(MeasurementRef),
+    PathWithMetadata(MeasurementPathSchema),
+    InlineWithMetadata(MeasurementInlineSchema),
+}
+
+#[allow(dead_code)] // schema-only representation
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MeasurementPathSchema {
+    path: PathBuf,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    speaker_name: Option<String>,
+    #[serde(default)]
+    provenance: Option<MeasurementProvenance>,
+}
+
+#[allow(dead_code)] // schema-only representation
+#[derive(JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct MeasurementInlineSchema {
+    inline: InlineMeasurement,
+    #[serde(default)]
+    speaker_name: Option<String>,
+    #[serde(default)]
+    provenance: Option<MeasurementProvenance>,
+}
+
+impl JsonSchema for MeasurementSingle {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "MeasurementSingle".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        MeasurementSingleSchema::json_schema(generator)
+    }
 }
 
 impl Serialize for MeasurementSingle {
@@ -461,6 +554,30 @@ mod tests {
     }
 
     #[test]
+    fn provenance_disjoint_support_preserves_gap_and_rejects_ambiguous_bands() {
+        let mut provenance = MeasurementProvenance {
+            valid_bands_hz: vec![[100.0, 200.0], [500.0, 600.0]],
+            ..Default::default()
+        };
+        assert_eq!(
+            provenance.declared_support_bands().unwrap(),
+            Some(vec![[100.0, 200.0], [500.0, 600.0]])
+        );
+        assert!(provenance.supports_frequency(150.0).unwrap());
+        assert!(!provenance.supports_frequency(350.0).unwrap());
+        let decoded: MeasurementProvenance =
+            serde_json::from_value(serde_json::to_value(&provenance).unwrap()).unwrap();
+        assert_eq!(decoded, provenance);
+        provenance.valid_band_hz = Some([100.0, 600.0]);
+        assert!(provenance.declared_support_bands().is_err());
+        provenance.valid_band_hz = None;
+        provenance.valid_bands_hz[1] = [200.0, 600.0];
+        assert!(provenance.declared_support_bands().is_err());
+        provenance.valid_bands_hz[1] = [f64::NAN, 600.0];
+        assert!(provenance.declared_support_bands().is_err());
+    }
+
+    #[test]
     fn provenance_defaults_to_unknown_and_old_json_stays_readable() {
         // Bare path JSON predates provenance: it reads with unknown kind.
         let source: MeasurementSource = serde_json::from_str("\"meas.csv\"").unwrap();
@@ -487,6 +604,7 @@ mod tests {
                 timing_reference_id: Some(String::from("loopback-1")),
                 has_measured_spl: true,
                 valid_band_hz: Some([50.0, 8000.0]),
+                valid_bands_hz: Vec::new(),
                 has_direct_angular: false,
                 direct_sound: None,
                 capture: None,

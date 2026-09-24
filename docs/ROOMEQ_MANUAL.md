@@ -447,6 +447,13 @@ reversions and failed checks. Comparison reports include a section for each mode
 Configured bands describe correction scope, not proof of applied changes;
 filter-center verdicts are not frequency intervals. Missing reasons remain
 explicitly unavailable rather than being inferred from response curves.
+The per-speaker report renders a 1–8 kHz early-reflection section only when
+an optional `early_reflections` output field declares a measured-room IR,
+the specified band-limited method, and valid pre/post event rows. It shows
+time/relative-level plots, six-column event tables, and post-event first-dip
+markers on the valid final response curve. These markers are two-path
+estimates, not measured spectral nulls. Missing or invalid evidence stays
+pending; the optimization producer of this field remains a separate task.
 
 The HTML report displays the saved playback verdict before its scores. Rejected
 or unverified results are diagnostic only. Reduced input-peak assumptions are
@@ -960,13 +967,14 @@ an explicit unavailable IR/step view.
 
 The verification report includes `comparisons[].capture_views` and a typed-JSON
 SHA-256 integrity binding. The canonical IR/step view retains both file hashes,
-sample-zero timing reference, sample rate, settings identity, and unmodified WAV
+sample-zero timing reference, declared stimulus identity, sample rate, settings identity, and unmodified WAV
 amplitudes; the step is the discrete cumulative sum. These are raw sample units,
 not an inferred pascal/SPL scale. The declared magnitude offset is retained but
 not applied to these raw traces. Pairs containing a synthetic capture stay
 synthetic. Matching operator declarations is not authenticated acquisition.
-Records over 65,536 samples yield an unavailable display rather than truncated
-data. Matched octave ETCs are available when the declared capture support includes
+Records over 65,536 samples yield an unavailable raw trace display rather than
+truncated data; the compact octave T60 diagnostic can still be calculated from
+the complete record. Matched octave ETCs are available when the declared capture support includes
 500/sqrt(2) through 4000*sqrt(2) Hz below Nyquist, and both records include the
 complete 0–40 ms window plus filter lookahead. The method uses finite Hann-windowed
 analytic sinc filters, four center-frequency periods on each side, with
@@ -1021,6 +1029,77 @@ diagnostic is **not passive-room RT**, an ISO-certified measurement, a safety
 gate, or evidence of perceptual benefit; filter spreading, record truncation,
 and the declared noise assumptions still matter. Missing `decay` settings keeps
 legacy input readable and decay explicitly unavailable.
+
+When a matched baseline/candidate IR pair is supplied, the verification report
+also carries an advisory nine-band `octave_t60` diagnostic (63 Hz–16 kHz).
+`math-rir` applies octave filters, automatic per-band noise cutoff, and a
+Schroeder slope: T30 is preferred and T20 is the fallback. EDT-only estimates,
+poor fits, filter-ring-limited estimates, bands above Nyquist, and bands whose
+full octave extends beyond the declared usable capture band remain unavailable
+with a reason. The HTML view retains gaps and shows both fits and their R².
+This automatic diagnostic has an algorithmic fit threshold of 0.90; it does
+not replace the separately declared noise-window and fit budgets above,
+prove a passive-room damping change, certify an ISO measurement, or affect a
+playback gate. The capture pair's synthetic or operator-declared status and
+the existing payload binding apply to the new view as well.
+When two or more distinct sources at one seat share the same declared
+stimulus, baseline graph, sample rate, settings, usable band, and capture evidence kind,
+the HTML capture report
+also shows their room-mean octave T60 diagnostic. Each band averages only
+accepted T30/T20 fits and displays the contributing source count for
+baseline and candidate separately. Missing fits remain gaps, and differing
+settings or capture kinds are never pooled. This is an advisory capture
+summary, not a passive-room damping or playback verdict.
+
+The same pair can provide an advisory STFT waterfall when each IR contains
+the complete 500 ms post-peak analysis interval plus the 16 ms Hann half-window.
+The bound `capture_views.waterfall` payload carries separate baseline and
+candidate grids, each with at most 100 time frames and 64 frequency bins inside
+the declared capture band. It uses a 32 ms window, 2 ms hop, and a −5…500 ms
+axis relative to each broadband absolute peak. Each grid's dB values use its
+own full-grid peak; they cannot show an absolute between-capture output change.
+The HTML report projects frequency, time, and relative level as an oblique
+wireframe and shows the sampled time trace for each resonance picked at 60 ms,
+alongside the fitted 20–200 ms decay time. Peaks are diagnostic candidates,
+not confirmed room modes or evidence of changed passive-room damping. A short
+or unsupported pair stays explicitly unavailable. This capture verification
+field is separate from the optimization DSP JSON's per-channel `waterfall`.
+
+The same complete pair can also emit `capture_views.wavelet`: a complex Morlet
+transform with three cycles, six logarithmic centers per octave, a 1 ms raw
+frame hop, and at most 64 frequency × 100 time display cells. The view is
+restricted to declared capture support, with −30…0 dB blue-to-red colors
+relative to each capture's own full wavelet-grid peak. The implementation
+normalizes to the grid peak after its wavelet response calculation, so these
+colors are not calibrated SPL or absolute between-capture levels. The
+time-frequency blur and boundary support affect apparent early energy; the
+heatmap alone cannot identify a physical reflection path. This verification
+field is separate from the optimization DSP JSON's per-channel `wavelet`.
+
+The same matched IR pair also yields an advisory 1–8 kHz early-reflection
+table when the declared usable capture band contains that whole range and
+both IRs have a detectable direct sound. Candidates within 15 ms and at
+least −15 dB relative to the filtered direct peak are listed separately for
+baseline and candidate. The table gives delay, extra path length at 343 m/s,
+first comb-dip frequency, and estimated peak-to-peak ripple. A gain at the
+direct level has an unbounded idealized ripple estimate, shown as unavailable.
+These are finite-window band-limited peaks, not verified geometric paths or
+an audibility result; their gain is relative to the direct peak, not an
+absolute microphone dBFS level. Missing 1–8 kHz support leaves the view
+unavailable.
+
+The matched pair can also emit `capture_views.early_late_curves` when both
+recordings have a direct reference, a complete 20 ms early segment, a
+nonempty late segment, and at least two fully supported third-octave bands.
+Full, early, and late are energy contributions on the same full peak-band
+reference **within each capture**; full is their incoherent energy sum, not
+a complex pressure sum. The split is 20 ms after the broadband envelope
+peak, or after the 120 Hz lowpass envelope peak for subwoofer/LFE sources.
+The report labels the separate baseline/candidate references and shows a
+1–8 kHz early-minus-late mean only when that complete range is supported.
+It does not establish absolute between-capture level or a passive-room
+damping change. This bound capture view is separate from the optimization
+DSP JSON's per-channel `early_late_curves` field.
 
 Calibrated ambient noise uses an optional **separate silent-playback WAV**, not
 an IR tail or the IR magnitude calibration offset. Supply `ir_analysis.ambient_noise`:
@@ -1110,10 +1189,27 @@ Render these views at the top of a separate capture diagnostic report:
 venv/bin/python scripts/display-roomeq.py --capture-verification verification-report.json -o captures.html
 ```
 
-The destination must be new. The renderer validates the view payload and
+To include the same measured-capture section after the plots in one saved
+optimization report, supply both artifacts:
+
+```bash
+venv/bin/python scripts/display-roomeq.py room-output.json --capture-verification verification-report.json -o room-report.html
+```
+
+The combined renderer recomputes the saved optimization payload binding,
+checks referenced FIR resource bytes, and requires the verification candidate
+graph ID to equal that bound graph identity. If either check fails, the capture
+section states why it is unavailable. The section retains every source/seat
+and synthetic/operator declaration and labels the verification report's
+recorded accepted/unchanged/rejected/insufficient-evidence status. Displaying
+diagnostics does not upgrade a rejected result. It does not turn a reconstructed display
+IR into a room measurement or upgrade a playback verdict.
+
+The capture-only destination must be new. The renderer validates the view payload and
 graph/source/seat binding before plotting, labels evidence kinds explicitly,
 and does not promote the imported comparison into an independent safety or
-listening verdict. Ordinary optimization and comparison report modes are unchanged.
+listening verdict. Comparison mode does not accept a capture-verification
+attachment.
 
 The complete IR is evaluated with the existing direct Fourier kernel. Limits
 of 1,048,576 samples and 16,777,216 sample-frequency operations bound work;
@@ -2632,8 +2728,13 @@ recorded listening outcomes.
 
 Every staged artifact carries provenance for its stage: stimulus
 manifests record renderer, version, platform, SPL mapping, and file
-hashes; validation results record the preregistration hash; rerank
-reports record evaluator and loss pins; export round trips
+hashes; validation results record the preregistration hash. Trial imports
+additionally bind the frozen listening setup hash, covering
+the exact chain/stimulus binding, population, absolute playback level,
+matching method, programme classes, and holdouts. Protocol-only imports
+remain software evidence; a self-declared nonsynthetic table does not prove
+that listeners ran the trial. Rerank reports record evaluator and loss
+pins; export round trips
 (`roomeq-export/src/roundtrip.rs`) verify biquad coefficients,
 routing, preamp normalization, delay, and convolution bytes against the
 canonical graph. Demo the gates and round trips without listening

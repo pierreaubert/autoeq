@@ -60,9 +60,8 @@ pub fn curve_support(curve: &Curve) -> CurveSupport {
 /// Curves aligned to a shared grid plus the evidence that grid is real.
 ///
 /// The grid is always a subset of the physical intersection of all inputs,
-/// so no output bin is extrapolated. `validity_mask[curve][bin]` is
-/// therefore all-`true` by construction; it is retained so downstream
-/// consumers (e.g. the optimiser) can mask without recomputing support.
+/// so no output bin is extrapolated. `validity_mask[curve][bin]` also
+/// excludes samples outside a declared usable band, when one is present.
 #[derive(Debug, Clone)]
 pub struct AlignedCurves {
     pub curves: Vec<Curve>,
@@ -179,74 +178,88 @@ pub fn load_source_individual_with_support(
     source: &MeasurementSource,
 ) -> Result<AlignedCurves, Box<dyn Error>> {
     let curves = load_source_unaligned(source)?;
-    align_source_curves(&curves, source.provenance().valid_band_hz)
+    align_source_curves(&curves, source.provenance().declared_support_bands()?)
 }
 
 fn align_source_curves(
     curves: &[Curve],
-    valid_band: Option<[f64; 2]>,
+    valid_bands: Option<Vec<[f64; 2]>>,
 ) -> Result<AlignedCurves, Box<dyn Error>> {
-    let Some(band) = valid_band else {
+    let Some(bands) = valid_bands else {
         return load_aligned_curves(curves, "measurement");
     };
-    let usable: Vec<_> = curves
+    let usable: Vec<AlignedCurves> = bands
         .iter()
-        .map(|curve| curve.select_frequency_band(band))
+        .map(|band| {
+            let selected: Vec<_> = curves
+                .iter()
+                .map(|curve| curve.select_frequency_band(*band))
+                .collect::<Result<_, _>>()?;
+            load_aligned_curves(&selected, "usable measurement")
+        })
         .collect::<Result<_, _>>()?;
-    let usable = load_aligned_curves(&usable, "usable measurement")?;
     let mut full = load_aligned_curves(curves, "measurement")?;
-    let [low, high] = band;
-    // Both aligned sets share a grid internally. Merge by the same index map
-    // for every seat and every measured field, never interpolating across the
-    // declared boundary. Bins inside the declaration but outside common usable
-    // sample support are omitted, not synthesized from excluded neighbors.
-    let mut indices: Vec<_> = full.curves[0]
+    // Retain the original display samples in every gap. Each usable segment
+    // is aligned independently, so interpolation cannot cross invalid support.
+    let mut indices: Vec<(Option<usize>, usize)> = full.curves[0]
         .freq
         .iter()
         .enumerate()
-        .filter_map(|(i, f)| (*f < low || *f > high).then_some((false, i)))
-        .chain((0..usable.curves[0].freq.len()).map(|i| (true, i)))
+        .filter_map(|(i, f)| {
+            (!bands.iter().any(|[low, high]| *f >= *low && *f <= *high)).then_some((None, i))
+        })
         .collect();
-    let frequency = |(inside, i): &(bool, usize)| {
-        if *inside {
-            usable.curves[0].freq[*i]
-        } else {
-            full.curves[0].freq[*i]
-        }
+    for (segment, aligned) in usable.iter().enumerate() {
+        indices.extend((0..aligned.curves[0].freq.len()).map(|i| (Some(segment), i)));
+    }
+    let frequency = |(segment, i): &(Option<usize>, usize)| match segment {
+        Some(segment) => usable[*segment].curves[0].freq[*i],
+        None => full.curves[0].freq[*i],
     };
     indices.sort_by(|a, b| frequency(a).total_cmp(&frequency(b)));
-    for (outer, inner) in full.curves.iter_mut().zip(&usable.curves) {
-        let merge = |outside: &Array1<f64>, inside: &Array1<f64>| {
-            Array1::from_iter(indices.iter().map(
-                |(usable, i)| {
-                    if *usable { inside[*i] } else { outside[*i] }
-                },
-            ))
+    for (seat, outer) in full.curves.iter_mut().enumerate() {
+        let merge = |outside: &Array1<f64>, inside: &[&Array1<f64>]| {
+            Array1::from_iter(indices.iter().map(|(segment, i)| match segment {
+                Some(segment) => inside[*segment][*i],
+                None => outside[*i],
+            }))
+        };
+        let merge_field = |outside: &Array1<f64>, field: fn(&Curve) -> &Array1<f64>| {
+            let inside: Vec<_> = usable.iter().map(|a| field(&a.curves[seat])).collect();
+            merge(outside, &inside)
         };
         let merge_optional = |outside: Option<&Array1<f64>>,
-                              inside: Option<&Array1<f64>>|
+                              field: fn(&Curve) -> Option<&Array1<f64>>|
          -> Result<Option<Array1<f64>>, Box<dyn Error>> {
-            match (outside, inside) {
-                (Some(outside), Some(inside)) => Ok(Some(merge(outside, inside))),
-                (None, None) => Ok(None),
-                _ => Err("usable alignment changed measurement metadata availability".into()),
+            let inside: Vec<_> = usable.iter().map(|a| field(&a.curves[seat])).collect();
+            if outside.is_none() && inside.iter().all(|value| value.is_none()) {
+                return Ok(None);
             }
+            let outside =
+                outside.ok_or("usable alignment changed measurement metadata availability")?;
+            let inside: Vec<_> = inside
+                .into_iter()
+                .collect::<Option<_>>()
+                .ok_or("usable alignment changed measurement metadata availability")?;
+            Ok(Some(merge(outside, &inside)))
         };
         *outer = Curve {
-            freq: merge(&outer.freq, &inner.freq),
-            spl: merge(&outer.spl, &inner.spl),
-            phase: merge_optional(outer.phase.as_ref(), inner.phase.as_ref())?,
-            coherence: merge_optional(outer.coherence.as_ref(), inner.coherence.as_ref())?,
-            noise_floor_db: merge_optional(
-                outer.noise_floor_db.as_ref(),
-                inner.noise_floor_db.as_ref(),
-            )?,
-            // A global decomposition is not valid for this piecewise view.
+            freq: merge_field(&outer.freq, |curve| &curve.freq),
+            spl: merge_field(&outer.spl, |curve| &curve.spl),
+            phase: merge_optional(outer.phase.as_ref(), |curve| curve.phase.as_ref())?,
+            coherence: merge_optional(outer.coherence.as_ref(), |curve| curve.coherence.as_ref())?,
+            noise_floor_db: merge_optional(outer.noise_floor_db.as_ref(), |curve| {
+                curve.noise_floor_db.as_ref()
+            })?,
             ..Default::default()
         };
         outer.validate("usable-band aligned measurement")?;
     }
-    full.validity_mask = vec![vec![true; indices.len()]; full.curves.len()];
+    let mask: Vec<bool> = indices
+        .iter()
+        .map(|(segment, _)| segment.is_some())
+        .collect();
+    full.validity_mask = vec![mask; full.curves.len()];
     Ok(full)
 }
 
@@ -421,7 +434,16 @@ pub fn load_measurement_with_policy(
 /// - `Single` → returns `vec![curve]`
 /// - `Multiple` → loads all curves, interpolates to first curve's frequency grid
 /// - `InMemory` → returns `vec![curve]`
+/// Disjoint declared support is refused because this return type has no mask;
+/// use [`load_source_individual_with_support`] for those sources.
 pub fn load_source_individual(source: &MeasurementSource) -> Result<Vec<Curve>, Box<dyn Error>> {
+    if source
+        .provenance()
+        .declared_support_bands()?
+        .is_some_and(|bands| bands.len() > 1)
+    {
+        return Err("curve-only loading cannot preserve disjoint measurement support; use load_source_individual_with_support or load_source_detailed".into());
+    }
     load_source_individual_with_support(source).map(|aligned| aligned.curves)
 }
 
@@ -506,7 +528,7 @@ pub struct DetailedLoad {
     pub overlap_hz: (f64, f64),
     /// Original per-curve support, in input order.
     pub support_hz: Vec<CurveSupport>,
-    /// Per-bin validity of the shared grid (all true by construction).
+    /// Per-bin validity of the shared grid, including the declared usable band.
     pub validity_mask: Vec<bool>,
 }
 
@@ -735,8 +757,8 @@ pub fn load_source_detailed(
     coherent_contract: Option<&CoherentAverageContract>,
 ) -> Result<DetailedLoad, Box<dyn Error>> {
     let native = load_source_unaligned(source)?;
-    let band = source.provenance().valid_band_hz;
-    let aligned = align_source_curves(&native, band)?;
+    let bands = source.provenance().declared_support_bands()?;
+    let aligned = align_source_curves(&native, bands.clone())?;
     let native_hashes = native
         .iter()
         .map(Curve::content_hash)
@@ -751,7 +773,7 @@ pub fn load_source_detailed(
                 output_hash,
                 serde_json::json!({
                     "source_index": index,
-                    "declared_valid_band_hz": band,
+                    "declared_valid_bands_hz": bands,
                     "grid_policy": "sorted_union_inside_common_support",
                     "declared_band_policy": "align_retained_native_samples_independently_then_merge_outer_response",
                     "interpolation": "autoeq_core::interpolate_log_space",
@@ -1211,6 +1233,54 @@ mod tests {
     }
 
     #[test]
+    fn disjoint_declared_support_does_not_interpolate_across_internal_gap() {
+        let curves = [
+            Curve {
+                freq: vec![100.0, 200.0, 300.0, 400.0, 500.0, 600.0].into(),
+                spl: vec![80.0, 80.0, 120.0, 120.0, 80.0, 80.0].into(),
+                ..Default::default()
+            },
+            Curve {
+                freq: vec![100.0, 200.0, 250.0, 350.0, 450.0, 500.0, 600.0].into(),
+                spl: vec![80.0, 80.0, 130.0, 130.0, 130.0, 80.0, 80.0].into(),
+                ..Default::default()
+            },
+        ];
+        let mut source = source_with_declared_band(&curves, [100.0, 600.0]);
+        let MeasurementSource::Multiple(multiple) = &mut source else {
+            unreachable!()
+        };
+        multiple.provenance.valid_band_hz = None;
+        multiple.provenance.valid_bands_hz = vec![[100.0, 200.0], [500.0, 600.0]];
+        let aligned = load_source_individual_with_support(&source).unwrap();
+        let grid = aligned.curves[0].freq.to_vec();
+        assert!(grid.contains(&250.0) && grid.contains(&450.0));
+        assert_eq!(aligned.curves[0].freq, aligned.curves[1].freq);
+        for (index, frequency) in grid.iter().enumerate() {
+            let expected = *frequency <= 200.0 || *frequency >= 500.0;
+            assert_eq!(aligned.validity_mask[0][index], expected);
+            assert_eq!(aligned.validity_mask[1][index], expected);
+            if expected {
+                assert!((aligned.curves[0].spl[index] - 80.0).abs() < 1e-9);
+                assert!((aligned.curves[1].spl[index] - 80.0).abs() < 1e-9);
+            }
+        }
+        let detailed = load_source_detailed(&source, None).unwrap();
+        assert_eq!(detailed.validity_mask, aligned.validity_mask[0]);
+        assert!(load_source_individual(&source).is_err());
+        assert!(load_source(&source).is_err());
+        multiple_support_bad_band_rejects(source);
+    }
+
+    fn multiple_support_bad_band_rejects(mut source: MeasurementSource) {
+        let MeasurementSource::Multiple(multiple) = &mut source else {
+            unreachable!()
+        };
+        multiple.provenance.valid_bands_hz[1] = [190.0, 600.0];
+        assert!(load_source_individual_with_support(&source).is_err());
+    }
+
+    #[test]
     fn declared_band_alignment_preserves_measured_fields_and_native_snapshots() {
         let mut outputs = Vec::new();
         for outside in [40.0, 120.0] {
@@ -1301,6 +1371,13 @@ mod tests {
                     .iter()
                     .all(|mask| mask.len() == aligned.curves[0].freq.len())
             );
+            for mask in &aligned.validity_mask {
+                for (&frequency, &valid) in aligned.curves[0].freq.iter().zip(mask) {
+                    assert_eq!(valid, (1000.0..=2000.0).contains(&frequency));
+                }
+                assert!(mask.iter().any(|valid| !valid));
+                assert!(mask.iter().any(|valid| *valid));
+            }
         }
         assert_eq!(outputs[0].phase, outputs[2].phase);
         assert_eq!(outputs[1].phase, outputs[3].phase);

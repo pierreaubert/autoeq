@@ -7,10 +7,14 @@ from pathlib import Path
 from .capture_clock_views import capture_clock_qa_html, gated_lr_channel
 from .capture_reflection_views import capture_reflections_html
 from .acoustic_report import (
+    early_reflections_html,
     level_compensation_html,
     pair_sum_difference,
+    room_t60_rows,
     summary_table_html,
     symmetric_groups,
+    t60_rows,
+    t60_table_html,
     tof_html,
     tof_table,
 )
@@ -23,6 +27,8 @@ from .figures import (
     create_ir_figure,
     create_smoothed_figure,
     create_symmetric_pair_figure,
+    create_early_late_figure,
+    create_t60_octaves_figure,
     create_tof_figure,
     create_combined_figure,
     create_bass_management_routing_figure,
@@ -61,6 +67,7 @@ from .target_overlay import build_target_overlay_curves
 from .correction_explanation import correction_explanation_html
 from .acceptance_views import acceptance_views_html, waveform_status_html
 from .payload_binding import verify_payload_binding
+from .capture_views import capture_views_html, optimization_waterfall_html, optimization_wavelet_html
 from .loaders import RoomEqData
 
 # Synthetic channel name used for the complex L+R sum tab in the
@@ -1062,7 +1069,7 @@ def _bass_management_sub_outputs_table_html(report: dict) -> str:
 
 
 def _playback_status_html(metadata: dict, label: str = "", *, data: dict | None = None) -> str:
-    """Expose recorded playback eligibility and conditional input assumptions."""
+    """Expose saved DSP eligibility and conditional input assumptions."""
     acceptance = metadata.get("correction_acceptance") or {}
     outcome = acceptance.get("outcome")
     approved = outcome == "unchanged" or (
@@ -1071,7 +1078,7 @@ def _playback_status_html(metadata: dict, label: str = "", *, data: dict | None 
     )
     verified, binding_reason, _ = verify_payload_binding(data or {})
     approved = approved and verified
-    title = "Recorded playback validation: " + str(outcome or "unverified")
+    title = "Saved DSP playback eligibility: " + str(outcome or "unverified")
     if label:
         title = label + " — " + title
     details = [binding_reason]
@@ -1110,6 +1117,7 @@ def create_html_report(
     output_path: Path,
     output_json_path: Path | None = None,
     smoothed_octaves: float = 1.0,
+    capture_verification: dict | None = None,
 ) -> None:
     """Create an HTML report with all channel plots.
 
@@ -1119,6 +1127,8 @@ def create_html_report(
         output_json_path: Path to output JSON (for resolving relative paths)
         smoothed_octaves: Fractional-octave smoothing for the Section 2
             smoothed-response overlays (feat-report asks for 1 octave).
+        capture_verification: Optional matched verification report. Its graph
+            identity must match the verified saved optimization payload.
     """
     if output_json_path is not None and not isinstance(data, RoomEqData):
         data = RoomEqData(data, output_json_path.resolve().parent)
@@ -1512,6 +1522,23 @@ def create_html_report(
     html_parts.append(_all_eq_filters_html(data))
     html_parts.append(_crossover_config_html(data))
     html_parts.append(level_compensation_html(data))
+    room_decay = room_t60_rows(data)
+    if room_decay:
+        room_decay_fig = create_t60_octaves_figure("Room mean", room_decay)
+        if room_decay_fig:
+            html_parts.append(
+                '<div class="plot-container">'
+                + room_decay_fig.to_html(full_html=False, include_plotlyjs=False)
+                + '<p class="epa-footer">Arithmetic mean of valid measured-room T60 '
+                'estimates at each octave. Speaker coverage varies by band; invalid '
+                'fits are excluded.</p></div>\n'
+            )
+        html_parts.append(
+            '<p class="epa-footer">Room T60 contributing speakers by octave: '
+            + ", ".join(f"{row['centre_hz']} Hz: {row['speaker_count']}"
+                        for row in room_decay)
+            + '</p>\n'
+        )
 
     # Time of flight before/after DSP (feat-report Section 3).
     tof_rows = tof_table(metadata)
@@ -1529,13 +1556,26 @@ def create_html_report(
 
     # Symmetric-monitor summing, magnitude domain (feat-report Section 2).
     # The complex pressure sum needs phase data roomeq does not emit yet.
-    pair_groups, _unpaired = symmetric_groups(channels_dict)
+    pair_groups, unpaired = symmetric_groups(channels_dict)
+    if pair_groups or unpaired:
+        html_parts.append('<div class="filters-section"><h3>Section 2 — Symmetric monitors</h3>')
+        if unpaired:
+            html_parts.append(
+                '<p>Unpaired channels (not summed): '
+                + ", ".join(escape(name) for name in unpaired)
+                + '</p>'
+            )
+        html_parts.append('</div>')
     for label, members in pair_groups:
         combo = pair_sum_difference(
             (channels_dict[members[0]] or {}).get("final_curve"),
             (channels_dict[members[1]] or {}).get("final_curve"),
         )
         if combo is None:
+            html_parts.append(
+                '<p>Symmetric pair ' + escape(label)
+                + ': sum unavailable because final curves are missing or use different frequency grids.</p>'
+            )
             continue
         pair_fig = create_symmetric_pair_figure(
             label, combo["freq"], combo["sum_spl"], combo["diff_spl"]
@@ -1762,6 +1802,52 @@ def create_html_report(
 """
             )
 
+        if not is_driver_tab:
+            html_parts.append(early_reflections_html(channel_data, tab_label))
+            early_late = channel_data.get("early_late_curves")
+            early_late_fig = create_early_late_figure(tab_label, early_late)
+            if early_late_fig:
+                html_parts.append(
+                    '<div class="plot-container">'
+                    + early_late_fig.to_html(full_html=False, include_plotlyjs=False)
+                    + '<p class="epa-footer">Third-octave early and late energy contributions '
+                    'share the full curve\'s peak-band reference. Full is an incoherent '
+                    'energy sum, not a coherent pressure response.</p></div>\n'
+                )
+            else:
+                html_parts.append(
+                    '<p class="epa-footer">Early vs late sound: pending '
+                    'roomeq field early_late_curves with a shared level reference.</p>\n'
+                )
+
+            t60 = t60_rows(channel_data)
+            t60_fig = create_t60_octaves_figure(tab_label, t60)
+            if t60_fig:
+                html_parts.append(
+                    '<div class="plot-container">'
+                    + t60_fig.to_html(full_html=False, include_plotlyjs=False)
+                    + '</div>\n'
+                )
+            html_parts.append(t60_table_html(channel_data))
+            waterfall_html = optimization_waterfall_html(
+                channel_data.get("waterfall"), channel_data.get("resonance_decays"))
+            if waterfall_html:
+                html_parts.append(waterfall_html)
+            else:
+                html_parts.append(
+                    '<p class="epa-footer">Waterfall and resonance decay: pending '
+                    'roomeq fields waterfall and resonance_decays from a measured '
+                    'room impulse response.</p>\n'
+                )
+            wavelet_html = optimization_wavelet_html(channel_data.get("wavelet"))
+            if wavelet_html:
+                html_parts.append(wavelet_html)
+            else:
+                html_parts.append(
+                    '<p class="epa-footer">Three-cycle wavelet: pending roomeq '
+                    'field wavelet from a measured room impulse response.</p>\n'
+                )
+
         # EPA psychoacoustic scores (pre/post) for this channel
         epa_per_channel = metadata.get("epa_per_channel") or {}
         epa_html = _epa_channel_table_html(epa_per_channel.get(channel_name))
@@ -1824,6 +1910,25 @@ def create_html_report(
         )
 
     html_parts.append('</div><!-- tabs-container -->\n')
+
+    if capture_verification is not None:
+        verified, reason, graph_identity = verify_payload_binding(data)
+        capture_graph = (capture_verification.get("graph_id")
+                         if isinstance(capture_verification, dict) else None)
+        if not verified:
+            html_parts.append(
+                '<section class="capture-views"><h1>Capture acceptance diagnostics</h1>'
+                '<p>Unavailable: saved optimization graph binding is invalid: '
+                + escape(reason) + '</p></section>\n'
+            )
+        elif capture_graph != graph_identity:
+            html_parts.append(
+                '<section class="capture-views"><h1>Capture acceptance diagnostics</h1>'
+                '<p>Unavailable: verification candidate graph does not match the saved '
+                'optimization graph.</p></section>\n'
+            )
+        else:
+            html_parts.append(capture_views_html(capture_verification))
 
     # Close HTML
     html_parts.append(

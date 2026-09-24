@@ -92,6 +92,8 @@ pub enum GateLabel {
 ///
 /// Frequencies below `valid_lower_hz`, or any frequency when the bound is
 /// `None`, label contaminated. The bound itself labels reflection-free.
+/// This lower-bound helper does not know the capture's upper support; use
+/// [`QuasiAnechoicReport::gate_label`] for a complete report verdict.
 pub fn gate_label_for(valid_lower_hz: Option<f64>, freq_hz: f64) -> GateLabel {
     match (valid_lower_hz, freq_hz.is_finite()) {
         (Some(bound), true) if bound.is_finite() && bound > 0.0 && freq_hz >= bound => {
@@ -123,6 +125,24 @@ pub struct QuasiAnechoicReport {
     pub reason_codes: Vec<String>,
     /// Stable evidence reference IDs.
     pub evidence_refs: Vec<String>,
+}
+
+impl QuasiAnechoicReport {
+    /// Label a frequency only when it lies inside both validated edges.
+    pub fn gate_label(&self, freq_hz: f64) -> GateLabel {
+        match (self.valid_lower_hz, self.valid_upper_hz) {
+            (Some(lower), Some(upper))
+                if lower.is_finite()
+                    && upper.is_finite()
+                    && upper > lower
+                    && freq_hz.is_finite()
+                    && (lower..=upper).contains(&freq_hz) =>
+            {
+                GateLabel::ReflectionFree
+            }
+            _ => GateLabel::ReflectionContaminated,
+        }
+    }
 }
 
 /// Grade one capture against explicit policy.
@@ -170,13 +190,23 @@ pub fn validate_quasi_anechoic(
         _ => false,
     };
 
-    let valid_lower_hz = match (gate, fits) {
+    let gate_lower_hz = match (gate, fits) {
         (Some(gate), true) => {
             autoeq_core::direct_sound::valid_lower_bound_hz(gate, policy.cycles_for_valid_band)
         }
         _ => None,
     };
-    let valid_upper_hz = input.requested_band_hz.map(|band| band[1]);
+    let requested_band = input.requested_band_hz.filter(|band| {
+        band[0].is_finite() && band[1].is_finite() && band[0] > 0.0 && band[1] > band[0]
+    });
+    if input.requested_band_hz.is_none() {
+        reasons.push(String::from("missing_requested_band"));
+    } else if requested_band.is_none() {
+        reasons.push(String::from("invalid_requested_band"));
+    }
+    let valid_upper_hz = requested_band.map(|band| band[1]);
+    let valid_lower_hz =
+        gate_lower_hz.map(|lower| requested_band.map_or(lower, |band| lower.max(band[0])));
 
     let has_direct_capture = matches!(
         input.capture_kind,
@@ -189,7 +219,7 @@ pub fn validate_quasi_anechoic(
     let phase_source = if has_direct_capture
         && !input.moving_microphone_average
         && fits
-        && valid_lower_hz.is_some()
+        && gate_lower_hz.is_some()
     {
         PhaseSourceVerdict::Supported
     } else {
@@ -212,14 +242,11 @@ pub fn validate_quasi_anechoic(
         reasons.push(String::from("missing_angular_coverage"));
     }
 
-    let band_within_window = match (input.requested_band_hz, valid_lower_hz) {
-        (Some(band), Some(lower)) => {
-            band[0].is_finite() && band[1].is_finite() && band[0] >= lower && band[1] > band[0]
-        }
-        (None, Some(_)) => true,
+    let band_within_window = match (requested_band, gate_lower_hz) {
+        (Some(band), Some(lower)) => band[0] >= lower,
         _ => false,
     };
-    if valid_lower_hz.is_some() && !band_within_window {
+    if gate_lower_hz.is_some() && requested_band.is_some() && !band_within_window {
         reasons.push(String::from("short_gate_band_limit"));
     }
 
@@ -313,6 +340,7 @@ mod tests {
         let report = validate_quasi_anechoic(&input, &QuasiAnechoicPolicy::v1()).unwrap();
         assert_eq!(report.detail, DetailVerdict::DetailEligible);
         assert_eq!(report.phase_source, PhaseSourceVerdict::Supported);
+        assert_eq!(report.valid_lower_hz, Some(1200.0));
     }
 
     #[test]
@@ -372,6 +400,37 @@ mod tests {
         assert_eq!(
             gate_label_for(None, 2000.0),
             GateLabel::ReflectionContaminated
+        );
+        let mut input = gated_input();
+        input.requested_band_hz = Some([1200.0, 8000.0]);
+        let report = validate_quasi_anechoic(&input, &QuasiAnechoicPolicy::v1()).unwrap();
+        assert_eq!(report.gate_label(1200.0), GateLabel::ReflectionFree);
+        assert_eq!(report.gate_label(8000.0), GateLabel::ReflectionFree);
+        assert_eq!(report.gate_label(1000.0), GateLabel::ReflectionContaminated);
+        assert_eq!(report.gate_label(8000.1), GateLabel::ReflectionContaminated);
+    }
+
+    #[test]
+    fn absent_or_invalid_requested_band_cannot_authorize_detail() {
+        let mut input = gated_input();
+        input.requested_band_hz = None;
+        let report = validate_quasi_anechoic(&input, &QuasiAnechoicPolicy::v1()).unwrap();
+        assert_eq!(report.detail, DetailVerdict::TonalOnly);
+        assert_eq!(report.gate_label(2000.0), GateLabel::ReflectionContaminated);
+        assert!(
+            report
+                .reason_codes
+                .contains(&String::from("missing_requested_band"))
+        );
+
+        input.requested_band_hz = Some([1200.0, f64::INFINITY]);
+        let report = validate_quasi_anechoic(&input, &QuasiAnechoicPolicy::v1()).unwrap();
+        assert_eq!(report.detail, DetailVerdict::TonalOnly);
+        assert_eq!(report.valid_upper_hz, None);
+        assert!(
+            report
+                .reason_codes
+                .contains(&String::from("invalid_requested_band"))
         );
     }
 

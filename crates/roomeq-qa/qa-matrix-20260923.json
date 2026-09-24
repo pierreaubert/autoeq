@@ -1,0 +1,317 @@
+{
+  "version": "2",
+  "date": "2026-09-23",
+  "head": "6e9647f36e91f7b1324ddaca3368226cda343809",
+  "scope": "current checkout QA baseline; uncommitted changes listed in reviews/implementation-audit-20260923.md",
+  "prior_matrix": "qa-matrix-20260921.json",
+  "cases": [
+    {
+      "id": "qa-fast-lib",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib --quiet",
+      "detail": "171 passed, 0 failed, 7 ignored, 0 filtered on the current source after the DBA diagnostic and outcome-test correction. Nightly decision, weekly Sonium phase, five-seed all-pass, targeted 7.1.4 optimizer and full DBA branch-mapping diagnostics remain explicitly ignored in the fast suite; focused runs are recorded separately.",
+      "log_path": "target/qa/qa-fast-after-outcome-20260924.log"
+    },
+    {
+      "id": "qa-feature-workspace-current",
+      "status": "pass",
+      "command": "cargo check --workspace --all-targets --features qa",
+      "detail": "The current Rust worktree, including routed DBA timing validation and QA diagnostics, passes the all-targets QA-feature workspace check. This is a compile gate, not a synthetic, acoustic or playback verdict.",
+      "log_path": "target/qa/workspace-after-dba-and-report-20260924.log"
+    },
+    {
+      "id": "qa-nightly-decision",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib nightly_decision_matrix -- --ignored",
+      "detail": "Named post-rename test executed and passed: 11 expected and executed decision rows, 0 failed. This is not full acoustic or release certification.",
+      "log_path": "target/qa/qa-nightly-decision-20260923.log; target/qa/nightly-decision-matrix.json"
+    },
+    {
+      "id": "qa-weekly-sonium-phase",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib sonium_cinema_phase_supports_arrival_estimation -- --ignored",
+      "detail": "The current ignored named test executed and passed: 1 passed, 177 filtered out, in 63.91 seconds. This is a software phase and arrival-estimation check, not physical timing evidence.",
+      "log_path": "target/qa/qa-weekly-sonium-phase-20260924.log"
+    },
+    {
+      "id": "qa-required-qa-filter",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib qa_",
+      "detail": "25 matched and passed, 0 failed; the named filter was executed on this checkout.",
+      "log_path": "target/qa/qa-lib-20260923.log"
+    },
+    {
+      "id": "qa-analytic-f01-f04",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib analytic_tests::",
+      "detail": "4 matched and passed, 0 failed; the named filter was executed on this checkout.",
+      "log_path": "target/qa/qa-lib-20260923.log"
+    },
+    {
+      "id": "qa-corpus",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib corpus_tests::",
+      "detail": "5 matched and passed, 0 failed; the named filter was executed on this checkout.",
+      "log_path": "target/qa/qa-lib-20260923.log"
+    },
+    {
+      "id": "qa-matrix-unit",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib matrix_tests::",
+      "detail": "2 matched and passed, 0 failed; the named filter was executed on this checkout.",
+      "log_path": "target/qa/qa-lib-20260923.log"
+    },
+    {
+      "id": "recipe-filter-inventory",
+      "status": "pass",
+      "command": "cargo test -p <crate> --lib -- --list for autoeq-core, autoeq-optim, roomeq-quality, roomeq-engine, roomeq-workflow, roomeq-model, roomeq-analysis and roomeq-qa; inspect builds/qa/qa-roomeq.just",
+      "detail": "26 active cargo-test substring filters and 10 nextest regex filters select nonzero tests on this checkout. The former workflow dsp_realization filter selected zero and was replaced with final_safety_gate_enforces_canonical_realization_error, which selected and passed one test in debug mode. This is an inventory, not execution of every release-tier recipe.",
+      "log_path": "target/qa/recipe-filter-inventory-20260923.json; target/qa/*-test-list-20260923.log"
+    },
+    {
+      "id": "qa-stage-contracts-release",
+      "status": "pass",
+      "command": "just qa-roomeq-stage-contracts",
+      "detail": "All 13 executed Rust/Python filters selected nonzero tests and passed (134 tests total across the recipe). Repeated after the merged math-audio pin and QA isolation edits; the final-checkout log passes. This includes pruning conditions, per-driver FIR, stage contracts, the repaired one-test workflow canonical-realization filter, engine DSP realization, and Python DSP contracts. It does not replace the full PR, acoustic, or weekly/nightly gates.",
+      "log_path": "target/qa/stage-contracts-final-20260923.log"
+    },
+    {
+      "id": "qa-pr-full-recipe",
+      "status": "fail",
+      "command": "just qa-roomeq-pr",
+      "detail": "The first roomeq-qa-coverage --tier pr stage reported 5 PASS, 0 REVERTED, 15 FAIL across 20 cases and exited 1; later synthetic, acoustic, stage-contract, parameter, and escaped-defect stages did not execute. Failures include structural fallback/crossover limits, improvement thresholds, unsafe-stage non-reversion, and retained FIR artifact conflicts. Coverage started before the subsequent math-audio pin and capture-report edits, so this is not a final-checkout verdict.",
+      "log_path": "target/qa/pr-20260923.log"
+    },
+    {
+      "id": "qa-pr-mixed-sidecar-isolation",
+      "status": "fail",
+      "command": "target/release/roomeq-qa-coverage --tier pr --scenario small_stereo_2_0 --solver fem --mode mixed --jobs 1",
+      "detail": "After QA seed/output scratch isolation, all five seeds completed with accepted useful outcomes, including formerly conflicting seed 83; the root residual-FIR file count stayed 1489. The full case still failed its separate quality threshold: 9.0% improvement versus 10.0% registry minimum. The artifact collision is no longer the observed failure in this case, but the PR case is not passing.",
+      "log_path": "target/qa/pr-small-stereo-mixed-isolated-20260923.log"
+    },
+    {
+      "id": "qa-pr-coverage-current",
+      "status": "fail",
+      "command": "cargo run --features qa --bin roomeq-qa-coverage --release -- --tier pr",
+      "detail": "Final 20-case rerun: 5 PASS, 0 REVERTED, 15 FAIL (exit 1). Isolated FIR sidecars and structural fallback fixes did not clear the PR coverage gate. Remaining failures include honest safety attenuation, crossover/seat quality, and registry improvement limits; thresholds were not relaxed.",
+      "log_path": "target/qa/coverage-pr-current-20260923.log"
+    },
+    {
+      "id": "qa-pr-small-stereo-21-current",
+      "status": "fail",
+      "command": "cargo run --features qa --bin roomeq-qa-coverage --release -- --tier pr --scenario small_stereo_2_1 --mode iir --jobs 1",
+      "detail": "Current-checkout focused rerun failed its unchanged quality threshold: 12.9% improvement versus the registry's 15.0% minimum. The five-seed reliability pass did not satisfy this acoustic improvement criterion. Logs show large residual target underfill near the 80 Hz crossover; its source and remedy remain unproven. A diagnostic rerun also exited 1 at the same 12.9% score; its first L/R Post-EQ refusals are cancellation deficits of 4.220/4.132 dB with no prepared target, so the target-underfill condition is not the cause. The frozen baseline cancellation is about 4.013 dB. FEM CSVs contain phase but the config lacks timing provenance; the upstream alignment path and modeled-reference policy need review. Post-EQ rejection logs now distinguish cancellation, absent evidence and target underfill without changing limits; the workflow crate check passes.",
+      "log_path": "target/qa/coverage-small-21-current-20260924.log; target/qa/coverage-small-21-components-20260924.log; target/qa/workflow-crossover-diagnostics-20260924.log"
+    },
+    {
+      "id": "qa-synthetic-routed-input-domain",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib synthetic::build::tests; cargo test -p roomeq-qa --lib reduced_level_714_mso_does_not_fail_structural_headroom -- --ignored",
+      "detail": "Seven builder tests passed with one other ignored; the targeted five-seed 7.1.4 MSO LowLatency case passed its full QA verdict under an explicit \u221220 dBFS programme peak. This does not claim full-scale operation or pass the complete synthetic PR matrix.",
+      "log_path": "target/qa/synthetic-positive-input-domain-final-20260924.log; target/qa/synthetic-714-reduced-level-full-verdict-20260924.log"
+    },
+    {
+      "id": "qa-synthetic-fullscale-refusal-current",
+      "status": "pass",
+      "command": "cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --parameter-matrix-refusals",
+      "detail": "All 6/6 full-scale safety-refusal rows passed with the fixed 12 dB attenuation cap. These are expected refusals, not positive full-scale processing passes.",
+      "log_path": "target/qa/synthetic-fullscale-refusal-after-input-scope-20260924.log"
+    },
+    {
+      "id": "qa-synthetic-pr-prefixture",
+      "status": "fail",
+      "command": "cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr",
+      "detail": "Pre-fixture binary completed 102 cases: 40 PASS, 29 REVERTED, 33 FAIL. Thirty-two multichannel cases hit structural headroom with full-scale input peaks; the all-pass multisub case lacked shared timing provenance. This run predates the explicit \u221220 dBFS routed input domain and synthetic shared timing fixture.",
+      "log_path": "target/qa/synthetic-pr-20260923.log"
+    },
+    {
+      "id": "qa-synthetic-pr-after-fixture",
+      "status": "pass",
+      "command": "cargo run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr",
+      "detail": "The full 102-case PR matrix completed under its outcome policy in 9293.2 seconds: 102 passed, 0 failed; 50 useful accepted outcomes and 52 safe reversions. This binary was compiled before the later routed DBA array-identity fix; a focused current-source DBA optimization assertion passes separately. A full post-fix binary run is not claimed.",
+      "log_path": "target/qa/synthetic-pr-current-20260924.log; target/qa/synthetic-dba-branch-map-routed-assert-20260924.log"
+    },
+    {
+      "id": "qa-pr-escaped-defects",
+      "status": "pass",
+      "command": "just qa-roomeq-escaped-defects",
+      "detail": "Resolved six escaped-defect owners and executed six exact regressions successfully. Mutant execution is a separate gate and is not claimed by this result.",
+      "log_path": "target/qa/escaped-defects-20260923.log; target/qa/escaped-defects/regressions.json"
+    },
+    {
+      "id": "qa-pr-parameters-old-timeout",
+      "status": "fail",
+      "command": "just qa-roomeq-parameters-pr",
+      "detail": "The signal/crossover Python checks, matrix checker, six release Rust matrix tests, and release synthetic build passed. The Python synthetic exit-contract then errored: both full-scale refusals and reduced-level processing subprocesses timed out after the previous 900-second per-subrunner limit. The 3-hour harness timeout was edited after this process launched; this failed result is retained, and a new run is needed.",
+      "log_path": "target/qa/parameters-pr-20260923.log"
+    },
+    {
+      "id": "qa-pr-parameters-current",
+      "status": "pass",
+      "command": "just qa-roomeq-parameters-pr",
+      "detail": "The revised exact PR recipe completed: precursor checks and six release Rust matrix tests passed; all six full-scale structural-refusal rows retained the expected refusals; all 16 reduced-level processing rows and four Python synthetic exit-contract tests passed. The prior timeout remains recorded separately.",
+      "log_path": "target/qa/parameters-pr-final-20260923.log"
+    },
+    {
+      "id": "contract-pr-genelec-kef-fidelia",
+      "status": "not_run",
+      "command": "cargo run --features qa --bin roomeq-qa-quality --release -- --case \"Cross-Mode measured Genelec 5.1.4\" --jobs 1 --maxeval 600000 --seed-runs 1; repeat for KEF 5.1 and Fidelia 2.0 variants",
+      "detail": "Expensive coordinator-owned optimization cases; no current score or pass claim.",
+      "log_path": ""
+    },
+    {
+      "id": "nightly-weekly-fuzzer-kautz",
+      "status": "not_run",
+      "command": "cargo run --bin roomeq-fuzzer --release --features=qa,plotly -- -n 1000 --seed 42 --skip-kautz-modal; just qa-roomeq-weekly; just qa-roomeq-acoustic-nightly; just qa-roomeq-coverage-gate",
+      "detail": "Full fuzzer, Kautz, nightly and weekly recipes have no current result; the 11-row decision artifact is a separate narrower check.",
+      "log_path": ""
+    },
+    {
+      "id": "acoustic-nightly-cinema-full",
+      "status": "not_run",
+      "command": "cargo run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly; run the full Sonium home-cinema matrix with its declared maxeval and seed limits",
+      "detail": "Full acoustic/nightly/real-corpus integration is pending; the weekly Sonium phase unit check does not cover it.",
+      "log_path": ""
+    },
+    {
+      "id": "ignored-outcome-tests",
+      "status": "pass",
+      "command": "cargo test --release -p roomeq-qa --lib outcome_tests -- --ignored",
+      "detail": "Both current named ignored outcome tests executed and passed in release mode: short-LFE matrix row 10 safely refuses without phase, and the phase-linear routed row preserves correction scores and 960-tap FIRs. The former short-LFE positive test was stale: it indexed a nonexistent logical LFE output and expected FIR delivery from a row with no phase. Supplying phase alone in an exploratory variant still produced no useful accepted candidate, so positive short-LFE FIR delivery remains unproven.",
+      "log_path": "target/qa/qa-ignored-outcomes-final-20260924.log; target/qa/qa-ignored-outcomes-release-20260924.log"
+    },
+    {
+      "id": "f05-disjoint-support-scoped",
+      "status": "pass",
+      "command": "cargo test -p autoeq-core --lib; cargo test -p autoeq-measurements --lib; cargo test -p roomeq-workflow --lib disjoint_support_gap_cannot_authorize_channel_wide_correction; cargo test -p roomeq-workflow --lib curve_only_workflow_load_refuses_disjoint_support; cargo test -p roomeq-workflow --lib workflow_f05_disjoint_gap_refuses_curve_only_optimization; cargo test -p roomeq-workflow --lib receipt_retains_disjoint_support_gap; cargo check --workspace --all-targets; python3 scripts/check_roomeq_schema_baselines.py",
+      "detail": "Core and measurements suites, focused workflow gap/curve-only/receipt tests, real optimize_room refusal, workspace compilation, and schema baseline checks pass. A disjoint declaration retains gap masks but correction dispatch still refuses it until band-aware design and scoring are implemented; F05 is not complete.",
+      "log_path": "target/qa/f05-disjoint-core-full-20260924.log; target/qa/f05-disjoint-measurements-full-20260924.log; target/qa/f05-disjoint-workflow-final-20260924.log; target/qa/f05-disjoint-optimize-entry-20260924.log; target/qa/f05-disjoint-curve-only-20260924.log; target/qa/f05-disjoint-receipt-20260924.log; target/qa/f05-disjoint-evidence-intake-final-20260924.log; target/qa/f05-disjoint-seat-replay-20260924.log; target/qa/f05-disjoint-workspace-final-20260924.log; target/qa/f05-disjoint-schema-check-20260924.log"
+    },
+    {
+      "id": "f05-direct-capture-gap-assessment",
+      "status": "pass",
+      "command": "cargo test -p roomeq-workflow --lib direct_capture_assessment_does_not_bridge_disjoint_support; cargo test -p roomeq-workflow --lib roadmap_correction_joint_scope_comes_from_stationary_capture_provenance; cargo test -p roomeq-workflow --lib disjoint_support_gap_cannot_authorize_channel_wide_correction; cargo test -p roomeq-workflow --lib roadmap_correction_assessments_respect_declared_usable_band; cargo check --workspace --all-targets --features qa",
+      "detail": "The public direct-capture assessor intersects requested frequency support with declared valid intervals and refuses a request spanning multiple disjoint segments. Four focused workflow tests and the full QA-feature workspace check pass. Channel-wide correction remains refused on disjoint support; this is not end-to-end F05 acceptance.",
+      "log_path": "target/qa/workflow-direct-disjoint-20260924.log; target/qa/workflow-roadmap_correction_joint_scope_comes_from_stationary_capture_provenance-20260924.log; target/qa/workflow-disjoint_support_gap_cannot_authorize_channel_wide_correction-20260924.log; target/qa/workflow-roadmap_correction_assessments_respect_declared_usable_band-20260924.log; target/qa/workspace-direct-disjoint-20260924.log"
+    },
+    {
+      "id": "next-direct-sound-bounded-band",
+      "status": "pass",
+      "command": "cargo test -p roomeq-analysis --lib; cargo test -p roomeq-workflow --lib roadmap_correction_assessments_respect_declared_usable_band; cargo check --workspace --all-targets --features qa",
+      "detail": "The 216-test analysis suite, one focused workflow consumer test and the full QA-feature workspace check pass. Detail eligibility now requires a finite requested band; the reported valid lower edge is the maximum of the reflection-free gate edge and requested support, and per-frequency labels refuse both outside edges. This is a software gate, not independent direct-sound capture evidence.",
+      "log_path": "target/qa/analysis-quasi-band-bound-20260924.log; target/qa/analysis-quasi-band-targeted-20260924.log; target/qa/workflow-quasi-band-bound-20260924.log; target/qa/workspace-quasi-band-bound-20260924.log"
+    },
+    {
+      "id": "report-f05-curve-integrity",
+      "status": "pass",
+      "command": "venv/bin/python3 -m unittest scripts.test_report scripts.test_figures",
+      "detail": "42 report tests pass. Unequal, nonfinite or unordered frequency/SPL arrays cannot yield level-compensation, deepest-notch or symmetric magnitude-pair values. This covers viewer integrity only; it does not complete correction-path F05. The TOF table and plot label after-DSP arrival as calculated from measured input arrival and deployed delay. Missing/nonfinite time-of-flight values leave chart bars absent and table cells unavailable, not plotted as zero.",
+      "log_path": "target/qa/report-tof-missing-20260924.log; target/qa/figures-tof-missing-20260924.log"
+    },
+    {
+      "id": "r3-report-integration-current",
+      "status": "pass",
+      "command": "PYTHONPATH=scripts:. venv/bin/python -m unittest scripts.test_correction_explanation scripts.test_report scripts.test_figures scripts.test_dsp scripts.test_target_overlay scripts.test_roomeq_measured_result",
+      "detail": "134 selected tests pass across the opening explanation, report, figures, DSP, target overlay, and measured-result audit. The exact measured 2.0_8361a IIR output was accepted and its opening HTML reviewed in Chromium; accepted, rejected and unverified example reports were generated. Measured acoustic report fields remain absent without measured IR inputs.",
+      "log_path": "target/qa/report-r3-full-after-browser-20260924.log; target/qa/report-8361a-final-browser-20260924.png; target/qa/report-measured-8361a-iir-20260924.log"
+    },
+    {
+      "id": "r4-root-cli-integration-current",
+      "status": "pass",
+      "command": "cargo test -p autoeq --features cli --test roomeq_integration_test; cargo check -p autoeq --features cli --bins",
+      "detail": "All six root RoomEQ CLI integration tests passed, including approved known-phase and rejected missing-phase export cases. The root CLI binaries pass cargo check. This is a software integration check, not backend or operator playback evidence.",
+      "log_path": "target/qa/root-integration-current-20260924.log; target/qa/root-cli-bins-current-20260924.log"
+    },
+    {
+      "id": "g5-root-capture-verification-current",
+      "status": "pass",
+      "command": "cargo test -p autoeq --features cli --test roomeq_capture_verification",
+      "detail": "All 18 root CLI verification-bundle and capture-import integration tests passed, including graph/stimulus mutation refusals, source-route completeness, raw-file preservation, calibrated noise, matched IR/ETC/decay reporting, and rejected diagnostic handling. The tests use fixture captures, not operator recordings. The fixture temp location now falls back to a repository-local directory when the plan's macOS volume is unavailable.",
+      "log_path": "target/qa/root-capture-verification-portable-20260924.log"
+    },
+    {
+      "id": "g5-root-admission-current",
+      "status": "pass",
+      "command": "cargo test -p autoeq --test roomeq_admission_correction",
+      "detail": "All 28 root admission integration tests passed after the test fixtures used an available temp directory, including final graph/ledger binding, source snapshots, phase correction and refusal, routed joint-sub outcomes, and both Python report handoffs. This is software admission evidence, not real capture or listening validation.",
+      "log_path": "target/qa/root-admission-full-current-20260924.log"
+    },
+    {
+      "id": "g6-public-electrical-runners-current",
+      "status": "pass",
+      "command": "PYTHONPATH=scripts:. ROOMEQ_QA_SCRATCH_ROOT=/home/pierre/src/autoeq/target/qa venv/bin/python scripts/run_selected_delay_contract.py; PYTHONPATH=scripts:. ROOMEQ_QA_SCRATCH_ROOT=/home/pierre/src/autoeq/target/qa venv/bin/python scripts/run_selected_delay_contract.py --combined; PYTHONPATH=scripts:. ROOMEQ_QA_SCRATCH_ROOT=/home/pierre/src/autoeq/target/qa venv/bin/python scripts/run_routed_joint_contract.py",
+      "detail": "The public Rust producer-to-Python electrical replay handoffs passed for selected delay, combined gain/delay and routed joint sub. Selected-delay sampled complex error was 0.0 in both cases; the routed fixture had separate L/R-to-Sub1/RearBass paths and no sampled over-limit output. The scripts now accept an explicit scratch-root override when the default macOS volume is unavailable. This is sampled digital fixture replay, not independent CamillaDSP or physical playback evidence.",
+      "log_path": "target/qa/selected-delay-runner-current-20260924.log; target/qa/selected-gain-delay-runner-current-20260924.log; target/qa/routed-joint-runner-current-20260924.log; target/qa/python-qa-runners-portable-20260924.log"
+    },
+    {
+      "id": "g5-workflow-library-current",
+      "status": "pass",
+      "command": "cargo test -p roomeq-workflow --lib",
+      "detail": "Full current workflow library suite completed: 902 passed, 0 failed, 7 ignored. This exercises W1-W4 software paths, including the long routed pruning matrix; ignored cases and cross-crate release gates retain their separate statuses.",
+      "log_path": "target/qa/workflow-full-current-20260924.log"
+    },
+    {
+      "id": "q2-f05-f15-pairwise-mutations",
+      "status": "not_run",
+      "command": "cargo test -p roomeq-qa --lib qa_; cargo test -p roomeq-workflow --lib evidence_intake; execute the documented F05-F15 cross-path and mutation matrix",
+      "detail": "Producer APIs and the 16-row ternary parameter pairwise matrix exist; the full F05-F15 cross-path and mutation matrix remains unexecuted as one gate. The F13 capture-binding regression now mutates source ID in addition to graph, stimulus, seat and calibration, and the focused public assessment test passes. F05 is still refused at channel preparation rather than optimized through disjoint support.",
+      "log_path": "target/qa/workflow-f13-source-id-mutation-20260924.log; target/qa/roomeq-parameter-matrix.json"
+    },
+    {
+      "id": "q4-backend-real-playback",
+      "status": "blocked",
+      "command": "run the CamillaDSP/matrix backend harnesses against exact X2 exports; import operator V2/W3 captures with preregistered limits",
+      "detail": "Independent backend executable and real operator capture evidence were unavailable in this checkout; no physical playback pass is claimed.",
+      "log_path": ""
+    },
+    {
+      "id": "q5-v4-intent-guard",
+      "status": "pass",
+      "command": "cargo test -p roomeq-quality --lib",
+      "detail": "231 passed, 0 failed, 1 ignored. Detectability cannot stand in for equivalence; a separate numeric preregistered ABX equivalence rule passes 17/30 against a 0.75 bound using exact lower-tail scoring, with independent coefficient agreement and matching numeric comparison/rule bounds and a declared alternative that attains target power. Imported protocols rerun registration validation, rejecting self-consistently rehashed invalid rules, underpowered designs, duplicate conditions, and design mismatches before scoring. Real imports require a balanced seed-derived answer key and raw responses; claim qualification additionally requires a frozen setup hash over binding, population, absolute level, matching method, programme classes and holdouts. The setup freezes pseudonymous participant IDs and a trial-to-participant allocation; real rows must match, and a participant cannot repeat within a condition. The three-presentation battery now binds cells to frozen setup conditions, level calibration, material class and protocol sizing, then recomputes battery verdicts from exactly one raw import per frozen setup and records content hashes for those validated imports. The scorer rejects incomplete, repeated, renamed and impossible validated condition cells. Incomplete real imports disclose every affected condition and the missing preregistered trial IDs; synthetic outcomes never promote. Software-path evidence only.",
+      "log_path": "target/qa/quality-battery-multiround-full-20260924.log"
+    },
+    {
+      "id": "q5-v4-missing-trial-disclosure",
+      "status": "pass",
+      "command": "cargo test -p roomeq-quality --lib real_import_discloses_missing_ids_for_every_condition; cargo test -p roomeq-quality --lib; cargo check -p roomeq-qa",
+      "detail": "A real import with one missing assigned row in each condition fails closed and names both conditions and both frozen trial IDs. The complete 228-test quality suite and downstream QA crate check pass; no operator trial was supplied.",
+      "log_path": "target/qa/quality-missing-trial-ids-20260924.log; target/qa/quality-missing-trial-full-20260924.log; target/qa/qa-check-missing-trial-20260924.log"
+    },
+    {
+      "id": "q5-listening-battery-setup-binding",
+      "status": "pass",
+      "command": "cargo test -p roomeq-quality --lib; cargo check -p roomeq-qa; cargo check --workspace --all-targets --features qa",
+      "detail": "Battery cells include their correction arm and full setup hash and bind to the exact frozen setup condition, material programme scope, preregistered intent/randomization/trial sizing and calibrated playback level. Stale hashes, changed arms or levels, swapped material classes, duplicated cells and tampered stimulus binding reject. Quality suite: 231 passed, 1 ignored; downstream QA crate check passes. A new raw-import scorer rejects missing rows and synthetic promotion, records content hashes, and accepts separate rooms sharing one protocol only when each room has its own verified setup and import; the QA-feature all-targets workspace check passes. Operator trials are still absent.",
+      "log_path": "target/qa/quality-battery-multiround-full-20260924.log; target/qa/qa-check-battery-multiround-20260924.log; target/qa/workspace-battery-multiround-20260924.log"
+    },
+    {
+      "id": "q5-g7-real-evidence",
+      "status": "blocked",
+      "command": "evaluate pinned independent model vectors and protocol-bound real listening trials through the G7 gates",
+      "detail": "Pinned reference vectors, domain/tolerances, and sufficient real trials are not in the checkout; proxy and synthetic controls do not promote perceptual or listening status. The raw importer and battery scorer validate ABX detectability or preregistered equivalence, but no release assessment consumes those typed imports. The preference path lacks a frozen choice-based numeric rule and rating import, so ABX success cannot be treated as listening benefit. Operator authentication is also external.",
+      "log_path": ""
+    },
+    {
+      "id": "q5-reference-artifact-intake",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib qa_reference_vectors_distinct_from_generated_controls",
+      "detail": "One fixture test passes: independent vector artifact must be nonempty, match its SHA-256, declare edition/license and differ from generated controls. This is software intake only; no independent vector was supplied.",
+      "log_path": "target/qa/reference-vector-validation-20260923.log"
+    },
+    {
+      "id": "q5-descriptive-evidence-fail-closed",
+      "status": "pass",
+      "command": "cargo test -p roomeq-qa --lib release_gates; cargo test -p roomeq-qa --lib psycho_fast",
+      "detail": "Nine release-gate and four psycho-fast tests pass. Descriptive independent-reference and real-trial records remain unassessed. The test-local approved numeric fixture checks the positive model gate path but is not G7 evidence.",
+      "log_path": "target/qa/release-gate-descriptor-20260923.log; target/qa/psycho-gate-descriptor-20260923.log; target/qa/release-gate-verified-reference-final-20260924.log"
+    },
+    {
+      "id": "q5-perceptual-software-current",
+      "status": "pass",
+      "command": "just qa-roomeq-perceptual",
+      "detail": "Current-checkout filtered software recipe selected 39 optimizer, 5 workflow validation/report, 4 workflow multiseat refusal, and 5 QA scorecard tests; all 53 passed. This does not satisfy independent vectors or real listening outcomes.",
+      "log_path": "target/qa/perceptual-v4-equivalence-power-20260924.log"
+    }
+  ]
+}

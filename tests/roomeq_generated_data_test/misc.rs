@@ -167,6 +167,7 @@ fn test_mixedphase_with_phase_data() {
         provenance: Default::default(),
         recording_config: None,
         ctc: None,
+        reporting: None,
         cea2034_cache: None,
     };
 

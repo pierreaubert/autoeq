@@ -1,5 +1,21 @@
 # Unreleased
 
+- Report the quasi-anechoic `valid_lower_hz` as the raw gate-physics bound
+  (`cycles/gate`) instead of clamping it to the requested band floor, per
+  the Wolfram RA10 oracle; the requested band stays carried on the upper
+  edge with the band/window relationship explicit in the detail grade and
+  `short_gate_band_limit` reason. Band-segmented callers
+  (`assess_direct_capture`) clamp explicitly to their assessment band, so
+  admission behavior is unchanged.
+- Write RoomEQ native outputs as a small JSON plus a sibling assets
+  directory (`dsp.json` + `dsp_files/`, generally `<stem>_files/`): all
+  generated WAV sidecars, extracted measurement curves/CSVs with a
+  `measurements_index.json` map, diagnostic grids, the run manifest, and a
+  `roomeq.log` summary now live in the assets directory and nothing is
+  written to the process working directory. The saved JSON keeps the
+  `DspGraph` schema with DSP data (plugins, metadata, ledger) minus the
+  heavy measurement blobs; the Python viewer re-injects them from the
+  sibling directory and legacy embedded outputs keep loading unchanged.
 - Optimize disjoint measurement support end to end (F05): declared
   `valid_bands_hz` segments are conditioned independently with gap retention,
   the engine optimizes and scores the union of measured segments (gap display

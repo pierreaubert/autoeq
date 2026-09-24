@@ -215,6 +215,18 @@ class MeasuredArtifactTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "electrical safety"):
             inspect(self.path)
 
+    def test_bundle_layout_resolves_manifest_and_sidecar_from_assets_dir(self):
+        self.save()
+        assets = self.path.parent / f"{self.path.stem}_files"
+        assets.mkdir()
+        bundled_wav = assets / "left.wav"
+        bundled_wav.write_bytes(self.wav.read_bytes())
+        self.wav.unlink()
+        (assets / "manifest.json").write_text(json.dumps({
+            "status": "complete", "assets_owned": [str(self.path), str(bundled_wav)],
+        }))
+        self.assertEqual(inspect(self.path)["convolutions_verified"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

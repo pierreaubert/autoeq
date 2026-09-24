@@ -67,10 +67,12 @@ fn test_roomeq_stereo_config() {
     // Verify output file was created
     assert!(output_path.exists(), "Output file was not created");
 
-    // Parse and validate output
-    let json_str = fs::read_to_string(&output_path).expect("Failed to read output file");
+    // Parse and validate output, restoring measurement blobs extracted
+    // into the sibling assets directory.
+    let bundle =
+        roomeq_workflow::load_output_bundle(&output_path).expect("Failed to load output bundle");
     let json: serde_json::Value =
-        serde_json::from_str(&json_str).expect("Failed to parse output JSON");
+        serde_json::to_value(&bundle).expect("Failed to serialize output bundle");
 
     // Verify structure
     assert!(json.get("channels").is_some(), "Missing 'channels' field");

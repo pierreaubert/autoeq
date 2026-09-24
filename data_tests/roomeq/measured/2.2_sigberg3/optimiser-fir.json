@@ -7,8 +7,7 @@
       "taps": 4096,
       "phase": "kirkeby",
       "correct_excess_phase": true,
-      "phase_smoothing": 0.167,
-      "placement": "per_driver"
+      "phase_smoothing": 0.167
     }
   },
   "version": "3.0.0"

@@ -950,6 +950,16 @@ pub fn assess_direct_capture(
             .reason_codes
             .push(String::from("direct_capture_band_limited"));
     }
+    // Segment the validated window to this assessment band. The report
+    // carries the raw gate-physics lower bound; the segmented lower edge is
+    // this band's floor (already raised to the gate bound above), or absent
+    // when no gate proves a bound at all.
+    if facts
+        .valid_lower_bound_hz(policy.cycles_for_valid_band)
+        .is_some()
+    {
+        report.valid_lower_hz = Some(supported[0]);
+    }
     Ok(report)
 }
 

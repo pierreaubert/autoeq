@@ -23,6 +23,7 @@ pub mod listening_stimuli;
 pub mod measurement;
 pub mod multisub;
 pub mod output;
+pub mod output_bundle;
 pub mod pipeline;
 pub mod pruning_audit;
 pub mod room_optimization;
@@ -57,6 +58,12 @@ pub use measurement::{
     load_source_with_individual, load_source_with_individual_with_frequency_samples,
 };
 pub use output::save_dsp_chain;
+pub use output_bundle::{
+    MEASUREMENTS_INDEX_FILENAME, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
+    candidate_asset_dirs, load_output_bundle,
+    manifest_path_for as bundle_manifest_path_for, read_convolution_bytes,
+    resolve_convolution_path, run_log_path_for, save_output_bundle,
+};
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
 pub use room_optimization::{
     CallbackAction, ChannelOptimizationResult, RoomOptimizationCallback, RoomOptimizationProgress,

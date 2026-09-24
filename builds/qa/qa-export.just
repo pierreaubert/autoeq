@@ -119,7 +119,7 @@ qa-export-camilladsp:
 		exit 1
 	fi
 	ROOMEQ_CAMILLADSP_VALIDATE_CMD="$validator --check {config}" \
-		cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/camilladsp/)'
+		{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/camilladsp/)'
 
 [group('qa-export')]
 qa-export-portable:
@@ -128,7 +128,7 @@ qa-export-portable:
 	# Roon and Wavelet have no supported headless importer. These tests parse each
 	# generated artifact independently and reconstruct its frequency response;
 	# optional application validators remain available through ROOMEQ_*_VALIDATE_CMD.
-	cargo nextest run --release -p roomeq-export --lib --no-tests fail \
+	{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail \
 		-E 'test(/equalizer_apo|easyeffects|wavelet|roon/)'
 
 [group('qa-export')]
@@ -160,7 +160,7 @@ qa-export-equalizer-apo:
 		Darwin)
 			runner="$(pwd)/scripts/run-equalizer-apo-utm.sh"
 			ROOMEQ_EQUALIZER_APO_PCM_CMD="bash '$runner' '{config}' '{input}' '{output}'" \
-				cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
+				{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
 			;;
 		MINGW*|MSYS*|CYGWIN*)
 			benchmark="${ROOMEQ_EQUALIZER_APO_BENCHMARK:-C:\\Program Files\\EqualizerAPO\\Benchmark.exe}"
@@ -170,7 +170,7 @@ qa-export-equalizer-apo:
 				exit 1
 			fi
 			ROOMEQ_EQUALIZER_APO_PCM_CMD="powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-equalizer-apo-benchmark.ps1 -Benchmark '$benchmark' -Config '{config}' -InputFile '{input}' -OutputFile '{output}'" \
-				cargo nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
+				{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'
 			;;
 		*)
 			echo "Equalizer APO engine QA requires Windows or macOS with a Windows UTM VM." >&2

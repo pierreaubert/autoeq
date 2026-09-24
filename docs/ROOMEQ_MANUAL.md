@@ -833,6 +833,38 @@ same canonical biquad implementation as runtime DSP. Both formats reject
 convolution, crossovers, routing, or unknown stages instead of silently
 dropping them.
 
+### Output bundle layout
+
+A run writes a small DSP JSON plus a sibling assets directory named after
+the output stem: `--output dsp.json` produces `dsp.json` and `dsp_files/`
+(generally `<stem>_files/`). Nothing is written to the process working
+directory. The assets directory holds every run-generated file:
+
+- convolution FIR WAV sidecars (`ir_file` references stay bare filenames
+  and resolve against the assets directory, with the JSON's parent
+  directory as a legacy fallback);
+- extracted measurement curves as CSV (`<channel>__initial.csv`,
+  `<channel>__final.csv`, `<channel>__eq.csv`, `<channel>__target.csv`,
+  `<channel>__pre_ir.csv`, `<channel>__post_ir.csv`,
+  `deployed__<channel>.csv`, per-driver curves) plus
+  `measurements_index.json` mapping each channel/field to its file;
+- diagnostic grids (`<channel>__waterfall.json`,
+  `<channel>__wavelet.json`, `<channel>__early_late_curves.json`,
+  `<channel>__resonance_decays.json`) when the run produced them;
+- `manifest.json` (run status and exact asset ownership) and `roomeq.log`
+  (run summary lines; detailed logs remain on stderr via `RUST_LOG`).
+
+Explicit `--export-path` / `--verification-bundle` artifacts go where
+requested (an `--export-format` default lands next to the JSON) and are
+tracked in `manifest.json` asset ownership.
+
+The saved JSON keeps the exact `DspGraph` schema with DSP data (plugins,
+metadata, decision ledger) but without the heavy measurement blobs, so it
+stays small. The Python viewer (`scripts/display-roomeq.py`, via
+`scripts/src/loaders.py`) re-injects the external curves from the sibling
+directory automatically, so plots are unchanged. Legacy outputs with
+embedded curves and sidecars next to the JSON keep loading as before.
+
 ### Playback verification (operator captures)
 
 The following flags make capture verification usable from the binary; the same
@@ -845,7 +877,8 @@ instead of comparing mismatched evidence.
   referenced run), `--calibration-id <ID>`, `--stimulus-hash <HASH>`,
   and `--verification-seats <SEATS>` (comma-separated seat IDs). Sources
   come from the graph's channel names; convolution sidecars resolve
-  against the output directory and are hashed with tap counts. Driver-
+  against the sibling assets directory (legacy: the output directory) and
+  are hashed with tap counts. Driver-
   level convolution requires the explicit prediction handoff described below.
   The bundle is always small-signal:
   limiter trials need a separate operator protocol and bundle.

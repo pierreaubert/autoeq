@@ -137,7 +137,11 @@ def inspect(path):
             if abs(seat["improvement_db"]) > 1e-6:
                 raise ValueError("identity fallback retains nonidentity seat metrics")
 
-    manifest = json.loads(path.with_suffix(".manifest.json").read_text())
+    manifest_path = path.parent / f"{path.stem}_files" / "manifest.json"
+    if not manifest_path.is_file():
+        # Legacy layout: manifest next to the native graph.
+        manifest_path = path.with_suffix(".manifest.json")
+    manifest = json.loads(manifest_path.read_text())
     if manifest["status"] != "complete":
         raise ValueError("native graph manifest is incomplete")
     for asset in manifest["assets_owned"]:
@@ -157,7 +161,14 @@ def inspect(path):
                     raise ValueError(f"unbound convolution: {reference}")
                 asset = Path(reference)
                 if not asset.is_absolute():
-                    asset = path.parent / asset
+                    candidates = [
+                        path.parent / asset,
+                        path.parent / f"{path.stem}_files" / asset,
+                    ]
+                    asset = next(
+                        (candidate for candidate in candidates if candidate.is_file()),
+                        candidates[0],
+                    )
                 actual = hashlib.sha256(asset.read_bytes()).hexdigest()
                 if actual != expected:
                     raise ValueError(f"convolution bytes changed: {asset}")

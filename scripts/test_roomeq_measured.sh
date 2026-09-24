@@ -67,6 +67,7 @@ for scenario in "${scenarios[@]}"; do
     done
 done
 
+failures=()
 for scenario in "${scenarios[@]}"; do
     results=()
     for mode in "${modes[@]}"; do
@@ -76,20 +77,46 @@ for scenario in "${scenarios[@]}"; do
         mkdir -p "$mode_out"
         result="$mode_out/dsp-$mode.json"
         echo "=== RoomEQ measured: $scenario / $mode ==="
+        # A rejected (or otherwise failing) mode must not abort the
+        # remaining runs: record it and continue to the end.
+        run_status=0
         RUST_LOG="$LOG" "$BIN" \
             --config "$IN/$scenario/recordings.json" \
             --override-config "$IN/$scenario/optimiser-$mode.json" \
-            --output "$result" 2>&1 | tee "$mode_out/run.log"
-        "$PYTHON" ./scripts/display-roomeq.py "$result" \
-            --output "$mode_out/dsp-$mode.html"
-        "$PYTHON" ./scripts/check_roomeq_measured_result.py "$result" \
-            | tee "$mode_out/audit.jsonl"
+            --output "$result" 2>&1 | tee "$mode_out/run.log" || run_status=${PIPESTATUS[0]}
+        if (( run_status != 0 )); then
+            echo "--- FAILED RoomEQ measured: $scenario / $mode (roomeq exit $run_status) ---" | tee -a "$mode_out/run.log"
+            failures+=("$scenario/$mode: roomeq exit $run_status")
+            continue
+        fi
+        if ! "$PYTHON" ./scripts/display-roomeq.py "$result" \
+            --output "$mode_out/dsp-$mode.html"; then
+            failures+=("$scenario/$mode: display failed")
+            continue
+        fi
+        if ! "$PYTHON" ./scripts/check_roomeq_measured_result.py "$result" \
+            | tee "$mode_out/audit.jsonl"; then
+            failures+=("$scenario/$mode: audit failed")
+            continue
+        fi
         results+=("$result")
     done
     if (( ${#results[@]} > 1 )); then
         # Recheck all earlier FIRs after the final mode has written its assets.
-        "$PYTHON" ./scripts/check_roomeq_measured_result.py "${results[@]}"
-        "$PYTHON" ./scripts/display-roomeq.py --compare "${results[@]}" \
-            --output "$OUT/$scenario/compare.html"
+        if ! "$PYTHON" ./scripts/check_roomeq_measured_result.py "${results[@]}"; then
+            failures+=("$scenario: cross-mode recheck failed")
+        fi
+        if ! "$PYTHON" ./scripts/display-roomeq.py --compare "${results[@]}" \
+            --output "$OUT/$scenario/compare.html"; then
+            failures+=("$scenario: compare failed")
+        fi
     fi
 done
+if (( ${#failures[@]} > 0 )); then
+    echo "=== RoomEQ measured failures (${#failures[@]}) ===" >&2
+    for failure in "${failures[@]}"; do
+        echo "  - $failure" >&2
+    done
+    exit 1
+fi
+echo "=== RoomEQ measured: all runs passed ==="

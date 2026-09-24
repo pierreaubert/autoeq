@@ -29,6 +29,7 @@ use roomeq_workflow::{
     ChannelOptimizationResult, DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomOptimizationResult,
     RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
     load_config_with_frequency_samples, load_merged_config_strict, save_dsp_chain,
+    output_bundle as bundle,
 };
 
 /// Version of the [`RunManifest`] schema written next to every pipeline output.
@@ -222,14 +223,98 @@ struct RunManifest {
     assets_owned: Vec<PathBuf>,
 }
 
-/// Manifest sidecar path for a pipeline output (e.g. `dsp.json` -> `dsp.manifest.json`).
+/// Manifest path for a pipeline output. The manifest lives inside the sibling
+/// assets directory, e.g. `dsp.json` -> `dsp_files/manifest.json`.
 fn manifest_path_for(output_path: &std::path::Path) -> PathBuf {
-    output_path.with_extension("manifest.json")
+    bundle::manifest_path_for(output_path)
+}
+
+/// Run-log path for a pipeline output, e.g. `dsp.json` -> `dsp_files/roomeq.log`.
+fn run_log_path_for(output_path: &std::path::Path) -> PathBuf {
+    bundle::run_log_path_for(output_path)
+}
+
+/// Directory holding convolution sidecars for an input/output graph: the
+/// sibling `<stem>_files` directory when it exists, else the file's parent.
+/// New runs always write sidecars into the sibling directory; this keeps
+/// legacy graphs (sidecars next to the JSON) readable.
+fn source_dir_for_graph(graph_path: &std::path::Path) -> PathBuf {
+    let candidates = bundle::candidate_asset_dirs(graph_path);
+    // Prefer the directory that actually holds a convolution sidecar,
+    // checking the sibling assets directory (new layout) before the parent
+    // (legacy layout); else prefer the assets directory when it exists.
+    for dir in candidates.iter().rev() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                if entry.path().extension().is_some_and(|ext| ext == "wav") {
+                    return dir.clone();
+                }
+            }
+        }
+    }
+    for dir in &candidates {
+        if dir.is_dir() && dir != &candidates[0] {
+            return dir.clone();
+        }
+    }
+    candidates.into_iter().next().unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Every file the run owns: the slim JSON plus all files in the sibling
+/// assets directory (sidecars, curves, manifest, log) plus an optional
+/// external export next to the JSON.
+fn owned_assets(output_path: &std::path::Path, export_path: Option<&std::path::Path>) -> Vec<PathBuf> {
+    let mut owned = vec![output_path.to_path_buf()];
+    let assets_dir = bundle::assets_dir_for(output_path);
+    if let Ok(entries) = std::fs::read_dir(&assets_dir) {
+        let mut names: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
+        names.sort();
+        owned.extend(names);
+    }
+    for required in [manifest_path_for(output_path), run_log_path_for(output_path)] {
+        if !owned.contains(&required) {
+            owned.push(required);
+        }
+    }
+    if let Some(path) = export_path {
+        if !owned.contains(&path.to_path_buf()) {
+            owned.push(path.to_path_buf());
+        }
+    }
+    owned
+}
+
+/// Append run-summary lines to the run log inside the assets directory.
+/// The log is a run summary (not a full stderr capture); detailed logs
+/// remain on stderr via `RUST_LOG`.
+fn append_run_log(output_path: &std::path::Path, lines: &[String]) {
+    let path = run_log_path_for(output_path);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let mut text = String::new();
+    if path.is_file() {
+        text = std::fs::read_to_string(&path).unwrap_or_default();
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+    }
+    for line in lines {
+        text.push_str(line);
+        text.push('\n');
+    }
+    if let Err(error) = std::fs::write(&path, text) {
+        warn!("Failed to write run log to {:?}: {:#}", path, error);
+    }
 }
 
 /// Persist a run manifest; returns the path written.
 fn write_run_manifest(output_path: &std::path::Path, manifest: &RunManifest) -> Result<PathBuf> {
     let path = manifest_path_for(output_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to create manifest directory {:?}", parent))?;
+    }
     let json = serde_json::to_string_pretty(manifest)?;
     std::fs::write(&path, json)
         .with_context(|| format!("Failed to write run manifest to {:?}", path))?;
@@ -564,9 +649,7 @@ pub fn run_command() -> Result<()> {
         let export_path = args
             .export_path
             .unwrap_or_else(|| convert_path.with_extension(format.default_extension()));
-        let source_dir = convert_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
+        let source_dir = source_dir_for_graph(convert_path);
 
         info!("Converting {:?} to {:?} format", convert_path, format);
         export_dsp_chain_with_convolution_sidecars(
@@ -574,7 +657,7 @@ pub fn run_command() -> Result<()> {
             format,
             &export_path,
             args.sample_rate,
-            source_dir,
+            &source_dir,
         )?;
         info!("Exported to {:?}", export_path);
         return Ok(());
@@ -637,7 +720,7 @@ pub fn run_command() -> Result<()> {
                         .collect(),
                     sample_rate_hz: args.sample_rate,
                 },
-                graph_path.parent().unwrap_or(std::path::Path::new(".")),
+                &source_dir_for_graph(graph_path),
                 args.verification_bundle
                     .as_deref()
                     .ok_or_else(|| anyhow!("Missing verification bundle directory"))?,
@@ -811,13 +894,20 @@ fn execute_optimization(
 
     info!("Found {} speakers", room_config.speakers.len());
 
+    // All generated files (WAV sidecars, curves/CSVs, validation bundle,
+    // manifest, log) go into the sibling `<stem>_files` directory; nothing
+    // is written to the process working directory.
+    let assets_dir = bundle::assets_dir_for(&output_path);
+    std::fs::create_dir_all(&assets_dir)
+        .with_context(|| format!("Failed to create assets directory {:?}", assets_dir))?;
+
     // Run optimization using the library
     let observer = create_progress_observer();
-    let out_dir = output_path.parent();
+    let assets_dir_buf = assets_dir.clone();
     let result = RoomPipeline::new(RoomPipelineRequest {
         config: &room_config,
         sample_rate,
-        output_dir: out_dir,
+        output_dir: Some(&assets_dir_buf),
         probe_arrival_overrides: None,
     })
     .with_frequency_samples(freq_samples)
@@ -827,14 +917,26 @@ fn execute_optimization(
 
     // Log summary: averages plus worst-channel, primary-seat and
     // objective/confidence evidence.
-    for line in summarize_run(&result, &room_config, sample_rate) {
+    let summary_lines = summarize_run(&result, &room_config, sample_rate);
+    for line in &summary_lines {
         info!("{}", line);
     }
 
-    // Save output
-    info!("Saving DSP chain to {:?}", output_path);
+    // Save output: extract measurement blobs to the assets directory first
+    // so the ledger binds the exact slim bytes being saved, then persist
+    // the small JSON next to it.
+    info!(
+        "Saving DSP chain to {:?} (assets in {:?})",
+        output_path, assets_dir
+    );
 
     let mut dsp_output = result.to_dsp_chain_output();
+    let extracted = bundle::extract_measurements_to_assets(&mut dsp_output, &assets_dir);
+    info!(
+        "Extracted {} measurement files to {:?}",
+        extracted.files.len(),
+        assets_dir
+    );
     // C08: reconcile provisional decision records against the exact bytes
     // being saved and attach the finalized, graph-bound ledger. A run
     // with no applicable decisions ships an explicitly empty ledger;
@@ -858,9 +960,7 @@ fn execute_optimization(
     // C09: verification bundle for the finalized, saved graph. Operator
     // identities were pre-validated before the optimization budget ran.
     if let Some(bundle_dir) = &bundle_options.dest_dir {
-        let source_dir = output_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
+        let source_dir = assets_dir.clone();
         let seats: Vec<String> = bundle_options
             .seats
             .as_deref()
@@ -878,11 +978,19 @@ fn execute_optimization(
                 seats,
                 sample_rate_hz: sample_rate,
             },
-            source_dir,
+            &source_dir,
             bundle_dir,
         )?;
         info!("Wrote verification bundle to {:?}", bundle_path);
     }
+
+    append_run_log(
+        &output_path,
+        &summary_lines
+            .iter()
+            .map(|line| format!("summary: {line}"))
+            .collect::<Vec<_>>(),
+    );
 
     if let Err(error) = require_playback_outcome(
         result
@@ -891,6 +999,7 @@ fn execute_optimization(
             .as_ref()
             .map(|report| report.outcome),
     ) {
+        append_run_log(&output_path, &[format!("status: rejected: {error:#}")]);
         persist_run_manifest_best_effort(
             &output_path,
             &RunManifest {
@@ -902,7 +1011,7 @@ fn execute_optimization(
                 export_path,
                 export_status: Some("not_attempted".to_string()),
                 export_error: Some(error.to_string()),
-                assets_owned: vec![output_path.clone(), manifest_path_for(&output_path)],
+                assets_owned: owned_assets(&output_path, None),
             },
         );
         return Err(error).with_context(|| {
@@ -917,9 +1026,7 @@ fn execute_optimization(
     // valid whatever happens below: it is never deleted on export failure.
     if let Some(format) = export_format {
         let path = export_path.unwrap_or_else(|| format.default_export_path(&output_path));
-        let source_dir = output_path
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
+        let source_dir = assets_dir.clone();
         info!("Exporting DSP chain to {:?} ({:?})", path, format);
         // Pre-check support against the realized graph first: the exporter
         // cannot recover support already lost in measurement alignment, so a
@@ -930,7 +1037,7 @@ fn execute_optimization(
                 format,
                 &path,
                 sample_rate,
-                source_dir,
+                &source_dir,
             ),
             Err(error) => Err(error.context(format!(
                 "external export format {format:?} is not supported by the realized DSP graph"
@@ -939,6 +1046,7 @@ fn execute_optimization(
         match export_outcome {
             Ok(()) => {
                 info!("Exported to {:?}", path);
+                append_run_log(&output_path, &[format!("export: {format:?} saved to {}", path.display())]);
                 persist_run_manifest_best_effort(
                     &output_path,
                     &RunManifest {
@@ -950,16 +1058,13 @@ fn execute_optimization(
                         export_path: Some(path.clone()),
                         export_status: Some("saved".to_string()),
                         export_error: None,
-                        assets_owned: vec![
-                            output_path.clone(),
-                            manifest_path_for(&output_path),
-                            path,
-                        ],
+                        assets_owned: owned_assets(&output_path, Some(&path)),
                     },
                 );
             }
             Err(error) => {
                 let diagnostic = partial_export_diagnostic(&output_path, format, &path, &error);
+                append_run_log(&output_path, &[format!("export: {format:?} failed: {error:#}")]);
                 // Record the partial run: the native graph is owned and valid,
                 // the export path is deliberately absent from asset ownership.
                 persist_run_manifest_best_effort(
@@ -973,7 +1078,7 @@ fn execute_optimization(
                         export_path: Some(path),
                         export_status: Some("failed".to_string()),
                         export_error: Some(format!("{error:#}")),
-                        assets_owned: vec![output_path.clone(), manifest_path_for(&output_path)],
+                        assets_owned: owned_assets(&output_path, None),
                     },
                 );
                 warn!("{}", diagnostic);
@@ -981,6 +1086,7 @@ fn execute_optimization(
             }
         }
     } else {
+        append_run_log(&output_path, &["status: complete".to_string()]);
         persist_run_manifest_best_effort(
             &output_path,
             &RunManifest {
@@ -992,7 +1098,7 @@ fn execute_optimization(
                 export_path: None,
                 export_status: None,
                 export_error: None,
-                assets_owned: vec![output_path.clone(), manifest_path_for(&output_path)],
+                assets_owned: owned_assets(&output_path, None),
             },
         );
     }
@@ -1879,9 +1985,12 @@ mod tests {
     }
 
     #[test]
-    fn manifest_path_sits_next_to_native_graph() {
+    fn manifest_path_sits_inside_sibling_assets_dir() {
         let path = manifest_path_for(std::path::Path::new("/tmp/run/dsp.json"));
-        assert_eq!(path, std::path::PathBuf::from("/tmp/run/dsp.manifest.json"));
+        assert_eq!(
+            path,
+            std::path::PathBuf::from("/tmp/run/dsp_files/manifest.json")
+        );
     }
 
     #[test]
@@ -1948,6 +2057,47 @@ mod tests {
             }),
             "failed export must not be owned"
         );
+    }
+
+    #[test]
+    fn owned_assets_always_cover_manifest_and_log() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = dir.path().join("dsp.json");
+        std::fs::write(&output, "{}").expect("write native graph");
+        let assets = roomeq_workflow::assets_dir_for(&output);
+        std::fs::create_dir_all(&assets).expect("create assets dir");
+        std::fs::write(assets.join("left_fir_48000hz.wav"), b"waves").expect("write sidecar");
+        let owned = super::owned_assets(&output, None);
+        assert!(owned.contains(&output), "slim JSON must be owned");
+        assert!(
+            owned.contains(&super::manifest_path_for(&output)),
+            "manifest must be owned even before it is written"
+        );
+        assert!(
+            owned.contains(&super::run_log_path_for(&output)),
+            "run log must be owned even before it is written"
+        );
+        assert!(
+            owned.contains(&assets.join("left_fir_48000hz.wav")),
+            "sidecars in the assets directory must be owned"
+        );
+    }
+
+    #[test]
+    fn source_dir_prefers_assets_dir_with_sidecars() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = dir.path().join("dsp.json");
+        // Legacy layout: sidecar next to the JSON.
+        std::fs::write(output.parent().unwrap().join("left.wav"), b"legacy").unwrap();
+        assert_eq!(
+            super::source_dir_for_graph(&output),
+            output.parent().unwrap().to_path_buf()
+        );
+        // New layout: sidecar in the sibling assets directory wins.
+        let assets = roomeq_workflow::assets_dir_for(&output);
+        std::fs::create_dir_all(&assets).unwrap();
+        std::fs::write(assets.join("left.wav"), b"bundle").unwrap();
+        assert_eq!(super::source_dir_for_graph(&output), assets);
     }
 
     #[test]

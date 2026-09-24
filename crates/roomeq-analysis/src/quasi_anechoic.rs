@@ -205,8 +205,13 @@ pub fn validate_quasi_anechoic(
         reasons.push(String::from("invalid_requested_band"));
     }
     let valid_upper_hz = requested_band.map(|band| band[1]);
-    let valid_lower_hz =
-        gate_lower_hz.map(|lower| requested_band.map_or(lower, |band| lower.max(band[0])));
+    // The reported lower edge is the raw gate-physics bound (`cycles/gate`).
+    // The requested band is carried only on the upper edge; the band/window
+    // relationship stays explicit in `band_within_window`, the detail grade,
+    // and the `short_gate_band_limit` reason. Callers that need a
+    // band-segmented window (e.g. direct-capture assessment) clamp
+    // explicitly against their own assessment band.
+    let valid_lower_hz = gate_lower_hz;
 
     let has_direct_capture = matches!(
         input.capture_kind,
@@ -340,7 +345,10 @@ mod tests {
         let report = validate_quasi_anechoic(&input, &QuasiAnechoicPolicy::v1()).unwrap();
         assert_eq!(report.detail, DetailVerdict::DetailEligible);
         assert_eq!(report.phase_source, PhaseSourceVerdict::Supported);
-        assert_eq!(report.valid_lower_hz, Some(1200.0));
+        // The reported lower edge is the raw gate-physics bound; the
+        // requested band is carried on the upper edge only (Wolfram RA10).
+        assert_eq!(report.valid_lower_hz, Some(1000.0));
+        assert_eq!(report.valid_upper_hz, Some(8000.0));
     }
 
     #[test]
@@ -404,9 +412,11 @@ mod tests {
         let mut input = gated_input();
         input.requested_band_hz = Some([1200.0, 8000.0]);
         let report = validate_quasi_anechoic(&input, &QuasiAnechoicPolicy::v1()).unwrap();
+        // Gate labels follow the validated gate-physics window [1000, 8000],
+        // not the requested band floor.
+        assert_eq!(report.gate_label(1000.0), GateLabel::ReflectionFree);
         assert_eq!(report.gate_label(1200.0), GateLabel::ReflectionFree);
         assert_eq!(report.gate_label(8000.0), GateLabel::ReflectionFree);
-        assert_eq!(report.gate_label(1000.0), GateLabel::ReflectionContaminated);
         assert_eq!(report.gate_label(8000.1), GateLabel::ReflectionContaminated);
     }
 

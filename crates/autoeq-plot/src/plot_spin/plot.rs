@@ -1,182 +1,126 @@
 use super::consts::CEA2034_CURVE_NAMES;
-use super::create::create_cea2034_combined_traces;
-use super::create::create_cea2034_traces;
-use super::create::create_cea2034_with_eq_combined_traces;
-use super::create::create_cea2034_with_eq_traces;
+use super::create::{
+    create_cea2034_combined_series, create_cea2034_series,
+    create_cea2034_with_eq_combined_series, create_cea2034_with_eq_series,
+};
 use super::misc::shorten_curve_name;
 use crate::filter_color::filter_color;
-use crate::ref_lines::make_ref_lines;
+use crate::ref_lines::make_ref_series;
 use crate::trend_lines::{
     calculate_tonal_balance, create_regression_trace, generate_regression_line,
 };
+use autoeq_report_wasm::{AxisSpec, Figure, XScale};
 use ndarray::Array1;
-use plotly::common::AxisSide;
-use plotly::layout::{AxisType, GridPattern, LayoutGrid, RowOrder};
-use plotly::{Layout, Plot};
 use std::collections::HashMap;
 
-/// Create a detailed CEA2034 spinorama plot with multiple subplots.
+fn log_freq_axis() -> AxisSpec {
+    AxisSpec {
+        label: "Frequency (Hz)".to_string(),
+        scale: XScale::Log,
+        min: Some(20.0),
+        max: Some(20000.0),
+    }
+}
+
+fn spl_axis(lo: f64, hi: f64) -> AxisSpec {
+    AxisSpec {
+        label: "SPL (dB)".to_string(),
+        scale: XScale::Linear,
+        min: Some(lo),
+        max: Some(hi),
+    }
+}
+
+const DETAIL_TITLES: [&str; 4] = [
+    "On Axis",
+    "Listening Window",
+    "Early Reflections",
+    "Sound Power",
+];
+
+const TONAL_TITLES: [&str; 4] = [
+    "On Axis Tonal Balance",
+    "Listening Window Tonal Balance",
+    "Early Reflections Tonal Balance",
+    "Sound Power Tonal Balance",
+];
+
+/// y ranges per detail/tonal panel (as before: ±10, ±10, -15..5, -15..5).
+fn detail_y_range(panel: usize) -> (f64, f64) {
+    match panel {
+        0 | 1 => (-10.0, 10.0),
+        _ => (-15.0, 5.0),
+    }
+}
+
+/// Detailed CEA2034 spinorama figures (one per panel; previously a 2x2 grid).
 ///
 /// Shows On Axis, Listening Window, Early Reflections, and Sound Power curves,
-/// optionally with EQ-applied variants overlaid.
+/// optionally with EQ-applied variants overlaid, plus ±1 dB references.
 pub fn plot_spin_details(
     cea2034_curves: Option<&HashMap<String, crate::Curve>>,
     eq_response: Option<&Array1<f64>>,
-) -> plotly::Plot {
-    let mut plot = Plot::new();
-    // Add each CEA2034 curves if provided
-    let x_axis1_title = "On Axis".to_string();
-    let x_axis2_title = "Listening Window".to_string();
-    let x_axis3_title = "Early Reflections".to_string();
-    let x_axis4_title = "Sound Power".to_string();
+) -> Vec<Figure> {
+    let mut panels: [Vec<autoeq_report_wasm::Series>; 4] = Default::default();
     if let Some(curves) = cea2034_curves {
-        let cea2034_traces = create_cea2034_traces(curves);
-        for trace in cea2034_traces {
-            plot.add_trace(Box::new(trace));
+        for (panel, s) in create_cea2034_series(curves) {
+            panels[panel].push(s);
         }
-        // Also plot the EQ-applied variants if provided
         if let Some(eq_resp) = eq_response {
-            let cea2034_eq_traces = create_cea2034_with_eq_traces(curves, eq_resp);
-            for trace in cea2034_eq_traces {
-                plot.add_trace(Box::new(trace));
+            for (panel, s) in create_cea2034_with_eq_series(curves, eq_resp) {
+                panels[panel].push(s);
             }
         }
     }
+    // ±1 dB references on the first two panels (as before).
+    let refs = make_ref_series();
+    panels[0].extend(refs.clone());
+    panels[1].extend(refs);
 
-    // Add reference lines y=1 and y=-1 from x=100 to x=10000 (black) on both subplots
-    for t in make_ref_lines("x", "y") {
-        plot.add_trace(Box::new(t));
-    }
-    for t in make_ref_lines("x2", "y2") {
-        plot.add_trace(Box::new(t));
-    }
-
-    // Configure layout with subplots
-    let layout = Layout::new()
-        .grid(
-            LayoutGrid::new()
-                .rows(2)
-                .columns(2)
-                .pattern(GridPattern::Independent)
-                .row_order(RowOrder::BottomToTop),
-        )
-        .width(1024)
-        .height(600)
-        .x_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis1_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.0, 0.45]),
-        )
-        .y_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-10.0, 10.0])
-                .domain(&[0.55, 1.0]),
-        )
-        .x_axis2(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis2_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.55, 1.0]),
-        )
-        .y_axis2(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-10.0, 10.0])
-                .domain(&[0.55, 1.0]),
-        )
-        .x_axis3(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis3_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.0, 0.45]),
-        )
-        .y_axis3(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-15.0, 5.0])
-                .domain(&[0.0, 0.45]),
-        )
-        .x_axis4(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis4_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.55, 1.0]),
-        )
-        .y_axis4(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-15.0, 5.0])
-                .domain(&[0.0, 0.45]),
-        );
-
-    plot.set_layout(layout);
-
-    plot
+    DETAIL_TITLES
+        .iter()
+        .enumerate()
+        .map(|(i, title)| {
+            let (lo, hi) = detail_y_range(i);
+            Figure {
+                title: (*title).to_string(),
+                x: log_freq_axis(),
+                y: spl_axis(lo, hi),
+                y2: None,
+                series: std::mem::take(&mut panels[i]),
+                hlines: vec![],
+                vlines: vec![],
+                xranges: vec![],
+                annotations: vec![],
+                legend: true,
+            }
+        })
+        .collect()
 }
 
-/// Create a tonal balance plot showing smoothed CEA2034 curves.
-///
-/// Shows the tonal balance (1/2 octave smoothed) for On Axis, Listening Window,
-/// Early Reflections, and Sound Power measurements.
+/// Tonal-balance figures (regression slopes per panel, with and without EQ).
 pub fn plot_spin_tonal(
     cea2034_curves: Option<&HashMap<String, crate::Curve>>,
     eq_response: Option<&Array1<f64>>,
-) -> plotly::Plot {
-    let mut plot = Plot::new();
-    // Add each CEA2034 curves if provided
-    let x_axis1_title = "On Axis Tonal Balance".to_string();
-    let x_axis2_title = "Listening Window Tonal Balance".to_string();
-    let x_axis3_title = "Early Reflections Tonal Balance".to_string();
-    let x_axis4_title = "Sound Power Tonal Balance".to_string();
+) -> Vec<Figure> {
+    let mut panels: [Vec<autoeq_report_wasm::Series>; 4] = Default::default();
     if let Some(curves) = cea2034_curves {
-        // Add regression lines for original curves (tonal balance)
         for (i, curve_name) in CEA2034_CURVE_NAMES.iter().enumerate() {
-            let x_axis = if i == 0 {
-                "x".to_string()
-            } else {
-                format!("x{}", i + 1)
-            };
-            let y_axis = if i == 0 {
-                "y".to_string()
-            } else {
-                format!("y{}", i + 1)
-            };
             if let Some(curve) = curves.get(*curve_name)
                 && let Some((slope, intercept)) =
                     calculate_tonal_balance(&curve.freq, &curve.spl, 100.0, 10000.0)
             {
                 let regression_line = generate_regression_line(slope, intercept, &curve.freq);
-                let trace = create_regression_trace(
+                panels[i].push(create_regression_trace(
                     &curve.freq,
                     &regression_line,
                     &format!("{} {:.2} dB/oct", shorten_curve_name(curve_name), slope),
                     filter_color(i),
-                    Some(&x_axis),
-                    Some(&y_axis),
-                );
-                plot.add_trace(Box::new(trace));
+                ));
             }
         }
-
-        // Add regression lines for EQ-applied curves (tonal balance)
         if let Some(eq_resp) = eq_response {
             for (i, curve_name) in CEA2034_CURVE_NAMES.iter().enumerate() {
-                let x_axis = if i == 0 {
-                    "x".to_string()
-                } else {
-                    format!("x{}", i + 1)
-                };
-                let y_axis = if i == 0 {
-                    "y".to_string()
-                } else {
-                    format!("y{}", i + 1)
-                };
                 if let Some(curve) = curves.get(*curve_name) {
                     let eq_applied = &curve.spl + eq_resp;
                     if let Some((slope, intercept)) =
@@ -184,7 +128,7 @@ pub fn plot_spin_tonal(
                     {
                         let regression_line =
                             generate_regression_line(slope, intercept, &curve.freq);
-                        let trace = create_regression_trace(
+                        panels[i].push(create_regression_trace(
                             &curve.freq,
                             &regression_line,
                             &format!(
@@ -193,176 +137,76 @@ pub fn plot_spin_tonal(
                                 slope
                             ),
                             filter_color(i + 4),
-                            Some(&x_axis),
-                            Some(&y_axis),
-                        );
-                        plot.add_trace(Box::new(trace));
+                        ));
                     }
                 }
             }
         }
     }
 
-    // Configure layout with subplots
-    let layout = Layout::new()
-        .grid(
-            LayoutGrid::new()
-                .rows(2)
-                .columns(2)
-                .pattern(GridPattern::Independent)
-                .row_order(RowOrder::BottomToTop),
-        )
-        .width(1024)
-        .height(600)
-        .x_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis1_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.0, 0.45]),
-        )
-        .y_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-10.0, 10.0])
-                .domain(&[0.55, 1.0]),
-        )
-        .x_axis2(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis2_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.55, 1.0]),
-        )
-        .y_axis2(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-10.0, 10.0])
-                .domain(&[0.55, 1.0]),
-        )
-        .x_axis3(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis3_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.0, 0.45]),
-        )
-        .y_axis3(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-15.0, 5.0])
-                .domain(&[0.0, 0.45]),
-        )
-        .x_axis4(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(x_axis4_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.55, 1.0]),
-        )
-        .y_axis4(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-15.0, 5.0])
-                .domain(&[0.0, 0.45]),
-        );
-
-    plot.set_layout(layout);
-
-    plot
+    TONAL_TITLES
+        .iter()
+        .enumerate()
+        .map(|(i, title)| {
+            let (lo, hi) = detail_y_range(i);
+            Figure {
+                title: (*title).to_string(),
+                x: log_freq_axis(),
+                y: spl_axis(lo, hi),
+                y2: None,
+                series: std::mem::take(&mut panels[i]),
+                hlines: vec![],
+                vlines: vec![],
+                xranges: vec![],
+                annotations: vec![],
+                legend: true,
+            }
+        })
+        .collect()
 }
 
-/// Create a CEA2034 spinorama overview plot.
+/// CEA2034 spinorama overview figures (response + DI on the secondary axis).
 ///
-/// Shows directivity indices (ERDI, SPDI) and the main CEA2034 curves
-/// with optional EQ response overlaid.
+/// Shows directivity indices (ERDI, SPDI) overlaid on the main CEA2034 curves,
+/// with and without the EQ response.
 pub fn plot_spin(
     cea2034_curves: Option<&HashMap<String, crate::Curve>>,
     eq_response: Option<&Array1<f64>>,
-) -> plotly::Plot {
-    let mut plot = Plot::new();
-
-    // ----------------------------------------------------------------------
-    // Add CEA2034 if provided with and without EQ
-    // ----------------------------------------------------------------------
-    let x_axis1_title = "CEA2034".to_string();
-    let x_axis3_title = "CEA2034 + EQ".to_string();
+) -> Vec<Figure> {
+    let di_axis = || AxisSpec {
+        label: "DI (dB)".to_string(),
+        scale: XScale::Linear,
+        min: Some(-5.0),
+        max: Some(45.0),
+    };
+    let mut figs = Vec::new();
     if let Some(curves) = cea2034_curves {
-        let cea2034_traces = create_cea2034_combined_traces(curves, "x", "y", "y2");
-        for trace in cea2034_traces {
-            plot.add_trace(Box::new(trace));
-        }
-
+        figs.push(Figure {
+            title: "CEA2034".to_string(),
+            x: log_freq_axis(),
+            y: spl_axis(-40.0, 10.0),
+            y2: Some(di_axis()),
+            series: create_cea2034_combined_series(curves),
+            hlines: vec![],
+            vlines: vec![],
+            xranges: vec![],
+            annotations: vec![],
+            legend: true,
+        });
         if let Some(eq_resp) = eq_response {
-            let cea2034_traces =
-                create_cea2034_with_eq_combined_traces(curves, eq_resp, "x3", "y3", "y4");
-            for trace in cea2034_traces {
-                plot.add_trace(Box::new(trace));
-            }
+            figs.push(Figure {
+                title: "CEA2034 + EQ".to_string(),
+                x: log_freq_axis(),
+                y: spl_axis(-40.0, 10.0),
+                y2: Some(di_axis()),
+                series: create_cea2034_with_eq_combined_series(curves, eq_resp),
+                hlines: vec![],
+                vlines: vec![],
+                xranges: vec![],
+                annotations: vec![],
+                legend: true,
+            });
         }
     }
-
-    // Configure layout with subplots
-    let layout = Layout::new()
-        .grid(
-            LayoutGrid::new()
-                .rows(1)
-                .columns(2)
-                .pattern(GridPattern::Independent),
-        )
-        .width(1024)
-        .height(450)
-        // cea2034
-        .x_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(&x_axis1_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0., 0.4]),
-        )
-        .y_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .dtick(5.0)
-                .range(vec![-40.0, 10.0]),
-        )
-        .y_axis2(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(
-                    "DI (dB)                      ⌃",
-                ))
-                .range(vec![-5.0, 45.0])
-                .tick_values(vec![-5.0, 0.0, 5.0, 10.0, 15.0])
-                .overlaying("y")
-                .side(AxisSide::Right),
-        )
-        // cea2034 with eq
-        .x_axis3(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(&x_axis3_title))
-                .type_(AxisType::Log)
-                .range(vec![1.301, 4.301])
-                .domain(&[0.55, 0.95]),
-        )
-        .y_axis3(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .dtick(5.0)
-                .range(vec![-40.0, 10.0])
-                .anchor("x3"),
-        )
-        .y_axis4(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text(
-                    "DI (dB)                      ⌃",
-                ))
-                .range(vec![-5.0, 45.0])
-                .tick_values(vec![-5.0, 0.0, 5.0, 10.0, 15.0])
-                .anchor("x3")
-                .overlaying("y3")
-                .side(AxisSide::Right),
-        );
-    plot.set_layout(layout);
-
-    plot
+    figs
 }

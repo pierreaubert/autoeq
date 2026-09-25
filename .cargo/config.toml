@@ -8,6 +8,18 @@ MACOSX_DEPLOYMENT_TARGET = "15.0"
 
 [build]
 rustflags = ["-Ctarget-cpu=native"]
+
+# wasm32: the workspace-wide `-Ctarget-cpu=native` resolves to a host CPU
+# whose features LLVM ignores on wasm, silently dropping the target's default
+# feature set (notably `reference-types`). Without it, wasm-bindgen omits its
+# externref runtime and its CLI refuses the module ("failed to find the
+# `__wbindgen_externref_table_dealloc` function"). Re-enable the standard
+# wasm feature set explicitly for this target.
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C",
+  "target-feature=+bulk-memory,+mutable-globals,+reference-types,+sign-ext",
+]
 # jobs intentionally unset: cargo defaults to the logical CPU count
 # (14 on macOS, 64 on the Linux EPYC), which is what we want per host.
 # Disabled: sccache is not installed in this environment; re-enable where

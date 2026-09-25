@@ -16,10 +16,8 @@
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 use anyhow::{Context, Result, anyhow};
-#[cfg(feature = "plotly")]
 use autoeq_plot as plot;
 use clap::Parser;
-#[cfg(feature = "plotly")]
 use log::warn;
 use log::{error, info};
 use std::path::PathBuf;
@@ -254,7 +252,6 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         path
     });
 
-    #[cfg(feature = "plotly")]
     {
         info!("📊 Generating plots: {}", output_path.display());
         if let Err(e) = plot::plot_results(
@@ -265,20 +262,11 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             &deviation_curve,
             &spin_data,
             &output_path,
-        )
-        .await
-        {
+        ) {
             warn!("Failed to generate plots: {}", e);
         } else {
             info!("✅ Plots generated successfully");
         }
-    }
-    #[cfg(not(feature = "plotly"))]
-    {
-        info!(
-            "📊 Plot generation disabled (rebuild with --features plotly to enable). Output base: {}",
-            output_path.display()
-        );
     }
 
     // The shipped preset serializes frequencies to integer Hz; surface
@@ -432,7 +420,6 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
         path
     });
 
-    #[cfg(feature = "plotly")]
     {
         info!("📊 Generating plots: {}", output_path.display());
         if let Err(e) = autoeq_plot::plot_drivers_results(
@@ -447,14 +434,6 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
         } else {
             info!("✅ Plots generated successfully");
         }
-    }
-    #[cfg(not(feature = "plotly"))]
-    {
-        let _ = (&drivers_data, gains, xover_freqs, &delays, args.sample_rate);
-        info!(
-            "📊 Plot generation disabled (rebuild with --features plotly to enable). Output base: {}",
-            output_path.display()
-        );
     }
 
     // QA mode output

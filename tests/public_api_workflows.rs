@@ -23,16 +23,6 @@ use autoeq::workflow::{
 use autoeq::x2peq::{peq2x, x2peq};
 use ndarray::Array1;
 
-/// Run the one `async` public function we exercise on a Tokio runtime.
-///
-/// `plot_results` is normally synchronous for the `plotly` feature, but the
-/// optional `plotly_static` PNG-export path needs a Tokio reactor, so we use a
-/// real runtime here instead of a hand-rolled executor.
-#[cfg(feature = "plotly")]
-fn block_on<F: std::future::Future>(fut: F) -> F::Output {
-    tokio::runtime::Runtime::new().unwrap().block_on(fut)
-}
-
 /// Build a headphone-style measurement with a mild bass bump.
 fn synthetic_headphone_curve() -> Curve {
     let freq = Array1::from_vec(vec![
@@ -473,7 +463,6 @@ fn test_optimize_multisub_happy_path() {
     );
 }
 
-#[cfg(feature = "plotly")]
 #[test]
 fn test_plot_results_writes_html() {
     use std::collections::HashMap;
@@ -519,7 +508,7 @@ fn test_plot_results_writes_html() {
 
     let cea2034_curves: Option<HashMap<String, Curve>> = None;
 
-    let result = block_on(autoeq::plot::plot_results(
+    let result = autoeq::plot::plot_results(
         &autoeq::plot::PlotConfig::from(&args),
         &optimized_params,
         &input,
@@ -527,7 +516,7 @@ fn test_plot_results_writes_html() {
         &deviation,
         &cea2034_curves,
         &output_path,
-    ));
+    );
 
     assert!(result.is_ok(), "plot_results failed: {:?}", result.err());
     let html_path = output_path.with_extension("html");
@@ -541,12 +530,8 @@ fn test_plot_results_writes_html() {
         html.contains("IIR Filter Optimization Results"),
         "HTML report should contain the expected title"
     );
-
-    #[cfg(feature = "plotly_static")]
-    {
-        let png_path = tmp.path().join("report-filters.png");
-        let png = std::fs::read(&png_path)
-            .unwrap_or_else(|error| panic!("static PNG missing at {png_path:?}: {error}"));
-        assert!(png.starts_with(b"\x89PNG\r\n\x1a\n"));
-    }
+    assert!(
+        html.contains("autoeq-report-data-v1"),
+        "HTML report should embed a versioned WASM payload"
+    );
 }

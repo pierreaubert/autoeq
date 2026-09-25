@@ -33,6 +33,24 @@ prod-autoeq:
 roomeq:
 	{{cargo}} build --release --features cli --bin roomeq
 
+# Rebuild the report-shell WASM bundles into crates/autoeq-report-wasm/dist/.
+# 2D canvas bundle builds on stable; the GPUI viewer needs nightly
+# (gpui-web's wasm_thread/parking_lot-nightly deps). Requires wasm-bindgen
+# 0.2.128 on PATH (or set WANDBIN). Reports embed dist/ at generation time.
+[group('build')]
+report-dist:
+	cargo build --release --target wasm32-unknown-unknown -p autoeq-report-wasm
+	${WANDBIN:-wasm-bindgen} --target web --out-name report2d --out-dir crates/autoeq-report-wasm/pkg2d target/wasm32-unknown-unknown/release/autoeq_report_wasm.wasm
+	cp crates/autoeq-report-wasm/pkg2d/report2d.js crates/autoeq-report-wasm/dist/report2d.js
+	cp crates/autoeq-report-wasm/pkg2d/report2d_bg.wasm crates/autoeq-report-wasm/dist/report2d.wasm
+
+[group('build')]
+report-dist-gpui:
+	cargo +nightly build --release --target wasm32-unknown-unknown -p autoeq-report-gpui
+	${WANDBIN:-wasm-bindgen} --target web --out-name reportgpui --out-dir crates/autoeq-report-gpui/pkg target/wasm32-unknown-unknown/release/autoeq_report_gpui.wasm
+	cp crates/autoeq-report-gpui/pkg/reportgpui.js crates/autoeq-report-wasm/dist/reportgpui.js
+	cp crates/autoeq-report-gpui/pkg/reportgpui_bg.wasm crates/autoeq-report-wasm/dist/reportgpui.wasm
+
 [group('build')]
 prod-roomeq: roomeq
 	{{cargo}} build --release --features qa --bin roomeq-qa-quality

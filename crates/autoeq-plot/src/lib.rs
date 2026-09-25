@@ -1,4 +1,4 @@
-//! Plotly visualizations and report generation for AutoEQ.
+//! HTML+WASM visualizations and report generation for AutoEQ.
 //!
 //! Copyright (C) 2025-2026 Pierre Aubert pierre(at)spinorama(dot)org
 //!
@@ -44,14 +44,12 @@ mod plot_filters;
 mod plot_results;
 mod plot_spin;
 mod ref_lines;
-#[cfg(feature = "plotly_static")]
-mod static_export;
 mod trend_lines;
 
 pub use config::PlotConfig;
 pub use filter_color::filter_color;
-pub use plot_drivers::{plot_drivers, plot_drivers_results};
-pub use plot_filters::plot_filters;
-pub use plot_results::plot_results;
+pub use plot_drivers::{plot_driver_figures, plot_drivers_results};
+pub use plot_filters::plot_filter_figures;
+pub use plot_results::{plot_compute, plot_results};
 pub use plot_spin::{plot_spin, plot_spin_details, plot_spin_tonal};
 pub use trend_lines::*;

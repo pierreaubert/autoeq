@@ -1,5 +1,18 @@
 # Unreleased
 
+- Replace Plotly report rendering with the HTML-shell + WebAssembly plot
+  stack (migration plan `reviews/WASM_PLOT_MIGRATION_PLAN.md`, step 1):
+  `crates/autoeq-plot` and `scripts/src/figures.py` emit versioned
+  render-only section JSON (`autoeq-report-data-v1`, see
+  `crates/autoeq-report-wasm/SCHEMA.md`) instead of Plotly figures; both the
+  Rust CLI and `scripts/display-roomeq.py` assemble self-contained HTML
+  reports (2D canvas WASM renderer embedded, no CDN, no Plotly install).
+  Browsers with WebGPU get a GPUI viewer toggle (`autoeq-report-gpui`,
+  nightly build). Plotly dropdowns became static default-smoothed curves,
+  subplot grids became one section per panel, and Sankey hover text was
+  dropped (the schema has no hover channel; driver alignment already lives
+  in the per-driver Sub DSP Chain tables). No `plotly` crate remains in
+  `Cargo.lock` and no `plotly` import remains in `scripts/src/`.
 - Report the quasi-anechoic `valid_lower_hz` as the raw gate-physics bound
   (`cycles/gate`) instead of clamping it to the requested band floor, per
   the Wolfram RA10 oracle; the requested band stays carried on the upper

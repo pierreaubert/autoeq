@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{PAGE_TITLE}}</title>
+<style>
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    margin: 0;
+    padding: 20px;
+    background: #f5f5f5;
+}
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+h1 {
+    color: #333;
+    border-bottom: 2px solid #4a90d9;
+    padding-bottom: 10px;
+}
+h2 {
+    color: #444;
+    margin-top: 30px;
+}
+.plot-container {
+    background: white;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.plot-container canvas {
+    display: block;
+    width: 100%;
+    touch-action: manipulation;
+}
+.html-section {
+    background: white;
+    border-radius: 8px;
+    padding: 15px 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    overflow-x: auto;
+}
+table {
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 0.9em;
+}
+th, td {
+    border: 1px solid #ddd;
+    padding: 6px 10px;
+    text-align: left;
+}
+th {
+    background: #f0f4f8;
+}
+.viewbar {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 16px;
+}
+.viewbar button {
+    font: inherit;
+    padding: 6px 14px;
+    border: 1px solid #4a90d9;
+    border-radius: 6px;
+    background: white;
+    color: #2a6496;
+    cursor: pointer;
+}
+.viewbar button.active {
+    background: #4a90d9;
+    color: white;
+}
+.render-error {
+    background: #fdecea;
+    color: #b00020;
+    border: 1px solid #f5c6cb;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    white-space: pre-wrap;
+}
+.tabbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+.tabbar button {
+    font: inherit;
+    font-size: 0.9em;
+    padding: 6px 14px;
+    border: 1px solid #ccc;
+    border-radius: 6px 6px 0 0;
+    background: #e8e8e8;
+    color: #333;
+    cursor: pointer;
+}
+.tabbar button.active {
+    background: white;
+    color: #2a6496;
+    border-color: #4a90d9;
+    border-bottom: 2px solid #4a90d9;
+}
+.tabpage {
+    display: none;
+}
+.tabpage.active {
+    display: block;
+}
+.epa-footer {
+    color: #555;
+    font-size: 0.88em;
+}
+.plot-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+.plot-row .plot-container {
+    flex: 1 1 480px;
+}
+#report-gpui {
+    min-height: 80vh;
+}
+#gpui-report-canvas {
+    width: 100%;
+}
+.filters-section {
+    background: white;
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.filter-list {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+}
+.bm-table {
+    border-collapse: collapse;
+    margin: 10px 0;
+    font-size: 0.88em;
+}
+.eq-tabs {
+    margin: 10px 0;
+}
+.eq-tab-header {
+    display: flex;
+    gap: 4px;
+}
+.eq-tab-btn {
+    font: inherit;
+    font-size: 0.85em;
+    padding: 5px 12px;
+    border: 1px solid #ccc;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    background: #eee;
+    cursor: pointer;
+}
+.eq-tab-btn.active {
+    background: #f8f8f8;
+    color: #4a90d9;
+    border-top: 2px solid #4a90d9;
+}
+.eq-tab-panel {
+    display: none;
+}
+.eq-tab-panel.active {
+    display: block;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<h1 id="report-title"></h1>
+<div class="viewbar" id="viewbar" style="display:none">
+<button id="view-2d" class="active" type="button">2D plots</button>
+<button id="view-gpui" type="button">GPUI view (WebGPU)</button>
+</div>
+<div id="report-2d"></div>
+<div id="report-gpui" style="display:none"></div>
+<div id="report-errors"></div>
+</div>
+<script id="report-payload" type="application/json">{{PAYLOAD_JSON}}</script>
+<script type="module">
+"use strict";
+const SCHEMA = "autoeq-report-data-v1";
+const WASM_2D_B64 = "{{WASM_2D_B64}}";
+const GLUE_2D_B64 = "{{GLUE_2D_B64}}";
+const WASM_GPUI_B64 = "{{WASM_GPUI_B64}}";
+const GLUE_GPUI_B64 = "{{GLUE_GPUI_B64}}";
+
+function b64ToBytes(b64) {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+}
+function showError(msg) {
+    const box = document.getElementById("report-errors");
+    const div = document.createElement("div");
+    div.className = "render-error";
+    div.textContent = msg;
+    box.appendChild(div);
+}
+async function importGlue(glueText) {
+    // Blob URLs in browsers (no size limits); data: URLs where blobs cannot
+    // be imported (e.g. headless harnesses).
+    try {
+        const url = URL.createObjectURL(new Blob([glueText], { type: "text/javascript" }));
+        try {
+            return await import(url);
+        } finally {
+            URL.revokeObjectURL(url);
+        }
+    } catch (e) {
+        return await import("data:text/javascript;base64," + btoa(glueText));
+    }
+}
+async function loadBundle(wasmB64, glueB64) {
+    const wasmBytes = b64ToBytes(wasmB64);
+    const glueText = new TextDecoder().decode(b64ToBytes(glueB64));
+    const mod = await importGlue(glueText);
+    // BufferSource init: no fetch, works from file:// too.
+    await mod.default({ module_or_path: wasmBytes });
+    return mod;
+}
+
+let payload = null;
+try {
+    payload = JSON.parse(document.getElementById("report-payload").textContent);
+} catch (e) {
+    showError("Report payload is not valid JSON: " + e);
+}
+if (payload && payload.schema !== SCHEMA) {
+    showError("Unsupported report schema " + JSON.stringify(payload.schema) + " (want " + SCHEMA + ").");
+    payload = null;
+}
+if (payload) {
+    document.title = payload.title || document.title;
+    document.getElementById("report-title").textContent = payload.title || "";
+}
+
+const canvases = []; // {id, section, el, tab}
+let wasm2d = null;
+let activeTab = null;
+
+function sectionHeight(kind, cssW) {
+    if (kind === "sankey") return Math.min(560, Math.max(320, cssW * 0.5));
+    if (kind === "bar") return Math.min(480, Math.max(300, cssW * 0.5));
+    return Math.min(520, Math.max(300, cssW * 0.55));
+}
+
+// Nested driver-tab switcher for html sections (roomeq per-driver tables).
+window.openEqTab = function (evt, panelId) {
+    const container = evt.currentTarget.closest(".eq-tabs");
+    if (!container) return;
+    for (const p of container.querySelectorAll(".eq-tab-panel")) p.classList.remove("active");
+    for (const b of container.querySelectorAll(".eq-tab-btn")) b.classList.remove("active");
+    container.querySelector("#" + CSS.escape(panelId)).classList.add("active");
+    evt.currentTarget.classList.add("active");
+};
+
+function buildDom() {
+    const root = document.getElementById("report-2d");
+    const tabs = [];
+    for (const sec of payload.sections || []) {
+        if (sec.tab && !tabs.includes(sec.tab)) tabs.push(sec.tab);
+    }
+    const pages = {};
+    if (tabs.length) {
+        const bar = document.createElement("div");
+        bar.className = "tabbar";
+        tabs.forEach((name, i) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = name;
+            if (i === 0) btn.classList.add("active");
+            btn.addEventListener("click", () => activateTab(name));
+            bar.appendChild(btn);
+        });
+        root.appendChild(bar);
+        activeTab = tabs[0];
+    }
+    (payload.sections || []).forEach((sec, i) => {
+        let host = root;
+        if (sec.tab) {
+            if (!pages[sec.tab]) {
+                const page = document.createElement("div");
+                page.className = "tabpage" + (sec.tab === activeTab ? " active" : "");
+                page.dataset.tab = sec.tab;
+                root.appendChild(page);
+                pages[sec.tab] = page;
+            }
+            host = pages[sec.tab];
+        }
+        if (sec.kind === "html") {
+            const div = document.createElement("div");
+            div.className = "html-section";
+            div.innerHTML = sec.html;
+            host.appendChild(div);
+            return;
+        }
+        const wrap = document.createElement("div");
+        wrap.className = "plot-container";
+        const canvas = document.createElement("canvas");
+        const id = "sec-" + i;
+        canvas.id = id;
+        wrap.appendChild(canvas);
+        host.appendChild(wrap);
+        canvases.push({ id, section: sec, el: canvas, tab: sec.tab || null });
+    });
+}
+
+function isVisible(c) {
+    return !c.tab || c.tab === activeTab;
+}
+
+function renderOne(c) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const cssW = c.el.clientWidth || c.el.parentElement.clientWidth || 800;
+    const cssH = sectionHeight(c.section.kind, cssW);
+    c.el.style.height = cssW ? cssH + "px" : c.el.style.height;
+    const rc = wasm2d.render_section(c.id, JSON.stringify(c.section), cssW, cssH, dpr);
+    if (rc !== 0) showError("render_section(" + c.id + ") failed with code " + rc);
+}
+
+function renderVisible() {
+    if (!wasm2d) return;
+    for (const c of canvases) {
+        if (isVisible(c)) renderOne(c);
+    }
+}
+
+function activateTab(name) {
+    activeTab = name;
+    const root = document.getElementById("report-2d");
+    for (const page of root.querySelectorAll(".tabpage")) {
+        page.classList.toggle("active", page.dataset.tab === name);
+    }
+    for (const btn of root.querySelectorAll(".tabbar button")) {
+        btn.classList.toggle("active", btn.textContent === name);
+    }
+    renderVisible();
+}
+
+function wireLegendClicks() {
+    for (const c of canvases) {
+        if (c.section.kind !== "figure" && c.section.kind !== "bar") continue;
+        c.el.addEventListener("click", (ev) => {
+            let rects = [];
+            try { rects = JSON.parse(wasm2d.legend_json(c.id)); } catch (e) { return; }
+            const r = c.el.getBoundingClientRect();
+            const x = ev.clientX - r.left, y = ev.clientY - r.top;
+            for (const g of rects) {
+                if (x >= g.x && x <= g.x + g.w && y >= g.y && y <= g.y + g.h) {
+                    wasm2d.toggle_series(c.id, g.series);
+                    return;
+                }
+            }
+        });
+    }
+}
+
+let resizeTimer = 0;
+window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(renderVisible, 200);
+});
+
+async function boot2d() {
+    try {
+        wasm2d = await loadBundle(WASM_2D_B64, GLUE_2D_B64);
+    } catch (e) {
+        showError("Could not start the 2D plot renderer: " + e);
+        return;
+    }
+    if (wasm2d.schema_version && wasm2d.schema_version() !== SCHEMA) {
+        showError("Renderer/payload schema mismatch.");
+        return;
+    }
+    buildDom();
+    renderVisible();
+    wireLegendClicks();
+}
+
+let gpuiMounted = false;
+async function mountGpui() {
+    const root = document.getElementById("report-gpui");
+    document.getElementById("report-2d").style.display = "none";
+    root.style.display = "";
+    document.getElementById("view-2d").classList.remove("active");
+    document.getElementById("view-gpui").classList.add("active");
+    if (gpuiMounted) return;
+    gpuiMounted = true;
+    try {
+        const mod = await loadBundle(WASM_GPUI_B64, GLUE_GPUI_B64);
+        if (mod.mount_report) await mod.mount_report("report-gpui");
+        else showError("GPUI bundle has no mount_report entry point.");
+        // The viewer resolves even when no WebGPU adapter exists (it logs
+        // and leaves the container empty); fall back to 2D with a note.
+        if (!root.querySelector("canvas")) {
+            show2d();
+            showError("GPUI viewer found no WebGPU adapter; showing 2D plots instead.");
+        }
+    } catch (e) {
+        showError("Could not start the GPUI viewer: " + e);
+    }
+}
+function show2d() {
+    document.getElementById("report-gpui").style.display = "none";
+    document.getElementById("report-2d").style.display = "";
+    document.getElementById("view-gpui").classList.remove("active");
+    document.getElementById("view-2d").classList.add("active");
+}
+
+if (payload) {
+    if (navigator.gpu) {
+        document.getElementById("viewbar").style.display = "";
+        document.getElementById("view-gpui").addEventListener("click", mountGpui);
+        document.getElementById("view-2d").addEventListener("click", show2d);
+    }
+    boot2d();
+}
+</script>
+</body>
+</html>

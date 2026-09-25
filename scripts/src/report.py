@@ -69,6 +69,23 @@ from .acceptance_views import acceptance_views_html, waveform_status_html
 from .payload_binding import verify_payload_binding
 from .capture_views import capture_views_html, optimization_waterfall_html, optimization_wavelet_html
 from .loaders import RoomEqData
+from . import wasm_report
+
+
+def _emit_html(sections: list[dict], html: str | None, tab: str | None = None) -> None:
+    """Append an HTML fragment as a raw-HTML section (skips empties)."""
+    if html:
+        sections.append(wasm_report.html_section(html, tab=tab))
+
+
+def _emit_fig(sections: list[dict], fig: dict | list | None) -> None:
+    """Append a figure section (or list of sections); skips None entries."""
+    if fig is None:
+        return
+    if isinstance(fig, list):
+        sections.extend(s for s in fig if s is not None)
+    else:
+        sections.append(fig)
 
 # Synthetic channel name used for the complex L+R sum tab in the
 # comparison report. Picked so it cannot collide with a real recording
@@ -1148,293 +1165,15 @@ def create_html_report(
     page_title = f"RoomEQ Results - {short_name}" if short_name else "RoomEQ Results"
 
     # Build HTML content
-    html_parts = [
-        "<!DOCTYPE html>\n"
-        "<html>\n"
-        "<head>\n"
-        '    <meta charset="utf-8">\n'
-        f"    <title>{page_title}</title>\n"
-        '    <script src="https://cdn.plot.ly/plotly-4.0.0.min.js" charset="utf-8"></script>\n'
-        """    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-        }
-        h1 {
-            color: #333;
-            border-bottom: 2px solid #4a90d9;
-            padding-bottom: 10px;
-        }
-        h2 {
-            color: #444;
-            margin-top: 30px;
-        }
-        .metadata {
-            background: white;
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .metadata h2 {
-            margin-top: 0;
-            color: #555;
-            font-size: 1.1em;
-        }
-        .metadata-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 10px;
-        }
-        .metadata-item {
-            padding: 5px 0;
-        }
-        .metadata-label {
-            font-weight: 600;
-            color: #666;
-        }
-        .metadata-value {
-            color: #333;
-        }
-        .improvement {
-            color: #2ecc71;
-            font-weight: bold;
-        }
-        .plot-container {
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .plot-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        @media (max-width: 1000px) {
-            .plot-row {
-                grid-template-columns: 1fr;
-            }
-        }
-        .filters-section {
-            background: #fdfdfd;
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-top: 20px;
-            border: 1px solid #eee;
-        }
-        .filters-section h3 {
-            margin-top: 0;
-            color: #555;
-        }
-        .filter-list {
-            font-family: monospace;
-            font-size: 0.9em;
-            background: #f8f8f8;
-            padding: 10px;
-            border-radius: 4px;
-            overflow-x: auto;
-        }
-        .channel-section {
-            padding: 10px 0;
-        }
-        .epa-section {
-            background: #fafafa;
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-top: 20px;
-            border: 1px solid #eee;
-        }
-        .epa-section h3 {
-            margin-top: 0;
-            color: #555;
-        }
-        .epa-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.95em;
-        }
-        .epa-table th,
-        .epa-table td {
-            padding: 6px 10px;
-            border: 1px solid #e4e4e4;
-            text-align: right;
-        }
-        .epa-table th:first-child,
-        .epa-table td:first-child {
-            text-align: left;
-        }
-        .epa-table th {
-            background: #f1f1f1;
-            font-weight: 600;
-            color: #555;
-        }
-        .epa-table tbody tr:nth-child(odd) {
-            background: #fdfdfd;
-        }
-        .epa-footer {
-            margin: 10px 0 0;
-            color: #888;
-            font-size: 0.8em;
-            font-style: italic;
-        }
-        .bass-management-section {
-            border-left: 4px solid #2ecc71;
-        }
-        .bm-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.92em;
-        }
-        .bm-table th,
-        .bm-table td {
-            padding: 7px 9px;
-            border: 1px solid #e4e4e4;
-            text-align: left;
-            vertical-align: top;
-        }
-        .bm-table th {
-            background: #f1f1f1;
-            font-weight: 600;
-            color: #555;
-        }
-        .bm-table tbody tr:nth-child(odd) {
-            background: #fdfdfd;
-        }
+    # Sections in document order; the shell renders them and builds the
+    # per-channel tab bar from the section `tab` fields.
+    sections: list[dict] = []
 
-        /* Tabs styles */
-        .tabs-container {
-            margin-top: 30px;
-        }
-        .tab-header {
-            display: flex;
-            flex-wrap: wrap;
-            background: #e0e0e0;
-            padding: 10px 10px 0;
-            border-radius: 8px 8px 0 0;
-            gap: 2px;
-        }
-        .tab-btn {
-            padding: 10px 20px;
-            border: none;
-            background: #d0d0d0;
-            cursor: pointer;
-            border-radius: 5px 5px 0 0;
-            font-weight: 600;
-            color: #666;
-            transition: all 0.2s;
-        }
-        .tab-btn:hover {
-            background: #c0c0c0;
-        }
-        .tab-btn.active {
-            background: white;
-            color: #4a90d9;
-            border-top: 3px solid #4a90d9;
-        }
-        .tab-content {
-            display: none;
-            background: white;
-            padding: 20px;
-            border-radius: 0 0 8px 8px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .tab-content.active {
-            display: block;
-        }
-        /* Inner EQ tabs: per-origin filter lists inside driver tabs.
-           Scoped classes so they never clash with the outer channel tabs. */
-        .eq-tabs {
-            margin-top: 10px;
-        }
-        .eq-tab-header {
-            display: flex;
-            flex-wrap: wrap;
-            background: #ececec;
-            padding: 6px 6px 0;
-            border-radius: 6px 6px 0 0;
-            gap: 2px;
-        }
-        .eq-tab-btn {
-            padding: 6px 14px;
-            border: none;
-            background: #d8d8d8;
-            cursor: pointer;
-            border-radius: 4px 4px 0 0;
-            font-weight: 600;
-            font-size: 0.85em;
-            color: #666;
-            transition: all 0.2s;
-        }
-        .eq-tab-btn:hover {
-            background: #c8c8c8;
-        }
-        .eq-tab-btn.active {
-            background: #f8f8f8;
-            color: #4a90d9;
-            border-top: 2px solid #4a90d9;
-        }
-        .eq-tab-panel {
-            display: none;
-        }
-        .eq-tab-panel.active {
-            display: block;
-        }
-    </style>
-    <script>
-        function openEqTab(evt, panelId) {
-            var container = evt.currentTarget.closest(".eq-tabs");
-            if (!container) {
-                return;
-            }
-            var panels = container.querySelectorAll(".eq-tab-panel");
-            for (var i = 0; i < panels.length; i++) {
-                panels[i].classList.remove("active");
-            }
-            var btns = container.querySelectorAll(".eq-tab-btn");
-            for (var j = 0; j < btns.length; j++) {
-                btns[j].classList.remove("active");
-            }
-            document.getElementById(panelId).classList.add("active");
-            evt.currentTarget.classList.add("active");
-        }
-        function openChannel(evt, channelId) {
-            var i, tabcontent, tablinks;
-            tabcontent = document.getElementsByClassName("tab-content");
-            for (i = 0; i < tabcontent.length; i++) {
-                tabcontent[i].classList.remove("active");
-            }
-            tablinks = document.getElementsByClassName("tab-btn");
-            for (i = 0; i < tablinks.length; i++) {
-                tablinks[i].classList.remove("active");
-            }
-            document.getElementById(channelId).classList.add("active");
-            evt.currentTarget.classList.add("active");
-            
-            // Trigger resize to fix Plotly plots in the newly visible tab
-            window.dispatchEvent(new Event('resize'));
-        }
-    </script>
-</head>
-<body>
-    <div class="container">
-"""
-        f"        <h1>{page_title}</h1>\n"
-    ]
-
-    html_parts.append(_playback_status_html(metadata, data=data))
-    html_parts.append(correction_explanation_html(data))
-    html_parts.append(acceptance_views_html(data))
-    html_parts.append(waveform_status_html(data))
-    html_parts.append(summary_table_html(data))
+    _emit_html(sections, _playback_status_html(metadata, data=data))
+    _emit_html(sections, correction_explanation_html(data))
+    _emit_html(sections, acceptance_views_html(data))
+    _emit_html(sections, waveform_status_html(data))
+    _emit_html(sections, summary_table_html(data))
 
     # Metadata section
     if metadata:
@@ -1456,7 +1195,7 @@ def create_html_report(
         else:
             epa_summary_html = ""
 
-        html_parts.append(
+        _emit_html(sections, 
             f"""
         <div class="metadata">
             <h2>Optimization Summary</h2>
@@ -1498,42 +1237,32 @@ def create_html_report(
 """
         )
 
-    html_parts.append(capture_clock_qa_html(data))
-    html_parts.append(capture_reflections_html(data))
+    _emit_html(sections, capture_clock_qa_html(data))
+    _emit_html(sections, capture_reflections_html(data))
     mixed_phase_html = _mixed_phase_summary_html(metadata, channels_dict)
     if mixed_phase_html:
-        html_parts.append(mixed_phase_html)
+        _emit_html(sections, mixed_phase_html)
 
     # Combined plot
-    combined_fig = create_combined_figure(data, output_json_path)
-    combined_html = combined_fig.to_html(full_html=False, include_plotlyjs=False)
-    html_parts.append(
-        f"""
-        <div class="plot-container">
-            <h2>All Channels Overview</h2>
-            {combined_html}
-        </div>
-"""
-    )
+    _emit_fig(sections, create_combined_figure(data, output_json_path))
 
     # Single-screen summaries: the full PEQ listing and the crossover
     # configuration, so nothing requires switching per-channel tabs.
-    html_parts.append(_gain_plugins_html(data))
-    html_parts.append(_all_eq_filters_html(data))
-    html_parts.append(_crossover_config_html(data))
-    html_parts.append(level_compensation_html(data))
+    _emit_html(sections, _gain_plugins_html(data))
+    _emit_html(sections, _all_eq_filters_html(data))
+    _emit_html(sections, _crossover_config_html(data))
+    _emit_html(sections, level_compensation_html(data))
     room_decay = room_t60_rows(data)
     if room_decay:
         room_decay_fig = create_t60_octaves_figure("Room mean", room_decay)
         if room_decay_fig:
-            html_parts.append(
-                '<div class="plot-container">'
-                + room_decay_fig.to_html(full_html=False, include_plotlyjs=False)
-                + '<p class="epa-footer">Arithmetic mean of valid measured-room T60 '
+            _emit_fig(sections, room_decay_fig)
+            _emit_html(sections,
+                '<p class="epa-footer">Arithmetic mean of valid measured-room T60 '
                 'estimates at each octave. Speaker coverage varies by band; invalid '
-                'fits are excluded.</p></div>\n'
+                'fits are excluded.</p>\n'
             )
-        html_parts.append(
+        _emit_html(sections, 
             '<p class="epa-footer">Room T60 contributing speakers by octave: '
             + ", ".join(f"{row['centre_hz']} Hz: {row['speaker_count']}"
                         for row in room_decay)
@@ -1544,68 +1273,51 @@ def create_html_report(
     tof_rows = tof_table(metadata)
     tof_before = create_tof_figure(tof_rows, after=False)
     tof_after = create_tof_figure(tof_rows, after=True)
-    if tof_before or tof_after:
-        html_parts.append('<div class="plot-row">\n')
-        for fig in (tof_before, tof_after):
-            if fig:
-                html_parts.append(
-                    f'<div class="plot-container">{fig.to_html(full_html=False, include_plotlyjs=False)}</div>\n'
-                )
-        html_parts.append("</div>\n")
-    html_parts.append(tof_html(metadata))
+    for fig in (tof_before, tof_after):
+        _emit_fig(sections, fig)
+    _emit_html(sections, tof_html(metadata))
 
     # Symmetric-monitor summing, magnitude domain (feat-report Section 2).
     # The complex pressure sum needs phase data roomeq does not emit yet.
     pair_groups, unpaired = symmetric_groups(channels_dict)
     if pair_groups or unpaired:
-        html_parts.append('<div class="filters-section"><h3>Section 2 — Symmetric monitors</h3>')
+        symmetric_head = (
+            '<div class="filters-section"><h3>Section 2 — Symmetric monitors</h3>'
+        )
         if unpaired:
-            html_parts.append(
+            symmetric_head += (
                 '<p>Unpaired channels (not summed): '
                 + ", ".join(escape(name) for name in unpaired)
                 + '</p>'
             )
-        html_parts.append('</div>')
+        symmetric_head += '</div>'
+        _emit_html(sections, symmetric_head)
     for label, members in pair_groups:
         combo = pair_sum_difference(
             (channels_dict[members[0]] or {}).get("final_curve"),
             (channels_dict[members[1]] or {}).get("final_curve"),
         )
         if combo is None:
-            html_parts.append(
+            _emit_html(sections, 
                 '<p>Symmetric pair ' + escape(label)
                 + ': sum unavailable because final curves are missing or use different frequency grids.</p>'
             )
             continue
-        pair_fig = create_symmetric_pair_figure(
+        _emit_fig(sections, create_symmetric_pair_figure(
             label, combo["freq"], combo["sum_spl"], combo["diff_spl"]
-        )
-        html_parts.append(
-            '<div class="plot-container">\n'
-            f"{pair_fig.to_html(full_html=False, include_plotlyjs=False)}"
-            "\n</div>\n"
-        )
+        ))
 
     # Bass-management routing/headroom section. This is driven by the
     # route-level #14 schema, not the deprecated single matrix summary.
     bass_management = metadata.get("bass_management") or {}
     if bass_management:
-        html_parts.append(_bass_management_summary_html(bass_management))
+        _emit_html(sections, _bass_management_summary_html(bass_management))
         routing_fig = create_bass_management_routing_figure(data)
         headroom_fig = create_bass_management_headroom_figure(data)
-        if routing_fig or headroom_fig:
-            html_parts.append('<div class="plot-row">\n')
-            if routing_fig:
-                html_parts.append(
-                    f'<div class="plot-container">{routing_fig.to_html(full_html=False, include_plotlyjs=False)}</div>\n'
-                )
-            if headroom_fig:
-                html_parts.append(
-                    f'<div class="plot-container">{headroom_fig.to_html(full_html=False, include_plotlyjs=False)}</div>\n'
-                )
-            html_parts.append("</div>\n")
-        html_parts.append(_bass_management_groups_table_html(bass_management))
-        html_parts.append(_bass_management_sub_outputs_table_html(bass_management))
+        _emit_fig(sections, routing_fig)
+        _emit_fig(sections, headroom_fig)
+        _emit_html(sections, _bass_management_groups_table_html(bass_management))
+        _emit_html(sections, _bass_management_sub_outputs_table_html(bass_management))
 
     # Reconstruct each logical input after bass management once. For a main
     # channel this is the crossover-aware complex sum of its high-passed main
@@ -1625,14 +1337,9 @@ def create_html_report(
     # Individual channel sections in tabs. Multi-driver channels (e.g.
     # two subwoofers on one LFE bus) expand into one tab per physical
     # driver so each subwoofer gets its own plots and filter details.
+    # Individual channel sections in shell tabs (the shell builds the tab
+    # bar from the section `tab` fields, so no tab buttons are emitted).
     tab_entries = display_channel_entries(data)
-    html_parts.append('<div class="tabs-container">\n')
-    html_parts.append('    <div class="tab-header">\n')
-    for i, entry in enumerate(tab_entries):
-        active_class = " active" if i == 0 else ""
-        safe_id = f"channel_{i}"
-        html_parts.append(f'        <button class="tab-btn{active_class}" onclick="openChannel(event, \'{safe_id}\')">{escape(entry["label"])}</button>\n')
-    html_parts.append('    </div>\n')
 
     for i, entry in enumerate(tab_entries):
         channel_name = entry["channel"]
@@ -1641,8 +1348,6 @@ def create_html_report(
         safe_label = escape(tab_label)
         channel_data = channels_dict[channel_name]
         is_driver_tab = driver_index is not None
-        active_class = " active" if i == 0 else ""
-        safe_id = f"channel_{i}"
 
         if is_driver_tab:
             # Physical sub output: its own measurement replayed through
@@ -1709,17 +1414,15 @@ def create_html_report(
         for p in passes:
             eq_filters.extend(p["filters"])
 
-        html_parts.append(
-            f"""
-        <div id="{safe_id}" class="tab-content{active_class}">
-            <div class="channel-section">
-                <h2>Channel: {safe_label}</h2>
-{caption_html}"""
+        _emit_html(sections,
+            f"<h2>Channel: {safe_label}</h2>\n{caption_html}",
+            tab=tab_label,
         )
 
         # Full range plot
         fig_full = create_channel_figure(
-            tab_label, initial_curve, final_curve, " (Full Range)"
+            tab_label, initial_curve, final_curve, " (Full Range)",
+            tab=tab_label,
         )
         add_channel_response_overlays(
             fig_full,
@@ -1727,221 +1430,164 @@ def create_html_report(
             target_view,
             lfe_plus_channel,
         )
-        full_html = fig_full.to_html(full_html=False, include_plotlyjs=False)
+        _emit_fig(sections, fig_full)
 
         # Zoomed plot (20-1200 Hz)
-        fig_zoom = create_zoomed_figure(tab_label, initial_curve, final_curve)
+        fig_zoom = create_zoomed_figure(
+            tab_label, initial_curve, final_curve, tab=tab_label
+        )
         add_channel_response_overlays(
             fig_zoom,
             tab_label,
             target_view,
             lfe_plus_channel,
         )
-        zoom_html = fig_zoom.to_html(full_html=False, include_plotlyjs=False)
-
-        html_parts.append(
-            f"""
-                <div class="plot-row">
-                    <div class="plot-container">
-                        {full_html}
-                    </div>
-                    <div class="plot-container">
-                        {zoom_html}
-                    </div>
-                </div>
-"""
-        )
+        _emit_fig(sections, fig_zoom)
 
         # Smoothed response overlay (feat-report Section 2, 1 octave).
-        fig_smooth = create_smoothed_figure(
-            tab_label, initial_curve, final_curve, octaves=smoothed_octaves
-        )
-        if fig_smooth:
-            smooth_html = fig_smooth.to_html(full_html=False, include_plotlyjs=False)
-            html_parts.append(
-                f"""
-                <div class="plot-container">
-                    {smooth_html}
-                </div>
-"""
-            )
+        _emit_fig(sections, create_smoothed_figure(
+            tab_label, initial_curve, final_curve, octaves=smoothed_octaves,
+            tab=tab_label,
+        ))
 
         # EQ response plot (uses per-pass breakdown when 3-pass labels are present)
         fig_eq = create_multipass_eq_figure(
             tab_label, eq_source, eq_response_view,
             sample_rate=float(data.get("sample_rate", 48_000.0)),
+            tab=tab_label,
         )
         if fig_eq is None:
             fig_eq = create_eq_figure(
                 tab_label, eq_filters, eq_response_view,
                 sample_rate=float(data.get("sample_rate", 48_000.0)),
+                tab=tab_label,
             )
-        if fig_eq:
-            eq_html = fig_eq.to_html(full_html=False, include_plotlyjs=False)
-            html_parts.append(
-                f"""
-                <div class="plot-container">
-                    {eq_html}
-                </div>
-"""
-            )
+        _emit_fig(sections, fig_eq)
 
         # IR waveform plot
-        fig_ir = create_ir_figure(
+        _emit_fig(sections, create_ir_figure(
             tab_label,
             ir_pre,
             ir_post,
-        )
-        if fig_ir:
-            ir_html = fig_ir.to_html(full_html=False, include_plotlyjs=False)
-            html_parts.append(
-                f"""
-                <div class="plot-container">
-                    {ir_html}
-                </div>
-"""
-            )
+            tab=tab_label,
+        ))
 
         if not is_driver_tab:
-            html_parts.append(early_reflections_html(channel_data, tab_label))
+            _emit_html(sections, early_reflections_html(channel_data, tab_label),
+                       tab=tab_label)
             early_late = channel_data.get("early_late_curves")
-            early_late_fig = create_early_late_figure(tab_label, early_late)
+            early_late_fig = create_early_late_figure(
+                tab_label, early_late, tab=tab_label
+            )
             if early_late_fig:
-                html_parts.append(
-                    '<div class="plot-container">'
-                    + early_late_fig.to_html(full_html=False, include_plotlyjs=False)
-                    + '<p class="epa-footer">Third-octave early and late energy contributions '
+                _emit_fig(sections, early_late_fig)
+                _emit_html(sections,
+                    '<p class="epa-footer">Third-octave early and late energy contributions '
                     'share the full curve\'s peak-band reference. Full is an incoherent '
-                    'energy sum, not a coherent pressure response.</p></div>\n'
+                    'energy sum, not a coherent pressure response.</p>\n',
+                    tab=tab_label,
                 )
             else:
-                html_parts.append(
+                _emit_html(sections,
                     '<p class="epa-footer">Early vs late sound: pending '
-                    'roomeq field early_late_curves with a shared level reference.</p>\n'
+                    'roomeq field early_late_curves with a shared level reference.</p>\n',
+                    tab=tab_label,
                 )
 
             t60 = t60_rows(channel_data)
-            t60_fig = create_t60_octaves_figure(tab_label, t60)
-            if t60_fig:
-                html_parts.append(
-                    '<div class="plot-container">'
-                    + t60_fig.to_html(full_html=False, include_plotlyjs=False)
-                    + '</div>\n'
-                )
-            html_parts.append(t60_table_html(channel_data))
+            t60_fig = create_t60_octaves_figure(tab_label, t60, tab=tab_label)
+            _emit_fig(sections, t60_fig)
+            _emit_html(sections, t60_table_html(channel_data), tab=tab_label)
             waterfall_html = optimization_waterfall_html(
                 channel_data.get("waterfall"), channel_data.get("resonance_decays"))
             if waterfall_html:
-                html_parts.append(waterfall_html)
+                _emit_html(sections, waterfall_html, tab=tab_label)
             else:
-                html_parts.append(
+                _emit_html(sections,
                     '<p class="epa-footer">Waterfall and resonance decay: pending '
                     'roomeq fields waterfall and resonance_decays from a measured '
-                    'room impulse response.</p>\n'
+                    'room impulse response.</p>\n',
+                    tab=tab_label,
                 )
             wavelet_html = optimization_wavelet_html(channel_data.get("wavelet"))
             if wavelet_html:
-                html_parts.append(wavelet_html)
+                _emit_html(sections, wavelet_html, tab=tab_label)
             else:
-                html_parts.append(
+                _emit_html(sections,
                     '<p class="epa-footer">Three-cycle wavelet: pending roomeq '
-                    'field wavelet from a measured room impulse response.</p>\n'
+                    'field wavelet from a measured room impulse response.</p>\n',
+                    tab=tab_label,
                 )
 
         # EPA psychoacoustic scores (pre/post) for this channel
         epa_per_channel = metadata.get("epa_per_channel") or {}
         epa_html = _epa_channel_table_html(epa_per_channel.get(channel_name))
         if epa_html:
-            html_parts.append(epa_html)
+            _emit_html(sections, epa_html, tab=tab_label)
 
         # Filter details (grouped by pass when 3-pass labels are present).
         # Driver tabs merge the driver EQ with the shared channel EQ, so
         # they render per-origin inner tabs instead of one flat list.
         has_labeled = any(p["label"] for p in passes)
         if is_driver_tab:
-            html_parts.append(
-                _driver_eq_filters_html(data, channel_name, driver_index, f"eq_{i}")
+            _emit_html(sections,
+                _driver_eq_filters_html(data, channel_name, driver_index, f"eq_{i}"),
+                tab=tab_label,
             )
         elif has_labeled and passes:
-            html_parts.append(
-                """
-                <div class="filters-section">
-                    <h3>EQ Filters (3-Pass Pipeline)</h3>
-"""
-            )
+            filter_parts = [
+                '<div class="filters-section">\n'
+                '    <h3>EQ Filters (3-Pass Pipeline)</h3>\n'
+            ]
             for p in passes:
-                html_parts.append(
-                    f"""
-                    <h4 style="color: {p['color']}; margin-bottom: 5px;">{p['display_name']}</h4>
-                    <div class="filter-list" style="margin-bottom: 10px;">
-"""
+                filter_parts.append(
+                    f'<h4 style="color: {p["color"]}; margin-bottom: 5px;">'
+                    f"{p['display_name']}</h4>\n"
+                    '<div class="filter-list" style="margin-bottom: 10px;">\n'
                 )
                 for j, f in enumerate(p["filters"], 1):
-                    html_parts.append(_format_eq_filter_line(f, j))
-                html_parts.append("                    </div>\n")
-            html_parts.append("                </div>\n")
+                    filter_parts.append(_format_eq_filter_line(f, j))
+                filter_parts.append("</div>\n")
+            filter_parts.append("</div>\n")
+            _emit_html(sections, "".join(filter_parts), tab=tab_label)
         elif eq_filters:
-            html_parts.append(
-                """
-                <div class="filters-section">
-                    <h3>EQ Filters</h3>
-                    <div class="filter-list">
-"""
-            )
+            filter_parts = [
+                '<div class="filters-section">\n'
+                '    <h3>EQ Filters</h3>\n'
+                '    <div class="filter-list">\n'
+            ]
             for j, f in enumerate(eq_filters, 1):
-                html_parts.append(_format_eq_filter_line(f, j))
-            html_parts.append(
-                """
-                    </div>
-                </div>
-"""
-            )
+                filter_parts.append(_format_eq_filter_line(f, j))
+            filter_parts.append("</div>\n</div>\n")
+            _emit_html(sections, "".join(filter_parts), tab=tab_label)
 
         if is_driver_tab:
             shaping_html = _driver_shaping_summary_html(data, channel_name, driver_index)
             if shaping_html:
-                html_parts.append(shaping_html)
-
-        html_parts.append(
-            """
-            </div>
-        </div>
-"""
-        )
-
-    html_parts.append('</div><!-- tabs-container -->\n')
+                _emit_html(sections, shaping_html, tab=tab_label)
 
     if capture_verification is not None:
         verified, reason, graph_identity = verify_payload_binding(data)
         capture_graph = (capture_verification.get("graph_id")
                          if isinstance(capture_verification, dict) else None)
         if not verified:
-            html_parts.append(
+            _emit_html(sections, 
                 '<section class="capture-views"><h1>Capture acceptance diagnostics</h1>'
                 '<p>Unavailable: saved optimization graph binding is invalid: '
                 + escape(reason) + '</p></section>\n'
             )
         elif capture_graph != graph_identity:
-            html_parts.append(
+            _emit_html(sections, 
                 '<section class="capture-views"><h1>Capture acceptance diagnostics</h1>'
                 '<p>Unavailable: verification candidate graph does not match the saved '
                 'optimization graph.</p></section>\n'
             )
         else:
-            html_parts.append(capture_views_html(capture_verification))
+            _emit_html(sections, capture_views_html(capture_verification))
 
-    # Close HTML
-    html_parts.append(
-        """
-    </div>
-</body>
-</html>
-"""
-    )
-
-    # Write output
-    with open(output_path, "w") as f:
-        f.write("".join(html_parts))
+    # Assemble the self-contained HTML+WASM report.
+    payload = wasm_report.payload(page_title, sections)
+    wasm_report.write_report(output_path, page_title, payload)
 
     print(f"HTML report written to: {output_path}")
 
@@ -1992,79 +1638,25 @@ def create_comparison_html_report(
     mode_names = [name for name, _ in mode_datasets]
     page_title = f"RoomEQ Mode Comparison: {', '.join(_mode_label(n) for n in mode_names)}"
 
-    html_parts = [
-        "<!DOCTYPE html>\n<html>\n<head>\n"
-        '    <meta charset="utf-8">\n'
-        f"    <title>{page_title}</title>\n"
-        '    <script src="https://cdn.plot.ly/plotly-4.0.0.min.js" charset="utf-8"></script>\n'
-        """    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-               margin: 0; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 1400px; margin: 0 auto; }
-        h1 { color: #333; border-bottom: 2px solid #4a90d9; padding-bottom: 10px; }
-        h2 { color: #444; margin-top: 30px; }
-        .summary-table { width: 100%; border-collapse: collapse; margin: 15px 0; }
-        .summary-table th, .summary-table td { padding: 8px 12px; border: 1px solid #ddd; text-align: center; }
-        .summary-table th { background: #f0f0f0; font-weight: 600; color: #555; }
-        .improvement { color: #2ecc71; font-weight: bold; }
-        .plot-container { background: white; padding: 15px; border-radius: 8px;
-                         margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .plot-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
-        @media (max-width: 1000px) { .plot-row { grid-template-columns: 1fr; } }
-        .tabs-container { margin-top: 30px; }
-        .tab-header { display: flex; flex-wrap: wrap; background: #e0e0e0;
-                     padding: 10px 10px 0; border-radius: 8px 8px 0 0; gap: 2px; }
-        .tab-btn { padding: 10px 20px; border: none; background: #d0d0d0; cursor: pointer;
-                  border-radius: 5px 5px 0 0; font-weight: 600; color: #666; transition: all 0.2s; }
-        .tab-btn:hover { background: #c0c0c0; }
-        .tab-btn.active { background: white; color: #4a90d9; border-top: 3px solid #4a90d9; }
-        .tab-content { display: none; background: white; padding: 20px;
-                      border-radius: 0 0 8px 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .tab-content.active { display: block; }
-        .epa-section { background: #fafafa; padding: 15px 20px; border-radius: 8px;
-                      margin-top: 20px; border: 1px solid #eee; }
-        .epa-section h3 { margin-top: 0; color: #555; }
-        .epa-table { width: 100%; border-collapse: collapse; font-size: 0.95em; }
-        .epa-table th, .epa-table td { padding: 6px 10px; border: 1px solid #e4e4e4; text-align: right; }
-        .epa-table th:first-child, .epa-table td:first-child { text-align: left; }
-        .epa-table th { background: #f1f1f1; font-weight: 600; color: #555; }
-        .epa-table tbody tr:nth-child(odd) { background: #fdfdfd; }
-        .epa-footer { margin: 10px 0 0; color: #888; font-size: 0.8em; font-style: italic; }
-    </style>
-    <script>
-        function openChannel(evt, channelId) {
-            var tabcontent = document.getElementsByClassName("tab-content");
-            for (var i = 0; i < tabcontent.length; i++) tabcontent[i].classList.remove("active");
-            var tablinks = document.getElementsByClassName("tab-btn");
-            for (var i = 0; i < tablinks.length; i++) tablinks[i].classList.remove("active");
-            document.getElementById(channelId).classList.add("active");
-            evt.currentTarget.classList.add("active");
-            window.dispatchEvent(new Event('resize'));
-        }
-    </script>
-</head>
-<body>
-    <div class="container">
-"""
-        f"        <h1>{page_title}</h1>\n"
-    ]
+    # Sections in document order; the shell renders them and builds the
+    # per-channel tab bar from the section `tab` fields.
+    sections: list[dict] = []
 
     for mode_name, data in mode_datasets:
-        html_parts.append(_playback_status_html(data.get("metadata") or {}, mode_name, data=data))
-        html_parts.append(capture_clock_qa_html(data))
-        html_parts.append(capture_reflections_html(data))
-        html_parts.append(correction_explanation_html(data, mode_name))
-        html_parts.append(acceptance_views_html(data, mode_name))
-        html_parts.append(waveform_status_html(data, mode_name))
+        _emit_html(sections, _playback_status_html(data.get("metadata") or {}, mode_name, data=data))
+        _emit_html(sections, capture_clock_qa_html(data))
+        _emit_html(sections, capture_reflections_html(data))
+        _emit_html(sections, correction_explanation_html(data, mode_name))
+        _emit_html(sections, acceptance_views_html(data, mode_name))
+        _emit_html(sections, waveform_status_html(data, mode_name))
 
     # --- Summary table ---
-    html_parts.append('<div class="plot-container">\n<h2>Summary</h2>\n')
-    html_parts.append('<table class="summary-table">\n<thead><tr>')
+    summary_parts = ['<h2>Summary</h2>\n<table class="summary-table">\n<thead><tr>']
     has_gd_summary = any(
         (data.get("metadata") or {}).get("group_delay") for _, data in mode_datasets
     )
     has_auto_summary = any("_auto" in mode_name for mode_name, _ in mode_datasets)
-    html_parts.append(
+    summary_parts.append(
         "<th>Mode</th><th>Loss</th>"
         '<th title="Flat loss before EQ (always computed via compute_flat_loss, regardless of which objective was minimized)">Pre flat-loss</th>'
         '<th title="Flat loss after EQ (always computed via compute_flat_loss, regardless of which objective was minimized)">Post flat-loss</th>'
@@ -2072,20 +1664,20 @@ def create_comparison_html_report(
         "<th>EPA Pref (pre)</th><th>EPA Pref (post)</th><th>EPA Δ</th>"
     )
     if has_auto_summary:
-        html_parts.append(
+        summary_parts.append(
             '<th title="Emitted EQ sections per channel, including driver-local sections; '
             'Kautz banks count all basis sections and shared entries count once; '
             'ranges show min-max across channels">EQ sections</th>'
         )
     if has_gd_summary:
-        html_parts.append(
+        summary_parts.append(
             '<th title="Group-delay optimization advisory">GD advisory</th>'
             '<th title="Whether GD controls were inserted into exported DSP">GD applied</th>'
             '<th title="Summed in-band GD RMS before and after GD optimization">GD RMS</th>'
             '<th title="GD RMS improvement, 20*log10(pre/post)">GD Δ</th>'
             '<th title="Total emitted all-pass filters; coh is mean in-band coherence">GD AP/coh</th>'
         )
-    html_parts.append("</tr></thead>\n<tbody>\n")
+    summary_parts.append("</tr></thead>\n<tbody>\n")
 
     mode_scores: list[tuple[str, float, float]] = []
     loss_types: list[str | None] = []
@@ -2112,7 +1704,7 @@ def create_comparison_html_report(
         else:
             epa_cells = '<td style="color:#999">-</td><td style="color:#999">-</td><td style="color:#999">-</td>'
 
-        html_parts.append(
+        summary_parts.append(
             f'<tr><td style="color:{color};font-weight:600">{_mode_label(mode_name)}</td>'
             f"{loss_cell}"
             f"<td>{pre:.4f}</td><td>{post:.4f}</td>"
@@ -2121,14 +1713,15 @@ def create_comparison_html_report(
             f"{_eq_filter_summary_html(data) if has_auto_summary else ''}"
             f"{_gd_summary_cells_html(meta) if has_gd_summary else ''}</tr>\n"
         )
-    html_parts.append("</tbody></table>\n")
+    summary_parts.append("</tbody></table>\n")
+    _emit_html(sections, "".join(summary_parts))
 
     # When the report mixes loss functions, clarify what the Pre/Post
     # flat-loss columns actually measure — readers might otherwise
     # assume an EPA-loss run's "score" reflects the EPA composite.
     distinct_losses = sorted({lt for lt in loss_types if lt})
     if len(distinct_losses) >= 2:
-        html_parts.append(
+        _emit_html(sections, 
             '<p style="color:#555;font-size:0.9em;margin-top:10px;">'
             "ℹ This report mixes runs that minimized different loss "
             f"functions ({', '.join(distinct_losses)}). The "
@@ -2143,7 +1736,7 @@ def create_comparison_html_report(
             "</p>\n"
         )
     if has_gd_summary:
-        html_parts.append(
+        _emit_html(sections, 
             '<p style="color:#555;font-size:0.9em;margin-top:10px;">'
             "GD columns come from <code>metadata.group_delay</code>. "
             "A non-success advisory is expected for recordings that do not "
@@ -2152,7 +1745,7 @@ def create_comparison_html_report(
             "</p>\n"
         )
     if has_auto_summary:
-        html_parts.append(
+        _emit_html(sections, 
             '<p style="color:#555;font-size:0.9em;margin-top:10px;">'
             "Auto columns show emitted EQ filter counts from the output JSON. "
             "Resolved automatic Q and gain bounds are logged by roomeq during the run "
@@ -2161,44 +1754,34 @@ def create_comparison_html_report(
         )
 
     # Score bar chart (passes loss_types so the chart can label/warn correctly)
-    score_fig = create_score_comparison_figure(mode_scores, loss_types)
-    html_parts.append(score_fig.to_html(full_html=False, include_plotlyjs=False))
-    html_parts.append("</div>\n")
+    _emit_fig(sections, create_score_comparison_figure(mode_scores, loss_types))
 
     # --- Per-channel tabs ---
-    html_parts.append('<div class="tabs-container">\n<div class="tab-header">\n')
+    # Per-channel sections in shell tabs (tab bar built by the shell).
     for i, ch_name in enumerate(sorted_channels):
-        active = " active" if i == 0 else ""
-        html_parts.append(
-            f'    <button class="tab-btn{active}" '
-            f"""onclick="openChannel(event, 'ch_{i}')">{ch_name}</button>\n"""
-        )
-    html_parts.append("</div>\n")
-
-    for i, ch_name in enumerate(sorted_channels):
-        active = " active" if i == 0 else ""
-        html_parts.append(f'<div id="ch_{i}" class="tab-content{active}">\n')
         is_lr = (ch_name == LR_SUM_CHANNEL)
         includes_redirected_bass = not is_lr and any(
             _has_redirected_bass_route(data, ch_name) for _, data in mode_datasets
         )
         source_label = _comparison_source_label(ch_name, includes_redirected_bass)
         if is_lr:
-            html_parts.append(
+            _emit_html(sections,
                 "<h2>Logical source L+R</h2>\n"
                 "<p>Complex sums require valid per-microphone clock evidence and measured phase. "
-                "Otherwise the plot uses a magnitude-only power sum, which is not a coherent pressure prediction.</p>\n"
+                "Otherwise the plot uses a magnitude-only power sum, which is not a coherent pressure prediction.</p>\n",
+                tab=ch_name,
             )
         else:
-            html_parts.append(f"<h2>{source_label}</h2>\n")
+            _emit_html(sections, f"<h2>{source_label}</h2>\n", tab=ch_name)
             if includes_redirected_bass:
-                html_parts.append(
+                _emit_html(sections,
                     '<p style="color:#666;font-size:0.9em;margin:-10px 0 15px 0;">'
                     "The response traces are the coherent microphone prediction for this "
                     "input source: its high-passed physical speaker output plus its "
                     "low-passed route through the physical subwoofer. They are not the "
                     f"isolated {ch_name} loudspeaker output."
-                    "</p>\n"
+                    "</p>\n",
+                    tab=ch_name,
                 )
 
         # Build mode_data for this channel. The synthetic L+R channel
@@ -2210,7 +1793,7 @@ def create_comparison_html_report(
             if is_lr:
                 lr, fallback_reason = gated_lr_channel(data, channels.get("L"), channels.get("R"))
                 if fallback_reason:
-                    html_parts.append(f"<p><strong>{escape(str(mode_name))}: magnitude-only fallback.</strong> {escape(fallback_reason)}</p>\n")
+                    _emit_html(sections, f"<p><strong>{escape(str(mode_name))}: magnitude-only fallback.</strong> {escape(fallback_reason)}</p>\n", tab=ch_name)
                 if lr:
                     mode_data.append((mode_name, lr))
             else:
@@ -2219,7 +1802,7 @@ def create_comparison_html_report(
                     mode_data.append((mode_name, ch_data))
 
         if not mode_data:
-            html_parts.append("<p>No data for this channel.</p>\n</div>\n")
+            _emit_html(sections, "<p>No data for this channel.</p>\n", tab=ch_name)
             continue
 
         # Shared design target: first mode carrying a serialized absolute
@@ -2240,55 +1823,48 @@ def create_comparison_html_report(
                 break
 
         # 1. Overlay plot (full range) + Zoomed (bass)
-        fig_overlay = create_comparison_overlay_figure(
-            source_label, mode_data, target_curve=comparison_target
-        )
-        fig_zoom = create_comparison_zoomed_figure(source_label, mode_data)
-        html_parts.append('<div class="plot-row">\n')
-        html_parts.append(f'<div class="plot-container">{fig_overlay.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
-        html_parts.append(f'<div class="plot-container">{fig_zoom.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
-        html_parts.append("</div>\n")
+        _emit_fig(sections, create_comparison_overlay_figure(
+            source_label, mode_data, target_curve=comparison_target,
+            tab=ch_name,
+        ))
+        _emit_fig(sections, create_comparison_zoomed_figure(
+            source_label, mode_data, tab=ch_name
+        ))
 
         # 2. Phase before/after per mode
-        fig_phase = create_comparison_phase_figure(ch_name, mode_data)
-        if fig_phase:
-            html_parts.append(f'<div class="plot-container">{fig_phase.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
+        _emit_fig(sections, create_comparison_phase_figure(
+            ch_name, mode_data, tab=ch_name
+        ))
 
         # 3. Group delay before/after per mode
-        fig_gd = create_comparison_group_delay_figure(ch_name, mode_data)
-        if fig_gd:
-            html_parts.append(f'<div class="plot-container">{fig_gd.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
+        _emit_fig(sections, create_comparison_group_delay_figure(
+            ch_name, mode_data, tab=ch_name
+        ))
 
         # 4. Impulse response before/after per mode
-        fig_ir = create_comparison_ir_figure(ch_name, mode_data)
-        if fig_ir:
-            html_parts.append(f'<div class="plot-container">{fig_ir.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
+        _emit_fig(sections, create_comparison_ir_figure(
+            ch_name, mode_data, tab=ch_name
+        ))
 
-        # 5. Per-mode subplots
-        fig_subplots = create_mode_subplots_figure(
-            ch_name, mode_data, target_curve=comparison_target
-        )
-        html_parts.append(f'<div class="plot-container">{fig_subplots.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
+        # 5. Per-mode detail (one section per mode; was a subplot grid)
+        _emit_fig(sections, create_mode_subplots_figure(
+            ch_name, mode_data, target_curve=comparison_target, tab=ch_name
+        ))
 
         # 6. EQ response overlay
-        fig_eq = create_comparison_eq_overlay_figure(
+        _emit_fig(sections, create_comparison_eq_overlay_figure(
             ch_name, mode_data,
             sample_rates={name: float(output.get("sample_rate", 48_000.0))
                           for name, output in mode_datasets},
-        )
-        if fig_eq:
-            html_parts.append(f'<div class="plot-container">{fig_eq.to_html(full_html=False, include_plotlyjs=False)}</div>\n')
+            tab=ch_name,
+        ))
 
         # 7. EPA psychoacoustic scores per mode
         epa_html = _epa_comparison_table_html(ch_name, mode_datasets)
         if epa_html:
-            html_parts.append(epa_html)
+            _emit_html(sections, epa_html, tab=ch_name)
 
-        html_parts.append("</div>\n")
-
-    html_parts.append("</div>\n</div>\n</body>\n</html>\n")
-
-    with open(output_path, "w") as f:
-        f.write("".join(html_parts))
+    payload = wasm_report.payload(page_title, sections)
+    wasm_report.write_report(output_path, page_title, payload)
 
     print(f"Comparison report written to: {output_path}")

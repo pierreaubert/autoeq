@@ -12,12 +12,10 @@ workspace = true
 
 [features]
 default = []
-plotly = ["dep:autoeq-plot", "autoeq-plot/plotly"]
-plotly_static = ["plotly", "autoeq-plot/plotly_static"]
 
 [dependencies]
 anyhow = { workspace = true }
-autoeq-plot = { workspace = true, optional = true }
+autoeq-plot = { workspace = true }
 autoeq-workflow = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }

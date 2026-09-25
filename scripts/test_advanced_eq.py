@@ -37,14 +37,17 @@ class AdvancedEqTests(unittest.TestCase):
         filt = {"topology": "kautz_filter", "freq": 900.0, "q": 1.0, "db_gain": -0.2}
         channel = {"plugins": [{"plugin_type": "eq", "parameters": {"filters": [filt]}}]}
         rates = {"iir": 32000.0, "fir": 96000.0}
-        fig = create_comparison_eq_overlay_figure(
+        section = create_comparison_eq_overlay_figure(
             "L", [(mode, channel) for mode in rates], sample_rates=rates)
-        for trace, rate in zip(fig.data, rates.values()):
-            self.assertLessEqual(max(trace.x), rate/2)
-            self.assertEqual(list(trace.y), compute_eq_response([filt], list(trace.x), rate))
+        assert section is not None
+        traces = [s for s in section["figure"]["series"] if s["name"] != "0 dB"]
+        for trace, rate in zip(traces, rates.values()):
+            self.assertLessEqual(max(trace["x"]), rate/2)
+            self.assertEqual(list(trace["y"]), compute_eq_response([filt], list(trace["x"]), rate))
         saved = {"eq_response": {"freq": [100.0, 200.0], "spl": [2.0, -3.0]}}
-        fig = create_comparison_eq_overlay_figure("L", [("iir", saved)], sample_rates=rates)
-        self.assertEqual(list(fig.data[0].y), [2.0, -3.0])
+        section = create_comparison_eq_overlay_figure("L", [("iir", saved)], sample_rates=rates)
+        assert section is not None
+        self.assertEqual(list(section["figure"]["series"][0]["y"]), [2.0, -3.0])
 
     def test_summary_counts_sections_and_driver_ownership(self):
         from scripts.src.report import _eq_filter_counts
@@ -81,15 +84,21 @@ class AdvancedEqTests(unittest.TestCase):
         from scripts.src.figures import create_eq_figure, create_multipass_eq_figure
         filt = {"topology": "kautz_filter", "freq": 900.0, "q": 1.0, "db_gain": -0.2}
         for rate in (32000.0, 44100.0, 96000.0):
-            fig = create_eq_figure("L", [filt], sample_rate=rate)
-            expected = compute_eq_response([filt], list(fig.data[0].x), rate)
-            self.assertEqual(list(fig.data[0].y), expected)
-            self.assertEqual(list(fig.data[1].y), expected)
-            self.assertIn("KAUTZ bank", fig.data[1].name)
-            self.assertNotIn("dB", fig.data[1].name)
+            section = create_eq_figure("L", [filt], sample_rate=rate)
+            assert section is not None
+            series = section["figure"]["series"]
+            # Combined EQ, per-filter decomposition, 0 dB reference.
+            expected = compute_eq_response([filt], list(series[0]["x"]), rate)
+            self.assertEqual(list(series[0]["y"]), expected)
+            self.assertEqual(list(series[1]["y"]), expected)
+            self.assertIn("KAUTZ bank", series[1]["name"])
+            self.assertNotIn("dB", series[1]["name"])
             channel = {"plugins": [{"plugin_type": "eq", "parameters": {"filters": [filt]}}]}
             multipass = create_multipass_eq_figure("L", channel, sample_rate=rate)
-            self.assertEqual(list(multipass.data[0].y), expected)
+            assert multipass is not None
+            repass = compute_eq_response(
+                [filt], list(multipass["figure"]["series"][0]["x"]), rate)
+            self.assertEqual(list(multipass["figure"]["series"][0]["y"]), repass)
 
     def check_response(self, filt, rate, frequencies, expected):
         db = compute_eq_response([filt], frequencies, rate)

@@ -70,42 +70,30 @@ pub fn generate_regression_line(slope: f64, intercept: f64, freqs: &Array1<f64>)
     freqs.mapv(|f| intercept + slope * (f / 1000.0).log2())
 }
 
-/// Create a scatter plot trace for a regression line
+/// Create a schema series for a regression line.
 ///
 /// # Arguments
 /// * `freqs` - Frequency points
 /// * `values` - SPL values for the regression line
-/// * `name` - Name for the trace
-/// * `color` - Color for the line
-/// * `x_axis` - X axis identifier (optional)
-/// * `y_axis` - Y axis identifier (optional)
+/// * `name` - Name for the series
+/// * `color` - CSS color for the line
 ///
 /// # Returns
-/// Scatter plot trace
+/// Report [`Series`](autoeq_report_wasm::Series) (line width 3, like before)
 pub fn create_regression_trace(
     freqs: &Array1<f64>,
     values: &Array1<f64>,
     name: &str,
     color: &str,
-    x_axis: Option<&str>,
-    y_axis: Option<&str>,
-) -> plotly::Scatter<f64, f64> {
-    let mut trace = plotly::Scatter::new(freqs.to_vec(), values.to_vec())
-        .mode(plotly::common::Mode::Lines)
-        .name(name)
-        .line(
-            plotly::common::Line::new()
-                .color(color.to_string())
-                .width(3.0),
-        );
-
-    if let Some(axis) = x_axis {
-        trace = trace.x_axis(axis);
+) -> autoeq_report_wasm::Series {
+    autoeq_report_wasm::Series {
+        name: name.to_string(),
+        x: freqs.to_vec(),
+        y: values.iter().map(|&v| Some(v)).collect(),
+        color: Some(color.to_string()),
+        width: 3.0,
+        dash: autoeq_report_wasm::DashOption::Solid,
+        visible: true,
+        y_axis: 0,
     }
-
-    if let Some(axis) = y_axis {
-        trace = trace.y_axis(axis);
-    }
-
-    *trace
 }

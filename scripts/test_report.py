@@ -2,6 +2,7 @@
 
 import copy
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -289,6 +290,34 @@ class SubDriverTabTests(unittest.TestCase):
             self.assertIn(expected, second)
         self.assertEqual(_driver_shaping_summary_html(data, "LFE", 7), "")
 
+    def test_driver_shaping_summary_preserves_sankey_hover_alignment(self):
+        # The old Sankey hover showed each driver's plugin alignment
+        # ("gain: +6.00 dB", "delay: 2.500 ms"); the per-driver table keeps it.
+        data = {
+            "channels": {
+                "LFE": {
+                    "drivers": [
+                        {
+                            "name": "sub_1",
+                            "initial_curve": {"freq": [20.0, 40.0],
+                                              "spl": [70.0, 70.0]},
+                            "plugins": [
+                                {"plugin_type": "gain",
+                                 "parameters": {"gain_db": 6.0}},
+                                {"plugin_type": "delay",
+                                 "parameters": {"delay_ms": 2.5}},
+                            ],
+                        },
+                    ],
+                },
+            },
+        }
+
+        summary = _driver_shaping_summary_html(data, "LFE", 0)
+
+        self.assertIn("driver gain +6.0 dB", summary)
+        self.assertIn("delay 2.500 ms", summary)
+
     def test_html_report_renders_per_sub_tabs(self):
         data = two_sub_overview_data()
         with tempfile.TemporaryDirectory() as directory:
@@ -296,9 +325,11 @@ class SubDriverTabTests(unittest.TestCase):
             create_html_report(data, output, None)
             html = output.read_text(encoding="utf-8")
 
-        self.assertIn(">Left Sub</button>", html)
-        self.assertIn(">Right Sub</button>", html)
-        self.assertNotIn(">LFE</button>", html)
+        # Per-channel tabs are shell tabs now (no tab buttons in the file):
+        # sections carry the tab label in the payload.
+        self.assertIn('"tab": "Left Sub"', html)
+        self.assertIn('"tab": "Right Sub"', html)
+        self.assertNotIn('"tab": "LFE"', html)
         self.assertIn("<h2>Channel: Left Sub</h2>", html)
         self.assertIn("Sub DSP Chain", html)
         self.assertIn("EQ: Left Sub", html)
@@ -383,7 +414,10 @@ class DriverEqFilterSplitTests(unittest.TestCase):
 
         self.assertIn("Driver: Left Sub (2)", html)
         self.assertIn("Shared channel LFE (1)", html)
-        self.assertIn("function openEqTab", html)
+        # Nested driver-tab switcher lives in the shell; the content keeps
+        # the tab hooks the shell wires up.
+        self.assertIn("openEqTab", html)
+        self.assertIn("eq-tab-btn", html)
 
 
 class SummarySectionTests(unittest.TestCase):
@@ -521,7 +555,7 @@ class SummarySectionTests(unittest.TestCase):
         self.assertLess(html.index("Recorded final correction decisions"),
                         html.index("<h2>Optimization Summary</h2>"))
         self.assertLess(html.index("Recorded final correction decisions"),
-                        html.index("<h2>All Channels Overview</h2>"))
+                        html.index('"title": "Combined Overview"'))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "comparison.html"
             create_comparison_html_report([("iir", data), ("fir", data)], output)
@@ -541,11 +575,11 @@ class SummarySectionTests(unittest.TestCase):
         self.assertIn("<h2>Crossover Configuration</h2>", html)
         self.assertIn("Not approved for playback", html)
         self.assertLess(html.index("Why this correction?"), html.index("<h2>Optimization Summary</h2>"))
-        self.assertLess(html.index("Why this correction?"), html.index("<h2>All Channels Overview</h2>"))
-        # Summaries precede the per-channel tabs.
+        self.assertLess(html.index("Why this correction?"), html.index('"title": "Combined Overview"'))
+        # Summaries precede the per-channel tabs (first non-null section tab).
         self.assertLess(
             html.index("<h2>All EQ Filters</h2>"),
-            html.index('<div class="tabs-container">'),
+            html.index('"tab": "'),
         )
 
 
@@ -555,6 +589,16 @@ def _stereo_curves(spl_l, spl_r, freq=None):
         {"freq": list(freq), "spl": list(spl_l)},
         {"freq": list(freq), "spl": list(spl_r)},
     )
+
+
+def report_payload(html):
+    """Decode the embedded report payload (HTML inside is JSON-escaped on disk)."""
+    match = re.search(
+        r'<script id="report-payload" type="application/json">(.*?)</script>',
+        html, re.S,
+    )
+    assert match is not None, "report payload script tag missing"
+    return json.loads(match.group(1))
 
 
 class AcousticReportTests(unittest.TestCase):
@@ -787,11 +831,14 @@ class AcousticReportTests(unittest.TestCase):
         self.assertIn("Measured arrival before DSP", table)
         self.assertIn("Calculated arrival after DSP", table)
         self.assertIn("not a post-playback capture", table)
-        figure = create_tof_figure(rows, after=True)
-        self.assertIn("Calculated arrival after DSP", figure.layout.title.text)
+        section = create_tof_figure(rows, after=True)
+        self.assertIn("Calculated arrival after DSP", section["chart"]["title"])
         self.assertAlmostEqual(rows[0]["after_ms"], 0.6)
         partial = rows + [{"name": "R", "before_ms": None, "after_ms": None}]
-        self.assertEqual(tuple(create_tof_figure(partial, after=True).data[0].y), (0.6, None))
+        # The bar schema has no nulls: rows without a measurement are dropped.
+        partial_section = create_tof_figure(partial, after=True)
+        self.assertEqual(partial_section["chart"]["categories"], ["L"])
+        self.assertEqual(partial_section["chart"]["groups"][0]["values"], [0.6])
         self.assertIsNone(create_tof_figure([{"name": "R", "after_ms": float("nan")}], after=True))
         self.assertIsNone(create_tof_figure([{"name": "R", "after_ms": True}], after=True))
         missing = {"timing_diagnostics": {"channels": [
@@ -855,9 +902,18 @@ class AcousticReportTests(unittest.TestCase):
                          "Early vs late sound: pending roomeq field",
                          "Room mean: measured octave-band T60",
                          "L: measured octave-band T60",
-                         'within declared ±0.05 s of the complete-channel room mean">100.0',
                          "Room T60 contributing speakers by octave: 63 Hz: 1"):
             self.assertIn(expected, html)
+        # The flatness cell quotes live inside payload HTML (JSON-escaped on
+        # disk), so assert against the decoded section instead of raw text.
+        summary = next(
+            section["html"] for section in report_payload(html)["sections"]
+            if "Results summary" in section.get("html", "")
+        )
+        self.assertIn(
+            'within declared ±0.05 s of the complete-channel room mean">100.0',
+            summary,
+        )
 
 
 if __name__ == "__main__":

@@ -854,6 +854,21 @@ directory. The assets directory holds every run-generated file:
 - `manifest.json` (run status and exact asset ownership) and `roomeq.log`
   (run summary lines; detailed logs remain on stderr via `RUST_LOG`).
 
+### HTML report format
+
+`scripts/display-roomeq.py room-output.json -o room-report.html` writes a
+self-contained HTML file: the plots render from an embedded versioned JSON
+payload (`autoeq-report-data-v1`, documented in
+`crates/autoeq-report-wasm/SCHEMA.md`) with a WebAssembly 2D canvas renderer,
+so the file needs no network access and no Plotly install. Per-channel
+sections open under shell tabs; legends toggle series by click. Browsers with
+WebGPU offer a GPUI viewer toggle rendering the same payload as an
+interactive section explorer (single-threaded; needs no COOP/COEP serving).
+Without a WebGPU adapter the toggle shows a note and falls back to the 2D
+plots.
+Rebuild the embedded bundles with `just report-dist` (stable) and
+`just report-dist-gpui` (nightly) after touching the renderer crates.
+
 Explicit `--export-path` / `--verification-bundle` artifacts go where
 requested (an `--export-format` default lands next to the JSON) and are
 tracked in `manifest.json` asset ownership.

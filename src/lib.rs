@@ -35,8 +35,7 @@ pub mod loss;
 pub mod optim;
 /// Parameter vector utilities for different PEQ models
 pub mod param_utils;
-/// Plotting and visualization functions (requires the `plotly` feature).
-#[cfg(feature = "plotly")]
+/// Plotting and visualization functions (HTML+WASM reports).
 pub use autoeq_plot as plot;
 /// Data reading and parsing functions
 pub mod read;
@@ -69,7 +68,6 @@ pub use cli::*;
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use optim::params::{OptimParams, PeqModel};
 pub use optim::*;
-#[cfg(feature = "plotly")]
 pub use plot::*;
 pub use read::*;
 pub use workflow::*;

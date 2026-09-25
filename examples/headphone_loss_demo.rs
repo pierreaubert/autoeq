@@ -15,9 +15,8 @@ use autoeq::read::{
     create_log_frequency_grid, normalize_and_interpolate_response, read_curve_from_csv,
     smooth_one_over_n_octave,
 };
+use autoeq_report_wasm::{AxisSpec, DashOption, Figure, ReportPayload, Section, Series, XScale};
 use clap::Parser;
-use plotly::common::Mode;
-use plotly::{Plot, Scatter};
 use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
@@ -136,96 +135,106 @@ fn generate_plots(
     smooth_deviation: &Curve,
     output_path: &PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Create plot 1: Input curve and target curve
-    let mut plot1 = Plot::new();
+    fn line(name: &str, x: Vec<f64>, y: Vec<f64>, color: &str) -> Series {
+        Series {
+            name: name.to_string(),
+            x,
+            y: y.into_iter().map(Some).collect(),
+            color: Some(color.to_string()),
+            width: 2.0,
+            dash: DashOption::Solid,
+            visible: true,
+            y_axis: 0,
+        }
+    }
+    fn freq_axis() -> AxisSpec {
+        AxisSpec {
+            label: "Frequency (Hz)".to_string(),
+            scale: XScale::Log,
+            min: Some(20.0),
+            max: Some(20000.0),
+        }
+    }
 
-    // Add input curve
-    let input_trace = Scatter::new(input_curve.freq.to_vec(), input_curve.spl.to_vec())
-        .mode(Mode::Lines)
-        .name("Input Curve");
-    plot1.add_trace(input_trace);
+    let fig1 = Figure {
+        title: "Input Curve vs Target Curve".to_string(),
+        x: freq_axis(),
+        y: AxisSpec {
+            label: "SPL (dB)".to_string(),
+            scale: XScale::Linear,
+            min: Some(-10.0),
+            max: Some(10.0),
+        },
+        y2: None,
+        series: vec![
+            line(
+                "Input Curve",
+                input_curve.freq.to_vec(),
+                input_curve.spl.to_vec(),
+                "#1f77b4",
+            ),
+            line(
+                "Harmann Target Curve",
+                target_curve.freq.to_vec(),
+                target_curve.spl.to_vec(),
+                "#ff7f0e",
+            ),
+        ],
+        hlines: vec![],
+        vlines: vec![],
+        xranges: vec![],
+        annotations: vec![],
+        legend: true,
+    };
+    let fig2 = Figure {
+        title: "Normalized Curves".to_string(),
+        x: freq_axis(),
+        y: AxisSpec {
+            label: "Normalized SPL (dB)".to_string(),
+            scale: XScale::Linear,
+            min: Some(-10.0),
+            max: Some(10.0),
+        },
+        y2: None,
+        series: vec![
+            line(
+                "Normalized Deviation",
+                deviation.freq.to_vec(),
+                deviation.spl.to_vec(),
+                "#1f77b4",
+            ),
+            line(
+                "Smooth Normalized Deviation",
+                smooth_deviation.freq.to_vec(),
+                smooth_deviation.spl.to_vec(),
+                "#ff7f0e",
+            ),
+        ],
+        hlines: vec![],
+        vlines: vec![],
+        xranges: vec![],
+        annotations: vec![],
+        legend: true,
+    };
 
-    let target_trace = Scatter::new(target_curve.freq.to_vec(), target_curve.spl.to_vec())
-        .mode(Mode::Lines)
-        .name("Harmann Target Curve");
-    plot1.add_trace(target_trace);
-
-    // Configure layout for plot 1
-    let layout1 = plotly::layout::Layout::new()
-        .title(plotly::common::Title::with_text(
-            "Input Curve vs Target Curve",
-        ))
-        .legend(plotly::layout::Legend::new().x(0.05).y(0.1))
-        .x_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("Frequency (Hz)"))
-                .type_(plotly::layout::AxisType::Log),
+    let mut payload = ReportPayload::new("Headphone Loss Analysis Plots");
+    payload.sections.push(Section::Figure {
+        figure: fig1,
+        tab: None,
+    });
+    payload.sections.push(Section::Figure {
+        figure: fig2,
+        tab: None,
+    });
+    let payload_json = serde_json::to_string(&payload)?;
+    let assets = autoeq_report_wasm::assemble::checked_in_assets().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("report shell assets missing (rebuild with just report-wasm): {e}"),
         )
-        .y_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("SPL (dB)"))
-                .range(vec![-10.0, 10.0]),
-        );
-    plot1.set_layout(layout1);
-
-    // Create plot 2: Normalized curves
-    let mut plot2 = Plot::new();
-
-    // Add normalized input curve
-    plot2.add_trace(
-        Scatter::new(deviation.freq.to_vec(), deviation.spl.to_vec())
-            .mode(Mode::Lines)
-            .name("Normalized Deviation"),
-    );
-    plot2.add_trace(
-        Scatter::new(
-            smooth_deviation.freq.to_vec(),
-            smooth_deviation.spl.to_vec(),
-        )
-        .mode(Mode::Lines)
-        .name("Smooth Normalized Deviation"),
-    );
-
-    // Configure layout for plot 2
-    let layout2 = plotly::layout::Layout::new()
-        .title(plotly::common::Title::with_text("Normalized Curves"))
-        .legend(plotly::layout::Legend::new().x(0.05).y(0.9))
-        .x_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("Frequency (Hz)"))
-                .type_(plotly::layout::AxisType::Log),
-        )
-        .y_axis(
-            plotly::layout::Axis::new()
-                .title(plotly::common::Title::with_text("Normalized SPL (dB)"))
-                .range(vec![-10.0, 10.0]),
-        );
-    plot2.set_layout(layout2);
-
-    // Create HTML output
-    let html_content = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>Headphone Loss Analysis Plots</title>
-    <script src="https://cdn.plot.ly/plotly-3.2.0.min.js"></script>
-</head>
-<body>
-    <h1>Headphone Loss Analysis Plots</h1>
-    <div id="plot1"></div>
-    <div id="plot2"></div>
-    <script>
-        var plot1 = {};
-        Plotly.newPlot('plot1', plot1.data, plot1.layout);
-
-        var plot2 = {};
-        Plotly.newPlot('plot2', plot2.data, plot2.layout);
-    </script>
-</body>
-</html>"#,
-        serde_json::to_string(&plot1).unwrap(),
-        serde_json::to_string(&plot2).unwrap()
-    );
+    })?;
+    let html_content =
+        autoeq_report_wasm::assemble::assemble_html(&payload.title, &payload_json, &assets);
 
     // Write HTML file
     std::fs::write(output_path, html_content)?;

@@ -47,6 +47,8 @@ members = [
     "crates/roomeq-synthetic",
     "crates/roomeq-workflow",
     "crates/autoeq-qa",
+    "crates/autoeq-report-wasm",
+    "crates/autoeq-report-gpui",
 ]
 [workspace.package]
 version = "0.5.74"
@@ -54,6 +56,9 @@ version = "0.5.74"
 [workspace.lints.rust]
 unsafe_code = "forbid"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(coverage)"] }
+
+[workspace.lints.clippy]
+perf = { level = "warn", priority = -1 }
 
 [workspace.dependencies]
 autoeq-core = { path = "crates/autoeq-core", version = "0.5" }
@@ -64,6 +69,8 @@ autoeq-measurements = { path = "crates/autoeq-measurements", version = "0.5" }
 autoeq-optim = { path = "crates/autoeq-optim", version = "0.5" }
 autoeq-workflow = { path = "crates/autoeq-workflow", version = "0.5" }
 autoeq-cli = { path = "crates/autoeq-cli", version = "0.5" }
+autoeq-report-wasm = { path = "crates/autoeq-report-wasm", version = "0.5" }
+autoeq-report-gpui = { path = "crates/autoeq-report-gpui", version = "0.5" }
 roomeq-model = { path = "crates/roomeq-model", version = "0.5" }
 roomeq-engine = { path = "crates/roomeq-engine", version = "0.5" }
 roomeq-export = { path = "crates/roomeq-export", version = "0.5" }
@@ -90,11 +97,7 @@ nalgebra = { version = "0.35", default-features = false, features = ["std"] }
 metaheuristics-nature = "10.1"
 rustfft = "6.4"
 hound = "3.5"
-# `plotly` is gated behind the `plotly` feature (off by default). Library code
-# under `src/plot/` and the `roomeq-fuzzer` binary require it; the main
-# `autoeq` binary degrades gracefully and skips chart generation when off.
-# currently we have compilation errors in 0.14.1
-plotly = "0.13"
+# Reports are self-contained HTML+WASM documents (no Plotly dependency).
 rand = "0.10.2"
 rand_chacha = "0.10.0"
 reqwest = { version = "0.13", features = ["json"] }
@@ -114,27 +117,26 @@ proptest = { version = "1.8", default-features = false, features = ["std"] }
 serial_test = "4"
 wide = "0.6.1"
 
-# Shared report primitives at the published Gitea revision.
-math-iir-fir = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
-math-dsp = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
-math-optimisation = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
-math-rir = { git = "http://192.168.1.32:3001/pierre/math-audio.git", rev = "cabbc6dc1c3d0c8aad275ac33ec015d174859c89", version = "0.5" }
+# Shared report primitives from the GitHub tree (never Gitea: releases
+# must resolve from public sources; local checkouts only via [patch]).
+math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
 sofa-reader = "0.2"
 
 # Core numerical computing
 ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
 oxiblas-ndarray = "0.2.1"
 
-# Optional, WebDriver-free static rendering. Charts are emitted as deterministic
-# SVG and `resvg` rasterizes them in-process to PNG.
-resvg = "0.48"
 rayon = "1.11"
 
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-artifacts = { workspace = true }
 autoeq-fir = { workspace = true }
-autoeq-plot = { workspace = true, optional = true }
+autoeq-plot = { workspace = true }
+autoeq-report-wasm = { workspace = true }
 autoeq-measurements = { workspace = true }
 autoeq-optim = { workspace = true }
 autoeq-workflow = { workspace = true }
@@ -149,7 +151,6 @@ roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
 roomeq-workflow = { workspace = true }
 anyhow = { workspace = true }
-plotly = { workspace = true, optional = true }
 serde_json = { workspace = true }
 math-iir-fir = { workspace = true }
 math-optimisation = { workspace = true }
@@ -158,9 +159,6 @@ math-optimisation = { workspace = true }
 default = []
 cli = ["dep:autoeq-cli", "dep:roomeq-cli"]
 qa = ["cli", "dep:roomeq-qa"]
-plotly = ["dep:plotly", "dep:autoeq-plot", "autoeq-plot/plotly", "autoeq-cli?/plotly"]
-# Static PNG export has no browser, WebDriver, display-server, or network dependency.
-plotly_static = ["plotly", "autoeq-plot/plotly_static", "autoeq-cli?/plotly_static"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
 
@@ -197,7 +195,7 @@ required-features = ["cli"]
 [[bin]]
 name = "roomeq-fuzzer"
 path = "src/bin/roomeq_fuzzer.rs"
-required-features = ["qa", "plotly"]
+required-features = ["qa"]
 
 [[bin]]
 name = "roomeq-qa-quality"
@@ -235,7 +233,6 @@ path = "src/lib.rs"
 
 [[example]]
 name = "headphone_loss_demo"
-required-features = ["plotly"]
 
 [[example]]
 name = "headphone_loss_validation"
@@ -280,7 +277,7 @@ opt-level = 3
 # benchmarks, and local release iteration. Thin LTO keeps cross-crate inlining
 # without the serial bottleneck of fat LTO, and 14 codegen units balance
 # parallelism with optimiser visibility.
-opt0level = 3
+opt-level = 3
 lto = "thin"
 codegen-units = 14
 panic = "abort"           # Removes unwind tables, saving ~15% binary size and link work

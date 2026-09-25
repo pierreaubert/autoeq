@@ -1,264 +1,138 @@
 use super::create::{
-    create_cea2034_combined_traces, create_cea2034_traces, create_cea2034_with_eq_combined_traces,
-    create_cea2034_with_eq_traces,
+    create_cea2034_combined_series, create_cea2034_series,
+    create_cea2034_with_eq_combined_series, create_cea2034_with_eq_series,
 };
 use super::misc::shorten_curve_name;
-use crate::ref_lines::make_ref_lines;
+use crate::ref_lines::make_ref_series;
 use ndarray::Array1;
-use serde_json::json;
-use serde_json::to_value as to_json;
 use std::collections::HashMap;
 
-#[test]
-fn test_create_cea2034_traces() {
-    // Create mock CEA2034 curves
+fn four_panel_curves() -> HashMap<String, crate::Curve> {
     let mut curves = HashMap::new();
-
-    // Create a simple frequency grid
     let freq = Array1::from(vec![20.0, 100.0, 1000.0, 10000.0, 20000.0]);
     let spl = Array1::from(vec![80.0, 85.0, 90.0, 85.0, 80.0]);
+    for name in [
+        "On Axis",
+        "Listening Window",
+        "Early Reflections",
+        "Sound Power",
+    ] {
+        curves.insert(
+            name.to_string(),
+            crate::Curve {
+                freq: freq.clone(),
+                spl: spl.clone(),
+                phase: None,
+                ..Default::default()
+            },
+        );
+    }
+    curves
+}
 
-    // Add mock curves for the primary CEA2034 set used by create_cea2034_traces
-    curves.insert(
-        "On Axis".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Listening Window".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Early Reflections".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Sound Power".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
+fn di_curves() -> HashMap<String, crate::Curve> {
+    let mut curves = HashMap::new();
+    let freq = Array1::from(vec![100.0, 1000.0, 10000.0]);
+    let spl_primary = Array1::from(vec![80.0, 85.0, 82.0]);
+    for name in [
+        "On Axis",
+        "Listening Window",
+        "Early Reflections",
+        "Sound Power",
+    ] {
+        curves.insert(
+            name.to_string(),
+            crate::Curve {
+                freq: freq.clone(),
+                spl: spl_primary.clone(),
+                phase: None,
+                ..Default::default()
+            },
+        );
+    }
+    let spl_di = Array1::from(vec![5.0, 6.0, 7.0]);
+    for name in ["Early Reflections DI", "Sound Power DI"] {
+        curves.insert(
+            name.to_string(),
+            crate::Curve {
+                freq: freq.clone(),
+                spl: spl_di.clone(),
+                phase: None,
+                ..Default::default()
+            },
+        );
+    }
+    curves
+}
 
-    // Test creating CEA2034 traces
-    let traces = create_cea2034_traces(&curves);
+#[test]
+fn test_create_cea2034_series() {
+    let curves = four_panel_curves();
+    let series = create_cea2034_series(&curves);
+    assert_eq!(series.len(), 4);
+    // Panels in order, short names.
+    let panels: Vec<usize> = series.iter().map(|(p, _)| *p).collect();
+    assert_eq!(panels, vec![0, 1, 2, 3]);
+    let names: Vec<&str> = series.iter().map(|(_, s)| s.name.as_str()).collect();
+    assert_eq!(names, vec!["ON", "LW", "ER", "SP"]);
 
-    // Should have 4 traces
-    assert_eq!(traces.len(), 4);
-
-    // Test creating CEA2034 traces with EQ
     let eq_response = Array1::from(vec![1.0, 1.0, 1.0, 1.0, 1.0]);
-    let eq_traces = create_cea2034_with_eq_traces(&curves, &eq_response);
-
-    // Should have 4 traces
-    assert_eq!(eq_traces.len(), 4);
+    let eq_series = create_cea2034_with_eq_series(&curves, &eq_response);
+    assert_eq!(eq_series.len(), 4);
+    assert_eq!(eq_series[0].1.name, "ON w/EQ");
 }
 
 #[test]
-fn test_make_ref_lines_values() {
-    let lines = make_ref_lines("x3", "y3");
+fn test_make_ref_series_values() {
+    let lines = make_ref_series();
     assert_eq!(lines.len(), 2);
-    let v0 = to_json(&lines[0]).unwrap();
-    let v1 = to_json(&lines[1]).unwrap();
-    assert_eq!(v0["x"], json!([100.0, 10000.0]));
-    assert_eq!(v1["x"], json!([100.0, 10000.0]));
-    assert_eq!(v0["y"], json!([1.0, 1.0]));
-    assert_eq!(v1["y"], json!([-1.0, -1.0]));
+    assert_eq!(lines[0].x, vec![100.0, 10000.0]);
+    assert_eq!(lines[1].x, vec![100.0, 10000.0]);
+    assert_eq!(lines[0].y, vec![Some(1.0), Some(1.0)]);
+    assert_eq!(lines[1].y, vec![Some(-1.0), Some(-1.0)]);
+    assert_eq!(lines[0].name, "+1 dB ref");
+    assert_eq!(lines[1].name, "-1 dB ref");
 }
 
 #[test]
-fn test_create_cea2034_combined_traces_counts_and_axes() {
-    // Build minimal curves covering names used by combined function
-    let mut curves = HashMap::new();
-    let freq = Array1::from(vec![100.0, 1000.0, 10000.0]);
-    let spl_primary = Array1::from(vec![80.0, 85.0, 82.0]);
-    let spl_di = Array1::from(vec![5.0, 6.0, 7.0]);
+fn test_create_cea2034_combined_series_counts_and_axes() {
+    let curves = di_curves();
+    let series = create_cea2034_combined_series(&curves);
+    assert_eq!(series.len(), 6);
 
-    // Primary curves
-    curves.insert(
-        "On Axis".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Listening Window".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Early Reflections".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Sound Power".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
+    let names: Vec<&str> = series.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.contains(&"ERDI"));
+    assert!(names.contains(&"SPDI"));
 
-    // DI curves
-    curves.insert(
-        "Early Reflections DI".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_di.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Sound Power DI".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_di.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-
-    let traces = create_cea2034_combined_traces(&curves, "x7", "y7", "y7");
-    assert_eq!(traces.len(), 6);
-
-    // Check that DI traces target the secondary axis
-    let v = to_json(&traces).unwrap();
-    let names: Vec<String> = v
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap().to_string())
-        .collect();
-    assert!(names.contains(&"ERDI".to_string()));
-    assert!(names.contains(&"SPDI".to_string()));
-
-    // Find DI entries and ensure yaxis is y7 (DI shares primary axis in current implementation)
-    for t in v.as_array().unwrap() {
-        let n = t["name"].as_str().unwrap();
-        if n.ends_with(" DI") {
-            assert_eq!(t["yaxis"], json!("y7"));
+    // DI series target the secondary axis; mains stay primary.
+    for s in &series {
+        if s.name == "ERDI" || s.name == "SPDI" {
+            assert_eq!(s.y_axis, 1, "{}", s.name);
+        } else {
+            assert_eq!(s.y_axis, 0, "{}", s.name);
         }
     }
 }
 
 #[test]
-fn test_create_cea2034_with_eq_combined_traces_counts_and_names() {
-    let mut curves = HashMap::new();
-    let freq = Array1::from(vec![100.0, 1000.0, 10000.0]);
-    let spl_primary = Array1::from(vec![80.0, 85.0, 82.0]);
-    let spl_di = Array1::from(vec![5.0, 6.0, 7.0]);
-
-    // Primary curves
-    curves.insert(
-        "On Axis".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Listening Window".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Early Reflections".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Sound Power".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_primary.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    // DI
-    curves.insert(
-        "Early Reflections DI".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_di.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-    curves.insert(
-        "Sound Power DI".to_string(),
-        crate::Curve {
-            freq: freq.clone(),
-            spl: spl_di.clone(),
-            phase: None,
-            ..Default::default()
-        },
-    );
-
+fn test_create_cea2034_with_eq_combined_series_counts_and_names() {
+    let curves = di_curves();
     let eq = Array1::from(vec![1.0, -1.0, 0.5]);
-    let traces = create_cea2034_with_eq_combined_traces(&curves, &eq, "x8", "y8", "y8");
-    assert_eq!(traces.len(), 6);
-    let v = to_json(&traces).unwrap();
-    // Primary names should have suffix w/EQ, DI should not
-    let names: Vec<String> = v
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|t| t["name"].as_str().unwrap().to_string())
-        .collect();
-    assert!(names.iter().any(|n| n == "ON w/EQ"));
-    assert!(names.iter().any(|n| n == "LW w/EQ"));
-    assert!(names.iter().any(|n| n == "ER w/EQ"));
-    assert!(names.iter().any(|n| n == "SP w/EQ"));
-    assert!(names.iter().any(|n| n == "ERDI"));
-    assert!(names.iter().any(|n| n == "SPDI"));
-    // DI yaxis should be y8 (shares primary axis in current implementation)
-    for t in v.as_array().unwrap() {
-        let n = t["name"].as_str().unwrap();
-        if n.ends_with(" DI") {
-            assert_eq!(t["yaxis"], json!("y8"));
-        }
-    }
+    let series = create_cea2034_with_eq_combined_series(&curves, &eq);
+    assert_eq!(series.len(), 6);
+    let names: Vec<&str> = series.iter().map(|s| s.name.as_str()).collect();
+    assert!(names.iter().any(|n| *n == "ON w/EQ"));
+    assert!(names.iter().any(|n| *n == "LW w/EQ"));
+    assert!(names.iter().any(|n| *n == "ER w/EQ"));
+    assert!(names.iter().any(|n| *n == "SP w/EQ"));
+    assert!(names.iter().any(|n| *n == "ERDI"));
+    assert!(names.iter().any(|n| *n == "SPDI"));
+    // EQ shifts the primary values but leaves DI untouched.
+    let on = series.iter().find(|s| s.name == "ON w/EQ").unwrap();
+    assert_eq!(on.y, vec![Some(81.0), Some(84.0), Some(82.5)]);
+    let erdi = series.iter().find(|s| s.name == "ERDI").unwrap();
+    assert_eq!(erdi.y, vec![Some(5.0), Some(6.0), Some(7.0)]);
+    assert_eq!(erdi.y_axis, 1);
 }
 
 #[test]

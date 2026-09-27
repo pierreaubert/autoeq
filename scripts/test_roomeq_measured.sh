@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Use `mbx` when installed, else plain `cargo` (mirrors the justfile).
+if [ -z "${CARGO:-}" ]; then
+    if command -v mbx >/dev/null 2>&1; then CARGO=mbx; else CARGO=cargo; fi
+fi
+
 # Run from the repository root even when invoked from another directory.
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
@@ -43,7 +48,7 @@ for scenario in "${scenarios[@]}"; do
     done
 done
 
-cargo build --release --locked --features cli --bin roomeq
+$CARGO build --release --locked --features cli --bin roomeq
 BIN=${CARGO_TARGET_DIR:-./target}/release/roomeq
 # REW captures are tracked, but their derived CSV directories are ignored.
 # Prepare missing derivatives in fresh worktrees without overwriting an

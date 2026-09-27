@@ -39,7 +39,7 @@ roomeq:
 # 0.2.128 on PATH (or set WANDBIN). Reports embed dist/ at generation time.
 [group('build')]
 report-dist:
-	cargo build --release --target wasm32-unknown-unknown -p autoeq-report-wasm
+	{{cargo}} build --release --target wasm32-unknown-unknown -p autoeq-report-wasm
 	${WANDBIN:-wasm-bindgen} --target web --out-name report2d --out-dir crates/autoeq-report-wasm/pkg2d target/wasm32-unknown-unknown/release/autoeq_report_wasm.wasm
 	cp crates/autoeq-report-wasm/pkg2d/report2d.js crates/autoeq-report-wasm/dist/report2d.js
 	cp crates/autoeq-report-wasm/pkg2d/report2d_bg.wasm crates/autoeq-report-wasm/dist/report2d.wasm

@@ -4263,6 +4263,7 @@ pub fn optimize_speaker(
         target_curve: target_curve.cloned(),
         optimizer: optimizer_config,
         recording_config: None,
+        measured_impulse_responses: Default::default(),
         ctc: None,
         reporting: None,
         cea2034_cache: None,

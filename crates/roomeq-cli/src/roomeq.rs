@@ -886,7 +886,7 @@ fn execute_optimization(
     // Load room configuration
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, _validation) = load_config_with_frequency_samples(
+    let (room_config, config_dir, _validation) = load_config_with_frequency_samples(
         &config_path,
         override_config_path.as_deref(),
         freq_samples,
@@ -931,6 +931,25 @@ fn execute_optimization(
     );
 
     let mut dsp_output = result.to_dsp_chain_output();
+    // Measured room IRs back the R1–R5 acoustic report: attach them (and
+    // the early/late analysis) before measurement extraction and ledger
+    // finalization bind the exact saved bytes.
+    if !room_config.measured_impulse_responses.is_empty() {
+        match roomeq_workflow::measured_ir::attach_measured_acoustics(
+            &mut dsp_output,
+            &room_config.measured_impulse_responses,
+            &config_dir,
+        ) {
+            Ok(warnings) => {
+                for warning in warnings {
+                    warn!("{warning}");
+                }
+            }
+            Err(reason) => {
+                anyhow::bail!("measured impulse responses refused delivered output: {reason}")
+            }
+        }
+    }
     let extracted = bundle::extract_measurements_to_assets(&mut dsp_output, &assets_dir);
     info!(
         "Extracted {} measurement files to {:?}",

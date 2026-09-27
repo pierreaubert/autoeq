@@ -6040,7 +6040,7 @@
     },
     "UpperBandAcousticBound": {
       "additionalProperties": false,
-      "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nThis is an external evidence declaration, not a fitted extrapolation.",
+      "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nAn explicit declaration is a flat cap, not a fitted extrapolation. The\nsubwoofer stopband inference may instead record a measured rolloff, in\nwhich case `max_spl_db` is the bound level at `band_hz[0]` and the bound\ndeclines at `rolloff_db_per_oct` above it.",
       "properties": {
         "band_hz": {
           "description": "Bound must overlap the measurement endpoint and cover the assessed band.",
@@ -6057,13 +6057,21 @@
           "type": "string"
         },
         "max_spl_db": {
-          "description": "Same input reference and SPL calibration as the corresponding capture.",
+          "description": "Same input reference and SPL calibration as the corresponding capture.\nFlat cap everywhere when `rolloff_db_per_oct` is absent, level at\n`band_hz[0]` when a rolloff is present.",
           "format": "double",
           "type": "number"
         },
         "partition": {
           "description": "`training` or `held_out`, matching the immutable capture partition.",
           "type": "string"
+        },
+        "rolloff_db_per_oct": {
+          "description": "Measured decline in dB per octave above `band_hz[0]`. Absent means a\nflat cap. Only a non-positive (falling or flat) slope is admissible;\na rising tail can never bound unmeasured output.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "seat_index": {
           "format": "uint",

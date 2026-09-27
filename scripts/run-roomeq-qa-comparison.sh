@@ -59,6 +59,11 @@
 
 set -euo pipefail
 
+# Use `mbx` when installed, else plain `cargo` (mirrors the justfile).
+if [ -z "${CARGO:-}" ]; then
+    if command -v mbx >/dev/null 2>&1; then CARGO=mbx; else CARGO=cargo; fi
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${PROJECT_ROOT}"
@@ -133,7 +138,7 @@ esac
 
 # Build roomeq first (avoids repeated compilation)
 echo "=== Building roomeq (release) ==="
-cargo build --features cli --bin roomeq --release
+$CARGO build --features cli --bin roomeq --release
 
 ROOMEQ="./target/release/roomeq"
 

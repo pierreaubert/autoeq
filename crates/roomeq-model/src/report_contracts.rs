@@ -380,7 +380,10 @@ pub struct QualityPartitionMetrics {
 }
 
 /// Calibrated upper bound on an unmeasured acoustic transfer, before DSP.
-/// This is an external evidence declaration, not a fitted extrapolation.
+/// An explicit declaration is a flat cap, not a fitted extrapolation. The
+/// subwoofer stopband inference may instead record a measured rolloff, in
+/// which case `max_spl_db` is the bound level at `band_hz[0]` and the bound
+/// declines at `rolloff_db_per_oct` above it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct UpperBandAcousticBound {
     /// `training` or `held_out`, matching the immutable capture partition.
@@ -389,9 +392,35 @@ pub struct UpperBandAcousticBound {
     /// Bound must overlap the measurement endpoint and cover the assessed band.
     pub band_hz: [f64; 2],
     /// Same input reference and SPL calibration as the corresponding capture.
+    /// Flat cap everywhere when `rolloff_db_per_oct` is absent, level at
+    /// `band_hz[0]` when a rolloff is present.
     pub max_spl_db: f64,
+    /// Measured decline in dB per octave above `band_hz[0]`. Absent means a
+    /// flat cap. Only a non-positive (falling or flat) slope is admissible;
+    /// a rising tail can never bound unmeasured output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rolloff_db_per_oct: Option<f64>,
     /// Stable reference to the calibration, specification, or measurement proof.
     pub evidence_id: String,
+}
+
+impl UpperBandAcousticBound {
+    /// Bound level at one frequency. Flat below and at the band edge so the
+    /// overlap with measured support stays a cap; declining above it only
+    /// when a measured rolloff was recorded.
+    pub fn level_at_hz(&self, frequency_hz: f64) -> f64 {
+        match self.rolloff_db_per_oct {
+            Some(slope)
+                if slope.is_finite()
+                    && slope <= 0.0
+                    && self.band_hz[0] > 0.0
+                    && frequency_hz > self.band_hz[0] =>
+            {
+                self.max_spl_db + slope * (frequency_hz / self.band_hz[0]).log2()
+            }
+            _ => self.max_spl_db,
+        }
+    }
 }
 
 /// Bound retained when a physical branch is omitted outside measured support.

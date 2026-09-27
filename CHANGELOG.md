@@ -1,5 +1,36 @@
 # Unreleased
 
+- Bound the inferred subwoofer stopband from the measured rolloff instead of
+  a flat peak-hold: when the last measured half-octave falls, the unmeasured
+  tail continues at its fitted dB-per-octave slope (recorded as
+  `measured_subwoofer_stopband_rolloff` with the new optional
+  `rolloff_db_per_oct` on `UpperBandAcousticBound`); rising tails keep the
+  flat peak-hold form. Explicit declarations stay flat caps unless they carry
+  a non-positive `rolloff_db_per_oct`, and rising slopes are rejected. The
+  0.1 dB omission budget still gates every summation.
+- Accept measured room impulse responses per channel
+  (`measured_impulse_responses` in the RoomEQ input config): declared
+  `time_ms,amplitude` CSVs are validated (uniform grid, declared-rate
+  agreement, shared timing across channels) and attached as the chain's
+  measured `pre_ir` at finalization, before extraction and ledger binding.
+  The R1–R5 acoustic analyses (band-limited reflection table, early/late
+  curves, nine-band octave T60, STFT waterfall with resonance decays,
+  three-cycle wavelet) run on measured IRs only, each gated against the
+  viewer contract; channels without a declaration keep synthesized IRs and
+  their report cells stay pending.
+- Rework the `display-roomeq` HTML report layout: the 2D/GPUI toggle sits at
+  the end of the title line and always shows (GPUI falls back to 2D without
+  a WebGPU adapter); the channel tab bar moved below the summary sections.
+  The combined overview is now three stacked panels sharing the frequency
+  axis (Before EQ + dotted targets, all EQ shaping curves, Corrected +
+  dotted targets) with per-panel legends and a shared Before/Corrected SPL
+  range. **All EQ Filters** renders channels as a button set. Section 1
+  operational share derives from legacy final ledger decisions when
+  `channel_summaries` is absent; level residuals are predicted from the
+  post-DSP curve; a new frequency-landmarks table reports per-speaker
+  peaks, notches and −6 dB LF extension. Both renderers consume the same
+  `autoeq-report-data-v1` payload, so 2D and GPUI views stay in parity.
+
 - Replace Plotly report rendering with the HTML-shell + WebAssembly plot
   stack (migration plan `reviews/WASM_PLOT_MIGRATION_PLAN.md`, step 1):
   `crates/autoeq-plot` and `scripts/src/figures.py` emit versioned

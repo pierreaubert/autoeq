@@ -1,7 +1,12 @@
+# Use `mbx` when installed, else plain `cargo` (mirrors the justfile).
+if [ -z "${CARGO:-}" ]; then
+    if command -v mbx >/dev/null 2>&1; then CARGO=mbx; else CARGO=cargo; fi
+fi
+
 IN=./data_tests/roomeq/measured/5.1.4_genelec
 OUT=./data_generated/roomeq/measured/5.1.4_genelec
 
-cargo build --release --features cli --bin roomeq
+$CARGO build --release --features cli --bin roomeq
 
 rm -fr ${OUT} && mkdir -p ${OUT}
 

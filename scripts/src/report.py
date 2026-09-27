@@ -8,6 +8,7 @@ from .capture_clock_views import capture_clock_qa_html, gated_lr_channel
 from .capture_reflection_views import capture_reflections_html
 from .acoustic_report import (
     early_reflections_html,
+    landmarks_table_html,
     level_compensation_html,
     pair_sum_difference,
     room_t60_rows,
@@ -423,10 +424,12 @@ def _all_eq_filters_html(data: dict) -> str:
 
     Mirrors the per-tab filter sections (driver tabs split by origin with a
     1..N numbering) so the whole correction is visible without switching
-    tabs. Returns an empty string when no channel carries EQ filters.
+    tabs. Channels render as a button set: clicking a channel button shows
+    that channel's EQ tables. Returns an empty string when no channel
+    carries EQ filters.
     """
     channels = data.get("channels") or {}
-    blocks: list[str] = []
+    panels: list[tuple[str, int, str]] = []
     for entry in display_channel_entries(data):
         channel_name = entry["channel"]
         driver_index = entry["driver"]
@@ -454,22 +457,42 @@ def _all_eq_filters_html(data: dict) -> str:
                 groups.append((f"Channel {channel_name}", passes))
         if not groups:
             continue
-        blocks.append(f"            <h3>{safe_label}</h3>\n")
+        total = sum(sum(len(p["filters"]) for p in passes) for _, passes in groups)
+        body = [f"            <h3>{safe_label}</h3>\n"]
         for origin, passes in groups:
             count = sum(len(p["filters"]) for p in passes)
-            blocks.append(f"            <h4>{escape(origin)} ({count})</h4>\n")
-            blocks.append(_eq_filter_table_html(passes))
-    if not blocks:
+            body.append(f"            <h4>{escape(origin)} ({count})</h4>\n")
+            body.append(_eq_filter_table_html(passes))
+        panels.append((safe_label, total, "".join(body)))
+    if not panels:
         return ""
-    return (
+    parts = [
         '        <div class="plot-container">\n'
         "            <h2>All EQ Filters</h2>\n"
         '            <p class="epa-footer">Complete PEQ listing for every '
         "channel and driver (same data and numbering as the per-tab "
-        "sections below).</p>\n"
-        + "".join(blocks)
-        + "        </div>\n"
-    )
+        "sections below). Select a channel to show its filters.</p>\n"
+        '            <div class="eq-tabs">\n'
+        '                <div class="eq-tab-header">\n',
+    ]
+    for index, (label, total, _) in enumerate(panels):
+        active = " active" if index == 0 else ""
+        parts.append(
+            '                    <button class="eq-tab-btn'
+            + active + '" '
+            f'onclick="openEqTab(event, \'alleq_{index}\')">'
+            f"{label} ({total})</button>\n"
+        )
+    parts.append("                </div>\n")
+    for index, (_, _, body) in enumerate(panels):
+        active = " active" if index == 0 else ""
+        parts.append(
+            f'                <div id="alleq_{index}" class="eq-tab-panel{active}">\n'
+            f"{body}"
+            "                </div>\n"
+        )
+    parts.append("            </div>\n        </div>\n")
+    return "".join(parts)
 
 
 def _crossover_config_html(data: dict) -> str:
@@ -1174,6 +1197,7 @@ def create_html_report(
     _emit_html(sections, acceptance_views_html(data))
     _emit_html(sections, waveform_status_html(data))
     _emit_html(sections, summary_table_html(data))
+    _emit_html(sections, landmarks_table_html(data))
 
     # Metadata section
     if metadata:

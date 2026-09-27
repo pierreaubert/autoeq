@@ -20,6 +20,7 @@ pub mod group_measurements;
 pub mod group_processing;
 pub mod home_cinema;
 pub mod listening_stimuli;
+pub mod measured_ir;
 pub mod measurement;
 pub mod multisub;
 pub mod output;

@@ -2961,6 +2961,7 @@ mod tests {
                     seat_index,
                     band_hz: [200.0, 20_000.0],
                     max_spl_db: 20.0,
+                    rolloff_db_per_oct: None,
                     evidence_id: format!("analytic-qualified-stopband-seat-{seat_index}"),
                 })
                 .collect(),
@@ -3120,6 +3121,7 @@ mod tests {
                 seat_index: 0,
                 band_hz: [200.0, 20_000.0],
                 max_spl_db: 80.0,
+                rolloff_db_per_oct: None,
                 evidence_id: "analytic-energetic-tail".into(),
             }],
         );

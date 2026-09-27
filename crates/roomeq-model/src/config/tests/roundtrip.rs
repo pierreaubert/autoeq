@@ -604,6 +604,7 @@ fn room_config_roundtrip_and_resolve_paths() {
         optimizer: OptimizerConfig::default(),
         provenance: Default::default(),
         recording_config: None,
+        measured_impulse_responses: Default::default(),
         ctc: Some(CtcConfig::default()),
         reporting: None,
         cea2034_cache: None,

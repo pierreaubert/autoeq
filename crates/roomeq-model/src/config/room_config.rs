@@ -1,5 +1,6 @@
 use super::ctc_config::CtcConfig;
 use super::default::{default_config_version, validate_config_version};
+use super::measured_ir_config::MeasuredIrSource;
 use super::optimizer_config::OptimizerConfig;
 use super::provenance_config::ProvenanceConfig;
 use super::reporting_config::ReportingConfig;
@@ -11,7 +12,7 @@ use super::types::TargetCurveConfig;
 use super::{ConfigValidationReport, ValidationStage};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Complete room configuration
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -41,6 +42,12 @@ pub struct RoomConfig {
     /// Recording configuration (device settings, signal parameters used during capture)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recording_config: Option<RecordingConfiguration>,
+    /// Measured room impulse responses per channel, backing the R1–R5
+    /// acoustic report fields. Keys are output channel names; values are
+    /// `time_ms,amplitude` CSVs captured in the room. Channels without an
+    /// entry keep synthesized IRs and their report cells stay pending.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub measured_impulse_responses: BTreeMap<String, MeasuredIrSource>,
     /// Cross-talk cancellation / binaural-aware correction configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ctc: Option<CtcConfig>,
@@ -82,6 +89,7 @@ impl Default for RoomConfig {
             optimizer: OptimizerConfig::default(),
             provenance: ProvenanceConfig::default(),
             recording_config: None,
+            measured_impulse_responses: BTreeMap::new(),
             ctc: None,
             reporting: None,
             cea2034_cache: None,
@@ -332,6 +340,11 @@ impl RoomConfig {
             ctc.resolve_paths(&base_dir);
         }
         self.provenance.resolve_paths(&base_dir);
+        for source in self.measured_impulse_responses.values_mut() {
+            if source.path.is_relative() {
+                source.path = base_dir.join(&source.path);
+            }
+        }
     }
 }
 

@@ -32,6 +32,56 @@ impl Summed {
     }
 }
 
+/// Least-squares rolloff in dB per octave over the last measured
+/// half-octave, plus the fitted level at the endpoint. Returns `None` when
+/// fewer than two points cover the window, the fit is degenerate, or the
+/// tail is rising: a rising edge cannot bound unmeasured output, so the
+/// caller keeps the flat peak-hold assumption. The junction level never
+/// understates the last measured bin.
+fn measured_rolloff_db_per_oct(
+    freq: &ndarray::Array1<f64>,
+    spl: &ndarray::Array1<f64>,
+    endpoint: f64,
+) -> Option<(f64, f64)> {
+    let points: Vec<(f64, f64)> = freq
+        .iter()
+        .zip(spl.iter())
+        .filter(|(frequency, level)| {
+            **frequency >= endpoint / std::f64::consts::SQRT_2
+                && frequency.is_finite()
+                && level.is_finite()
+        })
+        .map(|(frequency, level)| (frequency.log2(), *level))
+        .collect();
+    if points.len() < 2 {
+        return None;
+    }
+    let count = points.len() as f64;
+    let (sum_x, sum_y) = points
+        .iter()
+        .fold((0.0, 0.0), |(sx, sy), (x, y)| (sx + x, sy + y));
+    let (sum_xx, sum_xy) = points
+        .iter()
+        .fold((0.0, 0.0), |(sxx, sxy), (x, y)| {
+            (sxx + x * x, sxy + x * y)
+        });
+    let denominator = count * sum_xx - sum_x * sum_x;
+    if !denominator.is_finite() || denominator <= 1e-12 {
+        return None;
+    }
+    let slope = (count * sum_xy - sum_x * sum_y) / denominator;
+    if !slope.is_finite() || slope > 0.0 {
+        return None;
+    }
+    let intercept = (sum_y - slope * sum_x) / count;
+    let fitted = intercept + slope * endpoint.log2();
+    let last = *spl.last().unwrap();
+    if !fitted.is_finite() || !last.is_finite() {
+        return None;
+    }
+    Some((slope, fitted.max(last)))
+}
+
 /// Apply identical electrical processing to measured transfer and an explicit
 /// acoustic magnitude bound. The bound supplies no measured or invented phase.
 pub(super) fn process_branch(
@@ -65,26 +115,46 @@ pub(super) fn process_branch(
         .freq
         .last()
         .ok_or_else(|| invalid("empty bounded capture"))?;
-    // For subwoofers measured through the crossover region, assume the
-    // unmeasured stopband never exceeds the last measured half-octave's peak. This is
-    // a source-capability assumption, not extrapolated magnitude or phase.
-    // Requiring an octave beyond the low-pass preserves crossover evidence;
-    // the actual DSP and omission budget must still make the tail negligible.
+    // For subwoofers measured through the crossover region, bound the
+    // unmeasured stopband from the last measured half-octave. A falling
+    // measured tail continues to fall at its fitted rolloff; anything else
+    // (rising tail, fewer than two points) keeps the previous flat
+    // peak-hold assumption. This records measured magnitude behavior, never
+    // extrapolated phase. Requiring an octave beyond the low-pass preserves
+    // crossover evidence; the actual DSP and omission budget must still make
+    // the tail negligible.
     let inferred = subwoofer_low_pass_hz
         .filter(|cutoff| cutoff.is_finite() && *cutoff > 0.0 && endpoint >= 2.0 * cutoff)
         .filter(|_| grid[grid.len() - 1] > endpoint)
-        .map(|_| UpperBandAcousticBound {
-            partition: partition.into(),
-            seat_index: seat,
-            band_hz: [endpoint, grid[grid.len() - 1]],
-            max_spl_db: raw
-                .freq
-                .iter()
-                .zip(&raw.spl)
-                .filter(|(frequency, _)| **frequency >= endpoint / std::f64::consts::SQRT_2)
-                .map(|(_, spl)| *spl)
-                .fold(f64::NEG_INFINITY, f64::max),
-            evidence_id: "assumed_subwoofer_stopband_below_measured_tail".into(),
+        .map(|_| {
+            let rolloff = measured_rolloff_db_per_oct(&raw.freq, &raw.spl, endpoint);
+            let (max_spl_db, rolloff_db_per_oct, evidence_id) = match rolloff {
+                Some((slope, endpoint_level)) => (
+                    endpoint_level,
+                    Some(slope),
+                    "measured_subwoofer_stopband_rolloff",
+                ),
+                None => (
+                    raw.freq
+                        .iter()
+                        .zip(&raw.spl)
+                        .filter(|(frequency, _)| {
+                            **frequency >= endpoint / std::f64::consts::SQRT_2
+                        })
+                        .map(|(_, spl)| *spl)
+                        .fold(f64::NEG_INFINITY, f64::max),
+                    None,
+                    "assumed_subwoofer_stopband_below_measured_tail",
+                ),
+            };
+            UpperBandAcousticBound {
+                partition: partition.into(),
+                seat_index: seat,
+                band_hz: [endpoint, grid[grid.len() - 1]],
+                max_spl_db,
+                rolloff_db_per_oct,
+                evidence_id: evidence_id.into(),
+            }
         });
     // An explicit declaration always takes precedence over the assumption.
     let bound = matches.first().copied().or(inferred.as_ref());
@@ -97,25 +167,25 @@ pub(super) fn process_branch(
             || low > endpoint
             || high <= endpoint
             || !bound.max_spl_db.is_finite()
+            || bound
+                .rolloff_db_per_oct
+                .is_some_and(|slope| !slope.is_finite() || slope > 0.0)
             || bound.evidence_id.trim().is_empty()
         {
             return Err(invalid(format!(
                 "invalid upper-band acoustic bound for '{output}'"
             )));
         }
-        if raw
-            .freq
-            .iter()
-            .zip(&raw.spl)
-            .any(|(f, spl)| *f >= low && *spl > bound.max_spl_db + 1e-9)
-        {
+        if raw.freq.iter().zip(&raw.spl).any(|(f, spl)| {
+            *f >= low && *spl > bound.level_at_hz(*f) + 1e-9
+        }) {
             return Err(invalid(format!(
                 "upper-band acoustic bound contradicts measured '{output}' levels"
             )));
         }
         let bound_curve = Curve {
             freq: grid.clone(),
-            spl: ndarray::Array1::from_elem(grid.len(), bound.max_spl_db),
+            spl: grid.mapv(|frequency| bound.level_at_hz(frequency)),
             phase: None,
             ..Default::default()
         };
@@ -566,6 +636,7 @@ mod tests {
                         seat_index: 0,
                         band_hz: [200.0, 16_000.0],
                         max_spl_db: -120.0,
+                        rolloff_db_per_oct: None,
                         evidence_id: format!("subwoofer-stop-band-{index}"),
                     },
                 )),
@@ -581,5 +652,205 @@ mod tests {
                 .all(|support| support.max_magnitude_uncertainty_db == 0.0)
         );
         assert!(summed.curve.spl.iter().skip(3).all(|level| *level < -200.0));
+    }
+
+    #[test]
+    fn inferred_subwoofer_bound_follows_measured_rolloff() {
+        // Mirror of 2.2_sigberg1 FIR: sub endpoint 199.951172 Hz with a
+        // -24 dB/oct measured tail, +4.835 dB branch gain, 72.11 Hz LR24
+        // low-pass. Flat peak-hold puts 41.6 dB of omitted bound against a
+        // 76 dB seat sum at 201.554078 Hz (ratio 0.0168, over the 0.1 dB
+        // budget); the fitted rolloff puts 11.7 dB there (ratio 0.0006).
+        let grid = ndarray::Array1::from_vec(vec![
+            20.0,
+            100.0,
+            199.951172,
+            201.554078,
+            1000.0,
+            16_000.0,
+        ]);
+        let freq =
+            ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 199.951172_f64.log10(), 64);
+        let spl = freq.mapv(|frequency| {
+            if frequency <= 72.11 {
+                78.0
+            } else {
+                78.0 - 24.0 * (frequency / 72.11).log2()
+            }
+        });
+        let raw = Curve {
+            freq: freq.clone(),
+            spl,
+            phase: Some(ndarray::Array1::zeros(freq.len())),
+            ..Default::default()
+        };
+        let branch = process_branch(
+            "sub",
+            &raw,
+            &HashMap::new(),
+            "training",
+            0,
+            &grid,
+            Some(72.11),
+            |curve| {
+                let mut processed = curve.clone();
+                for (frequency, level) in processed.freq.iter().zip(&mut processed.spl) {
+                    *level += 4.835;
+                    if *frequency > 72.11 {
+                        *level -= 24.0 * (*frequency / 72.11).log2();
+                    }
+                }
+                Ok(processed)
+            },
+        )
+        .unwrap();
+        let (curve, declaration) = branch
+            .upper
+            .as_ref()
+            .expect("a falling tail must infer a bound");
+        assert_eq!(
+            declaration.evidence_id,
+            "measured_subwoofer_stopband_rolloff"
+        );
+        let slope = declaration
+            .rolloff_db_per_oct
+            .expect("rolloff must be recorded");
+        assert!(
+            (slope + 24.0).abs() < 0.5,
+            "unexpected fitted slope {slope}"
+        );
+        let top = *curve.spl.last().unwrap();
+        assert!(
+            top < declaration.max_spl_db - 100.0,
+            "bound curve must decline, ends at {top}"
+        );
+        let main = Branch {
+            output: "main".into(),
+            measured: Curve {
+                freq: grid.clone(),
+                spl: ndarray::Array1::from_elem(grid.len(), 76.0),
+                phase: Some(ndarray::Array1::zeros(grid.len())),
+                ..Default::default()
+            },
+            upper: None,
+        };
+        let summed = sum_branches(&[main, branch], 20.0, 16_000.0)
+            .expect("the fitted rolloff must satisfy the omission budget");
+        assert_eq!(summed.support.len(), 1);
+        assert!(summed.uncertainty_db() < MAX_OMISSION_ERROR_DB);
+        assert!(summed.uncertainty_db() > 0.0);
+    }
+
+    #[test]
+    fn rising_tail_keeps_flat_peak_hold() {
+        let raw = Curve {
+            freq: ndarray::Array1::from_vec(vec![20.0, 100.0, 150.0, 199.951172]),
+            spl: ndarray::Array1::from_vec(vec![50.0, 52.0, 55.0, 60.0]),
+            phase: Some(ndarray::Array1::zeros(4)),
+            ..Default::default()
+        };
+        let grid =
+            ndarray::Array1::from_vec(vec![20.0, 100.0, 199.951172, 1000.0, 16_000.0]);
+        let branch = process_branch(
+            "sub",
+            &raw,
+            &HashMap::new(),
+            "training",
+            0,
+            &grid,
+            Some(72.11),
+            |curve| Ok(curve.clone()),
+        )
+        .unwrap();
+        let (_, declaration) = branch
+            .upper
+            .as_ref()
+            .expect("peak hold must still infer a bound");
+        assert_eq!(declaration.rolloff_db_per_oct, None);
+        assert_eq!(
+            declaration.evidence_id,
+            "assumed_subwoofer_stopband_below_measured_tail"
+        );
+        assert_eq!(declaration.max_spl_db, 60.0);
+    }
+
+    #[test]
+    fn explicit_rising_rolloff_is_rejected() {
+        let raw = Curve {
+            freq: ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0]),
+            spl: ndarray::Array1::from_vec(vec![50.0, 50.0, 50.0]),
+            phase: Some(ndarray::Array1::zeros(3)),
+            ..Default::default()
+        };
+        let grid =
+            ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0]);
+        let declarations = HashMap::from([(
+            "sub".to_owned(),
+            vec![UpperBandAcousticBound {
+                partition: "training".into(),
+                seat_index: 0,
+                band_hz: [200.0, 16_000.0],
+                max_spl_db: 70.0,
+                rolloff_db_per_oct: Some(3.0),
+                evidence_id: "rising-tail".into(),
+            }],
+        )]);
+        let error = process_branch(
+            "sub",
+            &raw,
+            &declarations,
+            "training",
+            0,
+            &grid,
+            None,
+            |curve| Ok(curve.clone()),
+        )
+        .err()
+        .expect("a rising tail can never bound unmeasured output");
+        assert!(
+            error.to_string().contains("invalid upper-band acoustic bound"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn declining_bound_is_checked_at_frequency() {
+        let raw = Curve {
+            freq: ndarray::Array1::from_vec(vec![20.0, 100.0, 200.0, 250.0]),
+            spl: ndarray::Array1::from_vec(vec![50.0, 50.0, 70.0, 68.0]),
+            phase: Some(ndarray::Array1::zeros(4)),
+            ..Default::default()
+        };
+        let grid =
+            ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0]);
+        // At 250 Hz the declining bound allows 70 - 12*log2(250/200) = 66.1
+        // dB, so a 68 dB measured point contradicts it.
+        let declarations = HashMap::from([(
+            "sub".to_owned(),
+            vec![UpperBandAcousticBound {
+                partition: "training".into(),
+                seat_index: 0,
+                band_hz: [200.0, 16_000.0],
+                max_spl_db: 70.0,
+                rolloff_db_per_oct: Some(-12.0),
+                evidence_id: "declining-tail".into(),
+            }],
+        )]);
+        let error = process_branch(
+            "sub",
+            &raw,
+            &declarations,
+            "training",
+            0,
+            &grid,
+            None,
+            |curve| Ok(curve.clone()),
+        )
+        .err()
+        .expect("measured levels above the declining bound must fail");
+        assert!(
+            error.to_string().contains("contradicts measured"),
+            "{error}"
+        );
     }
 }

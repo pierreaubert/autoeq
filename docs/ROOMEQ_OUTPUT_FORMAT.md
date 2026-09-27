@@ -199,7 +199,7 @@ Each channel contains an ordered list of plugins that process audio in sequence.
 | `final_curve` | CurveData or null | Final frequency response after applying correction (normalized) |
 | `eq_response` | CurveData or null | EQ filter response curve (correction magnitude in dB) |
 | `target_curve` | CurveData or null | Effective target curve the optimizer worked against (mean-shifted + tilt, in absolute SPL) |
-| `pre_ir` | IrWaveform or null | Impulse response before correction (requires phase data) |
+| `pre_ir` | IrWaveform or null | Impulse response before correction (requires phase data, or a declared `measured_impulse_responses` entry, which takes precedence over the synthesized prediction) |
 | `post_ir` | IrWaveform or null | Impulse response after correction (requires phase data) |
 | `fir_temporal_masking` | TemporalIrMaskingMetrics or null | True FIR impulse-response temporal masking metrics for FIR, mixed-phase, hybrid, or standalone phase-correction filters. |
 | `direct_early_late_correction` | object or null | Direct/early/late correction-energy diagnostic, when that policy is enabled. |

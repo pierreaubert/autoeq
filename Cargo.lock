@@ -4614,6 +4614,7 @@ dependencies = [
  "log",
  "math-dsp",
  "math-iir-fir",
+ "math-rir",
  "ndarray",
  "num-complex",
  "rayon",

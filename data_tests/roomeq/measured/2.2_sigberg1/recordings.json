@@ -36,11 +36,23 @@
     },
     "subs_1": {
       "path": "left_sub.csv",
-      "name": "Left Sub"
+      "name": "Main listening position",
+      "speaker_name": "Left Sub",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "sigberg1-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "subs_2": {
       "path": "right_sub.csv",
-      "name": "Right Sub"
+      "name": "Main listening position",
+      "speaker_name": "Right Sub",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "sigberg1-mlp-session-1",
+        "has_measured_spl": true
+      }
     }
   },
   "crossovers": {

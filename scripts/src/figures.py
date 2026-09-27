@@ -568,30 +568,14 @@ def _driver_trace_kwargs(driver_index: int, color: str, point_count: int) -> dic
     return {"color": color, "width": 2.0, "dash": "solid"}
 
 
-def create_combined_figure(data: dict, json_path=None, tab=None) -> dict:
-    """Create a combined overview figure section (original + EQ + corrected).
+def _combined_panel_data(data: dict, json_path=None) -> dict:
+    """Collect the shared per-channel curves for the combined overview.
 
-    Args:
-        data: Output JSON data (roomeq result with correction filters)
-        json_path: Path to output JSON (used to resolve relative target files)
-        tab: Tab label passed into the emitted section.
+    Returns channel order, colors, EQ traces, post-DSP curves, target
+    overlays, crossover markers, and the shared SPL y-range so the
+    Before/Corrected panels stay visually comparable.
     """
     channels_dict = data.get("channels", {})
-
-    x_axis = axis("Frequency (Hz)", "log", 20, 20000)
-    if not channels_dict:
-        print("Warning: No channels found in the JSON file")
-        return figure(
-            "Combined Overview",
-            x_axis,
-            axis("SPL (dB)", "linear", -20, 30),
-            series_list=[],
-            tab=tab,
-        )
-
-    # Sort channels by classical order
-    sorted_channel_names = sorted(channels_dict.keys(), key=get_channel_sort_key)
-    channels = [(name, channels_dict[name]) for name in sorted_channel_names]
 
     # Color palette for channels
     channel_colors = [
@@ -619,6 +603,11 @@ def create_combined_figure(data: dict, json_path=None, tab=None) -> dict:
 
     post_dsp_curves = build_post_dsp_source_curves(data)
     target_curves = build_target_overlay_curves(data, post_dsp_curves, json_path)
+
+    # Sort channels by classical order
+    sorted_channel_names = sorted(channels_dict.keys(), key=get_channel_sort_key)
+    channels = [(name, channels_dict[name]) for name in sorted_channel_names]
+
     for channel_name, channel_data in channels:
         driver_curves = _get_driver_initial_curves(channel_data)
         if driver_curves:
@@ -635,16 +624,14 @@ def create_combined_figure(data: dict, json_path=None, tab=None) -> dict:
         if target_curve and "freq" in target_curve and "spl" in target_curve:
             all_corrected_curves.append(target_curve)
 
-    # Compute y-ranges
+    # Compute y-ranges (shared by the Before/Corrected panels)
     spl_y_min, spl_y_max = compute_y_range(
         all_initial_curves + all_corrected_curves
     )
 
-    # EQ traces (row 2 of the original). Multi-driver channels (e.g. two
-    # subwoofers sharing one LFE bus) expand into one effective per-driver
-    # shaping curve so each physical sub is visible instead of a single
-    # collapsed channel trace. Entries are (trace name, freq, spl, color
-    # index, driver index or None).
+    # EQ traces, one per channel (multi-driver channels expand into one
+    # effective per-driver shaping curve). Entries are (trace name, freq,
+    # spl, color index, driver index or None).
     eq_row_traces: list[tuple[str, list, list, int, int | None]] = []
     for channel_index, (channel_name, channel_data) in enumerate(channels):
         drivers = get_plottable_drivers(channel_data)
@@ -720,100 +707,7 @@ def create_combined_figure(data: dict, json_path=None, tab=None) -> dict:
         eq_y_upper = 15
         eq_y_lower = -15
 
-    spl_series: list[dict] = []
-    eq_series: list[dict] = []
-
-    # --- Original curves (default smoothing only; no dropdown) ---
-    for i, (channel_name, channel_data) in enumerate(channels):
-        color = channel_colors[i % len(channel_colors)]
-
-        if channel_name in per_driver_initial:
-            for d_idx, (driver_name, dcurve) in enumerate(
-                per_driver_initial[channel_name]
-            ):
-                spl_smoothed = smooth_octave(
-                    dcurve["freq"], dcurve["spl"], DEFAULT_SMOOTHING
-                )
-                style = _driver_trace_kwargs(d_idx, color, len(spl_smoothed))
-                spl_series.append(
-                    series(
-                        f"Original: {channel_name}/{driver_name}",
-                        dcurve["freq"],
-                        spl_smoothed,
-                        color=style["color"],
-                        width=style["width"],
-                        dash=style["dash"],
-                    )
-                )
-        else:
-            initial_curve = channel_data.get("initial_curve")
-            if initial_curve:
-                spl_smoothed = smooth_octave(
-                    initial_curve["freq"],
-                    initial_curve["spl"],
-                    DEFAULT_SMOOTHING,
-                )
-                spl_series.append(
-                    series(
-                        f"Original: {channel_name}",
-                        initial_curve["freq"],
-                        spl_smoothed,
-                        color=color,
-                        width=2.0,
-                    )
-                )
-
-    # --- EQ responses on the secondary Gain axis (unsmoothed) ---
-    for trace_name, eq_freq, eq_spl, color_index, _driver_index in eq_row_traces:
-        color = channel_colors[color_index % len(channel_colors)]
-        eq_series.append(
-            series(
-                trace_name,
-                eq_freq,
-                eq_spl,
-                color=color,
-                width=2.0,
-                y_axis=1,
-            )
-        )
-
-    # --- One microphone-predicted post-DSP curve per input (smoothed) ---
-    for i, (channel_name, channel_data) in enumerate(channels):
-        color = channel_colors[i % len(channel_colors)]
-        final_curve = post_dsp_curves.get(channel_name)
-
-        if final_curve and "freq" in final_curve and "spl" in final_curve:
-            freq = final_curve["freq"]
-            spl_smoothed = smooth_octave(freq, final_curve["spl"], DEFAULT_SMOOTHING)
-            spl_series.append(
-                series(
-                    f"Corrected: {channel_name}",
-                    freq,
-                    spl_smoothed,
-                    color=color,
-                    width=2.0,
-                )
-            )
-
-    # Target overlays share each channel's color and level alignment. They
-    # are deliberately not smoothed.
-    for i, (channel_name, _) in enumerate(channels):
-        target_curve = target_curves.get(channel_name)
-        if not target_curve:
-            continue
-        color = channel_colors[i % len(channel_colors)]
-        spl_series.append(
-            series(
-                f"Target: {channel_name}",
-                target_curve["freq"],
-                target_curve["spl"],
-                color=color,
-                width=2.0,
-                dash="dot",
-            )
-        )
-
-    # --- Crossover vertical lines (one per frequency; spanned all 3 rows) ---
+    # --- Crossover vertical lines (shared by all 3 panels) ---
     crossover_freqs = get_all_crossover_frequencies(data)
     vlines = []
     for xover_freq in crossover_freqs:
@@ -830,9 +724,135 @@ def create_combined_figure(data: dict, json_path=None, tab=None) -> dict:
             )
         )
 
-    # --- 0 dB reference for the EQ gain axis ---
-    # A schema hline always reads the primary (SPL) axis, so the EQ zero
-    # line is a two-point series pinned to y2 instead.
+    return {
+        "channels": channels,
+        "channel_colors": channel_colors,
+        "freq_points": freq_points,
+        "per_driver_initial": per_driver_initial,
+        "post_dsp_curves": post_dsp_curves,
+        "target_curves": target_curves,
+        "eq_row_traces": eq_row_traces,
+        "spl_y_min": spl_y_min,
+        "spl_y_max": spl_y_max,
+        "eq_y_lower": eq_y_lower,
+        "eq_y_upper": eq_y_upper,
+        "vlines": vlines,
+    }
+
+
+def create_combined_figure(data: dict, json_path=None, tab=None) -> list:
+    """Create the combined overview as three stacked panels.
+
+    One graph, three vertically aligned subplots sharing the frequency
+    x-axis (the schema has no multi-axis figure, so the panels are three
+    consecutive sections both renderers draw stacked in payload order):
+
+    1. Before EQ — every channel plus its dotted target overlay;
+    2. EQ — every channel/driver shaping curve on a Gain axis;
+    3. Corrected — every post-DSP channel plus its dotted target overlay.
+
+    Each panel carries only its own legend entries. The Before/Corrected
+    panels share one SPL y-range so they stay visually comparable.
+
+    Args:
+        data: Output JSON data (roomeq result with correction filters)
+        json_path: Path to output JSON (used to resolve relative target files)
+        tab: Tab label passed into the emitted sections.
+    """
+    channels_dict = data.get("channels", {})
+
+    x_axis = axis("Frequency (Hz)", "log", 20, 20000)
+    if not channels_dict:
+        print("Warning: No channels found in the JSON file")
+        return [
+            figure(
+                "Combined Overview — Before EQ",
+                x_axis,
+                axis("SPL (dB)", "linear", -20, 30),
+                series_list=[],
+                tab=tab,
+            )
+        ]
+
+    panels = _combined_panel_data(data, json_path)
+    channels = panels["channels"]
+    channel_colors = panels["channel_colors"]
+    freq_points = panels["freq_points"]
+    per_driver_initial = panels["per_driver_initial"]
+    post_dsp_curves = panels["post_dsp_curves"]
+    target_curves = panels["target_curves"]
+    eq_row_traces = panels["eq_row_traces"]
+    vlines = panels["vlines"]
+    spl_axis = axis("SPL (dB)", "linear", panels["spl_y_min"], panels["spl_y_max"])
+
+    # --- Panel 1: Before EQ (all channels + dotted targets) ---
+    before_series: list[dict] = []
+    for i, (channel_name, channel_data) in enumerate(channels):
+        color = channel_colors[i % len(channel_colors)]
+        if channel_name in per_driver_initial:
+            for d_idx, (driver_name, dcurve) in enumerate(
+                per_driver_initial[channel_name]
+            ):
+                spl_smoothed = smooth_octave(
+                    dcurve["freq"], dcurve["spl"], DEFAULT_SMOOTHING
+                )
+                style = _driver_trace_kwargs(d_idx, color, len(spl_smoothed))
+                before_series.append(
+                    series(
+                        f"{channel_name}/{driver_name} (before)",
+                        dcurve["freq"],
+                        spl_smoothed,
+                        color=style["color"],
+                        width=style["width"],
+                        dash=style["dash"],
+                    )
+                )
+        else:
+            initial_curve = channel_data.get("initial_curve")
+            if initial_curve:
+                spl_smoothed = smooth_octave(
+                    initial_curve["freq"],
+                    initial_curve["spl"],
+                    DEFAULT_SMOOTHING,
+                )
+                before_series.append(
+                    series(
+                        f"{channel_name} (before)",
+                        initial_curve["freq"],
+                        spl_smoothed,
+                        color=color,
+                        width=2.0,
+                    )
+                )
+    for i, (channel_name, _) in enumerate(channels):
+        target_curve = target_curves.get(channel_name)
+        if not target_curve:
+            continue
+        color = channel_colors[i % len(channel_colors)]
+        before_series.append(
+            series(
+                f"{channel_name} target",
+                target_curve["freq"],
+                target_curve["spl"],
+                color=color,
+                width=2.0,
+                dash="dot",
+            )
+        )
+
+    # --- Panel 2: EQ (all channels/drivers on the Gain axis) ---
+    eq_series: list[dict] = []
+    for trace_name, eq_freq, eq_spl, color_index, _driver_index in eq_row_traces:
+        color = channel_colors[color_index % len(channel_colors)]
+        eq_series.append(
+            series(
+                trace_name,
+                eq_freq,
+                eq_spl,
+                color=color,
+                width=2.0,
+            )
+        )
     eq_series.append(
         series(
             "0 dB",
@@ -841,19 +861,73 @@ def create_combined_figure(data: dict, json_path=None, tab=None) -> dict:
             color="rgba(150, 150, 150, 0.5)",
             width=1,
             dash="dash",
-            y_axis=1,
         )
     )
 
-    return figure(
-        "Combined Overview",
-        x_axis,
-        axis("SPL (dB)", "linear", spl_y_min, spl_y_max),
-        series_list=spl_series + eq_series,
-        vlines=vlines,
-        y2=axis("Gain (dB)", "linear", eq_y_lower, eq_y_upper),
-        tab=tab,
-    )
+    # --- Panel 3: Corrected (all post-DSP channels + dotted targets) ---
+    corrected_series: list[dict] = []
+    for i, (channel_name, channel_data) in enumerate(channels):
+        color = channel_colors[i % len(channel_colors)]
+        final_curve = post_dsp_curves.get(channel_name)
+
+        if final_curve and "freq" in final_curve and "spl" in final_curve:
+            freq = final_curve["freq"]
+            spl_smoothed = smooth_octave(freq, final_curve["spl"], DEFAULT_SMOOTHING)
+            corrected_series.append(
+                series(
+                    f"{channel_name} (corrected)",
+                    freq,
+                    spl_smoothed,
+                    color=color,
+                    width=2.0,
+                )
+            )
+    for i, (channel_name, _) in enumerate(channels):
+        target_curve = target_curves.get(channel_name)
+        if not target_curve:
+            continue
+        color = channel_colors[i % len(channel_colors)]
+        corrected_series.append(
+            series(
+                f"{channel_name} target",
+                target_curve["freq"],
+                target_curve["spl"],
+                color=color,
+                width=2.0,
+                dash="dot",
+            )
+        )
+
+    return [
+        figure(
+            "Combined Overview — Before EQ",
+            x_axis,
+            spl_axis,
+            series_list=before_series,
+            vlines=vlines,
+            tab=tab,
+        ),
+        figure(
+            "Combined Overview — EQ",
+            axis("Frequency (Hz)", "log", 20, 20000),
+            axis(
+                "Gain (dB)", "linear", panels["eq_y_lower"], panels["eq_y_upper"]
+            ),
+            series_list=eq_series,
+            vlines=vlines,
+            tab=tab,
+        ),
+        figure(
+            "Combined Overview — Corrected",
+            axis("Frequency (Hz)", "log", 20, 20000),
+            axis("SPL (dB)", "linear", panels["spl_y_min"], panels["spl_y_max"]),
+            series_list=corrected_series,
+            vlines=vlines,
+            tab=tab,
+        ),
+    ]
+
+
 def _bass_management_report(data: dict) -> dict:
     metadata = data.get("metadata") or {}
     return metadata.get("bass_management") or {}

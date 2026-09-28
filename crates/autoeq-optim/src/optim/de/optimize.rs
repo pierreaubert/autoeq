@@ -218,12 +218,12 @@ pub fn optimize_filters_autoeq_with_callback(
         .disp(false)
         .callback(Box::new(move |intermediate| callback(intermediate)));
 
-    // Add seed if provided for deterministic results
-    if let Some(seed_value) = params.seed {
-        config_builder = config_builder.seed(seed_value);
-        if !params.quiet {
-            log::debug!("🎲 Using deterministic seed: {}", seed_value);
-        }
+    // Unspecified never means nondeterministic: unseeded runs use the shared
+    // default seed instead of OS entropy.
+    let seed_value = params.seed.unwrap_or(crate::DEFAULT_SEED);
+    config_builder = config_builder.seed(seed_value);
+    if !params.quiet {
+        log::debug!("🎲 Using deterministic seed: {}", seed_value);
     }
 
     // Add adaptive configuration if present

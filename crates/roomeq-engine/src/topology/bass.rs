@@ -372,6 +372,43 @@ mod tests {
     }
 
     #[test]
+    fn dominating_hot_bass_passes_underfill_that_balance_fails() {
+        // Phase 0 pathology record (measured unknown: +12 dB bass drowns the
+        // main and the route optimizer calls it optimal). Underfill is
+        // max(branch) - sum, so single-branch domination shrinks it: the raw
+        // metric stays truthful, but the route OBJECTIVE must add a
+        // domination penalty (Phase 3a) instead of rewarding this.
+        let main = curve_with_levels(|_| 0.0);
+        let bass = curve_with_levels(|_| 0.0);
+        let nulled = curve_with_levels(|frequency| {
+            if (40.0..=160.0).contains(&frequency) {
+                -40.0
+            } else {
+                6.0
+            }
+        });
+        let balanced =
+            bass_management_crossover_cancellation_underfill_db(&main, &bass, &nulled, 80.0)
+                .expect("shared grid");
+        let hot_bass = curve_with_levels(|_| 12.0);
+        let dominated = curve_with_levels(|frequency| {
+            if (40.0..=160.0).contains(&frequency) {
+                9.5
+            } else {
+                12.0
+            }
+        });
+        let drowning =
+            bass_management_crossover_cancellation_underfill_db(&main, &hot_bass, &dominated, 80.0)
+                .expect("shared grid");
+        assert!(balanced > 20.0, "balanced null must read huge: {balanced}");
+        assert!(
+            drowning < MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB,
+            "drowning must pass the raw gate: {drowning}"
+        );
+    }
+
+    #[test]
     fn common_level_offset_is_not_crossover_underfill() {
         let target = curve_with_levels(|_| 0.0);
         let response = curve_with_levels(|_| -12.0);

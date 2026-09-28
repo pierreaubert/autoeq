@@ -576,8 +576,35 @@ def sanitize_identifier(name, max_len=100):
     return re.sub(r'_+', '_', identifier).strip('_')
 
 
-def export_csv(measurement, output_dir, *, overwrite=True):
-    """Export a single measurement to CSV."""
+def header_block(measurement, source_label=None):
+    """Build `#` provenance lines so facts survive the .mdat conversion.
+
+    Keys reuse the REW text-export vocabulary (`Measurement:`, `Dated:`,
+    `Frequency Step:`) plus `Converted from:` so the same header parser
+    reads both original exports and converted CSVs. Only recovered facts
+    are emitted; nothing is invented (microphone, timing reference, and
+    smoothing are not recovered from the .mdat and stay absent).
+    """
+    lines = [f"# Measurement: {measurement['name']}"]
+    html = measurement.get('html') or {}
+    dated = ' '.join(part for part in (html.get('date'), html.get('time')) if part).strip()
+    if dated:
+        lines.append(f"# Dated: {dated}")
+    params = measurement.get('params') or {}
+    ppo = params.get('ppo') or 0
+    if ppo:
+        lines.append(f"# Frequency Step: {ppo:g} ppo")
+    if source_label:
+        lines.append(f"# Converted from: {source_label} via mdat2csv.py")
+    return lines
+
+
+def export_csv(measurement, output_dir, *, overwrite=True, source_label=None):
+    """Export a single measurement to CSV.
+
+    A `#` header block precedes the column header; curve loaders skip
+    `#` lines, and the REW header parser transcribes them as provenance.
+    """
     freqs = measurement['freq']
     spl = measurement['spl']
     phase = measurement['phase']
@@ -605,6 +632,8 @@ def export_csv(measurement, output_dir, *, overwrite=True):
     except FileExistsError:
         return filepath
     with stream as f:
+        for line in header_block(measurement, source_label):
+            f.write(line + "\n")
         f.write("freq_hz,spl_db,phase_deg\n")
         for i in range(len(freqs)):
             freq = freqs[i]
@@ -691,7 +720,8 @@ def main():
               f"{'Phase:yes' if has_phase else 'Phase:NO'}{phase_range}")
 
         if has_spl:
-            filepath = export_csv(m, output_dir, overwrite=overwrite)
+            filepath = export_csv(m, output_dir, overwrite=overwrite,
+                                   source_label=os.path.basename(mdat_path))
             csv_paths.append(filepath)
             print(f"      -> {filepath}")
         else:

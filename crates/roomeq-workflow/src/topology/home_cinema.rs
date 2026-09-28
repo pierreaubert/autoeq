@@ -51,8 +51,13 @@ pub(crate) fn main_level_alignment_band(
 ) -> Result<(f64, f64)> {
     // A two-octave midrange reference avoids room-bass peaks and treble rolloff.
     // Limited-band speakers may narrow it, but must share at least one octave.
-    let mut low = (2.0 * crossover_hz).max(100.0);
-    let mut high = 2_000.0_f64;
+    // The passband reference is detected inside the search range: a room mode
+    // below the crossover region must not set the reference and veto the
+    // midrange.
+    let search_low = (2.0 * crossover_hz).max(100.0);
+    let search_high = 2_000.0_f64;
+    let mut low = search_low;
+    let mut high = search_high;
     for role in main_roles {
         let curve = curves
             .get(role)
@@ -60,7 +65,11 @@ pub(crate) fn main_level_alignment_band(
                 message: format!("missing main-channel calibration measurement '{role}'"),
             })?;
         let (passband, _) =
-            roomeq_engine::analysis::response_metrics::detect_passband_and_mean(curve);
+            roomeq_engine::analysis::response_metrics::detect_passband_and_mean_in_range(
+                curve,
+                search_low,
+                search_high,
+            );
         let (pass_low, pass_high) = passband.ok_or_else(|| AutoeqError::InvalidMeasurement {
             message: format!("no usable calibration passband for '{role}'"),
         })?;
@@ -439,6 +448,38 @@ fn source_pre_route_transfers(
         .collect()
 }
 
+/// Advisory prefix recording a refused crossover timing reference.
+///
+/// Coherent main/sub assessment (delay/polarity alignment and cancellation
+/// verdicts) is only meaningful on a shared stationary time base.
+pub(crate) const CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX: &str =
+    "crossover_timing_reference_refused:";
+
+/// Advisory recorded when coherent splice assessment is skipped.
+///
+/// A refused timing reference means main/sub phases share no calibrated time
+/// zero, so any coherent splice verdict computed from them is arbitrary.
+/// Enforcement sites skip the verdict (keeping magnitude correction) instead
+/// of rejecting or accepting corrections on luck.
+pub(crate) const CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY: &str =
+    "crossover_cancellation_unassessed_unverified_timing";
+
+/// Whether the bass report records a refused crossover timing reference.
+///
+/// Missing reports fail closed (enforcement stays on); only an explicit
+/// refusal skips coherent verdicts. Missing phase or grid mismatches keep
+/// their own fail-closed handling elsewhere.
+pub(crate) fn crossover_timing_refused(
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+) -> bool {
+    optimization.is_some_and(|report| {
+        report
+            .advisories
+            .iter()
+            .any(|advisory| advisory.starts_with(CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX))
+    })
+}
+
 /// Rebuild per-logical-input deployed curves from the final serialized DSP
 /// chains and routing graph.
 ///
@@ -511,19 +552,92 @@ pub(crate) fn reconstruct_deployed_source_curves_with_evidence(
     Ok((curves, evidence))
 }
 
+/// Deployed reconstruction with per-role splice outcomes for every role.
+///
+/// Unlike the evidence variant, one role's rejection or hard assessment
+/// failure never aborts its siblings: every outcome lands in the returned
+/// vector in sorted role order. WP4 records these margins at the splice
+/// verdict (transfer evidence) and on the published baseline after
+/// infeasible selection (crossover residual plus responsible branches).
+pub(crate) fn collect_routed_splice_outcomes(
+    channels: &HashMap<String, ChannelDspChain>,
+    fir_coeffs_by_channel: &HashMap<String, Vec<f64>>,
+    graph: &BassManagementRoutingGraph,
+    optimization: Option<&engine_home_cinema::BassManagementOptimizationReport>,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
+) -> Result<(HashMap<String, Curve>, Vec<RoleSpliceOutcome>)> {
+    let mut outcomes = Vec::new();
+    let curves = reconstruct_deployed_source_curves_impl(
+        channels,
+        fir_coeffs_by_channel,
+        graph,
+        optimization,
+        sample_rate,
+        sidecar_dir,
+        SpliceSafety::Collect(&mut outcomes),
+    )?;
+    outcomes.sort_by(|a, b| a.role.cmp(&b.role));
+    Ok((curves, outcomes))
+}
+
+/// One-line splice margin for a collected per-role outcome.
+///
+/// Accepted roles report underfill against the limit (the transfer margin
+/// post-verdict stages preserve); computed-but-rejected roles report the
+/// residual; hard failures stay explicitly unassessed, never zero-filled.
+fn format_splice_margin(outcome: &RoleSpliceOutcome) -> String {
+    match &outcome.assessed {
+        Ok(evidence) => {
+            let baseline = evidence
+                .baseline_db
+                .map(|db| format!(":baseline_db={db:.3}"))
+                .unwrap_or_default();
+            let improvement = evidence
+                .improvement_db
+                .map(|db| format!(":improvement_db={db:.3}"))
+                .unwrap_or_default();
+            format!(
+                "splice_margin:{}:underfill_db={:.3}:limit_db={:.3}:margin_db={:.3}:worst_hz={:.1}:reason={}{baseline}{improvement}",
+                outcome.role,
+                evidence.final_db,
+                evidence.limit_db,
+                evidence.limit_db - evidence.final_db,
+                evidence.final_worst_frequency_hz,
+                evidence.reason,
+            )
+        }
+        Err(error) => format!("splice_margin:{}:unassessed:{error}", outcome.role),
+    }
+}
+
 enum SpliceSafety<'a> {
     Strict,
     Record(&'a mut Vec<roomeq_model::CrossoverCancellationEvidence>),
+    Collect(&'a mut Vec<RoleSpliceOutcome>),
     Unenforced,
 }
 
 impl SpliceSafety<'_> {
     fn enforces(&self, _role: &str) -> bool {
         match self {
-            Self::Strict | Self::Record(_) => true,
+            Self::Strict | Self::Record(_) | Self::Collect(_) => true,
             Self::Unenforced => false,
         }
     }
+}
+
+/// Per-role splice assessment that never aborts its siblings.
+///
+/// `Ok` carries the computed cancellation evidence whether or not it met
+/// the acceptance limit; `Err` carries a hard assessment failure (missing
+/// crossover, mismatched grid) that left the role unassessed. WP4 records
+/// these margins at the splice verdict (transfer evidence) and on the
+/// published baseline after infeasible selection (crossover residual).
+#[derive(Debug, Clone)]
+pub(crate) struct RoleSpliceOutcome {
+    pub role: String,
+    pub assessed: std::result::Result<roomeq_model::CrossoverCancellationEvidence, String>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -858,7 +972,7 @@ fn reconstruct_deployed_source_curves_impl(
                 .map(|main| complex_sum_mains(&[main, &bass]))
                 .unwrap_or_else(|| bass.clone());
             if let Some(main) = main_curve.as_ref() && splice_safety.enforces(&role) {
-                let crossover_hz = graph
+                let crossover_lookup = graph
                     .routes
                     .iter()
                     .find(|route| {
@@ -866,51 +980,73 @@ fn reconstruct_deployed_source_curves_impl(
                             && route.route_kind == "redirected_bass_lowpass_to_sub"
                     })
                     .and_then(|route| route.low_pass_hz)
-                    .or_else(|| graph.routes.iter().find(|route| route.source_channel == role && route.route_kind == "main_highpass_to_self").and_then(|route| route.high_pass_hz))
-                    .ok_or_else(|| AutoeqError::InvalidConfiguration {
-                        message: format!("missing routed crossover frequency for '{role}'"),
+                    .or_else(|| graph.routes.iter().find(|route| route.source_channel == role && route.route_kind == "main_highpass_to_self").and_then(|route| route.high_pass_hz));
+                let assessed: std::result::Result<
+                    (f64, roomeq_model::CrossoverCancellationEvidence),
+                    AutoeqError,
+                > = (|| {
+                    let crossover_hz = crossover_lookup.ok_or_else(|| {
+                        AutoeqError::InvalidConfiguration {
+                            message: format!("missing routed crossover frequency for '{role}'"),
+                        }
                     })?;
-            let main_on_deployed_grid =
-                autoeq_core::curve_transforms::interpolate_log_space(&deployed.freq, main);
-            let bass_on_deployed_grid =
-                autoeq_core::curve_transforms::interpolate_log_space(&deployed.freq, &bass);
-            let reconstructed =
-                complex_sum_mains(&[&main_on_deployed_grid, &bass_on_deployed_grid]);
-            let cancellation =
-                roomeq_engine::topology::assess_crossover_cancellation(
-                    &role,
-                    &main_on_deployed_grid,
-                    &bass_on_deployed_grid,
-                    &reconstructed,
-                    crossover_hz,
-                    optimization.and_then(|o| o.crossover_cancellation.as_ref()),
-                )
-                    .ok_or_else(|| AutoeqError::InvalidMeasurement {
-                        message: format!("mismatched crossover reconstruction grid for '{role}'"),
-                    })?;
-            let underfill_db = cancellation.final_db;
-            let worst_frequency_hz = cancellation.final_worst_frequency_hz;
-            if !cancellation.accepted
+                    let main_on_deployed_grid =
+                        autoeq_core::curve_transforms::interpolate_log_space(&deployed.freq, main);
+                    let bass_on_deployed_grid =
+                        autoeq_core::curve_transforms::interpolate_log_space(&deployed.freq, &bass);
+                    let reconstructed =
+                        complex_sum_mains(&[&main_on_deployed_grid, &bass_on_deployed_grid]);
+                    let cancellation =
+                        roomeq_engine::topology::assess_crossover_cancellation(
+                            &role,
+                            &main_on_deployed_grid,
+                            &bass_on_deployed_grid,
+                            &reconstructed,
+                            crossover_hz,
+                            optimization.and_then(|o| o.crossover_cancellation.as_ref()),
+                        )
+                            .ok_or_else(|| AutoeqError::InvalidMeasurement {
+                                message: format!("mismatched crossover reconstruction grid for '{role}'"),
+                            })?;
+                    Ok((crossover_hz, cancellation))
+                })();
+                // Collect mode records every role (computed or hard-failed)
+                // without aborting its siblings; all other modes keep their
+                // exact first-failure behavior.
+                if let SpliceSafety::Collect(outcomes) = &mut splice_safety {
+                    outcomes.push(RoleSpliceOutcome {
+                        role: role.clone(),
+                        assessed: assessed
+                            .map(|(_, cancellation)| cancellation)
+                            .map_err(|error| error.to_string()),
+                    });
+                } else {
+                    let (crossover_hz, cancellation) = assessed?;
+                    let underfill_db = cancellation.final_db;
+                    let worst_frequency_hz = cancellation.final_worst_frequency_hz;
+                    if !cancellation.accepted
 
-            {
-                return Err(AutoeqError::OptimizationFailed {
-                    message: format!(
-                        "final routed crossover underfill for '{role}' is \
-                         {underfill_db:.3} dB at {worst_frequency_hz:.1} Hz (crossover {crossover_hz:.1} Hz; limit {:.1} dB; baseline {:?} dB; improvement {:?} dB required >0.05 dB; {})",
-                        cancellation.limit_db, cancellation.baseline_db, cancellation.improvement_db, cancellation.reason
-                    ),
-                });
-            }
-            if cancellation.reason == "improved_residual_cancellation" {
-                log::warn!("Crossover cancellation for '{role}' accepted as improved residual: baseline={:?} dB, final={underfill_db:.3} dB, limit={:.3} dB", cancellation.baseline_db, cancellation.limit_db);
-            }
-            if let SpliceSafety::Record(evidence) = &mut splice_safety {
-                evidence.push(cancellation);
-            }
-            if let Some(target) = channels
-                .get(&role)
-                .and_then(|chain| chain.target_curve.clone())
-                .map(Curve::from)
+                    {
+                        return Err(AutoeqError::OptimizationFailed {
+                            message: format!(
+                                "final routed crossover underfill for '{role}' is \
+                                 {underfill_db:.3} dB at {worst_frequency_hz:.1} Hz (crossover {crossover_hz:.1} Hz; limit {:.1} dB; baseline {:?} dB; improvement {:?} dB required >0.05 dB; {})",
+                                cancellation.limit_db, cancellation.baseline_db, cancellation.improvement_db, cancellation.reason
+                            ),
+                        });
+                    }
+                    if cancellation.reason == "improved_residual_cancellation" {
+                        log::warn!("Crossover cancellation for '{role}' accepted as improved residual: baseline={:?} dB, final={underfill_db:.3} dB, limit={:.3} dB", cancellation.baseline_db, cancellation.limit_db);
+                    }
+                    if let SpliceSafety::Record(evidence) = &mut splice_safety {
+                        evidence.push(cancellation);
+                    }
+                }
+            if let Some(crossover_hz) = crossover_lookup
+                && let Some(target) = channels
+                    .get(&role)
+                    .and_then(|chain| chain.target_curve.clone())
+                    .map(Curve::from)
                 && let Some(target_underfill_db) =
                     roomeq_engine::topology::bass_management_max_underfill_db_with_target(
                         Some(&deployed),
@@ -1853,6 +1989,8 @@ fn supporting_only_home_cinema_result(config: &RoomConfig) -> RoomOptimizationRe
             t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         },
     }
 }
@@ -2002,6 +2140,8 @@ fn optimize_home_cinema_no_sub(
             t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         },
     })
 }
@@ -2054,6 +2194,19 @@ pub(crate) fn replay_until_splice_safe(
     bass_route_upper_hz: f64,
     max_freq: f64,
 ) -> Result<HashMap<String, Curve>> {
+    if crossover_timing_refused(optimization) {
+        // Uncalibrated main/sub phase makes every coherent splice verdict
+        // arbitrary. Never strip correction stages on such verdicts; the
+        // final selection records the skipped assessment explicitly.
+        return reconstruct_deployed_source_curves_unenforced(
+            channel_chains,
+            fir_coeffs_by_channel,
+            graph,
+            optimization,
+            sample_rate,
+            sidecar_dir,
+        );
+    }
     loop {
         let mut cancellation_evidence = Vec::new();
         let replay = reconstruct_deployed_source_curves_impl(
@@ -2639,7 +2792,9 @@ fn optimize_home_cinema_with_sub(
     let mut optimization_advisories = sub_preprocess.advisories.clone();
     optimization_advisories.extend(phase_quality_advisories);
     if let Err(reason) = &timing_reference {
-        optimization_advisories.push(format!("crossover_timing_reference_refused:{reason}"));
+        optimization_advisories.push(format!(
+            "{CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX}{reason}"
+        ));
     } else if let Ok(reference) = &timing_reference {
         optimization_advisories.push(format!(
             "crossover_declared_common_timing_reference:{reference}"
@@ -3490,7 +3645,12 @@ fn optimize_home_cinema_with_sub(
         log::debug!(
             "  {role} Post-EQ underfill: cancellation={cancellation_underfill_db:?} dB, target={target_underfill_db:?} dB"
         );
-        let underfill_accepted = cancellation_evidence.as_ref().is_some_and(|e| e.accepted)
+        // Without calibrated main/sub timing the coherent cancellation
+        // verdict is arbitrary; screen Post-EQ on its mains and output
+        // preservation instead of rejecting corrections on luck.
+        let cancellation_screened = !crossover_timing_refused(Some(&bass_management_optimization));
+        let underfill_accepted = (!cancellation_screened
+            || cancellation_evidence.as_ref().is_some_and(|e| e.accepted))
             && target_underfill_db
                 .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
         // The splice objective above scores the predicted mains+bass sum, but
@@ -3665,9 +3825,14 @@ fn optimize_home_cinema_with_sub(
                         .then_with(|| left.1.final_db.total_cmp(&right.1.final_db))
                 })
         });
-        let routed_underfill_accepted = routed_underfill
-            .as_ref()
-            .is_some_and(|(_, evidence)| evidence.accepted);
+        // Without calibrated main/sub timing the coherent cancellation
+        // verdict is arbitrary; keep Sub Post-EQ on its score instead of
+        // rejecting corrections on luck.
+        let routed_underfill_accepted =
+            crossover_timing_refused(Some(&bass_management_optimization))
+                || routed_underfill
+                    .as_ref()
+                    .is_some_and(|(_, evidence)| evidence.accepted);
         // The SPL-loss allowance belongs to mains/surrounds/heights, not
         // subwoofer peak reduction. Sub EQ must still improve its response
         // and preserve every receiving main's crossover integration.
@@ -4156,6 +4321,7 @@ fn optimize_home_cinema_with_sub(
     }
     let mut final_post_eq_reverted = false;
     let mut splice_reverted_roles: Vec<String> = Vec::new();
+    let mut splice_verdict_margins: Vec<String> = Vec::new();
     let role_crossover_hz = |role: &str| {
         let group_id =
             engine_home_cinema::group_id_for_role(engine_home_cinema::role_for_channel(role));
@@ -4165,14 +4331,27 @@ fn optimize_home_cinema_with_sub(
             .unwrap_or(final_xo_freq)
     };
     if let Some(graph) = bass_routing_graph.as_ref() {
-        let first_replay = reconstruct_deployed_source_curves(
-            &channel_chains,
-            &pre_eq_fir_coeffs,
-            graph,
-            Some(&bass_management_optimization),
-            sample_rate,
-            output_dir,
-        )
+        // Without calibrated main/sub timing there is no coherent verdict to
+        // defer: reconstruct unenforced directly.
+        let first_replay = if crossover_timing_refused(Some(&bass_management_optimization)) {
+            reconstruct_deployed_source_curves_unenforced(
+                &channel_chains,
+                &pre_eq_fir_coeffs,
+                graph,
+                Some(&bass_management_optimization),
+                sample_rate,
+                output_dir,
+            )
+        } else {
+            reconstruct_deployed_source_curves(
+                &channel_chains,
+                &pre_eq_fir_coeffs,
+                graph,
+                Some(&bass_management_optimization),
+                sample_rate,
+                output_dir,
+            )
+        }
         .or_else(|error| {
             // This executor assembles an internal correction candidate. Keep a
             // crossover-rejected candidate available to cumulative refinement;
@@ -4305,6 +4484,26 @@ fn optimize_home_cinema_with_sub(
                 bass_route_upper_hz,
                 max_freq,
             )?,
+        };
+        // WP4d transfer evidence: per-role splice margins at the verdict,
+        // on the exact chains the gate just passed. Without calibrated
+        // main/sub timing there is no coherent verdict to record.
+        splice_verdict_margins = if crossover_timing_refused(Some(&bass_management_optimization)) {
+            vec!["splice_verdict_margins_unassessed:coherent_timing_refused".to_string()]
+        } else {
+            match collect_routed_splice_outcomes(
+                &channel_chains,
+                &pre_eq_fir_coeffs,
+                graph,
+                Some(&bass_management_optimization),
+                sample_rate,
+                output_dir,
+            ) {
+                Ok((_, outcomes)) => outcomes.iter().map(format_splice_margin).collect(),
+                Err(error) => {
+                    vec![format!("splice_verdict_margins_unassessed:{error}")]
+                }
+            }
         };
     }
     post_scores = channel_results
@@ -4452,6 +4651,14 @@ fn optimize_home_cinema_with_sub(
                             .collect(),
                     });
                 }
+                if !splice_verdict_margins.is_empty() {
+                    outcomes.push(StageOutcome {
+                        checks: Vec::new(),
+                        stage: "splice_verdict_margins".to_string(),
+                        status: StageStatus::Applied,
+                        advisories: splice_verdict_margins,
+                    });
+                }
                 outcomes
             },
             qa_seed_distribution: None,
@@ -4459,6 +4666,8 @@ fn optimize_home_cinema_with_sub(
             t60_flatness_tolerance_s: config.report_t60_tolerance_s(),
             operation_gates: None,
             provisional_decisions: crossover_provisional,
+            epa_provenance: None,
+            playback_summary: None,
         },
     })
 }
@@ -4555,6 +4764,29 @@ mod post_dsp_level_tests {
         assert!(
             super::main_level_alignment_band(&curves, &["L".into(), "R".into()], 80.0).is_err()
         );
+    }
+
+    #[test]
+    fn calibration_ignores_bass_mode_below_search_range() {
+        // Measured 2.2_genelec mains carry a +20 dB room mode near 41 Hz.
+        // The mode sits below twice the crossover, so it must not set the
+        // passband reference and veto the shared midrange octave.
+        let mut left = Curve {
+            freq: ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 192),
+            spl: ndarray::Array1::from_elem(192, 80.0),
+            ..Curve::default()
+        };
+        for (frequency, level) in left.freq.iter().zip(left.spl.iter_mut()) {
+            if *frequency < 60.0 {
+                *level += 20.0;
+            }
+        }
+        let right = left.clone();
+        let curves = HashMap::from([("L".into(), left), ("R".into(), right)]);
+        let band =
+            super::main_level_alignment_band(&curves, &["L".into(), "R".into()], 72.0).unwrap();
+        assert!(band.0 >= 144.0 && band.1 <= 2_000.0);
+        assert!(band.1 >= 2.0 * band.0);
     }
 
     #[test]
@@ -4763,6 +4995,151 @@ mod post_dsp_level_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn collect_splice_outcomes_isolates_sibling_assessment_failure() {
+        use roomeq_model::{
+            BassManagementSourceReport, BassManagementSubOutputReport, DriverDspChain,
+        };
+        // L carries a crossover; R routes omit every crossover frequency so
+        // only R is unassessable. Strict keeps first-failure behavior while
+        // Collect reports both roles.
+        let bass_measurement = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 100.0, 200.0],
+            spl: ndarray::array![80.0, 80.0, 80.0, 70.0, 20.0],
+            phase: Some(ndarray::Array1::zeros(5)),
+            ..Default::default()
+        };
+        let mut initial_sum = bass_measurement.clone();
+        initial_sum.spl.mapv_inplace(|level| level + 6.020599913);
+        let mut sub_chain = chain("LFE", initial_sum, None);
+        let mut drivers = Vec::new();
+        let mut outputs = Vec::new();
+        let mut routes = Vec::new();
+        for (index, delay) in [4.0, 10.0].into_iter().enumerate() {
+            let name = format!("sub{index}");
+            let mut raw = bass_measurement.clone();
+            raw.phase = Some(
+                raw.freq
+                    .mapv(|frequency| 360.0 * frequency * delay / 1000.0),
+            );
+            drivers.push(DriverDspChain {
+                name: name.clone(),
+                index,
+                plugins: vec![
+                    roomeq_engine::output::create_gain_plugin(6.0),
+                    roomeq_engine::output::create_delay_plugin(delay),
+                ],
+                initial_curve: Some((&raw).into()),
+                measured_band_hz: match (raw.freq.first(), raw.freq.last()) {
+                    (Some(&low), Some(&high)) => Some([low, high]),
+                    _ => None,
+                },
+            });
+            outputs.push(BassManagementSubOutputReport {
+                output_role: name.clone(),
+                gain_db: 6.0,
+                delay_ms: delay,
+                polarity_inverted: false,
+                strategy_source: "mso".into(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            });
+            for (source, source_index, low_pass_hz) in [("L", 0, Some(80.0)), ("R", 1, None)] {
+                let mut route = low_route(source, source_index);
+                route.destination = name.clone();
+                route.destination_index = index + 2;
+                route.gain_db = 6.0;
+                route.gain_linear = 10.0_f64.powf(6.0 / 20.0);
+                route.matrix_gain = route.gain_linear;
+                route.delay_ms = delay;
+                route.low_pass_hz = low_pass_hz;
+                routes.push(route);
+            }
+        }
+        sub_chain.drivers = Some(drivers);
+        let source = |role: &str| BassManagementSourceReport {
+            source_channel: role.into(),
+            group_id: "lcr".into(),
+            main_delay_ms: 0.0,
+            bass_route_delay_ms: 0.0,
+            polarity_inverted: false,
+            trim_db: 0.0,
+            objective_before: None,
+            objective_after: None,
+            accepted: false,
+            safety_restored: false,
+            advisories: Vec::new(),
+        };
+        let optimization = super::joint_bass_management_report_from_parts(
+            &[],
+            &[source("L"), source("R")],
+            &outputs,
+        );
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "LFE".into(),
+            physical_sub_outputs: vec!["sub0".into(), "sub1".into()],
+            stereo_routing: None,
+            input_channels: vec!["L".into(), "R".into()],
+            output_channels: vec!["L".into(), "R".into(), "LFE".into()],
+            routes,
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            advisories: Vec::new(),
+        };
+        let main = Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 100.0, 200.0, 400.0, 16000.0],
+            spl: ndarray::Array1::from_elem(7, 20.0),
+            phase: Some(ndarray::Array1::zeros(7)),
+            ..Default::default()
+        };
+        let channels = HashMap::from([
+            ("L".into(), chain("L", main.clone(), None)),
+            ("R".into(), chain("R", main.clone(), None)),
+            ("LFE".into(), sub_chain),
+        ]);
+        let strict = reconstruct_deployed_source_curves(
+            &channels,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48000.0,
+            std::path::Path::new("."),
+        )
+        .expect_err("strict reconstruction keeps first-failure behavior");
+        assert!(
+            strict
+                .to_string()
+                .contains("missing routed crossover frequency for 'R'"),
+            "unexpected strict failure: {strict}"
+        );
+        let (curves, outcomes) = super::collect_routed_splice_outcomes(
+            &channels,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48000.0,
+            std::path::Path::new("."),
+        )
+        .expect("collect must isolate the R failure");
+        assert!(curves.contains_key("L") && curves.contains_key("R"));
+        assert_eq!(outcomes.len(), 2);
+        assert_eq!(outcomes[0].role, "L");
+        assert!(
+            outcomes[0].assessed.is_ok(),
+            "L must stay assessed: {:?}",
+            outcomes[0].assessed
+        );
+        assert_eq!(outcomes[1].role, "R");
+        assert!(
+            outcomes[1]
+                .assessed
+                .as_ref()
+                .is_err_and(|error| error.contains("missing routed crossover frequency")),
+            "R must record its hard failure: {:?}",
+            outcomes[1].assessed
+        );
     }
 
     #[test]
@@ -5530,6 +5907,50 @@ mod post_dsp_level_tests {
                 vec!["L:improved_residual_cancellation".to_string()]
             );
         }
+    }
+
+    #[test]
+    fn crossover_timing_refused_detects_explicit_refusal_only() {
+        assert!(!super::crossover_timing_refused(None));
+        let mut report = baseline_report(&[accepted_source(true)]);
+        assert!(!super::crossover_timing_refused(Some(&report)));
+        report.advisories.push(format!(
+            "{}source 'L' lacks stationary timing evidence",
+            super::CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX
+        ));
+        assert!(super::crossover_timing_refused(Some(&report)));
+    }
+
+    #[test]
+    fn splice_replay_skips_stripping_when_timing_refused() {
+        // A refused timing reference leaves main/sub phase uncalibrated, so a
+        // coherent splice verdict is arbitrary: ship the curves instead of
+        // stripping correction stages on luck.
+        let (mut channels, graph) = cancelling_setup();
+        let mut optimization = baseline_report(&[accepted_source(true)]);
+        optimization.advisories.push(format!(
+            "{}source 'L' lacks stationary timing evidence",
+            super::CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX
+        ));
+        let mut reverted = Vec::new();
+        let deployed = super::replay_until_splice_safe(
+            &mut channels,
+            &mut HashMap::new(),
+            &mut reverted,
+            &HashMap::new(),
+            &graph,
+            Some(&optimization),
+            48_000.0,
+            std::path::Path::new("."),
+            &|_| 80.0,
+            "LFE",
+            20.0,
+            130.0,
+            16_000.0,
+        )
+        .expect("refused timing must not strip corrections");
+        assert!(deployed.contains_key("L"));
+        assert!(reverted.is_empty());
     }
 
     #[test]

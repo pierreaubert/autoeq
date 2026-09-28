@@ -339,6 +339,17 @@ retaining the other quality gates. It is independent of PEQ boost/headroom,
 electrical `max_attenuation_db`, and `default_input_peak` assumptions. Never
 derive an input-peak budget from a PEQ headroom reserve.
 
+`optimizer.finalization.min_improvement_lower_bound_db` (default `0.0`) is the
+benefit floor: every training seat's uncertainty-adjusted improvement
+(`improvement_lower_bound_db`, after subtracting pre/post summation
+uncertainty budgets) must exceed it, or the candidate is rejected as showing
+no demonstrated benefit and selection falls back to a simpler protected
+result. Identity candidates (no meaningful correction applied) skip the
+floor and flow through as the protected baseline. The default is the
+measurement-uncertainty boundary, not a perceptual threshold: raising it
+needs repeat-capture and listening evidence (see
+`docs/ROOMEQ_LISTENING_PLAN.md`), never a guess.
+
 `optimizer.finalization` defines the electrical assumptions used after all
 processing and artifact assembly:
 

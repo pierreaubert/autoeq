@@ -30,6 +30,18 @@ pub struct FinalizationConfig {
     /// Protect summed physical sub outputs with a runtime limiter instead of static cuts.
     /// Requires native playback to preserve the limiter and matching output delays.
     pub subwoofer_limiter: bool,
+    /// Minimum uncertainty-adjusted improvement for a candidate to ship, in dB.
+    ///
+    /// Every training seat's `improvement_lower_bound_db` (improvement after
+    /// subtracting summation uncertainty) must exceed this floor, or the
+    /// candidate is rejected as showing no demonstrated benefit and selection
+    /// falls back to a simpler protected result. Identity candidates (no
+    /// meaningful correction applied) skip the floor: with nothing applied
+    /// there is nothing to reject, and they flow through as the protected
+    /// baseline. The default 0.0 is the measurement-uncertainty boundary,
+    /// not a perceptual threshold: raising it needs repeat-capture and
+    /// listening evidence (WP7), never a guess.
+    pub min_improvement_lower_bound_db: f64,
 }
 
 impl Default for FinalizationConfig {
@@ -43,6 +55,7 @@ impl Default for FinalizationConfig {
             max_attenuation_db: 12.0,
             max_useful_output_loss_db: 3.0,
             subwoofer_limiter: false,
+            min_improvement_lower_bound_db: 0.0,
         }
     }
 }
@@ -78,6 +91,9 @@ impl FinalizationConfig {
             || !(0.0..=60.0).contains(&self.max_useful_output_loss_db)
         {
             return Err("finalization.max_useful_output_loss_db must be in 0..=60".into());
+        }
+        if !self.min_improvement_lower_bound_db.is_finite() {
+            return Err("finalization.min_improvement_lower_bound_db must be finite".into());
         }
         if self
             .input_peak_limits

@@ -15,7 +15,10 @@
 
 use std::path::{Path, PathBuf};
 
-use roomeq_model::{ChannelEarlyLateCurves, ChannelResonanceDecays, ChannelWaterfall, ChannelWavelet, CurveData, DspGraph, IrWaveform};
+use roomeq_model::{
+    ChannelEarlyLateCurves, ChannelResonanceDecays, ChannelWaterfall, ChannelWavelet, CurveData,
+    DspGraph, IrWaveform,
+};
 
 /// Name of the run log written inside the assets directory.
 pub const RUN_LOG_FILENAME: &str = "roomeq.log";
@@ -94,10 +97,7 @@ pub fn resolve_convolution_path(reference: &str, output_path: &Path) -> PathBuf 
 
 /// Read convolution bytes, checking the output parent first and the sibling
 /// assets directory second.
-pub fn read_convolution_bytes(
-    reference: &str,
-    output_path: &Path,
-) -> std::io::Result<Vec<u8>> {
+pub fn read_convolution_bytes(reference: &str, output_path: &Path) -> std::io::Result<Vec<u8>> {
     let direct = Path::new(reference);
     if direct.is_absolute() {
         return std::fs::read(direct);
@@ -202,7 +202,10 @@ fn record_file(
         .entry(channel.to_string())
         .or_insert_with(|| serde_json::Value::Object(serde_json::Map::new()));
     if let Some(object) = entry.as_object_mut() {
-        object.insert(kind.to_string(), serde_json::Value::String(file_name.to_string()));
+        object.insert(
+            kind.to_string(),
+            serde_json::Value::String(file_name.to_string()),
+        );
     }
 }
 
@@ -422,7 +425,9 @@ pub fn extract_measurements_to_assets(
         let index_value = serde_json::Value::Object(root);
         let path = assets_dir.join(MEASUREMENTS_INDEX_FILENAME);
         if write_json_file(&path, &index_value).is_ok() {
-            extracted.files.push(MEASUREMENTS_INDEX_FILENAME.to_string());
+            extracted
+                .files
+                .push(MEASUREMENTS_INDEX_FILENAME.to_string());
             extracted.files.sort();
         }
         extracted.index = index_value;
@@ -491,10 +496,7 @@ fn read_curve_csv(path: &Path) -> Result<CurveData, Box<dyn std::error::Error>> 
             cells.first().copied().unwrap_or(""),
             "frequency",
         )?);
-        spl.push(parse_f64_cell(
-            cells.get(1).copied().unwrap_or(""),
-            "SPL",
-        )?);
+        spl.push(parse_f64_cell(cells.get(1).copied().unwrap_or(""), "SPL")?);
         if has_phase {
             phase.push(parse_f64_cell(
                 cells.get(2).copied().unwrap_or(""),
@@ -544,10 +546,7 @@ fn read_ir_csv(path: &Path) -> Result<IrWaveform, Box<dyn std::error::Error>> {
             "amplitude",
         )?);
     }
-    Ok(IrWaveform {
-        time_ms,
-        amplitude,
-    })
+    Ok(IrWaveform { time_ms, amplitude })
 }
 
 fn read_json_blob<T>(path: &Path) -> Result<T, Box<dyn std::error::Error>>
@@ -613,15 +612,13 @@ pub fn load_output_bundle(output_path: &Path) -> Result<DspGraph, Box<dyn std::e
                     chain.post_ir = read_ir_csv(&path).ok();
                 }
                 "early_late_curves" if chain.early_late_curves.is_none() => {
-                    chain.early_late_curves =
-                        read_json_blob::<ChannelEarlyLateCurves>(&path).ok();
+                    chain.early_late_curves = read_json_blob::<ChannelEarlyLateCurves>(&path).ok();
                 }
                 "waterfall" if chain.waterfall.is_none() => {
                     chain.waterfall = read_json_blob::<ChannelWaterfall>(&path).ok();
                 }
                 "resonance_decays" if chain.resonance_decays.is_none() => {
-                    chain.resonance_decays =
-                        read_json_blob::<ChannelResonanceDecays>(&path).ok();
+                    chain.resonance_decays = read_json_blob::<ChannelResonanceDecays>(&path).ok();
                 }
                 "wavelet" if chain.wavelet.is_none() => {
                     chain.wavelet = read_json_blob::<ChannelWavelet>(&path).ok();
@@ -641,7 +638,10 @@ pub fn load_output_bundle(output_path: &Path) -> Result<DspGraph, Box<dyn std::e
             }
         }
     }
-    if let Some(deployed) = index.get("deployed_source_curves").and_then(|v| v.as_object()) {
+    if let Some(deployed) = index
+        .get("deployed_source_curves")
+        .and_then(|v| v.as_object())
+    {
         for (name, file) in deployed {
             if output.deployed_source_curves.contains_key(name) {
                 continue;
@@ -791,10 +791,7 @@ mod tests {
             .as_ref()
             .expect("post IR restored");
         assert_eq!(post_ir.amplitude, vec![1.0, 0.5]);
-        assert_eq!(
-            restored.deployed_source_curves["L"].spl,
-            vec![79.5, 80.5]
-        );
+        assert_eq!(restored.deployed_source_curves["L"].spl, vec![79.5, 80.5]);
     }
 
     #[test]

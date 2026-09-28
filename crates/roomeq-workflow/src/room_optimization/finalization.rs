@@ -37,6 +37,11 @@ pub(super) fn select(
         .and_then(|()| verify_delivered_channel_alignment(result, config, fs, dir));
     match selection {
         Ok(()) => {
+            // WP4a advisory: correlated (identical-drive) bass through the
+            // final serialized matrix. Pruning may still trim inaudible EQ
+            // afterwards; the advisory transfers within its JND bound.
+            let mono_bass = seat_replay::correlated_bass_stage(result, captures, config, fs, dir);
+            result.metadata.stage_outcomes.push(mono_bass);
             if let Some(report) = result.metadata.correction_acceptance.as_mut() {
                 super::validation_scorecard::align_report_metrics_to_scorecard(report);
                 report.refresh_outcome();
@@ -195,6 +200,44 @@ fn verify_delivered_channel_alignment(
         report.violations.sort();
         report.violations.dedup();
         report.refresh_outcome();
+    }
+    Ok(())
+}
+
+/// True when the candidate applies no meaningful correction.
+///
+/// Single definition of realized identity shared by the primary-metric
+/// check and the benefit floor: a candidate below both thresholds has
+/// nothing worth rejecting, so the floor skips it and selection treats
+/// it as the protected baseline.
+fn is_identity_correction(metrics: &roomeq_model::CorrectionMetricSummary) -> bool {
+    metrics.correction_rms_db.abs() <= 1e-6 && metrics.max_abs_correction_db.abs() <= 1e-6
+}
+
+/// Require demonstrated benefit on every training seat.
+///
+/// Held-out seats validate non-regression elsewhere; the seats the optimizer
+/// trained on must improve beyond the uncertainty-adjusted floor. A nonfinite
+/// bound fails closed: it cannot demonstrate benefit. Callers skip
+/// identity candidates: the floor rejects useless corrections, not the
+/// absence of correction.
+fn training_seats_show_benefit(
+    final_seats: &[roomeq_model::FinalSeatEvaluation],
+    floor_db: f64,
+) -> std::result::Result<(), String> {
+    for seat in final_seats
+        .iter()
+        .filter(|seat| seat.partition == "training")
+    {
+        // NaN lower bounds fail closed: only a strict improvement counts.
+        if seat.improvement_lower_bound_db.partial_cmp(&floor_db)
+            != Some(std::cmp::Ordering::Greater)
+        {
+            return Err(format!(
+                "training '{}' seat {} shows no benefit beyond uncertainty (lower bound {:.3} dB <= floor {:.3} dB)",
+                seat.logical_input, seat.seat_index, seat.improvement_lower_bound_db, floor_db
+            ));
+        }
     }
     Ok(())
 }
@@ -545,7 +588,25 @@ fn select_inner(
             if let Some(bass) = &candidate.metadata.bass_management
                 && let Some(graph) = &bass.routing_graph
             {
-                let (curves, cancellation) =
+                // Without calibrated main/sub timing the coherent splice
+                // verdict is arbitrary: reconstruct without enforcement and
+                // record the skipped assessment on selection instead of
+                // rejecting corrections on luck.
+                let timing_refused =
+                    crate::topology::crossover_timing_refused(bass.optimization.as_ref());
+                let (curves, cancellation) = if timing_refused {
+                    (
+                        crate::topology::reconstruct_deployed_source_curves_unenforced(
+                            &candidate.channels,
+                            &retained_fir_coeffs_by_channel(&candidate),
+                            graph,
+                            bass.optimization.as_ref(),
+                            fs,
+                            dir,
+                        )?,
+                        Vec::new(),
+                    )
+                } else {
                     crate::topology::reconstruct_deployed_source_curves_with_evidence(
                         &candidate.channels,
                         &retained_fir_coeffs_by_channel(&candidate),
@@ -553,7 +614,8 @@ fn select_inner(
                         bass.optimization.as_ref(),
                         fs,
                         dir,
-                    )?;
+                    )?
+                };
                 candidate.deployed_source_curves = curves;
                 candidate
                     .metadata
@@ -621,9 +683,7 @@ fn select_inner(
             // A realized identity is unchanged; a nonidentity candidate must
             // improve the declared primary metric to be selected.
             if report.metrics.improvement_db <= 1e-6 {
-                if report.metrics.correction_rms_db.abs() <= 1e-6
-                    && report.metrics.max_abs_correction_db.abs() <= 1e-6
-                {
+                if is_identity_correction(&report.metrics) {
                     report.accepted = false;
                     report.decision = roomeq_model::CorrectionDecision::IdentityFallback;
                     report.refresh_outcome();
@@ -651,6 +711,19 @@ fn select_inner(
                 .ok_or_else(|| failed("final acoustic evidence unavailable"))?;
             if quality.final_seats.is_empty() {
                 return Err(failed("final physical-seat evidence unavailable"));
+            }
+            // WP5a benefit floor: every training seat of a non-identity
+            // candidate must improve beyond measurement uncertainty, or the
+            // candidate shows no demonstrated benefit and selection prefers
+            // a simpler protected result. Identity candidates skip the
+            // floor: with no correction applied there is nothing to
+            // reject, and they flow through as the protected baseline.
+            if !is_identity_correction(&report.metrics) {
+                training_seats_show_benefit(
+                    &quality.final_seats,
+                    policy.min_improvement_lower_bound_db,
+                )
+                .map_err(failed)?;
             }
             let peak = outputs
                 .iter()
@@ -805,14 +878,103 @@ fn select_inner(
             trials,
         );
     };
+    let mut selection_advisories = vec![
+        "all_candidates_compared_against_fixed_structural_baseline".to_string(),
+        format!(
+            "benefit_floor_db={:.3}",
+            policy.min_improvement_lower_bound_db
+        ),
+    ];
+    if crate::topology::crossover_timing_refused(
+        selected
+            .metadata
+            .bass_management
+            .as_ref()
+            .and_then(|bass| bass.optimization.as_ref()),
+    ) {
+        selection_advisories
+            .push(crate::topology::CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY.to_string());
+    }
     selected.metadata.stage_outcomes.push(StageOutcome {
         stage: "final_correction_selection".into(),
         status: StageStatus::Applied,
-        advisories: vec!["all_candidates_compared_against_fixed_structural_baseline".into()],
+        advisories: selection_advisories,
         checks: trials,
     });
     *result = selected;
     Ok(())
+}
+
+/// Crossover residual plus responsible branches on a published baseline.
+///
+/// Collects per-role splice outcomes without aborting on the first
+/// rejection: a bad raw splice explains why no correction strength could
+/// succeed, while a clean one points at the seat/output violations instead.
+/// Unrouted graphs yield no entries; refused coherent timing and structural
+/// collection failures stay explicitly unassessed, never zero-filled.
+fn baseline_crossover_residuals(
+    baseline: &RoomOptimizationResult,
+    fs: f64,
+    dir: &Path,
+) -> Vec<String> {
+    let Some(bass) = baseline.metadata.bass_management.as_ref() else {
+        return Vec::new();
+    };
+    let Some(graph) = bass.routing_graph.as_ref() else {
+        return Vec::new();
+    };
+    if crate::topology::crossover_timing_refused(bass.optimization.as_ref()) {
+        return vec!["crossover_residual_unassessed:coherent_timing_refused".to_string()];
+    }
+    match crate::topology::collect_routed_splice_outcomes(
+        &baseline.channels,
+        &retained_fir_coeffs_by_channel(baseline),
+        graph,
+        bass.optimization.as_ref(),
+        fs,
+        dir,
+    ) {
+        Ok((_, outcomes)) => outcomes
+            .iter()
+            .map(|outcome: &crate::topology::RoleSpliceOutcome| {
+                let mut branches: Vec<String> = graph
+                    .routes
+                    .iter()
+                    .filter(|route| route.source_channel == outcome.role)
+                    .map(|route| format!("{}->{}", route.source_channel, route.destination))
+                    .collect();
+                branches.sort();
+                branches.dedup();
+                match &outcome.assessed {
+                    Ok(evidence) => {
+                        let baseline = evidence
+                            .baseline_db
+                            .map(|db| format!(":baseline_db={db:.3}"))
+                            .unwrap_or_default();
+                        let improvement = evidence
+                            .improvement_db
+                            .map(|db| format!(":improvement_db={db:.3}"))
+                            .unwrap_or_default();
+                        format!(
+                            "crossover_residual:{}:underfill_db={:.3}:limit_db={:.3}:worst_hz={:.1}:reason={}{baseline}{improvement}:branches={}",
+                            outcome.role,
+                            evidence.final_db,
+                            evidence.limit_db,
+                            evidence.final_worst_frequency_hz,
+                            evidence.reason,
+                            branches.join("|"),
+                        )
+                    }
+                    Err(error) => format!(
+                        "crossover_residual:{}:unassessed:{error}:branches={}",
+                        outcome.role,
+                        branches.join("|"),
+                    ),
+                }
+            })
+            .collect(),
+        Err(error) => vec![format!("crossover_residual_unassessed:{error}")],
+    }
 }
 
 /// Publish the exact correction-free graph used as the replay baseline.
@@ -959,6 +1121,7 @@ fn publish_baseline(
             _ => return Err(error),
         }
     }
+    advisories.extend(baseline_crossover_residuals(&baseline, fs, dir));
     if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
         report.accepted = false;
         report.decision = if attenuation > 1e-6 {
@@ -1014,6 +1177,10 @@ fn publish_baseline(
         advisories,
         checks: trials,
     });
+    // WP4a advisory on the published baseline too: the raw room's
+    // correlated-bass behavior explains what correction had to work with.
+    let mono_bass = seat_replay::correlated_bass_stage(&baseline, captures, config, fs, dir);
+    baseline.metadata.stage_outcomes.push(mono_bass);
     *result = baseline;
     Ok(())
 }
@@ -1731,6 +1898,74 @@ mod tests {
     use super::*;
     use roomeq_model::StageStatus;
 
+    fn benefit_seat(
+        partition: &str,
+        input: &str,
+        lower_bound_db: f64,
+    ) -> roomeq_model::FinalSeatEvaluation {
+        roomeq_model::FinalSeatEvaluation {
+            partition: partition.into(),
+            logical_input: input.into(),
+            seat_index: 0,
+            seat_label: None,
+            physical_outputs: vec![input.into()],
+            pre_summation_support: Vec::new(),
+            post_summation_support: Vec::new(),
+            unassessed_bands_hz: Vec::new(),
+            evaluated_band_hz: [20.0, 20_000.0],
+            pre_weighted_rms_db: 5.0,
+            post_weighted_rms_db: 5.0 - lower_bound_db,
+            improvement_db: lower_bound_db,
+            improvement_lower_bound_db: lower_bound_db,
+            band_improvement_db: None,
+        }
+    }
+
+    #[test]
+    fn identity_definition_matches_primary_check_thresholds() {
+        let mut metrics = roomeq_model::CorrectionMetricSummary {
+            auditory_frequency_measure: "erb_rate".to_string(),
+            pre_target_weighted_rms_db: 1.0,
+            post_target_weighted_rms_db: 1.0,
+            improvement_db: 0.0,
+            improvement_ratio: 0.0,
+            post_p95_abs_residual_db: 1.0,
+            post_worst_abs_residual_db: 1.0,
+            correction_rms_db: 0.0,
+            max_abs_correction_db: 0.0,
+        };
+        assert!(super::is_identity_correction(&metrics));
+        metrics.correction_rms_db = 1e-5;
+        assert!(!super::is_identity_correction(&metrics));
+        metrics.correction_rms_db = 0.0;
+        metrics.max_abs_correction_db = 1e-5;
+        assert!(!super::is_identity_correction(&metrics));
+    }
+
+    #[test]
+    fn benefit_floor_rejects_uncertainty_bound_training_seats() {
+        // Held-out seats never gate benefit; training seats must clear it.
+        let seats = vec![
+            benefit_seat("training", "L", 0.5),
+            benefit_seat("held_out", "L", -1.0),
+        ];
+        assert!(super::training_seats_show_benefit(&seats, 0.0).is_ok());
+        // Within uncertainty, nonfinite, or exactly at the floor: no
+        // demonstrated benefit, with the seat named in the diagnostic.
+        for bound in [0.0, -0.2, f64::NAN] {
+            let seats = vec![
+                benefit_seat("training", "L", 0.5),
+                benefit_seat("training", "R", bound),
+            ];
+            let error = super::training_seats_show_benefit(&seats, 0.0)
+                .expect_err("uncertainty-bound seat must fail benefit");
+            assert!(
+                error.contains("'R'") && error.contains("no benefit beyond uncertainty"),
+                "unexpected diagnostic: {error}"
+            );
+        }
+    }
+
     #[test]
     fn selection_defers_without_acceptance_evidence() {
         // Interim compatibility: routes whose pipeline attaches no
@@ -2431,6 +2666,9 @@ mod tests {
                 max_abs_correction_db: 0.0,
             },
             violations: Vec::new(),
+            realized_processing: None,
+            processing_fallback: None,
+            observations: Vec::new(),
             reverted_stages: Vec::new(),
             acoustic_quality: None,
             realization_quality: None,

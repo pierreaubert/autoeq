@@ -23,7 +23,14 @@ pub fn to_temporal_ir_masking(
         post_ringing_peak_db: value.post_ringing_peak_db,
         pre_ringing_audible_db: value.pre_ringing_audible_db,
         post_ringing_audible_db: value.post_ringing_audible_db,
+        pre_energy_ratio_db: value.pre_energy_ratio_db,
         penalty: value.penalty,
+        taps: value.taps,
+        sample_rate_hz: value.sample_rate_hz,
+        masking_profile: value.masking_profile,
+        pre_mask_ms: value.pre_mask_ms,
+        post_mask_ms: value.post_mask_ms,
+        audibility_threshold_db: value.audibility_threshold_db,
     }
 }
 

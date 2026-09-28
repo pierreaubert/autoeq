@@ -270,6 +270,9 @@ pub fn multi_seat_correction_report_with_frequency_samples(
         });
     }
 
+    // Canonical order: the speaker map iterates in per-process random
+    // order, so sort for deterministic reports, role groups, and weights.
+    channels.sort_by(|left, right| left.channel.cmp(&right.channel));
     let applied = channels.iter().any(|channel| channel.status == "applied");
     if !enabled {
         advisories.push("all_channel_multiseat_disabled".to_string());

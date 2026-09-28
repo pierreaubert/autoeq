@@ -980,6 +980,8 @@ mod tests {
                 operation_gates: None,
 
                 provisional_decisions: Vec::new(),
+                epa_provenance: None,
+                playback_summary: None,
             },
         };
         assert_eq!(

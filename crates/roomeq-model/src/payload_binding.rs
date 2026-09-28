@@ -22,6 +22,27 @@ use sha2::{Digest, Sha256};
 /// Versioned, format-independent digest codec for delivered JSON values.
 pub const PAYLOAD_BINDING_ALGORITHM: &str = "sha256-json-typed-v1";
 
+/// Remove volatile wall-clock fields before content-identity hashing.
+///
+/// `metadata.timestamp` records the emission moment (provenance), not the
+/// delivered DSP. Hashing it would make every run's fingerprint unique even
+/// when the content is bit-identical, defeating cross-run comparison and
+/// golden baselines. The shipped output keeps its timestamp; only the hash
+/// input is normalized. Both identity paths ([`PayloadBinding::new`] and
+/// `decision_ledger::canonical_value_identity`) and the Python mirror
+/// (`scripts/src/payload_binding.py::payload_digest`) apply this policy so
+/// binders and verifiers agree.
+///
+/// Volatile set (minimal, by evidence): `metadata.timestamp` only. No other
+/// wall-clock or per-process value reaches the delivered payload.
+pub fn strip_volatile_identity_fields(value: &mut Value) {
+    if let Some(metadata) = value.get_mut("metadata")
+        && let Some(object) = metadata.as_object_mut()
+    {
+        object.remove("timestamp");
+    }
+}
+
 /// Binding between a delivered payload and its existing decision graph identity.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct PayloadBinding {
@@ -35,12 +56,17 @@ pub struct PayloadBinding {
 
 impl PayloadBinding {
     /// Bind an already serialized payload, excluding its decision ledger.
+    ///
+    /// Volatile wall-clock fields are normalized out of the hash input (see
+    /// [`strip_volatile_identity_fields`]); the caller's payload is untouched.
     pub fn new(payload: &Value, graph_identity: &str) -> Self {
         let mut hash = Sha256::new();
         hash.update(PAYLOAD_BINDING_ALGORITHM.as_bytes());
         hash.update([0]);
         encode(&mut hash, &Value::String(graph_identity.to_owned()));
-        encode(&mut hash, payload);
+        let mut normalized = payload.clone();
+        strip_volatile_identity_fields(&mut normalized);
+        encode(&mut hash, &normalized);
         Self {
             algorithm: PAYLOAD_BINDING_ALGORITHM.to_owned(),
             graph_identity: graph_identity.to_owned(),
@@ -130,5 +156,26 @@ mod tests {
         let mut unsupported = binding.clone();
         unsupported.algorithm = "unknown".to_owned();
         assert!(!unsupported.matches(&value, "graph-1"));
+    }
+
+    #[test]
+    fn roadmap_identity_ignores_emission_timestamp_but_binds_content() {
+        let early =
+            json!({"channels": {"L": 1.0}, "metadata": {"timestamp": "2026-01-01T00:00:00+00:00"}});
+        let late =
+            json!({"channels": {"L": 1.0}, "metadata": {"timestamp": "2026-12-31T23:59:59+00:00"}});
+        let binding = PayloadBinding::new(&early, "graph-1");
+        // Timestamp-only drift keeps the binding: same content, same digest.
+        assert!(binding.matches(&late, "graph-1"));
+        assert_eq!(binding.sha256, PayloadBinding::new(&late, "graph-1").sha256);
+        // Content drift still breaks the binding.
+        let mut changed = late.clone();
+        changed["channels"]["L"] = json!(2.0);
+        assert!(!binding.matches(&changed, "graph-1"));
+        // The FNV fingerprint path applies the same normalization.
+        assert_eq!(
+            crate::decision_ledger::canonical_value_identity(&early).fingerprint,
+            crate::decision_ledger::canonical_value_identity(&late).fingerprint
+        );
     }
 }

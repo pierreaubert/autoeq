@@ -899,6 +899,15 @@ pub struct OptimizationMetadata {
     /// channel-energy aggregation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub epa_multichannel: Option<EpaMultichannelMetrics>,
+    /// Provenance for shipped EPA scores: model identity and the
+    /// calibration it assumed. Present whenever EPA scores ship.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub epa_provenance: Option<crate::EpaProvenance>,
+    /// Claim-level playback summary: what shipped, what benefit was
+    /// demonstrated, and which limits apply. Rendered from the evidence
+    /// blocks at conversion; auditors re-derive it from the report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback_summary: Option<crate::PlaybackSummary>,
     /// Group delay optimisation summary (GD-Opt v2, Phase GD-4).
     /// Present when GD-Opt was attempted (success or skip with advisory).
     #[serde(default, skip_serializing_if = "Option::is_none")]

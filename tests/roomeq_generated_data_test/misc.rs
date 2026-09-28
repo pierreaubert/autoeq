@@ -169,6 +169,7 @@ fn test_mixedphase_with_phase_data() {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     };
 
     let output_dir = workspace_root().join("data_generated/roomeq_comparison/mixedphase_synthetic");

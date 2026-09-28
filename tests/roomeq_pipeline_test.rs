@@ -58,6 +58,7 @@ fn stereo_config() -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 

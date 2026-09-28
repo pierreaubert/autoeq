@@ -21,7 +21,7 @@ use crate::topology::{
 };
 use crate::{Curve, crossover, home_cinema};
 use math_audio_dsp::analysis::compute_average_response;
-use roomeq_model::{CrossoverConfig, RoomConfig};
+use roomeq_model::{CrossoverConfig, RoomConfig, headroom::HeadroomBudget};
 use std::collections::{BTreeMap, HashMap};
 
 // Soft target-tracking preference, not a hard cancellation acceptance limit.
@@ -444,6 +444,9 @@ fn optimize_home_cinema_joint_group_crossovers(
         return None;
     }
 
+    // Phase 1 headroom budget: values identical to the inlined config reads
+    // below; behavior-neutral by construction (see roomeq_model::headroom).
+    let headroom_budget = HeadroomBudget::from_legacy_config(config);
     let mut lower_bounds = Vec::new();
     let mut upper_bounds = Vec::new();
     let mut initial = Vec::new();
@@ -482,19 +485,21 @@ fn optimize_home_cinema_joint_group_crossovers(
             .plan
             .frequency_range
             .unwrap_or((input.plan.frequency_hz, input.plan.frequency_hz));
-        lower_bounds.extend_from_slice(&[min_freq, 0.0, 0.0, 0.0, 0.0, config.optimizer.min_db]);
+        lower_bounds.extend_from_slice(&[
+            min_freq,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            headroom_budget.max_route_trim_down_db,
+        ]);
         upper_bounds.extend_from_slice(&[
             max_freq,
             (type_candidates.last().unwrap().len().saturating_sub(1)) as f64,
             20.0,
             20.0,
             1.0,
-            config
-                .system
-                .as_ref()
-                .and_then(|system| system.bass_management.as_ref())
-                .map(|bm| bm.max_sub_boost_db.max(0.0))
-                .unwrap_or(config.optimizer.max_db.max(0.0)),
+            headroom_budget.max_route_trim_up_db,
         ]);
         initial.extend_from_slice(&[
             current_report
@@ -771,6 +776,9 @@ pub fn optimize_bass_management_joint_solution_legacy(
         return vec!["joint_route_optimizer_skipped_no_phase_valid_groups".to_string()];
     }
 
+    // Phase 1 headroom budget: values identical to the inlined config reads
+    // below; behavior-neutral by construction (see roomeq_model::headroom).
+    let headroom_budget = HeadroomBudget::from_legacy_config(config);
     let mut lower_bounds = Vec::new();
     let mut upper_bounds = Vec::new();
     let mut initial = Vec::new();
@@ -797,19 +805,21 @@ pub fn optimize_bass_management_joint_solution_legacy(
         let (min_freq, max_freq) = joint_group_frequency_bounds(config, group_id, current_freq);
         let initial_freq = current_freq.clamp(min_freq, max_freq);
         type_candidates.push(candidates);
-        lower_bounds.extend_from_slice(&[min_freq, 0.0, 0.0, 0.0, 0.0, config.optimizer.min_db]);
+        lower_bounds.extend_from_slice(&[
+            min_freq,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            headroom_budget.max_route_trim_down_db,
+        ]);
         upper_bounds.extend_from_slice(&[
             max_freq,
             (type_candidates.last().unwrap().len().saturating_sub(1)) as f64,
             20.0,
             20.0,
             1.0,
-            config
-                .system
-                .as_ref()
-                .and_then(|system| system.bass_management.as_ref())
-                .map(|bm| bm.max_sub_boost_db.max(0.0))
-                .unwrap_or(config.optimizer.max_db.max(0.0)),
+            headroom_budget.max_route_trim_up_db,
         ]);
         initial.extend_from_slice(&[
             initial_freq,
@@ -822,12 +832,7 @@ pub fn optimize_bass_management_joint_solution_legacy(
     }
 
     let output_offset = initial.len();
-    let max_output_boost = config
-        .system
-        .as_ref()
-        .and_then(|system| system.bass_management.as_ref())
-        .map(|bm| bm.max_sub_boost_db.max(0.0))
-        .unwrap_or(config.optimizer.max_db.max(0.0));
+    let max_output_boost = headroom_budget.max_output_boost_db;
     for output in sub_outputs.iter() {
         let is_dba_front = output.strategy_source == "dba_front";
         let is_dba_rear = output.strategy_source == "dba_rear";
@@ -1541,12 +1546,23 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
     let grouped_roles = grouped_home_cinema_roles(main_roles);
     let group_count = grouped_roles.len().max(1);
     let per_group_max_iter = (config.optimizer.max_iter / group_count).max(1);
-    let max_route_trim = config
-        .system
-        .as_ref()
-        .and_then(|system| system.bass_management.as_ref())
-        .map(|bm| bm.max_sub_boost_db.max(0.0))
-        .unwrap_or(config.optimizer.max_db.max(0.0));
+    // Phase 1 headroom budget: values identical to the inlined config reads
+    // replaced here; behavior-neutral by construction.
+    let headroom_budget = HeadroomBudget::from_legacy_config(config);
+    // Joint-pool enforcement stays OFF: capping trim-up at the fixed-policy
+    // remainder over-constrains electrically feasible fixtures (measured
+    // genelec-fir: MSO spends the 6 dB policy pool while the -20 dBFS
+    // provisioned sub bus still holds ~10 dB of true headroom, so
+    // enforcement collapsed a 0.41 dB correction into a 0.04 dB placebo).
+    // Correct enforcement needs true-headroom pools spanning route+FIR
+    // (Phase 3d). The Phase 2 advisory below still reports the joint-pool
+    // position (`pool_db`) so wars stay diagnosed without harming feasible
+    // fixtures.
+    let applied_mso_boost_db = sub_outputs
+        .iter()
+        .map(|output| output.gain_db)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let max_route_trim = headroom_budget.max_route_trim_up_db;
     let mut optimized_sources = Vec::new();
     let mut overall_advisories = Vec::new();
     overall_advisories.extend(apply_per_sub_splice_selection(
@@ -1698,7 +1714,12 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
             let previous_source = existing_sources.iter().find(|source| {
                 source.source_channel == *source_channel && source.group_id == group_id
             });
-            lower_bounds.extend_from_slice(&[0.0, 0.0, 0.0, config.optimizer.min_db]);
+            lower_bounds.extend_from_slice(&[
+                0.0,
+                0.0,
+                0.0,
+                headroom_budget.max_route_trim_down_db,
+            ]);
             upper_bounds.extend_from_slice(&[20.0, 20.0, 1.0, max_route_trim]);
             initial.extend_from_slice(&[
                 previous_source
@@ -1722,7 +1743,7 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                             measured_sub_curve,
                             target_curves.and_then(|targets| targets.get(source_channel)),
                             current_frequency,
-                            config.optimizer.min_db,
+                            headroom_budget.max_route_trim_down_db,
                             max_route_trim,
                         )
                     })
@@ -1730,7 +1751,7 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                         previous_source
                             .map(|source| source.trim_db)
                             .unwrap_or(previous_group.trim_db)
-                            .clamp(config.optimizer.min_db, max_route_trim)
+                            .clamp(headroom_budget.max_route_trim_down_db, max_route_trim)
                     }),
             ]);
         }
@@ -1758,7 +1779,8 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                     params[base + 1].clamp(0.0, 20.0),
                 );
                 let polarity_inverted = params[base + 2].round().clamp(0.0, 1.0) >= 0.5;
-                let trim_db = params[base + 3].clamp(config.optimizer.min_db, max_route_trim);
+                let trim_db =
+                    params[base + 3].clamp(headroom_budget.max_route_trim_down_db, max_route_trim);
                 let mut main_branch = apply_crossover_response_to_curve(
                     source_curve,
                     crossover_type,
@@ -1889,7 +1911,7 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                         measured_sub_curve,
                         target_curves.and_then(|targets| targets.get(source_channel)),
                         refined[0],
-                        config.optimizer.min_db,
+                        headroom_budget.max_route_trim_down_db,
                         max_route_trim,
                     )
                 })
@@ -1949,6 +1971,64 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
             "source route group '{group_id}' crossover underfill: baseline={baseline_underfills:?}, candidate={:?}",
             candidate.as_ref().map(|(_, _, underfills, _)| underfills)
         );
+        // Phase 2 headroom pre-pass (advisory only): predict per-source
+        // splice feasibility against the joint trim pool. Magnitudes only:
+        // delay/polarity do not change levels and trim is what is being
+        // budgeted. No verdict changes; Phase 3 consumers act on these.
+        {
+            let assessed_frequency = refined[0].clamp(minimum_frequency, maximum_frequency);
+            let assessed_type = refined[1]
+                .round()
+                .clamp(0.0, type_candidates.len().saturating_sub(1) as f64)
+                as usize;
+            let assessed_crossover = &type_candidates[assessed_type];
+            let applied_sub_boost = applied_mso_boost_db;
+            for (source_index, (source_channel, source_curve)) in sources.iter().enumerate() {
+                let Some(sub_curve) = sub_curves.get(source_index) else {
+                    continue;
+                };
+                let main_branch = apply_crossover_response_to_curve(
+                    source_curve,
+                    assessed_crossover,
+                    assessed_frequency,
+                    sample_rate,
+                    false,
+                );
+                let sub_branch = if per_driver_low_pass_active {
+                    sub_curve.clone()
+                } else {
+                    apply_crossover_response_to_curve(
+                        sub_curve,
+                        assessed_crossover,
+                        assessed_frequency,
+                        sample_rate,
+                        true,
+                    )
+                };
+                if let Some(verdict) = super::headroom_assess::assess_splice_headroom(
+                    source_channel,
+                    &main_branch,
+                    &sub_branch,
+                    target_curves.and_then(|targets| targets.get(source_channel)),
+                    assessed_frequency,
+                    &headroom_budget,
+                    applied_sub_boost,
+                ) {
+                    let strategy = match verdict.strategy {
+                        roomeq_model::headroom::HeadroomStrategy::Balanced => "balanced",
+                        roomeq_model::headroom::HeadroomStrategy::SubFlexes => "sub_flexes",
+                        roomeq_model::headroom::HeadroomStrategy::MainProtects => "main_protects",
+                        roomeq_model::headroom::HeadroomStrategy::Fixed => "fixed",
+                    };
+                    overall_advisories.push(format!(
+                        "headroom_splice:{source_channel}:requires_db={:+.1}:pool_db={:.1}:shortfall_db={:.1}:strategy={strategy}",
+                        verdict.required_sub_boost_db,
+                        headroom_budget.joint_route_trim_up_db(applied_sub_boost),
+                        verdict.shortfall_db,
+                    ));
+                }
+            }
+        }
         // The route pass runs before the narrow-band corrective EQ pass.  A
         // measured response can therefore already exceed the final absolute
         // underfill limit.  Reject candidates that introduce or worsen an
@@ -1995,7 +2075,8 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
                 main_delay_ms,
                 bass_route_delay_ms,
                 polarity_inverted: chosen[base + 2].round().clamp(0.0, 1.0) >= 0.5,
-                trim_db: chosen[base + 3].clamp(config.optimizer.min_db, max_route_trim),
+                trim_db: chosen[base + 3]
+                    .clamp(headroom_budget.max_route_trim_down_db, max_route_trim),
                 objective_before: Some(baseline_losses[source_index]),
                 objective_after: Some(chosen_losses[source_index]),
                 accepted,

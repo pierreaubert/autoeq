@@ -165,6 +165,8 @@ impl WorkflowExecutor for Stereo20Executor {
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         };
 
         // 5. Process supporting-source channels.

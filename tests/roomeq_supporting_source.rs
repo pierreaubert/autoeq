@@ -87,6 +87,7 @@ fn stereo_workflow_emits_supporting_source_channels_and_metadata() {
         recording_config: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
         ctc: None,
     };
 
@@ -185,6 +186,7 @@ fn home_cinema_workflow_emits_supporting_source_channels_and_metadata() {
         recording_config: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
         ctc: None,
     };
 
@@ -257,6 +259,7 @@ fn spatial_robustness_advisories_raised_for_multiple_measurements() {
         recording_config: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
         ctc: None,
     };
 

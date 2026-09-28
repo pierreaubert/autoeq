@@ -23,7 +23,7 @@ pub struct SmartInitConfig {
     pub critical_frequencies: Vec<f64>,
     /// Random variation factor for guess diversification
     pub variation_factor: f64,
-    /// Random seed for deterministic initialization (None = random)
+    /// Seed for guess diversification (`None` selects [`crate::DEFAULT_SEED`]).
     pub seed: Option<u64>,
     /// Pre-detected frequency problems as `(frequency_hz, q, gain_db)`
     /// triples, typically produced by a higher-level analysis
@@ -130,12 +130,9 @@ pub fn create_smart_initial_guesses(
     config: &SmartInitConfig,
     peq_model: crate::PeqModel,
 ) -> Vec<Vec<f64>> {
-    // Create RNG based on config seed
-    let mut main_rng = if let Some(seed) = config.seed {
-        StdRng::seed_from_u64(seed)
-    } else {
-        StdRng::seed_from_u64(rand::random())
-    };
+    // Unspecified never means nondeterministic: unseeded runs use the shared
+    // default seed so they reproduce bit-for-bit instead of drawing entropy.
+    let mut main_rng = StdRng::seed_from_u64(config.seed.unwrap_or(crate::DEFAULT_SEED));
     let mut problems: Vec<FrequencyProblem> = if !config.pre_detected_problems.is_empty() {
         // Caller already ran a higher-quality analysis (e.g. SSIR
         // room-mode detection) and handed us the problems explicitly.
@@ -516,5 +513,49 @@ mod tests {
                 "param {i} = {val} out of bounds [{lo}, {hi}]"
             );
         }
+    }
+
+    #[test]
+    fn unseeded_initial_guesses_are_reproducible() {
+        use crate::PeqModel;
+        let target_response = Array1::from(vec![0.0, 0.0, 0.0]);
+        let freq_grid = Array1::from(vec![100.0, 1000.0, 10000.0]);
+        let bounds = vec![
+            (100.0_f64.log10(), 10000.0_f64.log10()),
+            (0.5, 3.0),
+            (-6.0, 6.0),
+        ];
+        let config = SmartInitConfig {
+            num_guesses: 2,
+            seed: None,
+            ..SmartInitConfig::default()
+        };
+        let run = || {
+            create_smart_initial_guesses(
+                &target_response,
+                &freq_grid,
+                1,
+                &bounds,
+                &config,
+                PeqModel::Pk,
+            )
+        };
+        assert_eq!(run(), run());
+        // None selects the shared default seed exactly.
+        let explicit = SmartInitConfig {
+            seed: Some(crate::DEFAULT_SEED),
+            ..config.clone()
+        };
+        assert_eq!(
+            run(),
+            create_smart_initial_guesses(
+                &target_response,
+                &freq_grid,
+                1,
+                &bounds,
+                &explicit,
+                PeqModel::Pk
+            )
+        );
     }
 }

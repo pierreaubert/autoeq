@@ -25,6 +25,7 @@ pub mod decision_ledger;
 pub mod eligibility;
 pub mod home_cinema;
 pub use crossover_cancellation::*;
+pub mod headroom;
 pub mod home_cinema_resolution;
 pub mod ir_waveform;
 pub mod joint_sub_report;

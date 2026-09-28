@@ -199,6 +199,8 @@ fn result_with_channel_slopes(
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         },
     }
 }
@@ -217,6 +219,7 @@ fn empty_room_config() -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 

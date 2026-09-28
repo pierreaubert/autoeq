@@ -61,12 +61,104 @@ pub(crate) fn processing_snapshot(
         .map_err(|error| format!("processing snapshot does not serialize: {error}"))
 }
 
+/// Refuse a delivered graph that carries negative physical delays.
+///
+/// Amendment 4 ordering enforcement: delay compilation is the single graph
+/// boundary that turns relative advances into causal delays, and every
+/// production path compiles before this ledger runs. Any negative `delay_ms`
+/// reaching finalization means compile never ran or a later stage regressed
+/// it; either way the pre-compile splice verdict does not cover the shipped
+/// graph, so fail closed. Mirrors the native-result audit's strict `< 0.0`
+/// rule, and additionally rejects non-finite values.
+fn refuse_negative_delays(
+    result: &roomeq_engine::room_result::RoomOptimizationResult,
+) -> Result<(), String> {
+    let mut channel_names: Vec<&String> = result.channels.keys().collect();
+    channel_names.sort();
+    for name in channel_names {
+        let chain = &result.channels[name];
+        for (plugin_index, plugin) in chain.plugins.iter().enumerate() {
+            if plugin.plugin_type != "delay" {
+                continue;
+            }
+            let value = plugin
+                .parameters
+                .get("delay_ms")
+                .and_then(serde_json::Value::as_f64)
+                .ok_or_else(|| {
+                    format!("channel '{name}' delay plugin {plugin_index} has no numeric delay_ms")
+                })?;
+            if !value.is_finite() {
+                return Err(format!(
+                    "channel '{name}' delay plugin {plugin_index} has non-finite delay {value}"
+                ));
+            }
+            if value < 0.0 {
+                return Err(format!(
+                    "channel '{name}' delay plugin {plugin_index} ships unresolved causal delay {value} ms"
+                ));
+            }
+        }
+        if let Some(drivers) = chain.drivers.as_ref() {
+            for (driver_index, driver) in drivers.iter().enumerate() {
+                for (plugin_index, plugin) in driver.plugins.iter().enumerate() {
+                    if plugin.plugin_type != "delay" {
+                        continue;
+                    }
+                    let value = plugin
+                        .parameters
+                        .get("delay_ms")
+                        .and_then(serde_json::Value::as_f64)
+                        .ok_or_else(|| {
+                            format!(
+                                "channel '{name}' driver {driver_index} delay plugin {plugin_index} has no numeric delay_ms"
+                            )
+                        })?;
+                    if !value.is_finite() {
+                        return Err(format!(
+                            "channel '{name}' driver {driver_index} delay plugin {plugin_index} has non-finite delay {value}"
+                        ));
+                    }
+                    if value < 0.0 {
+                        return Err(format!(
+                            "channel '{name}' driver {driver_index} delay plugin {plugin_index} ships unresolved causal delay {value} ms"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    if let Some(graph) = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+    {
+        for (route_index, route) in graph.routes.iter().enumerate() {
+            if !route.delay_ms.is_finite() {
+                return Err(format!(
+                    "routing_graph.routes[{route_index}] has non-finite delay {}",
+                    route.delay_ms
+                ));
+            }
+            if route.delay_ms < 0.0 {
+                return Err(format!(
+                    "routing_graph.routes[{route_index}] ships unresolved causal delay {} ms",
+                    route.delay_ms
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Finalize public workflow decisions after all processing and report mutations.
 pub(crate) fn finalize_result_ledger(
     result: &mut roomeq_engine::room_result::RoomOptimizationResult,
     assessed_processing: &serde_json::Value,
     sample_rate_hz: f64,
 ) -> Result<(), String> {
+    refuse_negative_delays(result)?;
     // Inner safety stages can remove phase processing before the outer processing
     // snapshot is taken. Reconcile the operation's actual emitted FIR reference,
     // not just the later snapshot or a generic acceptance status.
@@ -958,6 +1050,24 @@ mod tests {
                     && record.status == DecisionStatus::Applied
             }),
             "one surviving FIR cannot prove a joint phase operation survived"
+        );
+    }
+
+    #[test]
+    fn amendment4_final_ledger_refuses_negative_shipped_delay() {
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        result
+            .channels
+            .get_mut("left")
+            .unwrap()
+            .plugins
+            .push(roomeq_engine::output::create_delay_plugin(-1.5));
+        let processing = processing_snapshot(&result).unwrap();
+        let error = finalize_result_ledger(&mut result, &processing, 48_000.0)
+            .expect_err("negative shipped delay must fail closed");
+        assert!(
+            error.contains("unresolved causal delay"),
+            "unexpected refusal: {error}"
         );
     }
 

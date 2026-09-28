@@ -141,6 +141,9 @@ pub fn evaluate_correction_acceptance(
         },
         metrics,
         violations,
+        realized_processing: None,
+        processing_fallback: None,
+        observations: Vec::new(),
         reverted_stages: Vec::new(),
         acoustic_quality: None,
         realization_quality: None,
@@ -394,6 +397,123 @@ const RESIDUAL_REGRESSION_RELATIVE: f64 = 0.05;
 // margin while avoiding safety reverts for sub-decibel realization overlap.
 const BOOST_HEADROOM_TOLERANCE_DB: f64 = 0.5;
 
+/// Agreement between the boost limit and the two boost quantities.
+///
+/// The gain backstop guards filter gain (clipping/drive), so the
+/// electrical bound is its intended quantity; the acoustic response ratio
+/// is reported alongside because improved interference near a baseline
+/// null can legitimately exceed the backstop without any filter boosting.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BoostLimitAgreement {
+    /// Both quantities are within the ceiling.
+    WithinLimit,
+    /// The electrical bound exceeds the ceiling: a real gain violation.
+    ElectricalViolation {
+        acoustic_db: f64,
+        electrical_db: f64,
+        ceiling_db: f64,
+    },
+    /// The acoustic ratio exceeds the ceiling while the electrical bound
+    /// stays within it: recorded as an observation, not a violation.
+    ExplainedAcousticExcess {
+        acoustic_db: f64,
+        electrical_db: f64,
+        ceiling_db: f64,
+    },
+    /// The acoustic ratio exceeds the ceiling with no electrical bound to
+    /// clear it (curve-only or unevaluable graph): fail-closed violation.
+    UnevaluableViolation { acoustic_db: f64, ceiling_db: f64 },
+}
+
+/// Apply the boost backstop assessment to a report.
+///
+/// Shared by the safety-gate enforcement and the final replay
+/// re-enforcement so both boundaries apply identical semantics.
+/// Returns a failure message on the violation arms; the explained
+/// acoustic excess is recorded as an observation and returns `None`.
+pub fn apply_boost_limit_agreement(
+    report: &mut CorrectionAcceptanceReport,
+    acoustic_boost_db: f64,
+    electrical_boost_db: Option<f64>,
+    policy: &RuntimeAcceptancePolicy,
+) -> Option<String> {
+    match assess_boost_limit_agreement(
+        acoustic_boost_db,
+        electrical_boost_db,
+        policy.max_boost_db + BOOST_HEADROOM_TOLERANCE_DB,
+    ) {
+        BoostLimitAgreement::WithinLimit => None,
+        BoostLimitAgreement::ElectricalViolation {
+            electrical_db,
+            ceiling_db,
+            ..
+        } => {
+            report
+                .violations
+                .push("max_boost_limit_exceeded".to_string());
+            Some(format!(
+                "electrical filter boost {electrical_db:.3} dB exceeds {ceiling_db:.3} dB backstop"
+            ))
+        }
+        BoostLimitAgreement::UnevaluableViolation {
+            acoustic_db,
+            ceiling_db,
+        } => {
+            report
+                .violations
+                .push("max_boost_limit_exceeded".to_string());
+            Some(format!(
+                "acoustic boost {acoustic_db:.3} dB exceeds {ceiling_db:.3} dB backstop with unevaluable electrical gain"
+            ))
+        }
+        BoostLimitAgreement::ExplainedAcousticExcess {
+            acoustic_db,
+            electrical_db,
+            ceiling_db,
+        } => {
+            report.observations.push(format!(
+                "acoustic_boost_{acoustic_db:.3}_db_exceeds_{ceiling_db:.3}_db_backstop_with_electrical_{electrical_db:.3}_db_within_limit"
+            ));
+            report.observations.sort();
+            report.observations.dedup();
+            None
+        }
+    }
+}
+
+/// Assess the boost backstop against electrical and acoustic evidence.
+///
+/// Pure function shared by the safety-gate enforcement and the final
+/// replay re-enforcement so both boundaries apply identical semantics.
+/// `ceiling_db` already includes the implementation tolerance.
+pub fn assess_boost_limit_agreement(
+    acoustic_boost_db: f64,
+    electrical_boost_db: Option<f64>,
+    ceiling_db: f64,
+) -> BoostLimitAgreement {
+    match electrical_boost_db {
+        Some(electrical_db) if electrical_db > ceiling_db => {
+            BoostLimitAgreement::ElectricalViolation {
+                acoustic_db: acoustic_boost_db,
+                electrical_db,
+                ceiling_db,
+            }
+        }
+        Some(electrical_db) if acoustic_boost_db > ceiling_db => {
+            BoostLimitAgreement::ExplainedAcousticExcess {
+                acoustic_db: acoustic_boost_db,
+                electrical_db,
+                ceiling_db,
+            }
+        }
+        None if acoustic_boost_db > ceiling_db => BoostLimitAgreement::UnevaluableViolation {
+            acoustic_db: acoustic_boost_db,
+            ceiling_db,
+        },
+        _ => BoostLimitAgreement::WithinLimit,
+    }
+}
+
 /// Apply the production acceptance policy to evidence derived from the final
 /// canonical DSP graph. This is deliberately separate from the curve-only
 /// fixture policies so runtime decisions cannot silently omit evidence that
@@ -449,7 +569,20 @@ pub fn enforce_runtime_acceptance_evidence(
     if worst_position_improvement < -policy.max_worst_position_regression_db {
         violations.push("worst_position_regressed".to_string());
     }
-    if acoustic_quality.max_boost_db > policy.max_boost_db + BOOST_HEADROOM_TOLERANCE_DB {
+    // The backstop guards filter gain: the electrical bound is the
+    // checked quantity, and the acoustic response ratio is reported
+    // alongside. An acoustic-only excess (improved interference near a
+    // baseline null) is recorded as an observation, not a violation.
+    // The applier pushes its own violation string; mirror it here since
+    // this function's violation list is extended below.
+    if apply_boost_limit_agreement(
+        report,
+        acoustic_quality.max_boost_db,
+        acoustic_quality.max_electrical_boost_db,
+        &policy,
+    )
+    .is_some()
+    {
         violations.push("max_boost_limit_exceeded".to_string());
     }
     if acoustic_quality
@@ -466,8 +599,8 @@ pub fn enforce_runtime_acceptance_evidence(
     {
         violations.push("latency_limit_exceeded".to_string());
     }
-    match acoustic_quality.temporal.pre_ringing_energy_db {
-        Some(value) if value > policy.max_pre_ringing_energy_db => {
+    match acoustic_quality.temporal.pre_ringing_audible_db {
+        Some(value) if value > policy.max_pre_ringing_audible_db => {
             violations.push("pre_ringing_limit_exceeded".to_string());
         }
         None => violations.push("pre_ringing_evidence_missing".to_string()),
@@ -510,6 +643,8 @@ pub fn enforce_runtime_acceptance_evidence(
     report.violations.extend(violations);
     report.violations.sort();
     report.violations.dedup();
+    report.observations.sort();
+    report.observations.dedup();
     if runtime_violated {
         report.accepted = false;
         if report.decision == CorrectionDecision::Accepted {
@@ -885,14 +1020,18 @@ mod tests {
             held_out: None,
             correction_rms_db: 2.0,
             max_boost_db: 4.0,
+            max_electrical_boost_db: Some(3.5),
             max_cut_db: -6.0,
             induced_group_delay_rms_ms: Some(1.0),
             temporal: super::super::TemporalQualityEvidence {
-                pre_ringing_energy_db: Some(-40.0),
+                pre_ringing_audible_db: Some(-40.0),
                 latency_ms: Some(5.0),
                 available_headroom_db: Some(-4.0),
                 phase_evidence_available: true,
                 temporal_evidence_available: true,
+                coherent_timing: super::super::CoherentTimingEvidence::Unassessed,
+                alignment_delay_ms: None,
+                total_latency_ms: None,
             },
             correction_band_hz: None,
             evaluated_band_hz: [20.0, 20_000.0],
@@ -1033,13 +1172,20 @@ mod tests {
         scorecard.training.post_worst_abs_residual_db = 30.0;
         scorecard.training.worst_position_improvement_db = -2.0;
         scorecard.max_boost_db = 20.0;
+        // The gain backstop checks the electrical bound: an acoustic-only
+        // excess is an explained observation, so drive the violation arm
+        // with a hot electrical bound.
+        scorecard.max_electrical_boost_db = Some(20.0);
         scorecard.induced_group_delay_rms_ms = Some(50.0);
         scorecard.temporal = super::super::TemporalQualityEvidence {
-            pre_ringing_energy_db: Some(-5.0),
+            pre_ringing_audible_db: Some(-5.0),
             latency_ms: Some(500.0),
             available_headroom_db: Some(-20.0),
             phase_evidence_available: true,
             temporal_evidence_available: true,
+            coherent_timing: super::super::CoherentTimingEvidence::Unassessed,
+            alignment_delay_ms: None,
+            total_latency_ms: None,
         };
         let realization = RealizationQualityEvidence {
             evaluated_channels: 1,
@@ -1077,6 +1223,114 @@ mod tests {
     }
 
     #[test]
+    fn boost_backstop_checks_electrical_gain_not_acoustic_ratio() {
+        // Electrical excess violates even when the acoustic ratio is small.
+        assert!(matches!(
+            super::assess_boost_limit_agreement(4.0, Some(20.0), 12.5),
+            super::BoostLimitAgreement::ElectricalViolation { .. }
+        ));
+        // Acoustic-only excess is explained, not a violation.
+        assert!(matches!(
+            super::assess_boost_limit_agreement(23.85, Some(10.51), 12.5),
+            super::BoostLimitAgreement::ExplainedAcousticExcess { .. }
+        ));
+        // Unevaluable electrical gain fails closed.
+        assert!(matches!(
+            super::assess_boost_limit_agreement(23.85, None, 12.5),
+            super::BoostLimitAgreement::UnevaluableViolation { .. }
+        ));
+        // Both within the ceiling passes quietly.
+        assert_eq!(
+            super::assess_boost_limit_agreement(4.0, Some(3.5), 12.5),
+            super::BoostLimitAgreement::WithinLimit
+        );
+    }
+
+    #[test]
+    fn explained_acoustic_excess_is_observed_without_violation() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[4.0, -4.0, 3.0, -3.0]);
+        let post = curve(&[1.0, -1.0, 0.5, -0.5]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut scorecard = runtime_scorecard();
+        scorecard.max_boost_db = 23.85;
+        scorecard.max_electrical_boost_db = Some(10.51);
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            scorecard,
+            RealizationQualityEvidence {
+                evaluated_channels: 2,
+                max_abs_error_db: Some(0.01),
+                failed_channels: Vec::new(),
+            },
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::LowLatencyIir),
+        )
+        .unwrap();
+        assert!(report.accepted);
+        assert!(
+            !report
+                .violations
+                .iter()
+                .any(|violation| violation == "max_boost_limit_exceeded"),
+            "acoustic-only excess must not violate: {:?}",
+            report.violations
+        );
+        assert!(
+            report
+                .observations
+                .iter()
+                .any(|observation| observation.contains("acoustic_boost_23.850")),
+            "acoustic excess needs a recorded explanation: {:?}",
+            report.observations
+        );
+    }
+
+    #[test]
+    fn unevaluable_electrical_gain_fails_closed_on_acoustic_excess() {
+        let target = curve(&[0.0; 4]);
+        let pre = curve(&[4.0, -4.0, 3.0, -3.0]);
+        let post = curve(&[1.0, -1.0, 0.5, -0.5]);
+        let mut report = evaluate_correction_acceptance(
+            &pre,
+            &post,
+            &target,
+            None,
+            CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        let mut scorecard = runtime_scorecard();
+        scorecard.max_boost_db = 23.85;
+        scorecard.max_electrical_boost_db = None;
+        enforce_runtime_acceptance_evidence(
+            &mut report,
+            scorecard,
+            RealizationQualityEvidence {
+                evaluated_channels: 2,
+                max_abs_error_db: Some(0.01),
+                failed_channels: Vec::new(),
+            },
+            RuntimeAcceptancePolicy::for_output_class(RuntimeOutputClass::LowLatencyIir),
+        )
+        .unwrap();
+        assert!(!report.accepted);
+        assert!(
+            report
+                .violations
+                .iter()
+                .any(|violation| violation == "max_boost_limit_exceeded"),
+            "unevaluable gain must fail closed: {:?}",
+            report.violations
+        );
+    }
+
+    #[test]
     fn runtime_policy_rejects_missing_pre_ringing_evidence() {
         let mut report = evaluate_correction_acceptance(
             &curve(&[0.0; 4]),
@@ -1087,7 +1341,7 @@ mod tests {
         )
         .unwrap();
         let mut scorecard = runtime_scorecard();
-        scorecard.temporal.pre_ringing_energy_db = None;
+        scorecard.temporal.pre_ringing_audible_db = None;
         enforce_runtime_acceptance_evidence(
             &mut report,
             scorecard,

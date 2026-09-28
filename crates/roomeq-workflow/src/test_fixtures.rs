@@ -45,6 +45,8 @@ pub fn empty_metadata() -> OptimizationMetadata {
         t60_flatness_tolerance_s: None,
         operation_gates: None,
         provisional_decisions: Vec::new(),
+        epa_provenance: None,
+        playback_summary: None,
     }
 }
 

@@ -79,6 +79,17 @@ class PayloadBindingTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             payload_digest({"nan": float("nan")}, "graph-1")
 
+    def test_emission_timestamp_does_not_change_digest(self):
+        early = {"channels": {"L": 1.0}, "metadata": {"timestamp": "2026-01-01T00:00:00+00:00"}}
+        late = {"channels": {"L": 1.0}, "metadata": {"timestamp": "2026-12-31T23:59:59+00:00"}}
+        self.assertEqual(payload_digest(early, "graph-1"), payload_digest(late, "graph-1"))
+        # The caller's payload keeps its timestamp; only the hash input is normalized.
+        self.assertIn("timestamp", early["metadata"])
+        data = {"channels": {"L": {"plugins": []}}, "metadata": {"timestamp": "2026-01-01T00:00:00+00:00"}}
+        bind(data)
+        data["metadata"]["timestamp"] = "2026-12-31T23:59:59+00:00"
+        self.assertTrue(verify_payload_binding(data)[0])
+
     def test_resource_bytes_are_rechecked_without_cached_approval(self):
         preferred = Path("/Volumes/home_tmp/tmp")
         temp_root = preferred if preferred.is_dir() else Path(__file__).resolve().parents[1] / "target/qa/payload-binding-tmp"

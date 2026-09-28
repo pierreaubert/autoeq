@@ -890,6 +890,29 @@ stays small. The Python viewer (`scripts/display-roomeq.py`, via
 directory automatically, so plots are unchanged. Legacy outputs with
 embedded curves and sidecars next to the JSON keep loading as before.
 
+### Reading the playback summary
+
+`metadata.playback_summary` is the claim-level answer to "what did this run
+ship, and what does it cost". It restates the acceptance report without new
+judgment: the shipped outcome, how many training seats improved beyond
+uncertainty (`training_seats_improved/total`), the worst seat (report it next
+to the average), the modeled latency and headroom cost, the correction
+family actually present in the graph (`realized_processing`, which can differ
+from the requested mode — see `processing_fallback`), and the limits in
+force. `headlines` renders these as one deterministic sentence per outcome;
+rejected and unchanged runs name their violations there.
+
+EPA numbers (`epa_per_channel`, `epa_multichannel`,
+`perceptual_metrics.epa_preference_delta`) are configured model predictions
+from frequency response, labeled as such by `metadata.epa_provenance` — not
+measured audibility. EPA preference can fall while the acceptance metric
+improves: acceptance measures target-weighted RMS shape improvement, while
+EPA weights loudness, sharpness, and roughness dimensions that move with
+level balance and tilt. When they disagree, the correction changed something
+one objective weights and the other does not. Neither number proves
+audibility; see `docs/ROOMEQ_LISTENING_PLAN.md` for the claim wording each
+evidence level supports.
+
 ### Playback verification (operator captures)
 
 The following flags make capture verification usable from the binary; the same

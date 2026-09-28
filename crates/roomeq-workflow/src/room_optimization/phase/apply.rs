@@ -513,6 +513,7 @@ mod tests {
                 evidence_refs: vec![channel.to_string()],
                 assessment: roomeq_model::AssessmentRecord::default(),
             }],
+            rew_header_facts: None,
         }
     }
 

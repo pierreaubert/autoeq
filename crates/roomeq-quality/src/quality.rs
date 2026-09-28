@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use super::metrics::{percentile, rms, weighted_mean, weighted_rms};
 use autoeq_core::Curve;
+#[doc(inline)]
 pub use roomeq_model::{
-    AcousticQualityScorecard, QualityPartitionMetrics, TemporalQualityEvidence,
+    AcousticQualityScorecard, CoherentTimingEvidence, QualityPartitionMetrics,
+    TemporalQualityEvidence,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -44,6 +46,13 @@ pub struct TemporalChannelEvidence {
     pub fir_taps: Option<usize>,
 }
 
+/// Reported aggregate pre-ringing for chains without any FIR precursor.
+///
+/// Sentinel report floor, not a measured room-noise floor: an IIR-only
+/// chain has no FIR pre-ringing to measure, so the aggregate carries this
+/// floor value instead of a fabricated measurement or a missing field.
+pub const NO_FIR_PRE_RINGING_FLOOR_DB: f64 = -300.0;
+
 pub fn derive_temporal_quality_evidence(
     channels: &[TemporalChannelEvidence],
     pre: &[Curve],
@@ -55,11 +64,11 @@ pub fn derive_temporal_quality_evidence(
             || channel.main_time_ms.is_some()
             || channel.fir_taps.is_some()
     });
-    let pre_ringing_energy_db = channels
+    let pre_ringing_audible_db = channels
         .iter()
         .filter_map(|channel| channel.pre_ringing_audible_db)
         .reduce(f64::max)
-        .or_else(|| (!has_fir).then_some(-300.0));
+        .or_else(|| (!has_fir).then_some(NO_FIR_PRE_RINGING_FLOOR_DB));
     let latency_ms = channels
         .iter()
         .map(|channel| {
@@ -91,11 +100,16 @@ pub fn derive_temporal_quality_evidence(
             channel.pre_ringing_audible_db.is_some() && channel.main_time_ms.is_some()
         });
     TemporalQualityEvidence {
-        pre_ringing_energy_db,
+        pre_ringing_audible_db,
         latency_ms: Some(latency_ms),
         available_headroom_db: Some(-max_boost_db.max(0.0)),
         phase_evidence_available,
         temporal_evidence_available,
+        // Curve-only boundary: no config provenance, so replay assesses this.
+        coherent_timing: CoherentTimingEvidence::Unassessed,
+        // Alignment split lands at conversion, where the compile stage is visible.
+        alignment_delay_ms: None,
+        total_latency_ms: None,
     }
 }
 
@@ -352,6 +366,24 @@ pub fn evaluate_acoustic_quality_with_permitted_gain(
                 .max_by(|(_, a), (_, b)| a.total_cmp(b))
                 .unwrap()
                 .0;
+            let extension_edge = frequencies[0] * 2.0;
+            let extension_count = frequencies
+                .iter()
+                .take_while(|frequency| **frequency <= extension_edge)
+                .count();
+            let extension_band =
+                (extension_count >= 2).then(|| [frequencies[0], frequencies[extension_count - 1]]);
+            let extension_loss = (extension_count >= 2).then(|| {
+                weighted_mean(&frequencies[..extension_count], &losses[..extension_count])
+            });
+            let peak_pre = samples
+                .iter()
+                .map(|sample| sample.pre)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let peak_post = samples
+                .iter()
+                .map(|sample| sample.post)
+                .fold(f64::NEG_INFINITY, f64::max);
             useful_output.push(roomeq_model::UsefulOutputEvidence {
                 logical_input: None,
                 partition: partition.into(),
@@ -367,6 +399,10 @@ pub fn evaluate_acoustic_quality_with_permitted_gain(
                 bass_evaluated_band_hz: bass_band,
                 bass_unexplained_loss_rms_db: bass_loss,
                 target_shortfall_rms_db: target.map(|_| weighted_rms(&frequencies, &deficits)),
+                extension_band_hz: extension_band,
+                extension_loss_db: extension_loss,
+                peak_demand_change_db: (peak_pre.is_finite() && peak_post.is_finite())
+                    .then_some(peak_post - peak_pre),
             });
         }
     }
@@ -377,6 +413,8 @@ pub fn evaluate_acoustic_quality_with_permitted_gain(
         held_out,
         correction_rms_db,
         max_boost_db,
+        // Graph-side bound; replay computes it where channels exist.
+        max_electrical_boost_db: None,
         max_cut_db,
         induced_group_delay_rms_ms,
         temporal,
@@ -1046,6 +1084,56 @@ mod tests {
     }
 
     #[test]
+    fn output_loss_distinguishes_peak_cuts_extension_loss_and_peak_demand() {
+        // WP4: narrow peak attenuation must not read as lost extension, and
+        // broadband level loss must move peak demand, not just the mean.
+        let grid = [
+            20.0, 25.0, 32.0, 40.0, 50.0, 63.0, 80.0, 100.0, 125.0, 160.0, 200.0, 250.0, 315.0,
+            400.0, 500.0,
+        ];
+        let flat = vec![80.0; grid.len()];
+        let pre = curve(&grid, &flat);
+        let score = |post_levels: &[f64]| {
+            evaluate_acoustic_quality(
+                std::slice::from_ref(&pre),
+                &[curve(&grid, post_levels)],
+                &[],
+                &[],
+                None,
+                QualityEvaluationConfig {
+                    max_freq_hz: 500.0,
+                    ..config()
+                },
+                Default::default(),
+            )
+            .unwrap()
+        };
+        // Narrow 20 dB cut at 80 Hz only: peak evidence, no extension loss,
+        // no peak-demand shift (the flat top still reaches 80 dB).
+        let mut peak_cut = flat.clone();
+        peak_cut[6] = 60.0;
+        let loss = &score(&peak_cut).useful_output[0];
+        assert_eq!(loss.worst_unexplained_loss_db, Some(20.0));
+        assert_eq!(loss.extension_band_hz, Some([20.0, 40.0]));
+        assert_eq!(loss.extension_loss_db, Some(0.0));
+        assert_eq!(loss.peak_demand_change_db, Some(0.0));
+        // Lowest octave down 6 dB: extension loss without peak-demand shift.
+        let mut rolled_off = flat.clone();
+        for level in rolled_off.iter_mut().take(4) {
+            *level = 74.0;
+        }
+        let loss = &score(&rolled_off).useful_output[0];
+        assert!((loss.extension_loss_db.unwrap() - 6.0).abs() < 1e-9);
+        assert_eq!(loss.peak_demand_change_db, Some(0.0));
+        // Broadband 6 dB down: extension, demand, and mean move together.
+        let down = vec![74.0; grid.len()];
+        let loss = &score(&down).useful_output[0];
+        assert!((loss.extension_loss_db.unwrap() - 6.0).abs() < 1e-9);
+        assert_eq!(loss.peak_demand_change_db, Some(-6.0));
+        assert!((loss.mean_level_change_db + 6.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn output_loss_keeps_candidate_native_nulls_and_sampled_band_diagnostics() {
         let pre = curve(&[20.0, 500.0], &[80.0, 80.0]);
         let frequencies = [20.0, 59.0, 60.0, 90.0, 120.0, 121.0, 200.0, 201.0, 500.0];
@@ -1411,7 +1499,7 @@ mod tests {
             &[post],
             48_000.0,
         );
-        assert_eq!(evidence.pre_ringing_energy_db, Some(-30.0));
+        assert_eq!(evidence.pre_ringing_audible_db, Some(-30.0));
         assert_eq!(evidence.latency_ms, Some(5.0));
         assert_eq!(evidence.available_headroom_db, Some(-3.0));
     }
@@ -1429,7 +1517,7 @@ mod tests {
             std::slice::from_ref(&curve),
             48_000.0,
         );
-        assert_eq!(evidence.pre_ringing_energy_db, None);
+        assert_eq!(evidence.pre_ringing_audible_db, None);
     }
 
     #[test]

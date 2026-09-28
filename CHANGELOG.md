@@ -1,5 +1,36 @@
 # Unreleased
 
+- Add claim-level reporting to every RoomEQ output bundle:
+  `metadata.playback_summary` restates the shipped outcome, the
+  training-seat counts behind it, the worst seat, the modeled
+  latency/headroom cost, the correction family actually present, the
+  limits in force, and deterministic headline sentences — a pure
+  projection of the acceptance report with no new judgment.
+  `metadata.epa_provenance` labels all EPA numbers a configured
+  model prediction (`predicted_not_measured`), with the
+  EPA-vs-acceptance disagreement explained in
+  `docs/ROOMEQ_OUTPUT_FORMAT.md`. New user-side handoff docs
+  `docs/ROOMEQ_MEASUREMENT_PLAN.md` and
+  `docs/ROOMEQ_LISTENING_PLAN.md` define the capture protocol, the
+  controlled listening protocol, and the claim wording each
+  evidence level supports.
+- Add the benefit floor `optimizer.finalization.min_improvement_lower_bound_db`
+  (default `0.0`): every training seat's uncertainty-adjusted improvement
+  must exceed it or the candidate is rejected as showing no demonstrated
+  benefit. Identity candidates (no meaningful correction) skip the floor
+  and flow through as the protected baseline. The default is the
+  measurement-uncertainty boundary, not a perceptual threshold; raising it
+  needs repeat-capture and listening evidence.
+- Report requested-vs-realized correction family on the acceptance record
+  (`realized_processing` votes IIR/FIR plugins in the shipped graph;
+  `processing_fallback` names requested/realized divergence, e.g. a
+  mixed-phase request that shipped IIR-only). Fallback is audit labeling,
+  never a verdict change.
+- Mark delay padding appended by causal compilation with the
+  `delay_compile_common_latency` label and strip it during baseline
+  restoration, so refused graphs carry no compile-derived timing claims.
+  The ledger attach check now runs after all derived output fields are
+  computed, keeping delivery claims bound to the exact shipped payload.
 - Bound the inferred subwoofer stopband from the measured rolloff instead of
   a flat peak-hold: when the last measured half-octave falls, the unmeasured
   tail continues at its fitted dB-per-octave slope (recorded as

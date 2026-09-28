@@ -30,7 +30,7 @@ pub struct ScalarOptimConfig {
     pub atolerance: f64,
     /// DE mutation strategy. Ignored by non-DE backends.
     pub strategy: String,
-    /// Optional deterministic seed.
+    /// Stochastic seed (`None` selects [`crate::DEFAULT_SEED`]).
     pub seed: Option<u64>,
 }
 
@@ -185,7 +185,7 @@ where
             lambda,
             mu: 0,
             maxeval: config.max_iter.max(lambda + 1),
-            seed: config.seed,
+            seed: Some(config.seed.unwrap_or(crate::DEFAULT_SEED)),
             f_tol: config.atolerance.max(1e-12),
             stagnation_window: 80,
             callback: callback.map(|mut callback| {
@@ -231,9 +231,7 @@ where
         .init(Init::LatinHypercube)
         .x0(x0)
         .disp(false);
-    if let Some(seed) = config.seed {
-        builder = builder.seed(seed);
-    }
+    builder = builder.seed(config.seed.unwrap_or(crate::DEFAULT_SEED));
     if let Some(mut callback) = callback {
         builder = builder.callback(Box::new(move |progress| {
             callback(progress.iter, progress.fun, None)
@@ -311,7 +309,7 @@ where
             mu,
             lambda: 0,
             maxeval: config.max_iter.max(mu * 7),
-            seed: config.seed,
+            seed: Some(config.seed.unwrap_or(crate::DEFAULT_SEED)),
             f_tol: config.atolerance.max(1e-12),
             ..Default::default()
         },
@@ -605,5 +603,24 @@ mod tests {
         )
         .expect("optimizer should run");
         assert!(result.fun < 1e-2);
+    }
+
+    #[test]
+    fn unseeded_scalar_search_is_reproducible() {
+        let config = ScalarOptimConfig {
+            algorithm: "autoeq:de".to_string(),
+            max_iter: 200,
+            population: 8,
+            seed: None,
+            ..Default::default()
+        };
+        let run = || {
+            optimize_bounded_scalar(&[(-2.0, 2.0), (-2.0, 2.0)], &[1.5, 1.5], &config, quadratic)
+                .expect("unseeded search should run")
+        };
+        let first = run();
+        let second = run();
+        assert_eq!(first.x, second.x);
+        assert_eq!(first.fun, second.fun);
     }
 }

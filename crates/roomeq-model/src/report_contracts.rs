@@ -33,8 +33,25 @@ pub struct TemporalIrMaskingMetrics {
     pub pre_ringing_audible_db: f64,
     /// Post-masked audible post-ringing energy, dB relative to main peak energy.
     pub post_ringing_audible_db: f64,
+    /// Physical pre-main energy (unmasked), dB relative to main peak energy.
+    ///
+    /// Peak, physical energy, and the masking-model prediction answer three
+    /// different questions and must never be conflated.
+    pub pre_energy_ratio_db: f64,
     /// Scalar penalty using the configured material profile and IR weights.
     pub penalty: f64,
+    /// Analyzed impulse length in taps.
+    pub taps: usize,
+    /// Sample rate the impulse was analyzed at, in Hz.
+    pub sample_rate_hz: f64,
+    /// Masking-model programme profile assumed (`transient`/`mixed`/`sustained`).
+    pub masking_profile: String,
+    /// Pre-masking window retained from the analysis assumptions, in ms.
+    pub pre_mask_ms: f64,
+    /// Post-masking window retained from the analysis assumptions, in ms.
+    pub post_mask_ms: f64,
+    /// Audibility threshold retained from the analysis assumptions, in dB.
+    pub audibility_threshold_db: f64,
 }
 
 /// EPA dimensions computed from a frequency response.
@@ -53,6 +70,162 @@ pub struct EpaScore {
     pub roughness: f64,
     pub total_loudness_sone: f64,
     pub loudness_balance: f64,
+}
+
+/// Provenance for shipped EPA psychoacoustic scores.
+///
+/// EPA dimensions are predicted from frequency responses by a spectral
+/// diagnostic model; they are not measured audibility and never substitute
+/// for listening evidence. This block names the model and the calibration
+/// it assumed so every score stays checkable.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct EpaProvenance {
+    /// Scoring model identity.
+    pub model: String,
+    /// Always true: scores are model predictions, not measurements.
+    pub predicted_not_measured: bool,
+    /// Listening level the diagnostic assumed, in phon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listening_level_phon: Option<f64>,
+    /// Target sharpness the diagnostic assumed, in acum.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_sharpness_acum: Option<f64>,
+    /// Human-readable scope note.
+    pub note: String,
+}
+
+/// Claim-level playback summary: what shipped, what benefit was
+/// demonstrated, and which limits apply.
+///
+/// Rendered from (never a substitute for) the evidence blocks: every
+/// number here repeats a value found elsewhere in the report. User-facing
+/// reports and the mode matrix quote these headlines; auditors re-derive
+/// them from the cited evidence.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct PlaybackSummary {
+    /// Shipped outcome.
+    pub outcome: RoomEqOutcome,
+    /// Aggregate shape improvement in dB (echoes the acceptance metrics).
+    pub improvement_db: f64,
+    /// Training seats whose uncertainty-adjusted improvement clears zero.
+    pub training_seats_improved: usize,
+    /// Training seats evaluated.
+    pub training_seats_total: usize,
+    /// Lowest-benefit training seat as `input:index`, when evaluated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worst_seat: Option<String>,
+    /// Modeled total playback latency in ms, when assessed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_latency_ms: Option<f64>,
+    /// Available headroom in dB, when assessed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub available_headroom_db: Option<f64>,
+    /// Correction family actually present in the shipped graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realized_processing: Option<RealizedProcessing>,
+    /// Requested-vs-realized divergence, when any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing_fallback: Option<String>,
+    /// Applicable acceptance limits hit or in force, as `name=value`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub limits: Vec<String>,
+    /// Templated human-readable claims, deterministic for a fixed report.
+    pub headlines: Vec<String>,
+}
+
+/// Render the claim-level playback summary for an acceptance report.
+///
+/// Pure projection: seat counts come from uncertainty-adjusted training
+/// bounds, latency/headroom echo the temporal block, and headlines are
+/// fixed templates over the outcome. No new judgment is introduced here.
+pub fn playback_summary(report: &CorrectionAcceptanceReport) -> PlaybackSummary {
+    let seats: Vec<&FinalSeatEvaluation> = report
+        .acoustic_quality
+        .as_ref()
+        .map(|score| {
+            score
+                .final_seats
+                .iter()
+                .filter(|seat| seat.partition == "training")
+                .collect()
+        })
+        .unwrap_or_default();
+    let improved = seats
+        .iter()
+        .filter(|seat| seat.improvement_lower_bound_db > 0.0)
+        .count();
+    let worst_seat = seats
+        .iter()
+        .min_by(|a, b| {
+            a.improvement_lower_bound_db
+                .total_cmp(&b.improvement_lower_bound_db)
+        })
+        .map(|seat| format!("{}:{}", seat.logical_input, seat.seat_index));
+    let temporal = report
+        .acoustic_quality
+        .as_ref()
+        .map(|score| &score.temporal);
+    let total_latency_ms = temporal.and_then(|temporal| temporal.total_latency_ms);
+    let available_headroom_db = temporal.and_then(|temporal| temporal.available_headroom_db);
+    let mut limits = Vec::new();
+    if let Some(policy) = report.runtime_policy.as_ref() {
+        limits.push(format!("max_boost_db={:.1}", policy.max_boost_db));
+        limits.push(format!("max_latency_ms={:.1}", policy.max_latency_ms));
+        limits.push(format!(
+            "max_pre_ringing_audible_db={:.1}",
+            policy.max_pre_ringing_audible_db
+        ));
+    }
+    let latency = total_latency_ms
+        .map(|ms| format!("{ms:.1} ms"))
+        .unwrap_or_else(|| "unassessed".to_string());
+    let headroom = available_headroom_db
+        .map(|db| format!("{db:.1} dB"))
+        .unwrap_or_else(|| "unassessed".to_string());
+    let mut violations = report.violations.clone();
+    violations.sort();
+    let headlines = match report.outcome {
+        RoomEqOutcome::Accepted => vec![format!(
+            "Accepted: aggregate improvement +{:.2} dB across {}/{} training seats; total latency {}; headroom {}.",
+            report.metrics.improvement_db,
+            improved,
+            seats.len(),
+            latency,
+            headroom,
+        )],
+        RoomEqOutcome::Unchanged => vec![format!(
+            "Unchanged: no candidate demonstrated benefit beyond uncertainty; protected baseline published ({}).",
+            if violations.is_empty() {
+                "no violations".to_string()
+            } else {
+                violations.join("; ")
+            }
+        )],
+        RoomEqOutcome::Rejected => vec![format!(
+            "Rejected: {}; protected baseline published.",
+            if violations.is_empty() {
+                "no stated violation".to_string()
+            } else {
+                violations.join("; ")
+            }
+        )],
+        RoomEqOutcome::InsufficientEvidence => {
+            vec!["Insufficient evidence: measurement gaps prevent an acceptance claim.".to_string()]
+        }
+    };
+    PlaybackSummary {
+        outcome: report.outcome,
+        improvement_db: report.metrics.improvement_db,
+        training_seats_improved: improved,
+        training_seats_total: seats.len(),
+        worst_seat,
+        total_latency_ms,
+        available_headroom_db,
+        realized_processing: report.realized_processing,
+        processing_fallback: report.processing_fallback.clone(),
+        limits,
+        headlines,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -213,6 +386,12 @@ pub struct MixedPhaseCorrectionReport {
     /// Linear propagation delay removed from excess phase before FIR design.
     pub estimated_delay_ms: f64,
     /// Number of coefficients in the generated excess-phase FIR.
+    ///
+    /// Together with the sample rate this describes the finite record
+    /// (duration and FFT bin spacing, e.g. 4096 taps at 48 kHz span
+    /// 85.33 ms with 11.72 Hz spacing). That spacing is finite-record
+    /// sampling, not a lower correction-frequency limit or proof of
+    /// resolving power; zero padding interpolates but adds no information.
     pub fir_taps: usize,
     /// Causal FIR centering delay in milliseconds, when the realization is known.
     ///
@@ -324,16 +503,74 @@ pub struct CtcHrtfCandidateComparison {
     pub advisory: String,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// Whether evaluated inputs share one verified timing reference.
+///
+/// Phase arrays only prove values exist. Coherent summation additionally
+/// needs every contributing capture to share one calibrated time zero.
+/// Variants keep unknown inputs visibly limited instead of passing
+/// finite-but-unsynchronized phase as verified evidence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CoherentTimingEvidence {
+    /// Coherent timing was not assessed at this boundary.
+    #[default]
+    Unassessed,
+    /// Every evaluated input shares the cited reference across stationary captures.
+    Verified {
+        /// Shared timing-reference identity cited by all evaluated inputs.
+        reference_id: String,
+    },
+    /// Verification failed; coherent claims stay unsupported.
+    Refused {
+        /// Precise reason verification failed.
+        reason: String,
+    },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct TemporalQualityEvidence {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pre_ringing_energy_db: Option<f64>,
+    /// Worst masking-derived audible pre-ringing across channels, in dB
+    /// relative to each FIR's main impulse peak.
+    ///
+    /// This is the maximum of the per-channel `pre_ringing_audible_db`
+    /// values, not a physical pre/main energy ratio (that quantity is
+    /// `TemporalIrMaskingMetrics.pre_energy_ratio_db`). Runtime acceptance compares it
+    /// against `RuntimeAcceptancePolicy.max_pre_ringing_audible_db`
+    /// (−20 dB), which is distinct from the −30 dB per-channel FIR design
+    /// threshold: an aggregate between the two is expected, not a
+    /// demonstrated violation. Neither value proves audibility without
+    /// calibrated stimulus and listener context. IIR-only chains report
+    /// the `NO_FIR_PRE_RINGING_FLOOR_DB` sentinel (−300 dB), a
+    /// report floor rather than a measured room-noise floor.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "pre_ringing_energy_db"
+    )]
+    pub pre_ringing_audible_db: Option<f64>,
+    /// FIR design delay: the maximum main-impulse time across channels.
+    ///
+    /// Kept under its legacy name; WP6 splits the playback total below.
+    /// `None` means unresolved FIR evidence, never zero latency.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latency_ms: Option<f64>,
+    /// Common alignment delay every branch rose by at causal delay
+    /// compilation (`delay_compile_causal`), in ms. Zero when compilation
+    /// was a no-op; absent when the compile boundary never stamped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alignment_delay_ms: Option<f64>,
+    /// Total modeled playback latency (design + alignment) in ms.
+    ///
+    /// Excludes host/block buffering and converter delay, which the engine
+    /// cannot observe; the host adds those. Absent unless both summands
+    /// are assessed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_latency_ms: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub available_headroom_db: Option<f64>,
     /// True only when both pre and post responses carried measured phase.
     /// A missing phase is an evidence limitation, never a zero-phase claim.
+    /// Presence alone never verifies coherent timing; see `coherent_timing`.
     #[serde(default)]
     pub phase_evidence_available: bool,
     /// True when temporal measurements required by the output class exist.
@@ -341,6 +578,10 @@ pub struct TemporalQualityEvidence {
     /// being made; FIR and hybrid paths must provide measured masking data.
     #[serde(default)]
     pub temporal_evidence_available: bool,
+    /// Shared-timing verification across evaluated inputs.
+    /// Unassessed where replay did not evaluate; replay upgrades the verdict.
+    #[serde(default)]
+    pub coherent_timing: CoherentTimingEvidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -463,6 +704,37 @@ pub struct FinalSeatEvaluation {
     /// Improvement after subtracting pre/post summation uncertainty budgets.
     #[serde(default)]
     pub improvement_lower_bound_db: f64,
+    /// Per-band raw improvements, when the seat band supports them.
+    ///
+    /// WP5 concealment evidence: a broadband gain must not hide a band
+    /// regression. Raw (non-uncertainty-adjusted) by construction; the
+    /// broadband lower bound stays the enforced quantity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub band_improvement_db: Option<BandImprovement>,
+}
+
+/// Raw improvement split into modal bass, crossover overlap, and upper band.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct BandImprovement {
+    /// Schroeder frequency splitting bass from upper, in Hz.
+    pub schroeder_hz: f64,
+    /// Modal-bass band actually evaluated, in Hz.
+    pub bass_band_hz: [f64; 2],
+    /// Raw improvement over the bass band; absent with fewer than two bins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_improvement_db: Option<f64>,
+    /// Crossover-overlap band (XO ± one octave, clamped); absent when the
+    /// input has no routed crossover frequency.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossover_band_hz: Option<[f64; 2]>,
+    /// Raw improvement over the crossover band; absent when unassessed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crossover_improvement_db: Option<f64>,
+    /// Remaining usable upper band actually evaluated, in Hz.
+    pub upper_band_hz: [f64; 2],
+    /// Raw improvement over the upper band; absent with fewer than two bins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upper_improvement_db: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -502,6 +774,22 @@ pub struct UsefulOutputEvidence {
     pub bass_evaluated_band_hz: Option<[f64; 2]>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bass_unexplained_loss_rms_db: Option<f64>,
+    /// Lowest reliable octave of the evaluated band, when at least two
+    /// samples cover it. WP4 output distinction: loss here is lost low-end
+    /// extension, while `worst_unexplained_loss_db`/`loss_bands` describe
+    /// (usually narrow, benign) peak attenuation elsewhere.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_band_hz: Option<[f64; 2]>,
+    /// Log-frequency-weighted mean unexplained loss over
+    /// `extension_band_hz`. Stays near zero when cuts are peak-only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extension_loss_db: Option<f64>,
+    /// Peak absolute demand shift: peak post level minus peak pre level
+    /// over the evaluated band. The acoustic drive proxy: how much less
+    /// (or more) peak output the system is asked to produce. Electrical
+    /// required-vs-available headroom stays in the bus simulation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peak_demand_change_db: Option<f64>,
     /// Calibrated target deficit, without fitting away broadband level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_shortfall_rms_db: Option<f64>,
@@ -519,7 +807,23 @@ pub struct AcousticQualityScorecard {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub held_out: Option<QualityPartitionMetrics>,
     pub correction_rms_db: f64,
+    /// Acoustic response-ratio improvement in dB (post minus pre level).
+    ///
+    /// This is measured level change at the seat, not filter gain: coherent
+    /// summation across branches can move it without any filter boosting.
+    /// The enforced backstop compares this against the runtime policy; see
+    /// `max_electrical_boost_db` for the filter-side upper bound.
     pub max_boost_db: f64,
+    /// Upper bound on electrical filter boost in dB, when evaluable.
+    ///
+    /// Sums positive IIR-element gains (EQ bands, shelves, gain trims, route
+    /// gains) per branch; cascade overlap inflates it above the realized
+    /// peak. Branches with convolution content are excluded (sidecar taps
+    /// are unevaluated), and the field is absent when no branch is fully
+    /// evaluable. Advisory: enforcement stays on the acoustic backstop
+    /// until matrix evidence justifies switching the checked quantity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_electrical_boost_db: Option<f64>,
     pub max_cut_db: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub induced_group_delay_rms_ms: Option<f64>,
@@ -568,6 +872,126 @@ pub enum RoomEqOutcome {
     InsufficientEvidence,
 }
 
+/// Correction family actually present in the shipped graph.
+///
+/// Derived from serialized channel and per-driver plugins, never from the
+/// requested mode label: a mixed-phase run whose excess-phase FIR never
+/// materialized reports [`RealizedProcessing::IirOnly`], and a fully
+/// reverted run reports [`RealizedProcessing::Identity`]. `eq`,
+/// `warped_biquad`, and `kautz_filter` vote IIR; `convolution` votes FIR.
+/// Gain, delay, and crossover plugins are alignment/routing: a graph with
+/// only those reports [`RealizedProcessing::AlignmentOnly`], which still
+/// corrects level and timing (audible in joint summation) but shapes no
+/// frequency response.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RealizedProcessing {
+    /// No correction or alignment plugin on any channel or driver.
+    #[default]
+    Identity,
+    /// Only gain/delay/crossover plugins: level and timing alignment
+    /// without frequency-response shaping.
+    AlignmentOnly,
+    /// IIR correction plugins but no `convolution` anywhere.
+    IirOnly,
+    /// `convolution` plugins but no IIR correction anywhere.
+    FirOnly,
+    /// Both IIR correction and `convolution` present (band-split FIR or
+    /// excess-phase correction).
+    Hybrid,
+}
+
+/// Assess the realized correction family from shipped channel plugins.
+///
+/// Pure function over the serialized graph: channel-level and per-driver
+/// IIR/FIR plugins vote their family (see [`RealizedProcessing`]).
+pub fn assess_realized_processing(
+    channels: &std::collections::HashMap<String, crate::output::ChannelDspChain>,
+) -> RealizedProcessing {
+    fn votes(plugins: &[crate::output::PluginConfigWrapper]) -> (bool, bool, bool) {
+        let iir = plugins.iter().any(|p| {
+            matches!(
+                p.plugin_type.as_str(),
+                "eq" | "warped_biquad" | "kautz_filter"
+            )
+        });
+        let fir = plugins.iter().any(|p| p.plugin_type == "convolution");
+        let alignment = plugins
+            .iter()
+            .any(|p| matches!(p.plugin_type.as_str(), "gain" | "delay" | "crossover"));
+        (iir, fir, alignment)
+    }
+    let mut has_iir = false;
+    let mut has_fir = false;
+    let mut has_alignment = false;
+    for chain in channels.values() {
+        let (iir, fir, alignment) = votes(&chain.plugins);
+        has_iir |= iir;
+        has_fir |= fir;
+        has_alignment |= alignment;
+        if let Some(drivers) = &chain.drivers {
+            for driver in drivers {
+                let (iir, fir, alignment) = votes(&driver.plugins);
+                has_iir |= iir;
+                has_fir |= fir;
+                has_alignment |= alignment;
+            }
+        }
+    }
+    match (has_iir, has_fir, has_alignment) {
+        (true, true, _) => RealizedProcessing::Hybrid,
+        (true, false, _) => RealizedProcessing::IirOnly,
+        (false, true, _) => RealizedProcessing::FirOnly,
+        (false, false, true) => RealizedProcessing::AlignmentOnly,
+        (false, false, false) => RealizedProcessing::Identity,
+    }
+}
+
+/// Explain a requested-mode versus realized-processing divergence.
+///
+/// Returns `None` when the shipped graph matches the requested family
+/// (`LowLatency`/`WarpedIir`/`KautzModal`→IIR-only, `PhaseLinear`→FIR-only,
+/// `Hybrid`/`MixedPhase`→hybrid IIR+FIR). Otherwise returns a stable
+/// machine-readable reason
+/// naming both sides, e.g. `mixed_phase_requested_iir_only_realized`.
+/// A `None` requested mode (unknown configuration) never diverges.
+pub fn processing_fallback_reason(
+    requested: Option<&crate::config::ProcessingMode>,
+    realized: &RealizedProcessing,
+) -> Option<String> {
+    let requested = requested?;
+    let expected = match requested {
+        crate::config::ProcessingMode::LowLatency
+        | crate::config::ProcessingMode::WarpedIir
+        | crate::config::ProcessingMode::KautzModal => RealizedProcessing::IirOnly,
+        crate::config::ProcessingMode::PhaseLinear => RealizedProcessing::FirOnly,
+        crate::config::ProcessingMode::Hybrid | crate::config::ProcessingMode::MixedPhase => {
+            RealizedProcessing::Hybrid
+        }
+    };
+    if *realized == expected {
+        return None;
+    }
+    let requested_name = match requested {
+        crate::config::ProcessingMode::LowLatency => "low_latency",
+        crate::config::ProcessingMode::PhaseLinear => "phase_linear",
+        crate::config::ProcessingMode::Hybrid => "hybrid",
+        crate::config::ProcessingMode::MixedPhase => "mixed_phase",
+        crate::config::ProcessingMode::WarpedIir => "warped_iir",
+        crate::config::ProcessingMode::KautzModal => "kautz_modal",
+    };
+    let realized_name = match realized {
+        RealizedProcessing::Identity => "identity",
+        RealizedProcessing::AlignmentOnly => "alignment_only",
+        RealizedProcessing::IirOnly => "iir_only",
+        RealizedProcessing::FirOnly => "fir_only",
+        RealizedProcessing::Hybrid => "hybrid",
+    };
+    Some(format!(
+        "{requested_name}_requested_{realized_name}_realized"
+    ))
+}
+
 pub const RUNTIME_ACCEPTANCE_POLICY_VERSION: &str = "1.0.0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -589,10 +1013,24 @@ pub struct RuntimeAcceptancePolicy {
     pub max_post_p95_abs_residual_db: f64,
     pub max_post_worst_abs_residual_db: f64,
     pub max_worst_position_regression_db: f64,
+    /// Ceiling for the gain backstop in dB.
+    ///
+    /// Compares against the electrical filter-gain bound
+    /// (`max_electrical_boost_db`), not the acoustic response ratio:
+    /// improved interference near a baseline null can legitimately move
+    /// the ratio without any filter boosting. The acoustic
+    /// `max_boost_db` stays reported alongside; an acoustic-only excess
+    /// is recorded as an observation, while an unevaluable electrical
+    /// bound fails closed to a violation.
     pub max_boost_db: f64,
     pub min_available_headroom_db: f64,
     pub max_latency_ms: f64,
-    pub max_pre_ringing_energy_db: f64,
+    /// Runtime ceiling for the aggregate masking-derived audible
+    /// pre-ringing (`TemporalQualityEvidence.pre_ringing_audible_db`).
+    /// Distinct from the −30 dB per-channel FIR design threshold, which
+    /// applies at design time, not to this aggregate.
+    #[serde(alias = "max_pre_ringing_energy_db")]
+    pub max_pre_ringing_audible_db: f64,
     pub max_induced_group_delay_rms_ms: f64,
     pub max_realization_error_db: f64,
 }
@@ -613,7 +1051,7 @@ impl RuntimeAcceptancePolicy {
             max_boost_db: 12.0,
             min_available_headroom_db: -12.0,
             max_latency_ms,
-            max_pre_ringing_energy_db: -20.0,
+            max_pre_ringing_audible_db: -20.0,
             max_induced_group_delay_rms_ms,
             max_realization_error_db: 0.25,
         }
@@ -633,7 +1071,7 @@ impl RuntimeAcceptancePolicy {
             self.max_boost_db,
             self.min_available_headroom_db,
             self.max_latency_ms,
-            self.max_pre_ringing_energy_db,
+            self.max_pre_ringing_audible_db,
             self.max_induced_group_delay_rms_ms,
             self.max_realization_error_db,
         ]
@@ -690,6 +1128,28 @@ pub struct CorrectionAcceptanceReport {
     pub metrics: CorrectionMetricSummary,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub violations: Vec<String>,
+    /// Correction family actually present in the shipped graph, derived
+    /// from serialized plugins rather than the requested mode label.
+    /// Set at graph conversion; reports built before the final graph
+    /// exists leave this absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub realized_processing: Option<RealizedProcessing>,
+    /// Requested-mode versus realized-processing divergence, when any.
+    /// Names both sides (see [`processing_fallback_reason`]); `None`
+    /// means the shipped graph matches the requested family. A fallback
+    /// is audit labeling, not a verdict: it never changes the outcome by
+    /// itself.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub processing_fallback: Option<String>,
+    /// Non-violating limit assessments recorded for audit agreement.
+    ///
+    /// Entries explain why an apparent limit/value divergence is not a
+    /// violation under the defined quantity semantics (for example, an
+    /// acoustic response ratio above the gain backstop while the
+    /// electrical bound stays within it). Observations never change the
+    /// outcome; only `violations` do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub observations: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reverted_stages: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -756,6 +1216,9 @@ mod outcome_tests {
                 max_abs_correction_db: 0.0,
             },
             violations: violations.into_iter().map(str::to_string).collect(),
+            realized_processing: None,
+            processing_fallback: None,
+            observations: Vec::new(),
             reverted_stages: Vec::new(),
             acoustic_quality: None,
             realization_quality: None,
@@ -808,5 +1271,230 @@ mod outcome_tests {
             serde_json::from_value(legacy).expect("legacy report remains readable");
         assert_eq!(decoded.outcome, RoomEqOutcome::InsufficientEvidence);
         assert_eq!(decoded.derived_outcome(), RoomEqOutcome::Accepted);
+    }
+
+    fn chain_with(plugin_types: &[&str]) -> crate::output::ChannelDspChain {
+        let plugins: Vec<serde_json::Value> = plugin_types
+            .iter()
+            .map(|kind| serde_json::json!({"plugin_type": kind, "parameters": {}}))
+            .collect();
+        serde_json::from_value(serde_json::json!({
+            "channel": "L",
+            "plugins": plugins,
+            "drivers": null,
+            "initial_curve": null,
+            "final_curve": null,
+            "eq_response": null,
+            "pre_ir": null,
+            "post_ir": null,
+        }))
+        .expect("test chain deserializes")
+    }
+
+    #[test]
+    fn realized_processing_votes_iir_and_fir_plugins() {
+        use std::collections::HashMap;
+        let graph = |kinds: &[&str]| {
+            let mut channels = HashMap::new();
+            channels.insert("L".to_string(), chain_with(kinds));
+            channels
+        };
+        assert_eq!(
+            super::assess_realized_processing(&graph(&["eq", "delay", "gain"])),
+            super::RealizedProcessing::IirOnly
+        );
+        assert_eq!(
+            super::assess_realized_processing(&graph(&["convolution", "delay"])),
+            super::RealizedProcessing::FirOnly
+        );
+        assert_eq!(
+            super::assess_realized_processing(&graph(&["eq", "convolution"])),
+            super::RealizedProcessing::Hybrid
+        );
+        assert_eq!(
+            super::assess_realized_processing(&graph(&["delay", "gain", "crossover"])),
+            super::RealizedProcessing::AlignmentOnly
+        );
+        assert_eq!(
+            super::assess_realized_processing(&graph(&[])),
+            super::RealizedProcessing::Identity
+        );
+        assert_eq!(
+            super::assess_realized_processing(&graph(&["warped_biquad"])),
+            super::RealizedProcessing::IirOnly
+        );
+        assert_eq!(
+            super::assess_realized_processing(&graph(&["kautz_filter", "convolution"])),
+            super::RealizedProcessing::Hybrid
+        );
+    }
+
+    #[test]
+    fn fallback_reason_names_requested_and_realized() {
+        use super::RealizedProcessing;
+        use crate::config::ProcessingMode;
+        assert_eq!(
+            super::processing_fallback_reason(
+                Some(&ProcessingMode::MixedPhase),
+                &RealizedProcessing::IirOnly
+            )
+            .as_deref(),
+            Some("mixed_phase_requested_iir_only_realized")
+        );
+        assert_eq!(
+            super::processing_fallback_reason(
+                Some(&ProcessingMode::LowLatency),
+                &RealizedProcessing::IirOnly
+            ),
+            None
+        );
+        assert_eq!(
+            super::processing_fallback_reason(
+                Some(&ProcessingMode::PhaseLinear),
+                &RealizedProcessing::Hybrid
+            )
+            .as_deref(),
+            Some("phase_linear_requested_hybrid_realized")
+        );
+        assert_eq!(
+            super::processing_fallback_reason(None, &RealizedProcessing::Identity),
+            None
+        );
+    }
+
+    #[test]
+    fn legacy_pre_ringing_energy_name_still_reads() {
+        let legacy: TemporalQualityEvidence =
+            serde_json::from_value(serde_json::json!({"pre_ringing_energy_db": -27.0}))
+                .expect("legacy aggregate name reads");
+        assert_eq!(legacy.pre_ringing_audible_db, Some(-27.0));
+        let mut policy_value = serde_json::to_value(RuntimeAcceptancePolicy::for_output_class(
+            RuntimeOutputClass::Fir,
+        ))
+        .expect("serialize policy");
+        let ceiling = policy_value
+            .as_object_mut()
+            .expect("policy object")
+            .remove("max_pre_ringing_audible_db");
+        policy_value
+            .as_object_mut()
+            .expect("policy object")
+            .insert("max_pre_ringing_energy_db".into(), ceiling.unwrap());
+        let policy: RuntimeAcceptancePolicy =
+            serde_json::from_value(policy_value).expect("legacy policy name reads");
+        assert_eq!(policy.max_pre_ringing_audible_db, -20.0);
+        // New serializations use the corrected names.
+        let value = serde_json::to_value(&legacy).expect("serialize evidence");
+        assert!(value.get("pre_ringing_audible_db").is_some());
+        assert!(value.get("pre_ringing_energy_db").is_none());
+    }
+
+    fn seat(
+        partition: &str,
+        input: &str,
+        index: usize,
+        lower_bound_db: f64,
+    ) -> FinalSeatEvaluation {
+        FinalSeatEvaluation {
+            partition: partition.to_string(),
+            logical_input: input.to_string(),
+            seat_index: index,
+            seat_label: None,
+            physical_outputs: vec![input.to_string()],
+            pre_summation_support: Vec::new(),
+            post_summation_support: Vec::new(),
+            unassessed_bands_hz: Vec::new(),
+            evaluated_band_hz: [20.0, 20_000.0],
+            pre_weighted_rms_db: 4.0,
+            post_weighted_rms_db: 2.0,
+            improvement_db: 2.0,
+            improvement_lower_bound_db: lower_bound_db,
+            band_improvement_db: None,
+        }
+    }
+
+    fn scorecard_with_seats(seats: Vec<FinalSeatEvaluation>) -> AcousticQualityScorecard {
+        AcousticQualityScorecard {
+            useful_output: Vec::new(),
+            final_seats: seats,
+            training: QualityPartitionMetrics {
+                curve_count: 2,
+                pre_weighted_rms_median_db: 4.0,
+                post_weighted_rms_median_db: 2.0,
+                improvement_median_db: 2.0,
+                worst_position_improvement_db: 1.0,
+                pre_p95_abs_residual_db: 6.0,
+                post_p95_abs_residual_db: 3.0,
+                post_worst_abs_residual_db: 5.0,
+                mean_normalized_seat_spread_db: 1.0,
+                max_normalized_seat_spread_db: 2.0,
+                bass_post_weighted_rms_db: None,
+                upper_pre_weighted_rms_db: None,
+                upper_post_weighted_rms_db: None,
+                bass_pre_modal_roughness_db_per_octave2: None,
+                bass_post_modal_roughness_db_per_octave2: None,
+                bass_modal_roughness_improvement_db_per_octave2: None,
+            },
+            held_out: None,
+            correction_rms_db: 2.0,
+            max_boost_db: 4.0,
+            max_electrical_boost_db: Some(3.5),
+            max_cut_db: -6.0,
+            induced_group_delay_rms_ms: Some(1.0),
+            temporal: TemporalQualityEvidence {
+                pre_ringing_audible_db: Some(-40.0),
+                latency_ms: Some(5.0),
+                alignment_delay_ms: Some(1.0),
+                total_latency_ms: Some(6.0),
+                available_headroom_db: Some(-3.0),
+                phase_evidence_available: true,
+                temporal_evidence_available: true,
+                coherent_timing: CoherentTimingEvidence::Unassessed,
+            },
+            correction_band_hz: None,
+            evaluated_band_hz: [20.0, 20_000.0],
+            measurement_overlap_hz: Some([20.0, 20_000.0]),
+            finite: true,
+        }
+    }
+
+    #[test]
+    fn playback_summary_counts_training_seats_and_echoes_temporal() {
+        let mut accepted = report(CorrectionDecision::Accepted, true, vec![]);
+        accepted.outcome = RoomEqOutcome::Accepted;
+        accepted.metrics.improvement_db = 2.0;
+        accepted.runtime_policy = Some(RuntimeAcceptancePolicy::for_output_class(
+            RuntimeOutputClass::Fir,
+        ));
+        accepted.acoustic_quality = Some(scorecard_with_seats(vec![
+            seat("training", "L", 0, 1.5),
+            seat("training", "R", 1, -0.5),
+            seat("held_out", "C", 2, 3.0),
+        ]));
+        let summary = super::playback_summary(&accepted);
+        assert_eq!(summary.outcome, RoomEqOutcome::Accepted);
+        assert_eq!(summary.training_seats_improved, 1);
+        assert_eq!(summary.training_seats_total, 2);
+        assert_eq!(summary.worst_seat.as_deref(), Some("R:1"));
+        assert_eq!(summary.total_latency_ms, Some(6.0));
+        assert_eq!(summary.available_headroom_db, Some(-3.0));
+        assert_eq!(summary.limits.len(), 3);
+        assert_eq!(summary.headlines.len(), 1);
+        assert!(summary.headlines[0].contains("1/2 training seats"));
+        assert!(summary.headlines[0].contains("6.0 ms"));
+    }
+
+    #[test]
+    fn playback_summary_without_scorecard_reports_zero_seats() {
+        let mut accepted = report(CorrectionDecision::Accepted, true, vec![]);
+        accepted.outcome = RoomEqOutcome::Accepted;
+        let summary = super::playback_summary(&accepted);
+        assert_eq!(summary.training_seats_total, 0);
+        assert_eq!(summary.training_seats_improved, 0);
+        assert_eq!(summary.worst_seat, None);
+        assert_eq!(summary.total_latency_ms, None);
+        assert!(summary.limits.is_empty());
+        assert!(summary.headlines[0].contains("0/0 training seats"));
+        assert!(summary.headlines[0].contains("unassessed"));
     }
 }

@@ -87,6 +87,7 @@ pub fn temporal_ir_masking_metrics(
     let mut post_peak = 0.0_f64;
     let mut pre_energy = 0.0_f64;
     let mut post_energy = 0.0_f64;
+    let mut pre_physical_energy = 0.0_f64;
 
     for (idx, &sample) in ir.iter().enumerate() {
         if idx == main_index {
@@ -99,6 +100,7 @@ pub fn temporal_ir_masking_metrics(
             let weight = masking_weight(time_ms, config.pre_mask_ms);
             pre_peak = pre_peak.max(amp);
             pre_energy += energy * weight;
+            pre_physical_energy += energy;
         } else {
             let time_ms = (idx - main_index) as f64 * 1000.0 / sample_rate;
             let weight = masking_weight(time_ms, config.post_mask_ms);
@@ -130,6 +132,17 @@ pub fn temporal_ir_masking_metrics(
         post_ringing_peak_db: db_from_ratio(post_peak / main_amp),
         pre_ringing_audible_db: pre_audible_db,
         post_ringing_audible_db: post_audible_db,
+        pre_energy_ratio_db: db_from_energy_ratio(pre_physical_energy / main_energy),
         penalty,
+        taps: ir.len(),
+        sample_rate_hz: sample_rate,
+        masking_profile: match config.profile {
+            TemporalMaskingProfile::Transient => "transient".to_string(),
+            TemporalMaskingProfile::Mixed => "mixed".to_string(),
+            TemporalMaskingProfile::Sustained => "sustained".to_string(),
+        },
+        pre_mask_ms: config.pre_mask_ms,
+        post_mask_ms: config.post_mask_ms,
+        audibility_threshold_db: config.ir_audibility_threshold_db,
     })
 }

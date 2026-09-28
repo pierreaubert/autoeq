@@ -74,6 +74,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = optimize_room(&config, 48000.0, None, None).expect("Optimization failed");
@@ -142,6 +143,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = optimize_room(&config, 48000.0, None, None).expect("Optimization failed");
@@ -167,6 +169,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         for sample_rate in [0.0, -48_000.0, f64::NAN, f64::INFINITY] {

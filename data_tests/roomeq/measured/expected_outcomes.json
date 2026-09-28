@@ -1,0 +1,331 @@
+{
+  "combinations": {
+    "2.0_8361a/fir": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "2.0_8361a/iir": {
+      "improvement_db": 0.197399,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_8361a/mixed": {
+      "improvement_db": 0.24184,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_8361a/mixed-phase": {
+      "improvement_db": 0.295093,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab1/fir": {
+      "improvement_db": 1.37916,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab1/iir": {
+      "improvement_db": 1.955403,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab1/mixed": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "2.0_ascilab1/mixed-phase": {
+      "improvement_db": 0.517936,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab2/fir": {
+      "improvement_db": 0.448337,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab2/iir": {
+      "improvement_db": 1.379385,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab2/mixed": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "2.0_ascilab2/mixed-phase": {
+      "improvement_db": 0.411748,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab3/fir": {
+      "improvement_db": 0.508994,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab3/iir": {
+      "improvement_db": 1.760364,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_ascilab3/mixed": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "2.0_ascilab3/mixed-phase": {
+      "improvement_db": 0.611365,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_d3v/fir": {
+      "improvement_db": 0.624514,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_d3v/iir": {
+      "improvement_db": 0.388142,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_d3v/mixed": {
+      "improvement_db": 0.167494,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_d3v/mixed-phase": {
+      "improvement_db": 0.277674,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_fidelia/fir": {
+      "improvement_db": 0.551087,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_fidelia/iir": {
+      "improvement_db": 0.97788,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_fidelia/mixed": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "2.0_fidelia/mixed-phase": {
+      "improvement_db": 0.807315,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2024/fir": {
+      "improvement_db": 1.784194,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2024/iir": {
+      "improvement_db": 0.696404,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2024/mixed": {
+      "improvement_db": 0.387322,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2024/mixed-phase": {
+      "improvement_db": 0.539969,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2026/fir": {
+      "improvement_db": 0.493381,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2026/iir": {
+      "improvement_db": 0.761001,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.0_t7v_2026/mixed": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "2.0_t7v_2026/mixed-phase": {
+      "improvement_db": 0.483515,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_genelec/fir": {
+      "improvement_db": 0.230727,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_genelec/iir": {
+      "improvement_db": 0.822424,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_genelec/mixed": {
+      "improvement_db": -0.505056,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_genelec/mixed-phase": {
+      "improvement_db": -0.466509,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_sigberg1/fir": {
+      "improvement_db": 1.354893,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg1/iir": {
+      "improvement_db": 0.412036,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg1/mixed": {
+      "improvement_db": 0.163786,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg1/mixed-phase": {
+      "improvement_db": 0.772201,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg2/fir": {
+      "improvement_db": 0.398519,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg2/iir": {
+      "improvement_db": 0.439287,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg2/mixed": {
+      "improvement_db": -0.019001,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_sigberg2/mixed-phase": {
+      "improvement_db": -0.019001,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_sigberg3/fir": {
+      "improvement_db": 3.43981,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg3/iir": {
+      "improvement_db": 4.205755,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg3/mixed": {
+      "improvement_db": 3.43981,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_sigberg3/mixed-phase": {
+      "improvement_db": 4.205755,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "2.2_unknown/fir": {
+      "improvement_db": -2.853816,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_unknown/iir": {
+      "improvement_db": -2.365183,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_unknown/mixed": {
+      "improvement_db": -0.034957,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "2.2_unknown/mixed-phase": {
+      "improvement_db": -0.154615,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "5.0_genelec/fir": {
+      "improvement_db": 0.389134,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "5.0_genelec/iir": {
+      "improvement_db": 0.527738,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "5.0_genelec/mixed": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "5.0_genelec/mixed-phase": {
+      "improvement_db": 0.22519,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "5.1.4_genelec/fir": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
+    "5.1.4_genelec/iir": {
+      "improvement_db": 0.0,
+      "outcome": "unchanged",
+      "status": "unchanged"
+    },
+    "5.1.4_genelec/mixed": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
+    "5.1.4_genelec/mixed-phase": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
+    "5.1_kef/fir": {
+      "improvement_db": -1.85675,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "5.1_kef/iir": {
+      "improvement_db": 0.026343,
+      "outcome": "accepted",
+      "status": "accepted"
+    },
+    "5.1_kef/mixed": {
+      "improvement_db": -1.385249,
+      "outcome": "rejected",
+      "status": "rejected"
+    },
+    "5.1_kef/mixed-phase": {
+      "improvement_db": -3.543722,
+      "outcome": "rejected",
+      "status": "rejected"
+    }
+  },
+  "counts": {
+    "accepted": 41,
+    "error": 3,
+    "rejected": 12,
+    "unchanged": 8
+  },
+  "generated_by": "scripts/roomeq_suite_report.py --freeze (final-matrix, post WP1-WP7)"
+}

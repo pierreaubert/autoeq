@@ -28,33 +28,55 @@
   "speakers": {
     "L": {
       "path": "l.csv",
-      "name": "Left No EQ Sep 1"
+      "name": "Left No EQ Sep 1",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "genelec-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "R": {
       "path": "r.csv",
-      "name": "Right No EQ Sep 1"
+      "name": "Right No EQ Sep 1",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "genelec-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "subs_1": {
       "path": "l_sub.csv",
-      "name": "Left Sub"
+      "name": "Main listening position",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "genelec-mlp-session-1",
+        "has_measured_spl": true
+      },
+      "speaker_name": "Left Sub"
     },
     "subs_2": {
       "path": "r_sub.csv",
-      "name": "Right Sub"
+      "name": "Main listening position",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "genelec-mlp-session-1",
+        "has_measured_spl": true
+      },
+      "speaker_name": "Right Sub"
     }
   },
   "crossovers": {
     "bass_xover1": {
       "type": "LR24",
       "frequency_range": [
-        40.0,
+        80.0,
         130.0
       ]
     },
     "bass_xover2": {
       "type": "LR24",
       "frequency_range": [
-        40.0,
+        80.0,
         130.0
       ]
     }

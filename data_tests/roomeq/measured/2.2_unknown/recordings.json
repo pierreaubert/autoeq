@@ -28,19 +28,39 @@
   "speakers": {
     "L": {
       "path": "L_No_EQ_Sep_1.csv",
-      "name": "L No EQ Sep 1"
+      "name": "L No EQ Sep 1",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "unknown-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "R": {
       "path": "R_No_EQ_Sep_1.csv",
-      "name": "R No EQ Sep 1"
+      "name": "R No EQ Sep 1",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "unknown-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "subs_1": {
       "path": "L_Sub_No_EQ_Sep_1.csv",
-      "name": "Main listening position"
+      "name": "Main listening position",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "unknown-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "subs_2": {
       "path": "R_Sub_No_EQ_Sep_1.csv",
-      "name": "Main listening position"
+      "name": "Main listening position",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "unknown-mlp-session-1",
+        "has_measured_spl": true
+      }
     }
   },
   "crossovers": {

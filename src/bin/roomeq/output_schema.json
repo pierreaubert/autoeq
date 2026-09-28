@@ -77,12 +77,21 @@
           ]
         },
         "max_boost_db": {
+          "description": "Acoustic response-ratio improvement in dB (post minus pre level).\n\nThis is measured level change at the seat, not filter gain: coherent\nsummation across branches can move it without any filter boosting.\nThe enforced backstop compares this against the runtime policy; see\n`max_electrical_boost_db` for the filter-side upper bound.",
           "format": "double",
           "type": "number"
         },
         "max_cut_db": {
           "format": "double",
           "type": "number"
+        },
+        "max_electrical_boost_db": {
+          "description": "Upper bound on electrical filter boost in dB, when evaluable.\n\nSums positive IIR-element gains (EQ bands, shelves, gain trims, route\ngains) per branch; cascade overlap inflates it above the realized\npeak. Branches with convolution content are excluded (sidecar taps\nare unevaluated), and the field is absent when no branch is fully\nevaluable. Advisory: enforcement stays on the acoustic backstop\nuntil matrix evidence justifies switching the checked quantity.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "measurement_overlap_hz": {
           "description": "Common measured band, absent when independently assessed inputs have\ndisjoint support. Each final-seat record retains its assessed band.",
@@ -597,6 +606,79 @@
           "type": "string"
         }
       ]
+    },
+    "BandImprovement": {
+      "description": "Raw improvement split into modal bass, crossover overlap, and upper band.",
+      "properties": {
+        "bass_band_hz": {
+          "description": "Modal-bass band actually evaluated, in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "bass_improvement_db": {
+          "description": "Raw improvement over the bass band; absent with fewer than two bins.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "crossover_band_hz": {
+          "description": "Crossover-overlap band (XO ± one octave, clamped); absent when the\ninput has no routed crossover frequency.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "crossover_improvement_db": {
+          "description": "Raw improvement over the crossover band; absent when unassessed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "schroeder_hz": {
+          "description": "Schroeder frequency splitting bass from upper, in Hz.",
+          "format": "double",
+          "type": "number"
+        },
+        "upper_band_hz": {
+          "description": "Remaining usable upper band actually evaluated, in Hz.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "upper_improvement_db": {
+          "description": "Raw improvement over the upper band; absent with fewer than two bins.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "schroeder_hz",
+        "bass_band_hz",
+        "upper_band_hz"
+      ],
+      "type": "object"
     },
     "BassAnchorChannelResultLegacy": {
       "description": "Per-channel bass-anchor result (mirror of `BassAnchorChannelResult`).",
@@ -2655,6 +2737,17 @@
             "$ref": "#/$defs/EligibilityRecord"
           },
           "type": "array"
+        },
+        "rew_header_facts": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GateRewHeaderFacts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Declared REW header facts transcribed from the source file.\n\nReport-only provenance: verdicts never read these fields (a\ndeclaration is not verification). `None` means the source carried\nno transcribable header."
         }
       },
       "required": [
@@ -3068,6 +3161,60 @@
       ],
       "type": "object"
     },
+    "CoherentTimingEvidence": {
+      "description": "Whether evaluated inputs share one verified timing reference.\n\nPhase arrays only prove values exist. Coherent summation additionally\nneeds every contributing capture to share one calibrated time zero.\nVariants keep unknown inputs visibly limited instead of passing\nfinite-but-unsynchronized phase as verified evidence.",
+      "oneOf": [
+        {
+          "const": "unassessed",
+          "description": "Coherent timing was not assessed at this boundary.",
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Every evaluated input shares the cited reference across stationary captures.",
+          "properties": {
+            "verified": {
+              "properties": {
+                "reference_id": {
+                  "description": "Shared timing-reference identity cited by all evaluated inputs.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reference_id"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "verified"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Verification failed; coherent claims stay unsupported.",
+          "properties": {
+            "refused": {
+              "properties": {
+                "reason": {
+                  "description": "Precise reason verification failed.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "refused"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "ContinuousListeningAreaConfig": {
       "description": "Serializable continuous listening-area configuration for JSON config files.\n\nDrives `MultiSeatStrategy::ContinuousArea`. The optimizer integrates the\nper-position objective over a continuous prior π(p) defined over a\n`dimensions`-dimensional axis-aligned box, replacing the discrete seats\narray with a continuous probability density.\n\n`bounds.len()` must equal `dimensions`. For Gaussian priors,\n`mean.len()` and `cov_diag.len()` must also equal `dimensions`.\n`seat_positions.len()` must equal the number of discrete seats in the\ncalibration `MultiSeatMeasurements` and each row's length must equal\n`dimensions`.\n\n# Seat-identity / ordering contract\n\n`primary_seat` (on [`MultiSeatConfig`](super::multi_seat_config::MultiSeatConfig))\nis a positional index while `seat_positions` is a parallel array: the\nloader only checks equal counts, not semantic correspondence, so a swapped\norder in one sub/source silently combines different physical positions.\nTwo mechanisms close this gap:\n\n- **Stable seat IDs (recommended).** Set\n  [`SeatIdentityMap`](super::multi_seat_config::SeatIdentityMap) on the\n  sibling [`MultiSeatConfig`](super::multi_seat_config::MultiSeatConfig)\n  to one unique, non-empty ID per seat. Consumers (`roomeq-workflow`,\n  `roomeq-engine`) must join every source's per-seat measurements to\n  these IDs via\n  [`ContinuousListeningAreaConfig::check_source_seat_coverage`] instead of\n  relying on index order, and must echo the IDs in output reports\n  ([`ContinuousAreaMetrics`](crate::output::ContinuousAreaMetrics)) so the\n  correspondence is auditable.\n- **Strict positional ordering (legacy).** When no seat IDs are provided,\n  `seat_positions[i]` corresponds to measurement seat index `i`, and every\n  sub/source must present seats in exactly the same order. Any reordering\n  on one source silently mixes positions; prefer stable IDs.",
       "properties": {
@@ -3175,6 +3322,13 @@
         "metrics": {
           "$ref": "#/$defs/CorrectionMetricSummary"
         },
+        "observations": {
+          "description": "Non-violating limit assessments recorded for audit agreement.\n\nEntries explain why an apparent limit/value divergence is not a\nviolation under the defined quantity semantics (for example, an\nacoustic response ratio above the gain backstop while the\nelectrical bound stays within it). Observations never change the\noutcome; only `violations` do.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "outcome": {
           "$ref": "#/$defs/RoomEqOutcome",
           "default": "insufficient_evidence",
@@ -3182,6 +3336,13 @@
         },
         "policy": {
           "$ref": "#/$defs/CorrectionAcceptancePolicy"
+        },
+        "processing_fallback": {
+          "description": "Requested-mode versus realized-processing divergence, when any.\nNames both sides (see [`processing_fallback_reason`]); `None`\nmeans the shipped graph matches the requested family. A fallback\nis audit labeling, not a verdict: it never changes the outcome by\nitself.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "realization_quality": {
           "anyOf": [
@@ -3192,6 +3353,17 @@
               "type": "null"
             }
           ]
+        },
+        "realized_processing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RealizedProcessing"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Correction family actually present in the shipped graph, derived\nfrom serialized plugins rather than the requested mode label.\nSet at graph conversion; reports built before the final graph\nexists leave this absent."
         },
         "reverted_stages": {
           "items": {
@@ -5093,6 +5265,45 @@
       ],
       "type": "object"
     },
+    "EpaProvenance": {
+      "description": "Provenance for shipped EPA psychoacoustic scores.\n\nEPA dimensions are predicted from frequency responses by a spectral\ndiagnostic model; they are not measured audibility and never substitute\nfor listening evidence. This block names the model and the calibration\nit assumed so every score stays checkable.",
+      "properties": {
+        "listening_level_phon": {
+          "description": "Listening level the diagnostic assumed, in phon.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "Scoring model identity.",
+          "type": "string"
+        },
+        "note": {
+          "description": "Human-readable scope note.",
+          "type": "string"
+        },
+        "predicted_not_measured": {
+          "description": "Always true: scores are model predictions, not measurements.",
+          "type": "boolean"
+        },
+        "target_sharpness_acum": {
+          "description": "Target sharpness the diagnostic assumed, in acum.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "model",
+        "predicted_not_measured",
+        "note"
+      ],
+      "type": "object"
+    },
     "EpaScore": {
       "description": "EPA dimensions computed from a frequency response.",
       "properties": {
@@ -5362,6 +5573,17 @@
     "FinalSeatEvaluation": {
       "description": "One independently replayed final-chain listening-position assessment.",
       "properties": {
+        "band_improvement_db": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BandImprovement"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Per-band raw improvements, when the seat band supports them.\n\nWP5 concealment evidence: a broadband gain must not hide a band\nregression. Raw (non-uncertainty-adjusted) by construction; the\nbroadband lower bound stays the enforced quantity."
+        },
         "evaluated_band_hz": {
           "description": "Actual supported evaluation band for this input/position, not the\noptimizer's requested full band.",
           "items": {
@@ -5479,6 +5701,12 @@
         "max_useful_output_loss_db": {
           "default": 3.0,
           "description": "Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.\nSubwoofers are exempt. This is not input attenuation or PEQ boost.",
+          "format": "double",
+          "type": "number"
+        },
+        "min_improvement_lower_bound_db": {
+          "default": 0.0,
+          "description": "Minimum uncertainty-adjusted improvement for a candidate to ship, in dB.\n\nEvery training seat's `improvement_lower_bound_db` (improvement after\nsubtracting summation uncertainty) must exceed this floor, or the\ncandidate is rejected as showing no demonstrated benefit and selection\nfalls back to a simpler protected result. Identity candidates (no\nmeaningful correction applied) skip the floor: with nothing applied\nthere is nothing to reject, and they flow through as the protected\nbaseline. The default 0.0 is the measurement-uncertainty boundary,\nnot a perceptual threshold: raising it needs repeat-capture and\nlistening evidence (WP7), never a guess.",
           "format": "double",
           "type": "number"
         },
@@ -5631,6 +5859,105 @@
           "description": "Weight for treble band (default: 0.8 - less critical for room issues)",
           "format": "double",
           "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "GateRewHeaderFacts": {
+      "description": "Declared REW export-header facts attached to a channel gate.\n\nReport-side transcription of the loader's header facts (see\n`autoeq_measurements::read::RewHeaderFacts`). Every field is a\ndeclaration from the measurement file's comment lines, never an\nindependently verified claim: a timing-reference declaration does not\nverify a shared time zero, and a target level never authenticates\nabsolute playback calibration. `None` on the gate means the source\nfile carried no transcribable header (or was not a file at all).",
+      "properties": {
+        "acoustic_timing_reference": {
+          "default": false,
+          "description": "Whether a Format line declares an acoustic timing reference.\n`false` means \"no declaration seen\", not \"declared absent\".",
+          "type": "boolean"
+        },
+        "clock_adjustment_ppm": {
+          "description": "Clock adjustment in ppm from the Note line, when stated.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "converted_from": {
+          "description": "Conversion provenance for derived exports, e.g. `\"2.2.mdat via\nmdat2csv.py\"`. Absent on original REW text exports.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dated": {
+          "description": "Capture date string, transcribed verbatim.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimated_ir_delay_ms": {
+          "description": "Estimated IR delay in ms from the Note line, when stated.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "frequency_step_ppo": {
+          "description": "Export frequency resolution in points per octave, when stated.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "measurement_name": {
+          "description": "Measurement name from the header.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "microphone": {
+          "description": "Microphone token from the Source line, e.g. `\"UMIK-2\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rew_version": {
+          "description": "REW version string, e.g. `\"V5.40 beta 124\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "smoothing": {
+          "description": "Smoothing declaration, e.g. `\"Variable\"` or `\"1/12 octave\"`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stimulus": {
+          "description": "Stimulus description without the timing-reference suffix.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target_level_db": {
+          "description": "REW target level in dB. Not absolute playback calibration.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "timing_note": {
+          "description": "Full Note line content, preserving reference-channel and offset detail.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -6526,6 +6853,35 @@
       },
       "type": "object"
     },
+    "MeasuredIrSource": {
+      "additionalProperties": false,
+      "description": "One measured room impulse response backing a channel's acoustic report.",
+      "properties": {
+        "path": {
+          "description": "IR file path, resolved against the configuration directory.\nCSV with a `time_ms,amplitude` header.",
+          "type": "string"
+        },
+        "sample_rate_hz": {
+          "description": "Declared IR sample rate in Hz. When present it is verified against\nthe file's time grid; a mismatch fails ingestion fail-closed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "timing_reference_id": {
+          "description": "Shared clock identity across simultaneously captured channels.\nRequired on every entry when more than one channel declares a\nmeasured IR, so no cross-channel analysis can silently mix clocks.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "MeasurementInlineSchema": {
       "additionalProperties": false,
       "properties": {
@@ -6826,7 +7182,7 @@
           "type": "number"
         },
         "fir_taps": {
-          "description": "Number of coefficients in the generated excess-phase FIR.",
+          "description": "Number of coefficients in the generated excess-phase FIR.\n\nTogether with the sample rate this describes the finite record\n(duration and FFT bin spacing, e.g. 4096 taps at 48 kHz span\n85.33 ms with 11.72 Hz spacing). That spacing is finite-record\nsampling, not a lower correction-frequency limit or proof of\nresolving power; zero padding interpolates but adds no information.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -6901,7 +7257,7 @@
         },
         "pre_ringing_threshold_db": {
           "default": -30.0,
-          "description": "Pre-ringing threshold in dB. Default: -30.0",
+          "description": "Pre-ringing threshold in dB. Default: -30.0\n\nDesign-time per-channel threshold for excess-phase FIR design; see\n`PreRingingSerdeConfig.threshold_db` for its relation to the\nruntime aggregate ceiling.",
           "format": "double",
           "type": "number"
         }
@@ -7684,6 +8040,17 @@
             "null"
           ]
         },
+        "epa_provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EpaProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Provenance for shipped EPA scores: model identity and the\ncalibration it assumed. Present whenever EPA scores ship."
+        },
         "final_convolution_sha256": {
           "additionalProperties": {
             "type": [
@@ -7817,6 +8184,17 @@
             }
           ],
           "description": "Resolved perceptual policy metadata."
+        },
+        "playback_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlaybackSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Claim-level playback summary: what shipped, what benefit was\ndemonstrated, and which limits apply. Rendered from the evidence\nblocks at conversion; auditors re-derive it from the report."
         },
         "post_score": {
           "description": "Final deployed-response score, evaluated over the channel's\nrole/crossover-aware band (lower is better).",
@@ -8118,6 +8496,7 @@
             "input_peak_limits": {},
             "max_attenuation_db": 12.0,
             "max_useful_output_loss_db": 3.0,
+            "min_improvement_lower_bound_db": 0.0,
             "output_ceiling_dbfs": 0.0,
             "physical_drive": null,
             "physical_drive_weight": 0.0,
@@ -9204,6 +9583,95 @@
         }
       ]
     },
+    "PlaybackSummary": {
+      "description": "Claim-level playback summary: what shipped, what benefit was\ndemonstrated, and which limits apply.\n\nRendered from (never a substitute for) the evidence blocks: every\nnumber here repeats a value found elsewhere in the report. User-facing\nreports and the mode matrix quote these headlines; auditors re-derive\nthem from the cited evidence.",
+      "properties": {
+        "available_headroom_db": {
+          "description": "Available headroom in dB, when assessed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "headlines": {
+          "description": "Templated human-readable claims, deterministic for a fixed report.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "improvement_db": {
+          "description": "Aggregate shape improvement in dB (echoes the acceptance metrics).",
+          "format": "double",
+          "type": "number"
+        },
+        "limits": {
+          "description": "Applicable acceptance limits hit or in force, as `name=value`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "outcome": {
+          "$ref": "#/$defs/RoomEqOutcome",
+          "description": "Shipped outcome."
+        },
+        "processing_fallback": {
+          "description": "Requested-vs-realized divergence, when any.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "realized_processing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RealizedProcessing"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Correction family actually present in the shipped graph."
+        },
+        "total_latency_ms": {
+          "description": "Modeled total playback latency in ms, when assessed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "training_seats_improved": {
+          "description": "Training seats whose uncertainty-adjusted improvement clears zero.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "training_seats_total": {
+          "description": "Training seats evaluated.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "worst_seat": {
+          "description": "Lowest-benefit training seat as `input:index`, when evaluated.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "improvement_db",
+        "training_seats_improved",
+        "training_seats_total",
+        "headlines"
+      ],
+      "type": "object"
+    },
     "PluginConfigWrapper": {
       "description": "Backend-neutral serialized plugin descriptor. Native adapters translate this\ncontract into their runtime types; the model does not depend on AudioEngine.",
       "properties": {
@@ -9229,7 +9697,7 @@
         },
         "threshold_db": {
           "default": -30.0,
-          "description": "Maximum pre-ringing level in dB relative to main tap. Default: -30.0",
+          "description": "Maximum pre-ringing level in dB relative to main tap. Default: -30.0\n\nDesign-time per-channel threshold: it constrains FIR design, not the\nreported cross-channel aggregate. Runtime acceptance compares the\naggregate masking-derived audible value against its own −20 dB\nceiling, so an aggregate between the two is expected, not a\ndemonstrated design violation.",
           "format": "double",
           "type": "number"
         }
@@ -9861,6 +10329,36 @@
       ],
       "type": "object"
     },
+    "RealizedProcessing": {
+      "description": "Correction family actually present in the shipped graph.\n\nDerived from serialized channel and per-driver plugins, never from the\nrequested mode label: a mixed-phase run whose excess-phase FIR never\nmaterialized reports [`RealizedProcessing::IirOnly`], and a fully\nreverted run reports [`RealizedProcessing::Identity`]. `eq`,\n`warped_biquad`, and `kautz_filter` vote IIR; `convolution` votes FIR.\nGain, delay, and crossover plugins are alignment/routing: a graph with\nonly those reports [`RealizedProcessing::AlignmentOnly`], which still\ncorrects level and timing (audible in joint summation) but shapes no\nfrequency response.",
+      "oneOf": [
+        {
+          "const": "identity",
+          "description": "No correction or alignment plugin on any channel or driver.",
+          "type": "string"
+        },
+        {
+          "const": "alignment_only",
+          "description": "Only gain/delay/crossover plugins: level and timing alignment\nwithout frequency-response shaping.",
+          "type": "string"
+        },
+        {
+          "const": "iir_only",
+          "description": "IIR correction plugins but no `convolution` anywhere.",
+          "type": "string"
+        },
+        {
+          "const": "fir_only",
+          "description": "`convolution` plugins but no IIR correction anywhere.",
+          "type": "string"
+        },
+        {
+          "const": "hybrid",
+          "description": "Both IIR correction and `convolution` present (band-split FIR or\nexcess-phase correction).",
+          "type": "string"
+        }
+      ]
+    },
     "RecordingConfiguration": {
       "description": "Recording configuration stored with measurements\nContains device settings and signal parameters used during measurement capture",
       "properties": {
@@ -10455,6 +10953,13 @@
         "description": {
           "type": "string"
         },
+        "measured_impulse_responses": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MeasuredIrSource"
+          },
+          "description": "Measured room impulse responses per channel, backing the R1–R5\nacoustic report fields. Keys are output channel names; values are\n`time_ms,amplitude` CSVs captured in the room. Channels without an\nentry keep synthesized IRs and their report cells stay pending.",
+          "type": "object"
+        },
         "optimizer": {
           "$ref": "#/$defs/OptimizerConfig",
           "default": {
@@ -10467,6 +10972,7 @@
               "input_peak_limits": {},
               "max_attenuation_db": 12.0,
               "max_useful_output_loss_db": 3.0,
+              "min_improvement_lower_bound_db": 0.0,
               "output_ceiling_dbfs": 0.0,
               "physical_drive": null,
               "physical_drive_weight": 0.0,
@@ -10627,6 +11133,7 @@
       "description": "Versioned limits applied to production RoomEQ output.\n\nThe output class changes only temporal limits. Spectral, spatial, boost,\nheadroom, and realization limits are invariant across filter classes.",
       "properties": {
         "max_boost_db": {
+          "description": "Ceiling for the gain backstop in dB.\n\nCompares against the electrical filter-gain bound\n(`max_electrical_boost_db`), not the acoustic response ratio:\nimproved interference near a baseline null can legitimately move\nthe ratio without any filter boosting. The acoustic\n`max_boost_db` stays reported alongside; an acoustic-only excess\nis recorded as an observation, while an unevaluable electrical\nbound fails closed to a violation.",
           "format": "double",
           "type": "number"
         },
@@ -10646,7 +11153,8 @@
           "format": "double",
           "type": "number"
         },
-        "max_pre_ringing_energy_db": {
+        "max_pre_ringing_audible_db": {
+          "description": "Runtime ceiling for the aggregate masking-derived audible\npre-ringing (`TemporalQualityEvidence.pre_ringing_audible_db`).\nDistinct from the −30 dB per-channel FIR design threshold, which\napplies at design time, not to this aggregate.",
           "format": "double",
           "type": "number"
         },
@@ -10678,7 +11186,7 @@
         "max_boost_db",
         "min_available_headroom_db",
         "max_latency_ms",
-        "max_pre_ringing_energy_db",
+        "max_pre_ringing_audible_db",
         "max_induced_group_delay_rms_ms",
         "max_realization_error_db"
       ],
@@ -11856,6 +12364,11 @@
     "TemporalIrMaskingMetrics": {
       "description": "True impulse-response temporal masking metrics for FIR / phase correction.",
       "properties": {
+        "audibility_threshold_db": {
+          "description": "Audibility threshold retained from the analysis assumptions, in dB.",
+          "format": "double",
+          "type": "number"
+        },
         "main_index": {
           "description": "Main impulse sample index used as the transient reference.",
           "format": "uint",
@@ -11867,8 +12380,17 @@
           "format": "double",
           "type": "number"
         },
+        "masking_profile": {
+          "description": "Masking-model programme profile assumed (`transient`/`mixed`/`sustained`).",
+          "type": "string"
+        },
         "penalty": {
           "description": "Scalar penalty using the configured material profile and IR weights.",
+          "format": "double",
+          "type": "number"
+        },
+        "post_mask_ms": {
+          "description": "Post-masking window retained from the analysis assumptions, in ms.",
           "format": "double",
           "type": "number"
         },
@@ -11882,6 +12404,16 @@
           "format": "double",
           "type": "number"
         },
+        "pre_energy_ratio_db": {
+          "description": "Physical pre-main energy (unmasked), dB relative to main peak energy.\n\nPeak, physical energy, and the masking-model prediction answer three\ndifferent questions and must never be conflated.",
+          "format": "double",
+          "type": "number"
+        },
+        "pre_mask_ms": {
+          "description": "Pre-masking window retained from the analysis assumptions, in ms.",
+          "format": "double",
+          "type": "number"
+        },
         "pre_ringing_audible_db": {
           "description": "Pre-masked audible pre-ringing energy, dB relative to main peak energy.",
           "format": "double",
@@ -11891,6 +12423,17 @@
           "description": "Peak pre-ringing level before the main impulse, dB relative to main.",
           "format": "double",
           "type": "number"
+        },
+        "sample_rate_hz": {
+          "description": "Sample rate the impulse was analyzed at, in Hz.",
+          "format": "double",
+          "type": "number"
+        },
+        "taps": {
+          "description": "Analyzed impulse length in taps.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
@@ -11900,7 +12443,14 @@
         "post_ringing_peak_db",
         "pre_ringing_audible_db",
         "post_ringing_audible_db",
-        "penalty"
+        "pre_energy_ratio_db",
+        "penalty",
+        "taps",
+        "sample_rate_hz",
+        "masking_profile",
+        "pre_mask_ms",
+        "post_mask_ms",
+        "audibility_threshold_db"
       ],
       "type": "object"
     },
@@ -11989,6 +12539,14 @@
     },
     "TemporalQualityEvidence": {
       "properties": {
+        "alignment_delay_ms": {
+          "description": "Common alignment delay every branch rose by at causal delay\ncompilation (`delay_compile_causal`), in ms. Zero when compilation\nwas a no-op; absent when the compile boundary never stamped.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "available_headroom_db": {
           "format": "double",
           "type": [
@@ -11996,7 +12554,13 @@
             "null"
           ]
         },
+        "coherent_timing": {
+          "$ref": "#/$defs/CoherentTimingEvidence",
+          "default": "unassessed",
+          "description": "Shared-timing verification across evaluated inputs.\nUnassessed where replay did not evaluate; replay upgrades the verdict."
+        },
         "latency_ms": {
+          "description": "FIR design delay: the maximum main-impulse time across channels.\n\nKept under its legacy name; WP6 splits the playback total below.\n`None` means unresolved FIR evidence, never zero latency.",
           "format": "double",
           "type": [
             "number",
@@ -12005,10 +12569,11 @@
         },
         "phase_evidence_available": {
           "default": false,
-          "description": "True only when both pre and post responses carried measured phase.\nA missing phase is an evidence limitation, never a zero-phase claim.",
+          "description": "True only when both pre and post responses carried measured phase.\nA missing phase is an evidence limitation, never a zero-phase claim.\nPresence alone never verifies coherent timing; see `coherent_timing`.",
           "type": "boolean"
         },
-        "pre_ringing_energy_db": {
+        "pre_ringing_audible_db": {
+          "description": "Worst masking-derived audible pre-ringing across channels, in dB\nrelative to each FIR's main impulse peak.\n\nThis is the maximum of the per-channel `pre_ringing_audible_db`\nvalues, not a physical pre/main energy ratio (that quantity is\n`TemporalIrMaskingMetrics.pre_energy_ratio_db`). Runtime acceptance compares it\nagainst `RuntimeAcceptancePolicy.max_pre_ringing_audible_db`\n(−20 dB), which is distinct from the −30 dB per-channel FIR design\nthreshold: an aggregate between the two is expected, not a\ndemonstrated violation. Neither value proves audibility without\ncalibrated stimulus and listener context. IIR-only chains report\nthe `NO_FIR_PRE_RINGING_FLOOR_DB` sentinel (−300 dB), a\nreport floor rather than a measured room-noise floor.",
           "format": "double",
           "type": [
             "number",
@@ -12019,6 +12584,14 @@
           "default": false,
           "description": "True when temporal measurements required by the output class exist.\nFor an IIR-only chain this is true because no FIR precursor claim is\nbeing made; FIR and hybrid paths must provide measured masking data.",
           "type": "boolean"
+        },
+        "total_latency_ms": {
+          "description": "Total modeled playback latency (design + alignment) in ms.\n\nExcludes host/block buffering and converter delay, which the engine\ncannot observe; the host adds those. Absent unless both summands\nare assessed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -12147,6 +12720,27 @@
           "minItems": 2,
           "type": "array"
         },
+        "extension_band_hz": {
+          "description": "Lowest reliable octave of the evaluated band, when at least two\nsamples cover it. WP4 output distinction: loss here is lost low-end\nextension, while `worst_unexplained_loss_db`/`loss_bands` describe\n(usually narrow, benign) peak attenuation elsewhere.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "extension_loss_db": {
+          "description": "Log-frequency-weighted mean unexplained loss over\n`extension_band_hz`. Stays near zero when cuts are peak-only.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "logical_input": {
           "description": "Present when evaluated by logical-input final playback replay.",
           "type": [
@@ -12174,6 +12768,14 @@
         },
         "partition": {
           "type": "string"
+        },
+        "peak_demand_change_db": {
+          "description": "Peak absolute demand shift: peak post level minus peak pre level\nover the evaluated band. The acoustic drive proxy: how much less\n(or more) peak output the system is asked to produce. Electrical\nrequired-vs-available headroom stays in the bus simulation.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "permitted_gain_db": {
           "description": "Authorized broadband change, independent of fitted shape normalization.",

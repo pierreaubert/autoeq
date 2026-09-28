@@ -172,6 +172,8 @@ impl WorkflowExecutor for GenericExecutor {
                 operation_gates: None,
 
                 provisional_decisions: Vec::new(),
+                epa_provenance: None,
+                playback_summary: None,
             },
         })
     }

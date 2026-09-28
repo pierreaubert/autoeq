@@ -86,6 +86,7 @@ pub struct OptimParams {
     // -- Execution --
     pub no_parallel: bool,
     pub parallel_threads: usize,
+    /// Stochastic seed; `None` selects [`crate::DEFAULT_SEED`].
     pub seed: Option<u64>,
 
     /// Suppress non-essential logging (replaces `args.qa.is_some()`).

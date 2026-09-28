@@ -64,6 +64,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = autoeq::roomeq::optimize_room(&config, 48000.0, None, None)
@@ -166,6 +167,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = autoeq::roomeq::optimize_room(&config, 48000.0, None, None)
@@ -227,6 +229,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = autoeq::roomeq::optimize_room(&config, 48000.0, None, None)
@@ -344,6 +347,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = autoeq::roomeq::optimize_room(&config, 48000.0, None, None)
@@ -403,6 +407,7 @@ mod tests {
             ctc: None,
             reporting: None,
             cea2034_cache: None,
+            measured_impulse_responses: Default::default(),
         };
 
         let result = autoeq::roomeq::optimize_room(&config, 48000.0, None, None)

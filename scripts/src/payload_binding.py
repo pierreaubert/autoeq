@@ -12,8 +12,27 @@ import struct
 ALGORITHM = "sha256-json-typed-v1"
 
 
+def _strip_volatile_fields(payload):
+    """Drop wall-clock provenance from the hash input (Rust mirrors this).
+
+    `metadata.timestamp` records the emission moment, not delivered DSP.
+    Both binder and verifier strip it so content-identical runs share one
+    digest; the shipped output keeps its timestamp. Keep in sync with
+    roomeq-model/src/payload_binding.rs::strip_volatile_identity_fields.
+    """
+    if isinstance(payload, dict):
+        metadata = payload.get("metadata")
+        if isinstance(metadata, dict) and "timestamp" in metadata:
+            payload = dict(payload)
+            stripped = dict(metadata)
+            del stripped["timestamp"]
+            payload["metadata"] = stripped
+    return payload
+
+
 def payload_digest(payload, graph_identity):
     """Hash typed JSON without depending on either language's float formatting."""
+    payload = _strip_volatile_fields(payload)
     digest = hashlib.sha256(ALGORITHM.encode("utf-8") + b"\0")
 
     def encode(value):

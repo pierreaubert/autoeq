@@ -426,7 +426,6 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
                     )
                 })
                 .inspect_err(|error| {
-                    log::warn!("Physical-driver waveform unavailable for {channel_name}: {error}");
                     waveform_errors.insert(channel_name.clone(), error.to_string());
                 })
                 .ok();
@@ -494,7 +493,6 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
                     sidecar_dir,
                 ))
                 .inspect_err(|error| {
-                    log::warn!("Parallel waveform unavailable for {channel_name}: {error}");
                     waveform_errors.insert(channel_name.clone(), error.to_string());
                 })
                 .ok()?;

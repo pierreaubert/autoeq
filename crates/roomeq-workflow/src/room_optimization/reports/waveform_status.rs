@@ -11,6 +11,13 @@ pub(super) fn record(
     result: &mut RoomOptimizationResult,
     replay_errors: &BTreeMap<String, String>,
 ) {
+    // Candidate rebuilds inherit the preceding report. Log a replay failure
+    // only when its reason changes; always retain it in the current report.
+    for (name, reason) in replay_errors {
+        if replay_error_changed(result, name, reason) {
+            log::warn!("Waveform unavailable for {name}: {reason}");
+        }
+    }
     let mut checks = Vec::new();
     for (name, chain) in &result.channels {
         let initial_reason = match result.channel_results.get(name) {
@@ -67,9 +74,44 @@ pub(super) fn record(
     });
 }
 
+fn replay_error_changed(result: &RoomOptimizationResult, name: &str, reason: &str) -> bool {
+    let id = format!("post_ir:{name}");
+    !result
+        .metadata
+        .stage_outcomes
+        .iter()
+        .filter(|stage| stage.stage == "waveform_views")
+        .flat_map(|stage| &stage.checks)
+        .any(|check| check.id == id && !check.passed && check.diagnostic.as_deref() == Some(reason))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_replay_failures_are_reported_without_repeating_warnings() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let reason = "driver woofer: capture unavailable";
+        let errors = BTreeMap::from([("L".into(), reason.into())]);
+        assert!(replay_error_changed(&result, "L", reason));
+        record(&mut result, &errors);
+        assert!(!replay_error_changed(&result, "L", reason));
+        assert!(!replay_error_changed(&result.clone(), "L", reason));
+        assert!(replay_error_changed(&result, "L", "different failure"));
+        record(&mut result, &errors);
+        assert_eq!(
+            result
+                .metadata
+                .stage_outcomes
+                .iter()
+                .filter(|stage| stage.stage == "waveform_views")
+                .count(),
+            1
+        );
+        record(&mut result, &BTreeMap::new());
+        assert!(replay_error_changed(&result, "L", reason));
+    }
 
     #[test]
     fn waveform_reasons_distinguish_initial_phase_from_branch_replay() {

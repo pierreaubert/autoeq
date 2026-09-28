@@ -1,5 +1,13 @@
 # Unreleased
 
+- Identify stereo bass management correctly in workflow logs. Post-EQ
+  diagnostics now compare target shortfall, main/sub cancellation, and scores
+  with and without the pass, distinguish the configured baseline, and list
+  every failed acceptance check. Acceptance thresholds are unchanged.
+- Resolve parallel waveform timing against every declared physical sub output
+  when bass management groups separate measurements. Preserve branch identity
+  and shared capture timing checks, suppress unchanged waveform warnings, and
+  remove duplicate temporal-evidence refreshes during finalization.
 - Fix flaky `just ntest` (`cargo test --release`) failures: split the 2D
   renderer WASM exports out of `autoeq-report-wasm` into the new
   `cdylib`-only `autoeq-report-wasm-shell` crate. The release profile sets

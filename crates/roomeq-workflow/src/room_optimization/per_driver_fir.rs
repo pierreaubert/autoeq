@@ -1515,6 +1515,106 @@ mod tests {
     }
 
     #[test]
+    fn physical_sub_outputs_resolve_all_captures_for_parallel_waveforms() {
+        let (mut chain, mut config, target) = setup();
+        let roomeq_model::SpeakerConfig::Topology(topology) = config.speakers.remove("L").unwrap()
+        else {
+            unreachable!()
+        };
+        for (index, driver) in topology.drivers.into_iter().enumerate() {
+            config.speakers.insert(
+                format!("subs_{index}"),
+                roomeq_model::SpeakerConfig::Single(driver.measurement),
+            );
+        }
+        config.system = Some(roomeq_model::SystemConfig {
+            model: roomeq_model::SystemModel::Stereo,
+            subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                config: roomeq_model::SubwooferStrategy::Mso,
+                crossover: None,
+                routing: Default::default(),
+                outputs: (0..2)
+                    .map(|index| roomeq_model::SubwooferOutput {
+                        id: format!("Sub{}", index + 1),
+                        speaker: format!("subs_{index}"),
+                    })
+                    .collect(),
+            }),
+            ..Default::default()
+        });
+        chain.channel = "Sub1".into();
+        for driver in chain.drivers.as_mut().unwrap() {
+            driver.name = format!("Sub{}", driver.index + 1);
+        }
+        let sources =
+            super::super::parallel_timing::validated_sources(&chain, &config, &target).unwrap();
+        assert_eq!(sources.len(), 2);
+        let mut result = crate::test_fixtures::single_channel_room_result("Sub1");
+        result
+            .channel_results
+            .get_mut("Sub1")
+            .unwrap()
+            .initial_curve = target.clone();
+        result.channels.insert("Sub1".into(), chain.clone());
+        super::super::reports::refresh_temporal_ir_evidence(
+            &mut result,
+            &config,
+            48000.0,
+            Path::new("."),
+        );
+        assert!(result.channels["Sub1"].pre_ir.is_some());
+        assert!(result.channels["Sub1"].post_ir.is_some());
+
+        for fault in [
+            "identity",
+            "index",
+            "missing_driver",
+            "duplicate_output",
+            "missing_source",
+            "timing",
+        ] {
+            let mut invalid_chain = chain.clone();
+            let mut invalid_config = config.clone();
+            match fault {
+                "identity" => invalid_chain.drivers.as_mut().unwrap()[1].name = "wrong".into(),
+                "index" => invalid_chain.drivers.as_mut().unwrap()[1].index = 0,
+                "missing_driver" => {
+                    invalid_chain.drivers.as_mut().unwrap().pop();
+                }
+                "duplicate_output" => {
+                    invalid_config
+                        .system
+                        .as_mut()
+                        .unwrap()
+                        .subwoofers
+                        .as_mut()
+                        .unwrap()
+                        .outputs[1]
+                        .id = "Sub1".into();
+                }
+                "missing_source" => {
+                    invalid_config.speakers.remove("subs_1");
+                }
+                "timing" => {
+                    let roomeq_model::SpeakerConfig::Single(
+                        roomeq_model::MeasurementSource::Single(source),
+                    ) = invalid_config.speakers.get_mut("subs_1").unwrap()
+                    else {
+                        unreachable!()
+                    };
+                    source.provenance.timing_reference_id = Some("different-clock".into());
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                super::super::parallel_timing::validate(&invalid_chain, &invalid_config, &target)
+                    .is_err(),
+                "{fault}"
+            );
+        }
+    }
+
+    #[test]
     fn roadmap_correction_dba_timing_uses_routed_output_ids() {
         let (mut chain, mut config, target) = setup();
         let roomeq_model::SpeakerConfig::Topology(topology) = config.speakers.remove("L").unwrap()

@@ -1,4 +1,4 @@
-// Home-cinema workflow executor (X.0 / X.1, any channel count).
+// Shared stereo and home-cinema bass-management workflow executor.
 
 use super::bass_management::*;
 use super::run::run_channel_via_generic_path_with_frequency_samples;
@@ -39,6 +39,7 @@ use std::collections::HashMap;
 pub(super) struct HomeCinemaExecutor;
 
 const DESIRED_CROSSOVER_TARGET_UNDERFILL_DB: f64 = 1.0;
+const BASS_MANAGEMENT_LOG_TARGET: &str = "roomeq_workflow::bass_management";
 
 /// Common acoustic calibration band for home-cinema main channels.
 ///
@@ -1036,7 +1037,7 @@ fn reconstruct_deployed_source_curves_impl(
                         });
                     }
                     if cancellation.reason == "improved_residual_cancellation" {
-                        log::warn!("Crossover cancellation for '{role}' accepted as improved residual: baseline={:?} dB, final={underfill_db:.3} dB, limit={:.3} dB", cancellation.baseline_db, cancellation.limit_db);
+                        log::warn!(target: BASS_MANAGEMENT_LOG_TARGET, "Crossover cancellation for '{role}' accepted as improved residual: baseline={:?} dB, final={underfill_db:.3} dB, limit={:.3} dB", cancellation.baseline_db, cancellation.limit_db);
                     }
                     if let SpliceSafety::Record(evidence) = &mut splice_safety {
                         evidence.push(cancellation);
@@ -1062,7 +1063,7 @@ fn reconstruct_deployed_source_curves_impl(
                 // after bounded EQ even when the main/sub crossover sums
                 // safely. Keep the truthful deployed curve and surface the
                 // residual instead of suppressing the complete DSP artifact.
-                log::warn!(
+                log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                     "  Final routed target underfill for '{}' is {:.3} dB at {:.1} Hz (quality target {:.1} dB)",
                     role,
                     target_underfill_db,
@@ -1806,11 +1807,16 @@ impl WorkflowExecutor for HomeCinemaExecutor {
             };
         }
 
-        info!(
-            "Running Home Cinema Optimization Workflow ({} single mains, {} supporting sources{})",
+        let layout = if matches!(sys.model, SystemModel::Stereo) {
+            "Stereo"
+        } else {
+            "Home cinema"
+        };
+        info!(target: BASS_MANAGEMENT_LOG_TARGET,
+            "{layout} bass management ({} single mains, {} supporting sources, {} physical sub outputs)",
             single_roles.len(),
             supporting_roles.len(),
-            if has_sub { " + bass-managed sub" } else { "" }
+            sys.subwoofers.as_ref().map_or(0, |subs| subs.outputs.len()),
         );
 
         // Bass-management and score aggregation require a primary main. Do
@@ -1914,7 +1920,7 @@ impl WorkflowExecutor for HomeCinemaExecutor {
         }?;
 
         if !supporting_roles.is_empty() {
-            info!(
+            info!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "Processing {} supporting-source channel(s) after mains",
                 supporting_roles.len()
             );
@@ -2030,7 +2036,7 @@ fn optimize_home_cinema_no_sub(
             let gain = *gains.get(role).unwrap_or(&0.0);
             let source = resolve_single_source(role, config, sys)?;
 
-            info!("  Optimizing '{}' with alignment gain {:.2} dB", role, gain);
+            info!(target: BASS_MANAGEMENT_LOG_TARGET, "  Optimizing '{}' with alignment gain {:.2} dB", role, gain);
 
             let (chain, ch_result, pre_score, post_score, _fir, multiseat_rejection) =
                 run_channel_via_generic_path_with_frequency_samples(
@@ -2048,7 +2054,7 @@ fn optimize_home_cinema_no_sub(
                     frequency_samples,
                 )?;
 
-            info!(
+            info!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "  '{}' pre_score={:.4} post_score={:.4}",
                 role, pre_score, post_score
             );
@@ -2083,7 +2089,7 @@ fn optimize_home_cinema_no_sub(
     let avg_pre = pre_scores.iter().sum::<f64>() / pre_scores.len() as f64;
     let avg_post = post_scores.iter().sum::<f64>() / post_scores.len() as f64;
 
-    info!(
+    info!(target: BASS_MANAGEMENT_LOG_TARGET,
         "Average pre-score: {:.4}, post-score: {:.4}",
         avg_pre, avg_post
     );
@@ -2240,7 +2246,7 @@ pub(crate) fn replay_until_splice_safe(
         let Some(stage) = strip_next_splice_breaking_stage(chain) else {
             return Err(error);
         };
-        log::warn!(
+        log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
             "  Final routed replay for '{role}' cancels at the crossover; reverting {stage} and replaying: {error}"
         );
         let initial: Curve = chain
@@ -2473,14 +2479,14 @@ fn optimize_home_cinema_with_sub(
                     if min_xo < per_config.optimizer.max_freq {
                         per_config.optimizer.min_freq = per_config.optimizer.min_freq.max(min_xo);
                     } else {
-                        log::warn!(
+                        log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                             "  Main Pre-EQ crossover lower bound {:.1} Hz does not overlap configured optimization band [{:.1}, {:.1}] Hz; retaining the configured band",
                             min_xo,
                             per_config.optimizer.min_freq,
                             per_config.optimizer.max_freq
                         );
                     }
-                    info!(
+                    info!(target: BASS_MANAGEMENT_LOG_TARGET,
                         "  Pre-EQ via generic path for '{}' (min_freq={:.1} Hz)",
                         role, min_xo
                     );
@@ -2519,14 +2525,14 @@ fn optimize_home_cinema_with_sub(
             if max_xo > sub_config.optimizer.min_freq {
                 sub_config.optimizer.max_freq = sub_config.optimizer.max_freq.min(max_xo);
             } else {
-                log::warn!(
+                log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                     "  Sub Pre-EQ crossover upper bound {:.1} Hz does not overlap configured optimization band [{:.1}, {:.1}] Hz; retaining the configured band",
                     max_xo,
                     sub_config.optimizer.min_freq,
                     sub_config.optimizer.max_freq
                 );
             }
-            info!(
+            info!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "  Pre-EQ via generic path for '{}' (max_freq={:.1} Hz)",
                 sub_role, max_xo
             );
@@ -2949,7 +2955,7 @@ fn optimize_home_cinema_with_sub(
         normalize_crossover_delays(main_delay_raw, sub_delay_raw);
     let sub_gain_post = sub_gain_raw;
 
-    info!(
+    info!(target: BASS_MANAGEMENT_LOG_TARGET,
         "  Crossover Optimized: Freq={:.1} Hz, Main Gain={:.2}, Sub Gain={:.2}, Main Delay={:.2}, Sub Delay={:.2}",
         final_xo_freq, main_gain_post, sub_gain_post, main_delay_post, sub_delay_post
     );
@@ -3064,7 +3070,7 @@ fn optimize_home_cinema_with_sub(
     ) as f64;
 
     let sub_correction = 0.0;
-    info!(
+    info!(target: BASS_MANAGEMENT_LOG_TARGET,
         "  Physical sub level retained: Main={:.2} dB, Sub={:.2} dB, Common tonal correction={:+.2} dB",
         main_mean, sub_mean, sub_correction
     );
@@ -3078,7 +3084,7 @@ fn optimize_home_cinema_with_sub(
     let (sub_gain_post, mut sub_gain_limited) =
         engine_home_cinema::limited_sub_gain(requested_sub_gain, bass_management.as_ref());
     if sub_gain_limited {
-        log::warn!(
+        log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
             "  Bass management limited sub gain from {:+.2} dB to {:+.2} dB for headroom",
             requested_sub_gain,
             sub_gain_post
@@ -3312,7 +3318,7 @@ fn optimize_home_cinema_with_sub(
     } else {
         vec![baseline_reason.to_string()]
     };
-    log::debug!(
+    log::debug!(target: BASS_MANAGEMENT_LOG_TARGET,
         "  Bass-management source-route optimizer advisories: {:?}",
         sub_output_advisories
     );
@@ -3323,7 +3329,7 @@ fn optimize_home_cinema_with_sub(
         }
     }
     for source in &source_results {
-        info!(
+        info!(target: BASS_MANAGEMENT_LOG_TARGET,
             "  Source route '{}': main_delay={:.3} ms, bass_delay={:.3} ms, invert={}, trim={:+.2} dB, accepted={}, advisories={:?}",
             source.source_channel,
             source.main_delay_ms,
@@ -3454,7 +3460,7 @@ fn optimize_home_cinema_with_sub(
         config,
         Some(&bass_management_optimization),
     );
-    log::debug!("  Bass-management routing graph: {bass_routing_graph:?}");
+    log::debug!(target: BASS_MANAGEMENT_LOG_TARGET, "  Bass-management routing graph: {bass_routing_graph:?}");
     let deprecated_peak_gain_extra = if bass_management_optimization.sub_output_results.is_empty() {
         sub_gain_post
     } else {
@@ -3527,7 +3533,7 @@ fn optimize_home_cinema_with_sub(
             routed_target_curves.insert(role.clone(), target.into());
         }
         if opt_config.min_freq >= opt_config.max_freq {
-            log::warn!(
+            log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "  Skipping {role} routed Post-EQ: invalid optimization band [{:.1}, {:.1}] Hz",
                 config.optimizer.min_freq,
                 config.optimizer.max_freq
@@ -3598,22 +3604,23 @@ fn optimize_home_cinema_with_sub(
         let main_eq_resp =
             response::compute_peq_complex_response(&filters, &main_curve.freq, sample_rate);
         let main_curve_after = response::apply_complex_response(main_curve, &main_eq_resp);
-        let bass_branch = bass_routing_graph
-            .as_ref()
-            .and_then(|graph| {
-                engine_bass_management::predict_bass_source_curve_from_routes(
-                    &routed_common_sub_post,
-                    optimizer_source_pre_route_transfers.get(role),
-                    graph,
-                    role,
-                    sample_rate,
-                )
-            })
-            .map(|bass| {
-                let bass_eq_resp =
-                    response::compute_peq_complex_response(&filters, &bass.freq, sample_rate);
-                response::apply_complex_response(&bass, &bass_eq_resp)
-            });
+        let bass_before_post_eq = bass_routing_graph.as_ref().and_then(|graph| {
+            engine_bass_management::predict_bass_source_curve_from_routes(
+                &routed_common_sub_post,
+                optimizer_source_pre_route_transfers.get(role),
+                graph,
+                role,
+                sample_rate,
+            )
+        });
+        let cancellation_before_post_eq = bass_before_post_eq.as_ref().and_then(|bass| {
+            post_eq_crossover_cancellation(config, role, main_curve, bass, role_xover_freq)
+        });
+        let bass_branch = bass_before_post_eq.as_ref().map(|bass| {
+            let bass_eq_resp =
+                response::compute_peq_complex_response(&filters, &bass.freq, sample_rate);
+            response::apply_complex_response(bass, &bass_eq_resp)
+        });
         let post_curve_after = bass_branch
             .as_ref()
             .map(|bass| complex_sum_mains(&[&main_curve_after, bass]))
@@ -3629,7 +3636,6 @@ fn optimize_home_cinema_with_sub(
         let cancellation_evidence = bass_branch.as_ref().and_then(|bass| {
             post_eq_crossover_cancellation(config, role, &main_curve_after, bass, role_xover_freq)
         });
-        let cancellation_underfill_db = cancellation_evidence.as_ref().map(|e| e.final_db);
         let target_underfill_db =
             roomeq_engine::topology::bass_management_max_underfill_db_with_target(
                 Some(&post_curve_after),
@@ -3642,17 +3648,14 @@ fn optimize_home_cinema_with_sub(
                 prepared_target.as_ref(),
                 role_xover_freq,
             );
-        log::debug!(
-            "  {role} Post-EQ underfill: cancellation={cancellation_underfill_db:?} dB, target={target_underfill_db:?} dB"
-        );
         // Without calibrated main/sub timing the coherent cancellation
         // verdict is arbitrary; screen Post-EQ on its mains and output
         // preservation instead of rejecting corrections on luck.
         let cancellation_screened = !crossover_timing_refused(Some(&bass_management_optimization));
-        let underfill_accepted = (!cancellation_screened
-            || cancellation_evidence.as_ref().is_some_and(|e| e.accepted))
-            && target_underfill_db
-                .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
+        let cancellation_accepted =
+            !cancellation_screened || cancellation_evidence.as_ref().is_some_and(|e| e.accepted);
+        let target_accepted = target_underfill_db
+            .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
         // The splice objective above scores the predicted mains+bass sum, but
         // the published channel score — and the final safety gate — judge the
         // mains chain alone. A candidate that improves the predicted sum while
@@ -3675,7 +3678,48 @@ fn optimize_home_cinema_with_sub(
         if !output_preserved {
             post_eq_output_rejections.push((role.clone(), output_loss));
         }
-        if post < pre && underfill_accepted && mains_preserved && output_preserved {
+        // Compare this pass against its immediate input, and label the older
+        // configured baseline separately. Common pre-route EQ cannot repair
+        // the relative cancellation already present in that input.
+        let failed_gates: Vec<_> = [
+            (post < pre, "combined_objective_not_improved"),
+            (cancellation_accepted, "cancellation_vs_configured_baseline"),
+            (target_accepted, "absolute_target_shortfall"),
+            (mains_preserved, "main_only_score_regressed"),
+            (output_preserved, "useful_output_loss"),
+        ]
+        .into_iter()
+        .filter_map(|(passed, reason)| (!passed).then_some(reason))
+        .collect();
+        let accepted = failed_gates.is_empty();
+        let metric = |value: Option<f64>| {
+            value.map_or_else(|| "unavailable".to_owned(), |value| format!("{value:.6}"))
+        };
+        let target_without = metric(pre_target_underfill_db);
+        let target_with = metric(target_underfill_db);
+        let target_reduction_pct = metric(
+            pre_target_underfill_db
+                .zip(target_underfill_db)
+                .filter(|(before, _)| *before > 1e-9)
+                .map(|(before, after)| 100.0 * (before - after) / before),
+        );
+        let cancellation_without = metric(cancellation_before_post_eq.as_ref().map(|e| e.final_db));
+        let cancellation_with = metric(cancellation_evidence.as_ref().map(|e| e.final_db));
+        let configured_baseline =
+            metric(cancellation_evidence.as_ref().and_then(|e| e.baseline_db));
+        let peak_eq_gain_db = main_eq_resp
+            .iter()
+            .map(|value| 20.0 * value.norm().log10())
+            .fold(f64::NEG_INFINITY, f64::max);
+        let cancellation_limit_db = config.optimizer.max_crossover_cancellation_db;
+        let target_limit_db = roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB;
+        let output_loss_limit_db = config.optimizer.finalization.max_useful_output_loss_db;
+        let decision = if accepted { "accepted" } else { "discarded" };
+        log::log!(target: BASS_MANAGEMENT_LOG_TARGET,
+            if accepted { log::Level::Info } else { log::Level::Warn },
+            "{role} Post-EQ {decision}: without/with this pass: target_shortfall_db={target_without}/{target_with}, target_shortfall_db_reduction_pct={target_reduction_pct}, cancellation_db={cancellation_without}/{cancellation_with}, combined_objective={pre:.6}/{post:.6}, main_only_score={main_pre_score:.6}/{main_post_score:.6}; configured_baseline_cancellation_db={configured_baseline}; cancellation_screened={cancellation_screened}, cancellation_limit_db={cancellation_limit_db:.3}, target_limit_db={target_limit_db:.3} (both limits allow 0.05 dB tolerance); useful_output_loss_db={output_loss:.6}, output_loss_limit_db={output_loss_limit_db:.6}, peak_eq_gain_db={peak_eq_gain_db:.6}; failed_gates={failed_gates:?}"
+        );
+        if accepted {
             optimizer_evidence_by_channel
                 .entry(role.clone())
                 .or_default()
@@ -3689,47 +3733,6 @@ fn optimize_home_cinema_with_sub(
                 .entry(role.clone())
                 .or_default()
                 .append(&mut post_eq_result.optimizer_evidence);
-            if let Some(cancellation) = cancellation_evidence
-                .as_ref()
-                .filter(|evidence| !evidence.accepted)
-            {
-                log::warn!(
-                    "  {} Post-EQ discarded: crossover cancellation {:.3} dB refused ({}, baseline {:?} dB; target={target_underfill_db:?}, pre-target={pre_target_underfill_db:?})",
-                    role,
-                    cancellation.final_db,
-                    cancellation.reason,
-                    cancellation.baseline_db,
-                );
-            } else if cancellation_evidence.is_none() {
-                log::warn!(
-                    "  {role} Post-EQ discarded: crossover cancellation evidence unavailable"
-                );
-            } else if let Some(underfill_db) = target_underfill_db.filter(|value| {
-                !roomeq_engine::topology::bass_management_underfill_is_acceptable(*value)
-            }) {
-                log::warn!(
-                    "  {role} Post-EQ discarded: target-relative underfill {underfill_db:.3} dB exceeds {:.3} dB (pre-target={pre_target_underfill_db:?})",
-                    roomeq_engine::topology::MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB,
-                );
-            } else if !output_preserved {
-                log::warn!(
-                    "{role} Post-EQ discarded: full-band useful output loss {output_loss:.3} dB"
-                );
-            } else if !mains_preserved {
-                log::warn!(
-                    "  {} Post-EQ discarded: mains published score regressed from {:.4} to {:.4}",
-                    role,
-                    main_pre_score,
-                    main_post_score
-                );
-            } else {
-                log::warn!(
-                    "  {} Post-EQ discarded: score regressed from {:.4} to {:.4}",
-                    role,
-                    pre,
-                    post
-                );
-            }
             post_eq_filters.insert(role.clone(), Vec::new());
         }
     }
@@ -3749,7 +3752,7 @@ fn optimize_home_cinema_with_sub(
         opt_config.max_freq = bass_route_upper_hz - 20.0;
         let sub_post_eq_band_empty = opt_config.max_freq <= opt_config.min_freq;
         if sub_post_eq_band_empty {
-            log::warn!(
+            log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "  Sub Post-EQ skipped: bass-route upper bound {:.1} Hz leaves no optimization band above min_freq {:.1} Hz after the 20 Hz guard band",
                 bass_route_upper_hz,
                 opt_config.min_freq,
@@ -3856,13 +3859,13 @@ fn optimize_home_cinema_with_sub(
                 .filter(|_| !routed_underfill_accepted)
                 .map(|(role, evidence)| (role, evidence.final_db))
             {
-                log::warn!(
+                log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                     "  Sub Post-EQ discarded: routed crossover underfill for '{}' is {:.3} dB",
                     role,
                     underfill_db,
                 );
             } else {
-                log::warn!(
+                log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                     "  Sub Post-EQ discarded: score {:.4} -> {:.4} or full-band useful output loss exceeded its budget",
                     pre,
                     post
@@ -3995,7 +3998,7 @@ fn optimize_home_cinema_with_sub(
                     .map(|initial| output::compute_eq_response(initial, &realized_data));
                 chain.final_curve = Some(realized_data);
             }
-            Err(error) => log::warn!(
+            Err(error) => log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "Could not reconstruct canonical home-cinema response for '{}': {}",
                 role,
                 error
@@ -4153,7 +4156,7 @@ fn optimize_home_cinema_with_sub(
             .filter(|plan| plan.is_deployable())
             .count();
         if deployed > 0 {
-            info!(
+            info!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "  Deployed per-sub low-pass to {deployed} sub driver(s) pre-sum (redirected-bass cutoff owned by drivers)"
             );
             bass_management_optimization
@@ -4208,7 +4211,7 @@ fn optimize_home_cinema_with_sub(
             (HashMap::new(), HashMap::new())
         };
     for (role, trim_db) in &post_dsp_input_trims {
-        info!(" Post-DSP input level trim '{}': {:+.2} dB", role, trim_db);
+        info!(target: BASS_MANAGEMENT_LOG_TARGET, " Post-DSP input level trim '{}': {:+.2} dB", role, trim_db);
     }
 
     // 8. Compute scores
@@ -4361,7 +4364,7 @@ fn optimize_home_cinema_with_sub(
             if underfill_error_role(&error.to_string()).is_none() {
                 return Err(error);
             }
-            log::warn!(
+            log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                 "Deferring candidate crossover rejection to final correction selection: {error}"
             );
             reconstruct_deployed_source_curves_unenforced(
@@ -4386,7 +4389,7 @@ fn optimize_home_cinema_with_sub(
                     })
                 }) =>
             {
-                log::warn!(
+                log::warn!(target: BASS_MANAGEMENT_LOG_TARGET,
                     "Final serialized routed replay rejected Post-EQ; restoring the pre-Post-EQ snapshot: {first_error}"
                 );
                 let names = channel_chains.keys().cloned().collect::<Vec<_>>();
@@ -4514,7 +4517,7 @@ fn optimize_home_cinema_with_sub(
     let avg_pre = pre_scores.iter().sum::<f64>() / pre_scores.len() as f64;
     let avg_post = post_scores.iter().sum::<f64>() / post_scores.len() as f64;
 
-    info!(
+    info!(target: BASS_MANAGEMENT_LOG_TARGET,
         "Average pre-score: {:.4}, post-score: {:.4}",
         avg_pre, avg_post
     );
@@ -4696,6 +4699,35 @@ mod post_dsp_level_tests {
             freq: frequencies,
             ..Curve::default()
         }
+    }
+
+    #[test]
+    fn common_post_eq_preserves_inherited_crossover_cancellation() {
+        let config = roomeq_model::RoomConfig::default();
+        let main = curve(0.0);
+        let mut bass = main.clone();
+        bass.phase.as_mut().unwrap().fill(160.0);
+        let before =
+            super::post_eq_crossover_cancellation(&config, "L", &main, &bass, 80.0).unwrap();
+        let filters = [math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            80.0,
+            48_000.0,
+            1.0,
+            6.0,
+        )];
+        let transfer =
+            roomeq_engine::response::compute_peq_complex_response(&filters, &main.freq, 48_000.0);
+        let main_after = roomeq_engine::response::apply_complex_response(&main, &transfer);
+        let bass_after = roomeq_engine::response::apply_complex_response(&bass, &transfer);
+        let after =
+            super::post_eq_crossover_cancellation(&config, "L", &main_after, &bass_after, 80.0)
+                .unwrap();
+        let sum_before = roomeq_engine::topology::complex_sum_mains(&[&main, &bass]);
+        let sum_after = roomeq_engine::topology::complex_sum_mains(&[&main_after, &bass_after]);
+        assert!((after.final_db - before.final_db).abs() < 1e-9);
+        assert!((sum_after.spl[2] - sum_before.spl[2] - 6.0).abs() < 1e-9);
+        assert!(!before.accepted && !after.accepted);
     }
 
     #[test]

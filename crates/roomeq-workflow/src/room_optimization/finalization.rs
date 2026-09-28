@@ -561,7 +561,6 @@ fn select_inner(
                 }
                 refresh_responses(&mut candidate, fs, dir)?;
                 refresh_final_reports(&mut candidate, config, fs, dir);
-                refresh_temporal_ir_evidence(&mut candidate, config, fs, dir);
                 room_optimization_result::apply_final_correction_safety_gate(
                     &mut candidate,
                     fs,
@@ -1076,7 +1075,6 @@ fn publish_baseline(
     verify_declared_physical_drive(&mut baseline, config, fs, dir)?;
     refresh_responses(&mut baseline, fs, dir)?;
     refresh_final_reports(&mut baseline, config, fs, dir);
-    refresh_temporal_ir_evidence(&mut baseline, config, fs, dir);
     if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
         // Candidate evidence must never be attached to the delivered fallback.
         report.acoustic_quality = None;

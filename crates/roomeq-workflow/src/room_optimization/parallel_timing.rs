@@ -50,6 +50,40 @@ pub(super) fn validated_sources(
     let drivers = chain.drivers.as_deref().unwrap_or_default();
     let mut array_names: Option<Vec<String>> = None;
     let sources: Vec<MeasurementSource> = match speaker {
+        SpeakerConfig::Single(_) => {
+            // Routed bass management synthesizes one MultiSub chain from
+            // separate physical outputs. Its owner is the first output ID,
+            // but acquisition timing must cover every contributing capture.
+            let outputs = config
+                .system
+                .as_ref()
+                .and_then(|system| system.subwoofers.as_ref())
+                .filter(|subs| subs.outputs.iter().any(|output| output.id == chain.channel))
+                .map(|subs| &subs.outputs)
+                .ok_or(
+                    "parallel waveform timing unavailable: unsupported source-to-driver mapping",
+                )?;
+            let mut sources = Vec::with_capacity(outputs.len());
+            for output in outputs {
+                let Some(SpeakerConfig::Single(source)) = config.speakers.get(&output.speaker)
+                else {
+                    return Err("parallel waveform timing unavailable: physical sub output requires a single capture".into());
+                };
+                sources.push(source.clone());
+            }
+            let names: std::collections::BTreeSet<_> =
+                outputs.iter().map(|output| &output.id).collect();
+            if names.len() != outputs.len()
+                || drivers.iter().any(|driver| {
+                    outputs
+                        .get(driver.index)
+                        .is_none_or(|output| output.id != driver.name)
+                })
+            {
+                return Err("parallel waveform timing unavailable: physical sub driver/source identity mismatch".into());
+            }
+            sources
+        }
         SpeakerConfig::Group(group) => group.measurements.clone(),
         SpeakerConfig::MultiSub(group) => group.subwoofers.clone(),
         SpeakerConfig::Dba(group) => {

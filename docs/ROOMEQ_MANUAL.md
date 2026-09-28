@@ -30,6 +30,12 @@ reference may itself be a synthesized sum. Independent FIR-kernel metrics remain
 Main-role and declared sub-output aliases resolve to their source configuration;
 conflicting mappings are refused. DBA uses the production front/rear aggregate
 branches, but timing admission covers every contributing source in both arrays.
+When separate single-capture sub outputs are grouped into one internal processing
+chain, timing validation resolves all declared outputs in driver-index order and
+checks each output ID. It does not mistake the chain's owning `Sub1` alias for
+the sole contributing capture. Repeated report refreshes retain errors in the
+waveform status but warn only when the replay failure changes; a recovered view
+allows a later recurrence to be reported again.
 Cardioid uses its front/rear individual branches. Supporting-source processing
 emits separate channels and is not a parallel-driver mapping in this gate.
 Joint per-driver FIR generation now uses the same admission check before design
@@ -513,6 +519,11 @@ subwoofer gain.
 
 ## Crossover cancellation and baseline acceptance
 
+Stereo systems with subwoofers share the home-cinema bass-management executor.
+The workflow announcement identifies the configured layout and physical sub
+count. Post-EQ decision logs use the shared `roomeq_workflow::bass_management`
+logging target.
+
 An explicit multi-sub `joint_optimization: true` request requires a prepared
 seat matrix and verified shared timing evidence. Missing evidence returns an
 error without substituting the detailed optimizer. Selecting legacy detailed
@@ -552,6 +563,17 @@ configured routing before automatic array/route optimization and EQ. For example
 and 10→11 dB fail. Each logical input is checked independently. The original
 baseline persists through every correction and safety stage; intermediate
 improvements never become a new baseline.
+
+Post-EQ decision logs separately compare the immediate input **without** this
+pass and the candidate **with** this pass: target shortfall, main/sub cancellation,
+combined objective, and main-only score. The frozen configured cancellation
+baseline is labelled separately. The reported percentage is the reduction in
+the target shortfall measured in dB, not a percentage change in pressure, power,
+or perceived loudness. Peak EQ gain and useful-output loss expose additional
+trade-offs, and every failed acceptance check is listed. The current Post-EQ
+target-shortfall gate remains an absolute 3 dB limit plus 0.05 dB tolerance;
+these diagnostics do not change acceptance. Common pre-route EQ can reduce a
+target deficit while leaving the relative main/sub cancellation unchanged.
 
 For multi-position measurements, baseline construction selects
 `optimizer.multi_seat.primary_seat` (default 0) from each main and sub source,

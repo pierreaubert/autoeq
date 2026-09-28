@@ -118,16 +118,10 @@ pub(super) fn process_branch(
     // measured tail continues to fall at its fitted rolloff; anything else
     // (rising tail, fewer than two points) keeps the previous flat
     // peak-hold assumption. This records measured magnitude behavior, never
-<<<<<<< HEAD
-    // extrapolated phase. Requiring an octave beyond the low-pass preserves
-    // crossover evidence; the actual DSP and omission budget must still make
-    // the tail negligible.
-=======
     // extrapolated phase. The fitted half-octave must sit at or above the
     // deployed low-pass corner so the slope characterizes stopband rolloff
     // rather than passband ripple; the actual DSP and omission budget must
     // still make the tail negligible.
->>>>>>> proposal-wp1-wp7
     let inferred = subwoofer_low_pass_hz
         .filter(|cutoff| {
             cutoff.is_finite() && *cutoff > 0.0 && endpoint >= std::f64::consts::SQRT_2 * cutoff
@@ -145,13 +139,7 @@ pub(super) fn process_branch(
                     raw.freq
                         .iter()
                         .zip(&raw.spl)
-<<<<<<< HEAD
-                        .filter(|(frequency, _)| {
-                            **frequency >= endpoint / std::f64::consts::SQRT_2
-                        })
-=======
                         .filter(|(frequency, _)| **frequency >= endpoint / std::f64::consts::SQRT_2)
->>>>>>> proposal-wp1-wp7
                         .map(|(_, spl)| *spl)
                         .fold(f64::NEG_INFINITY, f64::max),
                     None,
@@ -187,18 +175,12 @@ pub(super) fn process_branch(
                 "invalid upper-band acoustic bound for '{output}'"
             )));
         }
-<<<<<<< HEAD
-        if raw.freq.iter().zip(&raw.spl).any(|(f, spl)| {
-            *f >= low && *spl > bound.level_at_hz(*f) + 1e-9
-        }) {
-=======
         if raw
             .freq
             .iter()
             .zip(&raw.spl)
             .any(|(f, spl)| *f >= low && *spl > bound.level_at_hz(*f) + 1e-9)
         {
->>>>>>> proposal-wp1-wp7
             return Err(invalid(format!(
                 "upper-band acoustic bound contradicts measured '{output}' levels"
             )));
@@ -685,22 +667,9 @@ mod tests {
         // low-pass. Flat peak-hold puts 41.6 dB of omitted bound against a
         // 76 dB seat sum at 201.554078 Hz (ratio 0.0168, over the 0.1 dB
         // budget); the fitted rolloff puts 11.7 dB there (ratio 0.0006).
-<<<<<<< HEAD
-        let grid = ndarray::Array1::from_vec(vec![
-            20.0,
-            100.0,
-            199.951172,
-            201.554078,
-            1000.0,
-            16_000.0,
-        ]);
-        let freq =
-            ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 199.951172_f64.log10(), 64);
-=======
         let grid =
             ndarray::Array1::from_vec(vec![20.0, 100.0, 199.951172, 201.554078, 1000.0, 16_000.0]);
         let freq = ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 199.951172_f64.log10(), 64);
->>>>>>> proposal-wp1-wp7
         let spl = freq.mapv(|frequency| {
             if frequency <= 72.11 {
                 78.0
@@ -779,12 +748,7 @@ mod tests {
             phase: Some(ndarray::Array1::zeros(4)),
             ..Default::default()
         };
-<<<<<<< HEAD
-        let grid =
-            ndarray::Array1::from_vec(vec![20.0, 100.0, 199.951172, 1000.0, 16_000.0]);
-=======
         let grid = ndarray::Array1::from_vec(vec![20.0, 100.0, 199.951172, 1000.0, 16_000.0]);
->>>>>>> proposal-wp1-wp7
         let branch = process_branch(
             "sub",
             &raw,
@@ -816,12 +780,7 @@ mod tests {
             phase: Some(ndarray::Array1::zeros(3)),
             ..Default::default()
         };
-<<<<<<< HEAD
-        let grid =
-            ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0]);
-=======
         let grid = ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0]);
->>>>>>> proposal-wp1-wp7
         let declarations = HashMap::from([(
             "sub".to_owned(),
             vec![UpperBandAcousticBound {
@@ -846,13 +805,9 @@ mod tests {
         .err()
         .expect("a rising tail can never bound unmeasured output");
         assert!(
-<<<<<<< HEAD
-            error.to_string().contains("invalid upper-band acoustic bound"),
-=======
             error
                 .to_string()
                 .contains("invalid upper-band acoustic bound"),
->>>>>>> proposal-wp1-wp7
             "{error}"
         );
     }
@@ -865,12 +820,7 @@ mod tests {
             phase: Some(ndarray::Array1::zeros(4)),
             ..Default::default()
         };
-<<<<<<< HEAD
-        let grid =
-            ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0]);
-=======
         let grid = ndarray::Array1::from_vec(vec![20.0, 100.0, 250.0, 1000.0, 16_000.0]);
->>>>>>> proposal-wp1-wp7
         // At 250 Hz the declining bound allows 70 - 12*log2(250/200) = 66.1
         // dB, so a 68 dB measured point contradicts it.
         let declarations = HashMap::from([(

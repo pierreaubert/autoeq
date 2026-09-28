@@ -1,9 +1,15 @@
 # Unreleased
 
+- Accept routed main Post-EQ when target shortfall is at most 3.05 dB, or
+  improves by at least 20% and 1 dB against the immediate input. Protect the
+  main's requested target above twice crossover, and check incremental
+  cancellation without blaming common EQ for an inherited null. Final
+  selection compares candidates with and without optional main Post-EQ under
+  the existing electrical, output-loss, timing, and per-seat requirements.
 - Identify stereo bass management correctly in workflow logs. Post-EQ
   diagnostics now compare target shortfall, main/sub cancellation, and scores
   with and without the pass, distinguish the configured baseline, and list
-  every failed acceptance check. Acceptance thresholds are unchanged.
+  every active failed acceptance check.
 - Resolve parallel waveform timing against every declared physical sub output
   when bass management groups separate measurements. Preserve branch identity
   and shared capture timing checks, suppress unchanged waveform warnings, and

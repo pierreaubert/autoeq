@@ -246,6 +246,31 @@ pub(super) fn apply_final_correction_safety_gate(
                     )
                 })
                 .map(|curves| {
+                    // A common Post-EQ is designed for the routed sum around
+                    // crossover. Above that region, protect the configured
+                    // main target rather than penalizing its intended slope.
+                    if let Some(target) = result
+                        .channels
+                        .get(name)
+                        .filter(|chain| has_routed_post_eq(chain))
+                        .and_then(|chain| chain.target_curve.as_ref())
+                    {
+                        let target: roomeq_model::Curve = target.clone().into();
+                        return (
+                            roomeq_engine::group::target_error_score(
+                                &curves[0],
+                                &target,
+                                topology_band.0,
+                                topology_band.1,
+                            ),
+                            roomeq_engine::group::target_error_score(
+                                &curves[1],
+                                &target,
+                                topology_band.0,
+                                topology_band.1,
+                            ),
+                        );
+                    }
                     (
                         roomeq_engine::topology::compute_flat_loss(
                             &curves[0],
@@ -1702,6 +1727,22 @@ fn has_route_owned_bass_low_pass(chain: &ChannelDspChain) -> bool {
     })
 }
 
+fn has_routed_post_eq(chain: &ChannelDspChain) -> bool {
+    chain.plugins.iter().any(|plugin| {
+        plugin.plugin_type == "eq"
+            && plugin
+                .parameters
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                == Some("post_eq")
+            && plugin
+                .parameters
+                .get("room_eq_stage")
+                .and_then(serde_json::Value::as_str)
+                == Some("pre_route")
+    })
+}
+
 fn route_passband(
     chain: &ChannelDspChain,
     curve: &roomeq_model::Curve,
@@ -1739,7 +1780,19 @@ fn route_passband(
             .get("output")
             .and_then(serde_json::Value::as_str)
         {
-            Some("high") => low = low.max(frequency + 20.0),
+            Some("high") => {
+                // The routed sum owns the half-to-twice-crossover window.
+                // Common Post-EQ is screened there before insertion and by
+                // final native-seat replay. Its isolated main gate protects
+                // the response above that window; ordinary main correction
+                // retains the existing passband.
+                let floor = if has_routed_post_eq(chain) {
+                    2.0 * frequency
+                } else {
+                    frequency + 20.0
+                };
+                low = low.max(floor);
+            }
             Some("low") => high = high.min(frequency),
             _ => {}
         }
@@ -2478,6 +2531,79 @@ mod tests {
     use roomeq_engine::quality::CorrectionDecision;
     use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
+
+    #[test]
+    fn routed_post_eq_main_gate_protects_response_above_the_splice_window() {
+        let room = single_channel_room_result("L");
+        let mut chain = room.channels["L"].clone();
+        chain.plugins = vec![roomeq_engine::topology::mark_route_owned_plugin(
+            roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "high"),
+        )];
+        let initial = roomeq_model::Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 120.0, 160.0, 300.0, 1000.0, 2000.0],
+            spl: ndarray::Array1::from_elem(8, 80.0),
+            ..Default::default()
+        };
+        chain.target_curve = Some((&initial).into());
+        let mut post = initial.clone();
+        post.spl[3] += 10.0;
+        assert_eq!(
+            route_passband(&chain, &initial, (20.0, 2000.0)),
+            Some((100.0, 2000.0))
+        );
+        let ordinary = evaluate_passband_correction_acceptance(
+            &chain,
+            &initial,
+            &post,
+            &initial,
+            12,
+            (20.0, 2000.0),
+        )
+        .unwrap();
+        assert!(
+            ordinary.metrics.post_target_weighted_rms_db
+                > ordinary.metrics.pre_target_weighted_rms_db
+        );
+        chain
+            .plugins
+            .push(roomeq_engine::topology::mark_plugin_stage(
+                roomeq_engine::output::create_labeled_eq_plugin(&[], "post_eq"),
+                "pre_route",
+            ));
+        assert_eq!(
+            route_passband(&chain, &initial, (20.0, 2000.0)),
+            Some((160.0, 2000.0))
+        );
+        let splice = evaluate_passband_correction_acceptance(
+            &chain,
+            &initial,
+            &post,
+            &initial,
+            12,
+            (20.0, 2000.0),
+        )
+        .unwrap();
+        assert!(splice.metrics.post_target_weighted_rms_db < 1e-9);
+        post.spl[6] += 10.0;
+        let outside = evaluate_passband_correction_acceptance(
+            &chain,
+            &initial,
+            &post,
+            &initial,
+            12,
+            (20.0, 2000.0),
+        )
+        .unwrap();
+        assert!(
+            outside.metrics.post_target_weighted_rms_db
+                > outside.metrics.pre_target_weighted_rms_db
+        );
+        chain.plugins[1].parameters["room_eq_stage"] = serde_json::json!("post_route");
+        assert_eq!(
+            route_passband(&chain, &initial, (20.0, 2000.0)),
+            Some((100.0, 2000.0))
+        );
+    }
 
     #[test]
     fn baseline_restoration_strips_marked_padding_but_keeps_structural_delays() {

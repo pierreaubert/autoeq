@@ -8,6 +8,31 @@ pub const MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB: f64 = 3.0;
 /// The objective still penalizes every amount above the nominal 3 dB limit.
 pub const CROSSOVER_UNDERFILL_ACCEPTANCE_TOLERANCE_DB: f64 = 0.05;
 
+/// Minimum relative reduction in dB shortfall for a still-imperfect Post-EQ pass.
+///
+/// This product policy admits useful partial correction; it is not a loudness
+/// percentage or a demonstrated audibility threshold.
+pub const POST_EQ_MIN_UNDERFILL_REDUCTION: f64 = 0.20;
+/// Minimum absolute improvement required alongside the relative Post-EQ rule.
+///
+/// One dB prevents small numerical or already-negligible changes from passing
+/// solely because their percentage is large.
+pub const POST_EQ_MIN_UNDERFILL_IMPROVEMENT_DB: f64 = 1.0;
+
+/// Accept a good residual or a material improvement over the immediate input.
+///
+/// Both depths must be finite and nonnegative. Above the absolute quality
+/// target, require at least 20% and 1 dB reduction in the shortfall measured
+/// in dB. This stage policy does not replace final output or seat checks.
+pub fn post_eq_underfill_is_acceptable(before_db: f64, after_db: f64) -> bool {
+    if !before_db.is_finite() || !after_db.is_finite() || before_db < 0.0 || after_db < 0.0 {
+        return false;
+    }
+    bass_management_underfill_is_acceptable(after_db)
+        || (before_db - after_db >= POST_EQ_MIN_UNDERFILL_IMPROVEMENT_DB
+            && after_db <= before_db * (1.0 - POST_EQ_MIN_UNDERFILL_REDUCTION))
+}
+
 pub fn bass_management_underfill_is_acceptable(underfill_db: f64) -> bool {
     underfill_db
         <= MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB + CROSSOVER_UNDERFILL_ACCEPTANCE_TOLERANCE_DB
@@ -335,6 +360,35 @@ pub fn select_bass_management_crossover_type(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn post_eq_underfill_accepts_absolute_or_material_relative_improvement() {
+        for (before, after, accepted) in [
+            (3.05, 3.05, true),
+            (3.051, 3.051, false),
+            (5.0, 4.0, true),
+            (5.0, 4.000001, false),
+            (10.0, 8.0, true),
+            (10.0, 8.000001, false),
+            (4.0, 3.1, false),
+            (4.0, 3.2, false),
+            (0.0, 0.0, true),
+            (10.160898695740133, 3.950030168390911, true),
+            (20.113734419323308, 6.765109022500242, true),
+            (10.0, 10.0, false),
+            (10.0, 11.0, false),
+        ] {
+            assert_eq!(
+                post_eq_underfill_is_acceptable(before, after),
+                accepted,
+                "{before} -> {after}"
+            );
+        }
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0] {
+            assert!(!post_eq_underfill_is_acceptable(invalid, 0.0));
+            assert!(!post_eq_underfill_is_acceptable(10.0, invalid));
+        }
+    }
     use ndarray::Array1;
 
     fn curve_with_levels(levels: impl Fn(f64) -> f64) -> Curve {

@@ -459,6 +459,7 @@ fn select_inner(
         .map(|baseline| joint_drive::proposals(baseline, config))
         .transpose()?
         .unwrap_or_default();
+    let without_post_eq = without_common_post_eq(&original);
     let parameters: Vec<_> = parameters
         .into_iter()
         .map(|(main, sub, mode, cut)| (main, sub, mode, cut, None))
@@ -469,14 +470,28 @@ fn select_inner(
                 .map(|(index, _)| (1.0, 1.0, "output", 0.0, Some(index))),
         )
         .collect();
+    let parameters: Vec<_> = parameters
+        .iter()
+        .copied()
+        .map(|parameters| (parameters, false))
+        .chain(without_post_eq.iter().flat_map(|_| {
+            parameters
+                .iter()
+                .copied()
+                .filter(|parameters| parameters.4.is_none())
+                .map(|parameters| (parameters, true))
+        }))
+        .collect();
     let mut prepared_strengths = None;
     let mut prepared = Err(String::new());
-    for &(strength, sub_strength, attenuation_mode, drive_cut_db, joint_trial) in &parameters {
+    for &((strength, sub_strength, attenuation_mode, drive_cut_db, joint_trial), omit_post_eq) in
+        &parameters
+    {
         if config.optimizer.finalization.subwoofer_limiter && attenuation_mode != "output" {
             continue;
         }
-        if prepared_strengths != Some((strength, sub_strength, joint_trial)) {
-            prepared_strengths = Some((strength, sub_strength, joint_trial));
+        if prepared_strengths != Some((strength, sub_strength, joint_trial, omit_post_eq)) {
+            prepared_strengths = Some((strength, sub_strength, joint_trial, omit_post_eq));
             let trial_source = joint_trial
                 .map(|index| {
                     joint_trials[index].apply(
@@ -487,7 +502,15 @@ fn select_inner(
                 })
                 .transpose()?;
             prepared = prepare_candidate(
-                trial_source.as_ref().unwrap_or(&original),
+                trial_source.as_ref().unwrap_or_else(|| {
+                    if omit_post_eq {
+                        without_post_eq
+                            .as_ref()
+                            .expect("omitted Post-EQ trial has a source")
+                    } else {
+                        &original
+                    }
+                }),
                 (strength, sub_strength),
                 &sub_roles,
                 config,
@@ -812,18 +835,29 @@ fn select_inner(
                         / quality.final_seats.len().max(1) as f64
                         <= 0.05
                 });
-            stop_after_trial = policy.physical_drive_weight == 0.0
+            // An optional splice EQ must compete with its absence under the
+            // same final electrical and native-seat checks, even if the first
+            // complete candidate passes. Keep the existing shortcut otherwise.
+            stop_after_trial = without_post_eq.is_none()
+                && policy.physical_drive_weight == 0.0
                 && ((intact_full_correction && (all_seats_improved || !allow_role_refinement))
                     || residual_is_negligible);
             Ok(score)
         })();
+        let trial_id = if let Some(index) = joint_trial {
+            joint_trials[index].id()
+        } else if drive_cut_db == 0.0 {
+            format!("correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}")
+        } else {
+            format!(
+                "correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}_drive_cut_{drive_cut_db:.5}"
+            )
+        };
         trials.push(StageCheck {
-            id: if let Some(index) = joint_trial {
-                joint_trials[index].id()
-            } else if drive_cut_db == 0.0 {
-                format!("correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}")
+            id: if omit_post_eq {
+                format!("{trial_id}_without_post_eq")
             } else {
-                format!("correction_strength_{strength:.5}_sub_{sub_strength:.5}_{attenuation_mode}_drive_cut_{drive_cut_db:.5}")
+                trial_id
             },
             // Rejected alternatives are diagnostic search outcomes. The
             // selected graph has separate enforced final safety evidence.
@@ -844,6 +878,7 @@ fn select_inner(
                     advisories: vec![
                         format!("selected_strength={strength}"),
                         format!("selected_sub_strength={sub_strength}"),
+                        format!("selected_without_post_eq={omit_post_eq}"),
                         "attenuation_included_in_final_acoustic_acceptance".into(),
                     ],
                     checks: Vec::new(),
@@ -902,6 +937,48 @@ fn select_inner(
     });
     *result = selected;
     Ok(())
+}
+
+/// Keep prior correction as an alternative to the optional routed splice EQ.
+fn without_common_post_eq(original: &RoomOptimizationResult) -> Option<RoomOptimizationResult> {
+    original
+        .metadata
+        .bass_management
+        .as_ref()?
+        .routing_graph
+        .as_ref()?;
+    let mut candidate = original.clone();
+    let mut changed = false;
+    for (name, chain) in &mut candidate.channels {
+        let before = chain.plugins.len();
+        chain.plugins.retain(|plugin| {
+            !(plugin.plugin_type == "eq"
+                && plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("post_eq")
+                && plugin
+                    .parameters
+                    .get("room_eq_stage")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("pre_route"))
+        });
+        if chain.plugins.len() != before {
+            changed = true;
+            if let Some(channel) = candidate.channel_results.get_mut(name) {
+                // Routed mains retain this pass in their biquad summary. The
+                // preceding correction remains in its serialized plugins.
+                channel.biquads.clear();
+                // Evidence has no stage identity; retain it as history rather
+                // than claim its complete parameter set is still emitted.
+                for run in &mut channel.optimizer_evidence {
+                    run.selected_for_output = false;
+                }
+            }
+        }
+    }
+    changed.then_some(candidate)
 }
 
 /// Crossover residual plus responsible branches on a published baseline.
@@ -1895,6 +1972,82 @@ fn refinement_delay_reference(delay_samples: f64, support: usize, fs: f64) -> Re
 mod tests {
     use super::*;
     use roomeq_model::StageStatus;
+
+    #[test]
+    fn without_post_eq_retains_prior_eq_routing_and_sub_correction() {
+        let (mut result, mut config) = fixture();
+        config.system = Some(
+            serde_json::from_value(serde_json::json!({
+                "model": "stereo", "speakers": {"L": "L", "R": "R"},
+                "subwoofers": {"strategy": "mso", "crossover": "xo",
+                    "outputs": [{"id": "Sub1", "speaker": "sub"}]}
+            }))
+            .unwrap(),
+        );
+        config.crossovers = Some(
+            serde_json::from_value(serde_json::json!({
+                "xo": {"type": "LR24", "frequency": 80.0}
+            }))
+            .unwrap(),
+        );
+        result.metadata.bass_management =
+            roomeq_engine::home_cinema::bass_management_report(&config, None, false);
+        assert!(
+            result
+                .metadata
+                .bass_management
+                .as_ref()
+                .unwrap()
+                .routing_graph
+                .is_some()
+        );
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            80.0,
+            48_000.0,
+            1.0,
+            6.0,
+        );
+        let prior = roomeq_engine::topology::mark_plugin_stage(
+            roomeq_engine::output::create_labeled_eq_plugin(
+                std::slice::from_ref(&filter),
+                "room_eq_correction",
+            ),
+            "pre_route",
+        );
+        let crossover = roomeq_engine::topology::mark_route_owned_plugin(
+            roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "high"),
+        );
+        let optional = roomeq_engine::topology::mark_plugin_stage(
+            roomeq_engine::output::create_labeled_eq_plugin(
+                std::slice::from_ref(&filter),
+                "post_eq",
+            ),
+            "pre_route",
+        );
+        let physical = roomeq_engine::topology::mark_plugin_stage(
+            roomeq_engine::output::create_labeled_eq_plugin(
+                std::slice::from_ref(&filter),
+                "post_eq",
+            ),
+            "post_route",
+        );
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![prior.clone(), crossover.clone(), optional, physical.clone()];
+        result.channel_results.get_mut("L").unwrap().biquads = vec![filter];
+        let before = serde_json::to_value(&result.channels).unwrap();
+        let candidate =
+            without_common_post_eq(&result).expect("common Post-EQ gets an explicit alternative");
+        assert_eq!(
+            serde_json::to_value(&candidate.channels["L"].plugins).unwrap(),
+            serde_json::to_value(vec![prior, crossover, physical]).unwrap()
+        );
+        assert!(candidate.channel_results["L"].biquads.is_empty());
+        assert_eq!(serde_json::to_value(&result.channels).unwrap(), before);
+        assert!(without_common_post_eq(&candidate).is_none());
+        result.metadata.bass_management = None;
+        assert!(without_common_post_eq(&result).is_none());
+    }
 
     fn benefit_seat(
         partition: &str,

@@ -570,10 +570,24 @@ combined objective, and main-only score. The frozen configured cancellation
 baseline is labelled separately. The reported percentage is the reduction in
 the target shortfall measured in dB, not a percentage change in pressure, power,
 or perceived loudness. Peak EQ gain and useful-output loss expose additional
-trade-offs, and every failed acceptance check is listed. The current Post-EQ
-target-shortfall gate remains an absolute 3 dB limit plus 0.05 dB tolerance;
-these diagnostics do not change acceptance. Common pre-route EQ can reduce a
-target deficit while leaving the relative main/sub cancellation unchanged.
+trade-offs, and every failed acceptance check is listed.
+
+The optional Post-EQ target-shortfall gate accepts either a result at or below
+3.05 dB, or a reduction of at least 20% **and** at least 1 dB against the immediate
+input. These are fixed product thresholds, not audibility thresholds. The main
+response above twice the crossover frequency must not regress: this check uses
+error against the requested target when one is available, otherwise flatness.
+When cancellation screening is active, this pass must not worsen cancellation
+by more than 0.05 dB against its immediate input. The final routed cancellation
+check still uses the frozen configured baseline described above. Common
+pre-route EQ can reduce target shortfall while leaving relative main/sub
+cancellation unchanged.
+
+Final selection evaluates candidates both with and without an accepted optional
+main Post-EQ pass. Removing this pass preserves preceding EQ, routing, and
+physical-sub correction. Electrical drive, useful-output, temporal, and retained
+seat checks still apply. Passing the relative target rule does not guarantee
+that the optional pass will be exported.
 
 For multi-position measurements, baseline construction selects
 `optimizer.multi_seat.primary_seat` (default 0) from each main and sub source,

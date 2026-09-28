@@ -286,6 +286,15 @@ its fixed pre-optimization routing baseline: 10→4 dB passes with an
 `improved_residual_cancellation` advisory; 10→10 and 10→11 dB fail. Passing this
 check does not bypass electrical headroom, target-quality, or multi-seat checks.
 
+The optional common main Post-EQ uses a separate fixed target-shortfall rule:
+accept at or below 3.05 dB, or improve by at least 20% and at least 1 dB against
+the immediate input. These constants have no configuration fields. Its main
+response above twice the crossover must not regress against the requested
+target (or flatness without a target). Active cancellation screening also
+rejects regression greater than 0.05 dB against that immediate input. Final
+selection compares alternatives with and without the optional pass under the
+same electrical and retained-seat acceptance requirements.
+
 The baseline is captured from the measurements before automatic array alignment,
 route optimization, level alignment, and EQ. Configured crossover ranges use
 their geometric centre and automatic filter types use the first search candidate;

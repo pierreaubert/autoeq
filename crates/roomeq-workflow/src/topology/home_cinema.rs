@@ -3652,20 +3652,51 @@ fn optimize_home_cinema_with_sub(
         // verdict is arbitrary; screen Post-EQ on its mains and output
         // preservation instead of rejecting corrections on luck.
         let cancellation_screened = !crossover_timing_refused(Some(&bass_management_optimization));
-        let cancellation_accepted =
-            !cancellation_screened || cancellation_evidence.as_ref().is_some_and(|e| e.accepted);
-        let target_accepted = target_underfill_db
-            .is_none_or(roomeq_engine::topology::bass_management_underfill_is_acceptable);
-        // The splice objective above scores the predicted mains+bass sum, but
-        // the published channel score — and the final safety gate — judge the
-        // mains chain alone. A candidate that improves the predicted sum while
-        // damaging the mains response would be reverted wholesale downstream,
-        // taking the main correction with it. Require the mains published
-        // score not to regress so a harmful Post-EQ is dropped instead.
+        // Common pre-route EQ inherits the incoming cancellation. Screen its
+        // incremental effect here; final routed replay retains the original
+        // configured-baseline policy for the complete correction.
+        let cancellation_accepted = !cancellation_screened
+            || cancellation_before_post_eq
+                .as_ref()
+                .zip(cancellation_evidence.as_ref())
+                .is_some_and(|(before, after)| {
+                    before.final_db.is_finite()
+                        && after.final_db.is_finite()
+                        && after.final_db
+                            <= before.final_db + roomeq_model::CROSSOVER_CANCELLATION_TOLERANCE_DB
+                });
+        let target_accepted = match (pre_target_underfill_db, target_underfill_db) {
+            (Some(before), Some(after)) => {
+                roomeq_engine::topology::post_eq_underfill_is_acceptable(before, after)
+            }
+            (None, None) => prepared_target.is_none(),
+            _ => false,
+        };
+        // Judge the crossover on its delivered main-plus-bass sum. The
+        // isolated main must preserve its response above the splice window,
+        // where the common EQ should not trade away unrelated correction.
         let main_pre_score = compute_flat_loss(main_curve, role_xover_freq, main_post_max_freq);
         let main_post_score =
             compute_flat_loss(&main_curve_after, role_xover_freq, main_post_max_freq);
-        let mains_preserved = main_post_score <= main_pre_score + 1e-6;
+        let main_protected_min_hz = role_xover_freq * 2.0;
+        let protected_score = |curve: &Curve| {
+            prepared_target.as_ref().map_or_else(
+                || compute_flat_loss(curve, main_protected_min_hz, main_post_max_freq),
+                |target| {
+                    roomeq_engine::group::target_error_score(
+                        curve,
+                        target,
+                        main_protected_min_hz,
+                        main_post_max_freq,
+                    )
+                },
+            )
+        };
+        let main_protected_pre = protected_score(main_curve);
+        let main_protected_post = protected_score(&main_curve_after);
+        let mains_preserved = main_protected_pre.is_finite()
+            && main_protected_post.is_finite()
+            && main_protected_post <= main_protected_pre + 1e-6;
         let output_loss = post_eq_useful_output_loss(
             &post_curve,
             &post_curve_after,
@@ -3683,9 +3714,15 @@ fn optimize_home_cinema_with_sub(
         // the relative cancellation already present in that input.
         let failed_gates: Vec<_> = [
             (post < pre, "combined_objective_not_improved"),
-            (cancellation_accepted, "cancellation_vs_configured_baseline"),
-            (target_accepted, "absolute_target_shortfall"),
-            (mains_preserved, "main_only_score_regressed"),
+            (
+                cancellation_accepted,
+                "cancellation_regressed_vs_without_post_eq",
+            ),
+            (
+                target_accepted,
+                "target_shortfall_not_good_or_materially_improved",
+            ),
+            (mains_preserved, "main_score_outside_crossover_regressed"),
             (output_preserved, "useful_output_loss"),
         ]
         .into_iter()
@@ -3717,7 +3754,7 @@ fn optimize_home_cinema_with_sub(
         let decision = if accepted { "accepted" } else { "discarded" };
         log::log!(target: BASS_MANAGEMENT_LOG_TARGET,
             if accepted { log::Level::Info } else { log::Level::Warn },
-            "{role} Post-EQ {decision}: without/with this pass: target_shortfall_db={target_without}/{target_with}, target_shortfall_db_reduction_pct={target_reduction_pct}, cancellation_db={cancellation_without}/{cancellation_with}, combined_objective={pre:.6}/{post:.6}, main_only_score={main_pre_score:.6}/{main_post_score:.6}; configured_baseline_cancellation_db={configured_baseline}; cancellation_screened={cancellation_screened}, cancellation_limit_db={cancellation_limit_db:.3}, target_limit_db={target_limit_db:.3} (both limits allow 0.05 dB tolerance); useful_output_loss_db={output_loss:.6}, output_loss_limit_db={output_loss_limit_db:.6}, peak_eq_gain_db={peak_eq_gain_db:.6}; failed_gates={failed_gates:?}"
+            "{role} Post-EQ {decision}: without/with this pass: target_shortfall_db={target_without}/{target_with}, target_shortfall_db_reduction_pct={target_reduction_pct}, cancellation_db={cancellation_without}/{cancellation_with}, combined_objective={pre:.6}/{post:.6}, main_only_score={main_pre_score:.6}/{main_post_score:.6}, main_score_above_{main_protected_min_hz:.1}_hz={main_protected_pre:.6}/{main_protected_post:.6}; configured_baseline_cancellation_db={configured_baseline}; cancellation_screened={cancellation_screened}, configured_cancellation_limit_db={cancellation_limit_db:.3}, target_limit_db={target_limit_db:.3}+0.05_or_20pct_and_1dB_improvement; useful_output_loss_db={output_loss:.6}, output_loss_limit_db={output_loss_limit_db:.6}, peak_eq_gain_db={peak_eq_gain_db:.6}; failed_gates={failed_gates:?}"
         );
         if accepted {
             optimizer_evidence_by_channel

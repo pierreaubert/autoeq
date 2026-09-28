@@ -215,7 +215,6 @@ fn empty_room_config() -> RoomConfig {
         optimizer: Default::default(),
         provenance: Default::default(),
         recording_config: None,
-        measured_impulse_responses: Default::default(),
         ctc: None,
         reporting: None,
         cea2034_cache: None,

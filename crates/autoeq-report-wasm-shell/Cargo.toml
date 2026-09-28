@@ -1,0 +1,37 @@
+[package]
+name = "autoeq-report-wasm-shell"
+version = "0.5.0"
+edition = "2024"
+description = "WASM export shell (cdylib) for the AutoEQ 2D report renderer"
+license = "GPL-3.0-or-later"
+
+# cdylib-only is load-bearing: this crate must never gain an rlib that host
+# code links. The release profile sets panic="abort" while test targets use
+# unwind, so every host-linked lib is built twice (one unit per panic
+# strategy); a cdylib+rlib crate assigns both units identical output
+# filenames, and parallel rustc invocations race on them (cargo#6313),
+# which flakes `cargo test --release` with E0277/E0463/panic-strategy
+# errors. Keep the Rust API in autoeq-report-wasm (rlib) and only the
+# wasm-bindgen exports here; nothing may depend on this crate.
+[lib]
+crate-type = ["cdylib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+autoeq-report-wasm = { workspace = true }
+serde_json = { workspace = true }
+# The wasm-bindgen stack also compiles on the host (DOM APIs stub out), so
+# the shell stays fully type-checked by plain `cargo check` / `cargo test`.
+wasm-bindgen = "=0.2.128"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "TextMetrics",
+    "console",
+] }

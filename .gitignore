@@ -29,6 +29,8 @@ _site
 !docs/ROOMEQ_INCREMENTAL_PLAN.md
 !docs/ARCHITECTURE.md
 !crates/*/ARCHITECTURE.md
+!crates/*/README.md
+!crates/*/CHANGELOG.md
 
 # python
 __pycache__

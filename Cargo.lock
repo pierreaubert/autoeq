@@ -444,8 +444,16 @@ version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
  "gpui-d3rs",
- "js-sys",
  "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "autoeq-report-wasm-shell"
+version = "0.5.0"
+dependencies = [
+ "autoeq-report-wasm",
+ "js-sys",
  "serde_json",
  "wasm-bindgen",
  "web-sys",

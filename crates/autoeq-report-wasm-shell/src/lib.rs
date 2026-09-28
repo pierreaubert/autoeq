@@ -1,9 +1,18 @@
-//! WASM exports for the default 2D report renderer.
+//! WASM export shell for the default 2D report renderer.
 //!
 //! The HTML shell inlines the generated glue plus the base64 `.wasm` and
-//! drives these three functions: [`render_section`], [`legend_json`],
-//! [`toggle_series`]. All layout math lives in the shared [`crate::draw`]
-//! core (d3rs scales/geometry).
+//! drives these functions: [`render_section`], [`legend_json`],
+//! [`toggle_series`], plus [`last_error`] and [`schema_version`]. All layout
+//! math lives in the shared [`autoeq_report_wasm::draw`] core (d3rs
+//! scales/geometry).
+//!
+//! This crate is `cdylib`-only on purpose: the release profile sets
+//! `panic = "abort"` while test targets use `unwind`, so a `cdylib` + `rlib`
+//! crate that host code links is built twice with identical output filenames
+//! and parallel rustc invocations race on them (cargo#6313), flaking
+//! `cargo test --release`. The Rust API stays in `autoeq-report-wasm`
+//! (rlib); only the `wasm-bindgen` exports live here, and nothing may
+//! depend on this crate (see `Cargo.toml`).
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
@@ -11,8 +20,10 @@ use std::sync::{Mutex, OnceLock};
 use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
-use crate::draw::{Ctx, DrawMeta, LegendEntry, TextAlign, draw_bar, draw_figure, draw_sankey};
-use crate::schema::{SCHEMA_VERSION, Section};
+use autoeq_report_wasm::draw::{
+    Ctx, DrawMeta, LegendEntry, TextAlign, draw_bar, draw_figure, draw_sankey,
+};
+use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
 
 /// Retained per-canvas document for legend toggles.
 struct Retained {
@@ -99,11 +110,11 @@ impl Ctx for CanvasCtx {
         let _ = self.ctx.fill_text(text, x, y);
     }
     fn fill_text_rotated(&mut self, text: &str, x: f64, y: f64, angle_deg: f64, align: TextAlign) {
-        let _ = self.ctx.save();
+        self.ctx.save();
         let _ = self.ctx.translate(x, y);
         let _ = self.ctx.rotate(angle_deg * std::f64::consts::PI / 180.0);
         self.fill_text(text, 0.0, 0.0, align);
-        let _ = self.ctx.restore();
+        self.ctx.restore();
     }
     fn text_width(&mut self, text: &str) -> f64 {
         self.ctx
@@ -120,14 +131,14 @@ fn canvas_by_id(id: &str) -> Option<HtmlCanvasElement> {
 }
 
 fn draw_error(canvas_id: &str, msg: &str) {
-    if let Some(canvas) = canvas_by_id(canvas_id) {
-        if let Some(mut backend) = CanvasCtx::new(&canvas, 600.0, 80.0, 1.0) {
-            backend.set_fill("#ffffff");
-            backend.fill_rect(0.0, 0.0, 600.0, 80.0);
-            backend.set_fill("#b00020");
-            backend.set_font("13px system-ui, sans-serif");
-            backend.fill_text(msg, 12.0, 30.0, TextAlign::Left);
-        }
+    if let Some(canvas) = canvas_by_id(canvas_id)
+        && let Some(mut backend) = CanvasCtx::new(&canvas, 600.0, 80.0, 1.0)
+    {
+        backend.set_fill("#ffffff");
+        backend.fill_rect(0.0, 0.0, 600.0, 80.0);
+        backend.set_fill("#b00020");
+        backend.set_font("13px system-ui, sans-serif");
+        backend.fill_text(msg, 12.0, 30.0, TextAlign::Left);
     }
     web_sys::console::error_1(&JsValue::from_str(&format!("report2d/{canvas_id}: {msg}")));
 }
@@ -172,7 +183,11 @@ pub fn render_section(canvas_id: &str, section_json: &str, w: f64, h: f64, dpr: 
 pub fn legend_json(canvas_id: &str) -> String {
     let entries = state()
         .lock()
-        .map(|map| map.get(canvas_id).map(|r| r.legend.clone()).unwrap_or_default())
+        .map(|map| {
+            map.get(canvas_id)
+                .map(|r| r.legend.clone())
+                .unwrap_or_default()
+        })
         .unwrap_or_default();
     let mut out = String::from("[");
     for (i, e) in entries.iter().enumerate() {
@@ -213,11 +228,9 @@ pub fn toggle_series(canvas_id: &str, idx: usize) -> i32 {
                 .map(|mut map| {
                     map.get_mut(canvas_id)
                         .and_then(|r| match &mut r.section {
-                            Section::Figure { figure: f, .. } => {
-                                f.series.get_mut(idx).map(|s| {
-                                    s.visible = !s.visible;
-                                })
-                            }
+                            Section::Figure { figure: f, .. } => f.series.get_mut(idx).map(|s| {
+                                s.visible = !s.visible;
+                            }),
                             _ => None,
                         })
                         .is_some()
@@ -326,10 +339,10 @@ fn rerender(canvas_id: &str, w: f64, h: f64, dpr: f64) -> i32 {
         }
         Section::Html { .. } => DrawMeta::default(),
     };
-    if let Ok(mut map) = state().lock() {
-        if let Some(r) = map.get_mut(canvas_id) {
-            r.legend = meta.legend;
-        }
+    if let Ok(mut map) = state().lock()
+        && let Some(r) = map.get_mut(canvas_id)
+    {
+        r.legend = meta.legend;
     }
     1
 }
@@ -350,4 +363,23 @@ fn draw_section(backend: &mut CanvasCtx, section: &Section, w: f64, h: f64) -> D
 #[wasm_bindgen]
 pub fn schema_version() -> String {
     SCHEMA_VERSION.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use autoeq_report_wasm::schema::SCHEMA_VERSION;
+
+    // Host-runnable exports: miss paths never touch the DOM.
+    #[test]
+    fn exports_match_schema() {
+        assert_eq!(schema_version(), SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn unknown_canvas_answers_empty() {
+        assert_eq!(legend_json("no-such-canvas"), "[]");
+        assert_eq!(toggle_series("no-such-canvas", 0), 0);
+        assert_eq!(last_error(), "");
+    }
 }

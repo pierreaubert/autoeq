@@ -1,5 +1,20 @@
 # Unreleased
 
+- Fix flaky `just ntest` (`cargo test --release`) failures: split the 2D
+  renderer WASM exports out of `autoeq-report-wasm` into the new
+  `cdylib`-only `autoeq-report-wasm-shell` crate. The release profile sets
+  `panic = "abort"` while test targets use `unwind`, so the old
+  `cdylib` + `rlib` crate was built twice with identical output filenames
+  and parallel rustc invocations raced on them (cargo#6313), surfacing as
+  `E0277`/`E0463`/panic-strategy errors. `just report-dist` now builds the
+  shell crate; the checked-in `report2d` bundle exports are unchanged.
+- Fix three `roomeq_admission_correction` failures hidden behind that
+  flake: their report assertions searched rendered HTML for literal
+  `<section class="...">` markers, but reports embed sections as a JSON
+  payload (quotes escaped) since the Plotly→WASM migration. The scripts
+  now decode the embedded `report-payload` JSON (the `SCHEMA.md`
+  contract, same pattern as `scripts/test_report.py`) and assert
+  section order/content on the decoded sections.
 - Add claim-level reporting to every RoomEQ output bundle:
   `metadata.playback_summary` restates the shipped outcome, the
   training-seat counts behind it, the worst seat, the modeled

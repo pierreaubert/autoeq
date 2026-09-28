@@ -5,9 +5,11 @@ edition = "2024"
 description = "HTML+WASM report renderer for AutoEQ (Plotly replacement, gpui-toolkit based)"
 license = "GPL-3.0-or-later"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
+# Plain rlib: the cdylib shell lives in autoeq-report-wasm-shell. A
+# cdylib+rlib crate linked by host code is built twice under
+# `cargo test --release` (panic=abort vs unwind units) with identical
+# output filenames, and parallel rustc invocations race on them
+# (cargo#6313). Keep it that way.
 [lints]
 workspace = true
 
@@ -16,16 +18,3 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.22"
 d3rs = { package = "gpui-d3rs", path = "../../../gpui-toolkit/crates/gpui-d3rs", version = "0.9", default-features = false }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "=0.2.128"
-js-sys = "0.3"
-web-sys = { version = "0.3", features = [
-    "Window",
-    "Document",
-    "Element",
-    "HtmlCanvasElement",
-    "CanvasRenderingContext2d",
-    "TextMetrics",
-    "console",
-] }

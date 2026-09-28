@@ -32,6 +32,9 @@
       "autoeq-plot",
       "autoeq-workflow"
     ],
+    "autoeq-report-wasm-shell": [
+      "autoeq-report-wasm"
+    ],
     "roomeq-model": [
       "autoeq-core"
     ],
@@ -106,6 +109,7 @@
     "autoeq-measurements": "cargo test -p autoeq-measurements --lib",
     "autoeq-optim": "cargo test -p autoeq-optim --lib",
     "autoeq-plot": "cargo test -p autoeq-plot --lib",
+    "autoeq-report-wasm-shell": "cargo test -p autoeq-report-wasm-shell --lib",
     "autoeq-workflow": "cargo test -p autoeq-workflow --lib",
     "roomeq-analysis": "cargo test -p roomeq-analysis --lib",
     "roomeq-cli": "cargo test -p roomeq-cli --lib",

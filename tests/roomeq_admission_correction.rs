@@ -1128,12 +1128,21 @@ fn roadmap_correction_admission_report_binds_production_payload() {
     // Python independently recomputes the digest from the actual serialized
     // public output; it does not receive an oracle pass flag from Rust.
     let script = r#"
-import copy, json, os, sys, tempfile
+import copy, json, os, re, sys, tempfile
 from pathlib import Path
 from scripts.src.payload_binding import verify_payload_binding
 from scripts.src.correction_explanation import correction_explanation_html
 from scripts.src.loaders import load_roomeq_json
 from scripts.src.report import create_html_report, create_comparison_html_report
+def payload_html_sections(rendered):
+    match = re.search(r'<script id="report-payload" type="application/json">(.*?)</script>', rendered, re.S)
+    assert match, 'report payload script tag missing'
+    return [s.get('html', '') for s in json.loads(match.group(1))['sections'] if s.get('kind') == 'html']
+def section_index(sections, marker):
+    for i, html in enumerate(sections):
+        if marker in html:
+            return i
+    raise AssertionError(f'section marker missing from report payload: {marker}')
 data = json.load(sys.stdin)
 valid, reason, _ = verify_payload_binding(data)
 assert valid, reason
@@ -1163,15 +1172,16 @@ with tempfile.TemporaryDirectory(dir=os.environ['ROOMEQ_TEST_TMP_ROOT']) as dire
     report_path = root / 'report.html'
     create_html_report(loaded, report_path, result_path)
     rendered = report_path.read_text()
-    assert rendered.index('<section class="playback-status"') < rendered.index('<section class="correction-explanation"')
+    sections = payload_html_sections(rendered)
+    assert section_index(sections, '<section class="playback-status"') < section_index(sections, '<section class="correction-explanation"')
     assert 'Delivered payload and referenced resource bytes verified' in rendered
-    assert rendered.index('<section class="correction-explanation"') < rendered.index('<section class="acceptance-views"')
+    assert section_index(sections, '<section class="correction-explanation"') < section_index(sections, '<section class="acceptance-views"')
     assert 'General magnitude' in rendered
     create_comparison_html_report([('original', loaded), ('mutated', changed)], root / 'comparison.html')
     compared = (root / 'comparison.html').read_text()
     assert 'Delivered payload changed' in compared
     assert 'Not approved for playback' in compared
-assert compared.count('<section class="acceptance-views"') == 2
+assert sum('<section class="acceptance-views"' in html for html in payload_html_sections(compared)) == 2
 "#;
     assert_python_report(&output, script);
 }
@@ -2666,12 +2676,21 @@ fn assert_joint_rejection_ledger(output: &autoeq::roomeq::DspChainOutput, reason
     assert_python_report(
         output,
         r#"
-import json, os, sys, tempfile
+import json, os, re, sys, tempfile
 from pathlib import Path
 from scripts.src.payload_binding import verify_payload_binding
 from scripts.src.correction_explanation import correction_explanation_html
 from scripts.src.report import create_html_report, create_comparison_html_report
 from scripts.src.loaders import load_roomeq_json
+def payload_html_sections(rendered):
+    match = re.search(r'<script id="report-payload" type="application/json">(.*?)</script>', rendered, re.S)
+    assert match, 'report payload script tag missing'
+    return [s.get('html', '') for s in json.loads(match.group(1))['sections'] if s.get('kind') == 'html']
+def section_index(sections, marker):
+    for i, html in enumerate(sections):
+        if marker in html:
+            return i
+    raise AssertionError(f'section marker missing from report payload: {marker}')
 data = json.load(sys.stdin)
 assert verify_payload_binding(data)[0]
 section = correction_explanation_html(data)
@@ -2688,14 +2707,15 @@ with tempfile.TemporaryDirectory(dir=os.environ['ROOMEQ_TEST_TMP_ROOT']) as dire
     loaded = load_roomeq_json(path)
     create_html_report(loaded, root / 'report.html', path)
     rendered = (root / 'report.html').read_text()
-    verdict = rendered.index('<section class="playback-status"')
-    explanation = rendered.index('<section class="correction-explanation"')
-    views = rendered.index('<section class="acceptance-views"')
+    sections = payload_html_sections(rendered)
+    verdict = section_index(sections, '<section class="playback-status"')
+    explanation = section_index(sections, '<section class="correction-explanation"')
+    views = section_index(sections, '<section class="acceptance-views"')
     assert verdict < explanation < views
-    assert 'proposal reverted' in rendered[explanation:views]
+    assert 'proposal reverted' in sections[explanation]
     create_comparison_html_report([('joint', loaded), ('same', loaded)], root / 'comparison.html')
     compared = (root / 'comparison.html').read_text()
-    assert compared.count('<section class="correction-explanation"') == 2
+    assert sum('<section class="correction-explanation"' in html for html in payload_html_sections(compared)) == 2
     assert compared.count('stage history, not approval of later routing or recorded playback') >= 2
 "#,
     );

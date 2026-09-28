@@ -37,10 +37,12 @@ roomeq:
 # 2D canvas bundle builds on stable; the GPUI viewer needs nightly
 # (gpui-web's wasm_thread/parking_lot-nightly deps). Requires wasm-bindgen
 # 0.2.128 on PATH (or set WANDBIN). Reports embed dist/ at generation time.
+# The 2D exports live in the cdylib-only autoeq-report-wasm-shell crate;
+# autoeq-report-wasm itself is a plain rlib (see its Cargo.toml).
 [group('build')]
 report-dist:
-	{{cargo}} build --release --target wasm32-unknown-unknown -p autoeq-report-wasm
-	${WANDBIN:-wasm-bindgen} --target web --out-name report2d --out-dir crates/autoeq-report-wasm/pkg2d target/wasm32-unknown-unknown/release/autoeq_report_wasm.wasm
+	{{cargo}} build --release --target wasm32-unknown-unknown -p autoeq-report-wasm-shell
+	${WANDBIN:-wasm-bindgen} --target web --out-name report2d --out-dir crates/autoeq-report-wasm/pkg2d target/wasm32-unknown-unknown/release/autoeq_report_wasm_shell.wasm
 	cp crates/autoeq-report-wasm/pkg2d/report2d.js crates/autoeq-report-wasm/dist/report2d.js
 	cp crates/autoeq-report-wasm/pkg2d/report2d_bg.wasm crates/autoeq-report-wasm/dist/report2d.wasm
 
@@ -124,6 +126,10 @@ lint:
 	# that is not available in all checkout environments. Keep lint hermetic and
 	# lint the default production surface; plotly builds remain covered by CI.
 	{{cargo}} clippy --all -- -D warnings
+
+[group('lint')]
+clippy:
+	{{cargo}} clippy --workspace --tests --bins --all-features -- -D warnings
 
 alias format := fmt
 

@@ -11,7 +11,4 @@ pub mod assemble;
 pub mod draw;
 pub mod schema;
 
-#[cfg(target_arch = "wasm32")]
-pub mod wasm;
-
 pub use schema::*;

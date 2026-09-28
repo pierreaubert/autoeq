@@ -3,8 +3,9 @@
 //! Layout math uses gpui-toolkit `d3rs` scales (`LogScale`/`LinearScale`),
 //! renderer-independent [`AxisLayout`](d3rs::axis::AxisLayout) geometry, the
 //! `d3rs` Sankey layout, and the `d3rs` category10 palette. The [`Ctx`] trait
-//! abstracts the 2D backend: a Canvas 2D implementation ships on wasm
-//! (`crate::wasm`), a recording implementation drives native unit tests.
+//! abstracts the 2D backend: a Canvas 2D implementation ships in the
+//! `autoeq-report-wasm-shell` crate, a recording implementation drives
+//! native unit tests.
 
 use d3rs::axis::{AxisConfig, AxisLayout};
 use d3rs::color::ColorScheme;

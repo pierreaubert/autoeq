@@ -21,7 +21,7 @@ human-readable contract.
 ```
 
 The shell refuses to render when `schema` does not match
-`autoeq-report-wasm::schema_version()`.
+`autoeq-report-wasm-shell::schema_version()`.
 
 ## Sections
 

@@ -48,6 +48,7 @@ members = [
     "crates/roomeq-workflow",
     "crates/autoeq-qa",
     "crates/autoeq-report-wasm",
+    "crates/autoeq-report-wasm-shell",
     "crates/autoeq-report-gpui",
 ]
 [workspace.package]
@@ -70,6 +71,7 @@ autoeq-optim = { path = "crates/autoeq-optim", version = "0.5" }
 autoeq-workflow = { path = "crates/autoeq-workflow", version = "0.5" }
 autoeq-cli = { path = "crates/autoeq-cli", version = "0.5" }
 autoeq-report-wasm = { path = "crates/autoeq-report-wasm", version = "0.5" }
+autoeq-report-wasm-shell = { path = "crates/autoeq-report-wasm-shell", version = "0.5" }
 autoeq-report-gpui = { path = "crates/autoeq-report-gpui", version = "0.5" }
 roomeq-model = { path = "crates/roomeq-model", version = "0.5" }
 roomeq-engine = { path = "crates/roomeq-engine", version = "0.5" }

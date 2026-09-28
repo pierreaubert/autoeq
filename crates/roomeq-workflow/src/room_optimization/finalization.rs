@@ -484,11 +484,38 @@ fn select_inner(
         .collect();
     let mut prepared_strengths = None;
     let mut prepared = Err(String::new());
-    for &((strength, sub_strength, attenuation_mode, drive_cut_db, joint_trial), omit_post_eq) in
-        &parameters
+    let started = std::time::Instant::now();
+    let mut last_progress = started;
+    log::info!(
+        "Finalization: evaluating up to {} candidates, including with/without Post-EQ={}",
+        parameters.len(),
+        without_post_eq.is_some()
+    );
+    for (
+        index,
+        &((strength, sub_strength, attenuation_mode, drive_cut_db, joint_trial), omit_post_eq),
+    ) in parameters.iter().enumerate()
     {
         if config.optimizer.finalization.subwoofer_limiter && attenuation_mode != "output" {
             continue;
+        }
+        // Keep warning-only measured runs visibly alive during lengthy searches.
+        // At info level, report more frequently without flooding each trial.
+        let info_enabled = log::log_enabled!(log::Level::Info);
+        let interval = if info_enabled { 5 } else { 30 };
+        if last_progress.elapsed().as_secs() >= interval {
+            log::log!(
+                if info_enabled {
+                    log::Level::Info
+                } else {
+                    log::Level::Warn
+                },
+                "Finalization running: candidate {}/{}, elapsed {:.1}s, main strength={strength:.5}, sub strength={sub_strength:.5}, attenuation={attenuation_mode}, without Post-EQ={omit_post_eq}",
+                index + 1,
+                parameters.len(),
+                started.elapsed().as_secs_f64()
+            );
+            last_progress = std::time::Instant::now();
         }
         if prepared_strengths != Some((strength, sub_strength, joint_trial, omit_post_eq)) {
             prepared_strengths = Some((strength, sub_strength, joint_trial, omit_post_eq));
@@ -890,6 +917,12 @@ fn select_inner(
             }
         }
     }
+    log::info!(
+        "Finalization: evaluated {} candidates in {:.1}s; passing candidate={}",
+        trials.len(),
+        started.elapsed().as_secs_f64(),
+        best.is_some()
+    );
     let Some((_, mut selected)) = best else {
         // A structural fallback can itself exceed the electrical limit. Keep
         // the original candidate failures visible even if no artifact is saved.
@@ -1484,6 +1517,7 @@ pub(super) fn rebuild(
     // This also refreshes temporal IR evidence for the safety gate below.
     // Repeating it before any graph mutation replays the same chain twice.
     refresh_final_reports(result, config, fs, dir);
+    let temporal_before_gate = temporal_replay_inputs(result);
     room_optimization_result::apply_final_correction_safety_gate(
         result,
         fs,
@@ -1494,7 +1528,11 @@ pub(super) fn rebuild(
         group_delay_budget_ms(config),
     );
     refresh_responses(result, fs, dir)?;
-    refresh_temporal_ir_evidence(result, config, fs, dir);
+    // The safety gate does not rewrite sidecars. Reuse the just-built evidence
+    // only when the full channels, source curves, and retained FIRs agree.
+    if temporal_before_gate != temporal_replay_inputs(result) {
+        refresh_temporal_ir_evidence(result, config, fs, dir);
+    }
     // Runtime safety evaluates the deployed graph and may revert unsafe
     // stages. Rebuild the canonical before/after scorecard afterwards so
     // serialized scalar metrics and the detailed scorecard describe the
@@ -1511,6 +1549,15 @@ pub(super) fn rebuild(
     }
     preserve_safety_reversion_decision(result);
     Ok(())
+}
+
+fn temporal_replay_inputs(result: &RoomOptimizationResult) -> serde_json::Value {
+    let sources: std::collections::BTreeMap<_, _> = result
+        .channel_results
+        .iter()
+        .map(|(name, channel)| (name, (&channel.initial_curve, &channel.fir_coeffs)))
+        .collect();
+    serde_json::to_value((&result.channels, sources)).expect("serializable temporal replay inputs")
 }
 
 fn preserve_safety_reversion_decision(result: &mut RoomOptimizationResult) {
@@ -1972,6 +2019,34 @@ fn refinement_delay_reference(delay_samples: f64, support: usize, fs: f64) -> Re
 mod tests {
     use super::*;
     use roomeq_model::StageStatus;
+
+    #[test]
+    fn temporal_reuse_requires_unchanged_chain_measurement_and_fir() {
+        let (result, _) = fixture();
+        let original = temporal_replay_inputs(&result);
+        let mut changed = result.clone();
+        changed
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .plugins
+            .push(roomeq_engine::output::create_gain_plugin(-1.0));
+        assert_ne!(original, temporal_replay_inputs(&changed));
+        let mut changed = result.clone();
+        changed
+            .channel_results
+            .get_mut("L")
+            .unwrap()
+            .initial_curve
+            .spl[0] += 1.0;
+        assert_ne!(original, temporal_replay_inputs(&changed));
+        let mut changed = result.clone();
+        changed.channel_results.get_mut("L").unwrap().fir_coeffs = Some(vec![0.5, 0.5]);
+        assert_ne!(original, temporal_replay_inputs(&changed));
+        let mut report_only = result.clone();
+        report_only.metadata.stage_outcomes.clear();
+        assert_eq!(original, temporal_replay_inputs(&report_only));
+    }
 
     #[test]
     fn without_post_eq_retains_prior_eq_routing_and_sub_correction() {

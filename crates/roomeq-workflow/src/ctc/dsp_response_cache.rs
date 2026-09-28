@@ -121,10 +121,7 @@ pub fn channel_electrical_response_with_embedded_irs(
         cache.convolution_ir.insert(resolved, taps.clone());
     }
     let mut realized = RealizedDsp::new(chain, sample_rate, &mut cache)?;
-    frequencies
-        .iter()
-        .map(|frequency| realized.response_at(*frequency))
-        .collect()
+    realized.response_grid(frequencies)
 }
 
 pub(super) struct DspResponseCache {

@@ -6,7 +6,7 @@
 
 use crate::error::{AutoeqError, Result};
 use crate::response::{MIN_REALIZATION_RESPONSE_DB, apply_complex_response_with_min_db};
-use math_audio_dsp::{biquad_complex_response, fir_complex_response};
+use math_audio_dsp::biquad_complex_response;
 use math_audio_iir_fir::{
     Biquad, BiquadFilterType, KautzFilter, KautzSection, bark_lambda, warp_frequency,
 };
@@ -15,9 +15,44 @@ use num_complex::Complex64;
 use roomeq_model::{ChannelDspChain, PluginConfigWrapper};
 use std::f64::consts::PI;
 
+mod fft_grid;
+
 /// Resolves convolution sidecars without coupling the DSP engine to file I/O.
 pub trait ConvolutionIrProvider {
     fn taps(&mut self, ir_file: &str, sample_rate: u32) -> Result<&[f64]>;
+
+    /// Evaluate the complete FIR at one frequency.
+    ///
+    /// Providers may cache exact responses for a requested frequency grid.
+    ///
+    /// # Errors
+    /// Returns an error for an invalid sample rate or unavailable sidecar.
+    fn response(
+        &mut self,
+        ir_file: &str,
+        frequency_hz: f64,
+        sample_rate: f64,
+    ) -> Result<Complex64> {
+        Ok(fir_response_at(
+            self.taps(ir_file, checked_sample_rate(sample_rate)?)?,
+            frequency_hz,
+            sample_rate,
+        ))
+    }
+}
+
+/// Evaluate the FIR polynomial with one complex rotation per frequency.
+fn fir_response_at(taps: &[f64], frequency_hz: f64, sample_rate: f64) -> Complex64 {
+    if taps.is_empty() {
+        return Complex64::new(1.0, 0.0);
+    }
+    // Horner's method evaluates the same finite DTFT as summing tap phasors,
+    // without computing sine/cosine once per tap. No grid interpolation or
+    // truncation is involved, including at narrow electrical peak anchors.
+    let z = Complex64::from_polar(1.0, -2.0 * PI * frequency_hz / sample_rate);
+    taps.iter()
+        .rev()
+        .fold(Complex64::default(), |acc, tap| acc * z + tap)
 }
 
 /// Provider for chains that are required not to contain convolution plugins.
@@ -77,6 +112,31 @@ impl<'a, P: ConvolutionIrProvider> RealizedDsp<'a, P> {
             .iter()
             .map(|frequency| self.response_at(*frequency))
             .collect()
+    }
+
+    /// Evaluate a frequency grid, using FFTs for complete one-sided FFT grids.
+    ///
+    /// Added off-grid anchors and other grids retain scalar evaluation.
+    /// FFT evaluation includes every FIR
+    /// tap, including filters longer than the transform, without interpolation.
+    /// The cache lives only for this call, so changed sidecars cannot be reused.
+    ///
+    /// # Errors
+    /// Returns the same configuration and sidecar errors as scalar evaluation.
+    pub fn response_grid(&mut self, frequencies_hz: &[f64]) -> Result<Vec<Complex64>> {
+        if let Some(size) = fft_grid::fft_size(frequencies_hz, self.sample_rate) {
+            let mut provider = fft_grid::FftGrid::new(&mut *self.convolution, size);
+            let mut realized = RealizedDsp::new(self.chain, self.sample_rate, &mut provider)?;
+            frequencies_hz
+                .iter()
+                .map(|frequency| realized.response_at(*frequency))
+                .collect()
+        } else {
+            frequencies_hz
+                .iter()
+                .map(|frequency| self.response_at(*frequency))
+                .collect()
+        }
     }
 
     pub fn apply_to_curve(&mut self, curve: &crate::Curve) -> Result<crate::Curve> {
@@ -496,7 +556,7 @@ fn convolution_response<P: ConvolutionIrProvider>(
     plugin: &PluginConfigWrapper,
     frequency_hz: f64,
     sample_rate: f64,
-    sample_rate_u32: u32,
+    _sample_rate_u32: u32,
     convolution: &mut P,
 ) -> Result<Complex64> {
     let ir_file = plugin
@@ -506,11 +566,7 @@ fn convolution_response<P: ConvolutionIrProvider>(
         .ok_or_else(|| AutoeqError::InvalidConfiguration {
             message: "serialized convolution plugin has no ir_file".to_string(),
         })?;
-    let wet = fir_complex_response(
-        convolution.taps(ir_file, sample_rate_u32)?,
-        frequency_hz,
-        sample_rate,
-    );
+    let wet = convolution.response(ir_file, frequency_hz, sample_rate)?;
     if ir_file.is_empty() {
         return Err(AutoeqError::InvalidConfiguration {
             message: "serialized convolution plugin has an empty ir_file".to_string(),
@@ -797,6 +853,12 @@ mod tests {
                     "mixed branch mismatch at {frequency} Hz / {rate}: {actual} vs {expected}"
                 );
             }
+            let grid: Vec<_> = (0..=128).map(|i| i as f64 * rate / 256.0).collect();
+            let batched = realized.response_grid(&grid).unwrap();
+            for (frequency, actual) in grid.iter().zip(batched) {
+                let expected = realized.response_at(*frequency).unwrap();
+                assert!((actual - expected).norm() < 1e-10);
+            }
         }
     }
 
@@ -894,6 +956,118 @@ mod tests {
             .response_at(12_000.0)
             .unwrap();
         assert!((actual - Complex64::new(1.0, -1.0)).norm() < 1e-12);
+    }
+
+    #[test]
+    fn fft_grid_matches_scalar_for_long_firs_and_parallel_chains() {
+        struct TestIr {
+            taps: Vec<f64>,
+            reads: usize,
+        }
+        impl ConvolutionIrProvider for TestIr {
+            fn taps(&mut self, _: &str, _: u32) -> Result<&[f64]> {
+                self.reads += 1;
+                Ok(&self.taps)
+            }
+        }
+        for rate in [44100.0, 48000.0, 96000.0] {
+            for length in [0, 1, 97, 4096] {
+                let taps: Vec<_> = (0..length)
+                    .map(|i| (i as f64 * 0.13).cos() * (-0.003 * i as f64).exp())
+                    .collect();
+                let mut fir = crate::output::create_convolution_plugin("test.wav");
+                fir.parameters["mix"] = serde_json::json!(0.7);
+                fir.parameters["gain_db"] = serde_json::json!(-3.0);
+                let mut channel = chain(vec![fir.clone(), create_gain_plugin(-2.0)]);
+                channel.drivers = Some(vec![
+                    DriverDspChain {
+                        name: "low".into(),
+                        index: 0,
+                        plugins: vec![fir.clone()],
+                        initial_curve: None,
+                        measured_band_hz: None,
+                    },
+                    DriverDspChain {
+                        name: "high".into(),
+                        index: 1,
+                        plugins: vec![create_gain_plugin(-6.0)],
+                        initial_curve: None,
+                        measured_band_hz: None,
+                    },
+                ]);
+                let mut grid: Vec<_> = (0..=128).map(|i| i as f64 * rate / 256.0).collect();
+                let mut provider = TestIr { taps, reads: 0 };
+                let fast = RealizedDsp::new(&channel, rate, &mut provider)
+                    .unwrap()
+                    .response_grid(&grid)
+                    .unwrap();
+                assert_eq!(
+                    provider.reads, 1,
+                    "reuse shared FIR spectrum across branches"
+                );
+                let mut scalar = RealizedDsp::new(&channel, rate, &mut provider).unwrap();
+                for (frequency, actual) in grid.iter().zip(fast) {
+                    let expected = scalar.response_at(*frequency).unwrap();
+                    assert!(
+                        (actual - expected).norm() < 1e-9 * (1.0 + expected.norm()),
+                        "{rate} Hz, {length} taps, bin {frequency}: {actual} != {expected}"
+                    );
+                }
+                grid.extend([20.123, 305.7, rate * 0.49999]);
+                grid.sort_by(f64::total_cmp);
+                let mut realized = RealizedDsp::new(&channel, rate, &mut provider).unwrap();
+                let anchored = realized.response_grid(&grid).unwrap();
+                for (frequency, actual) in grid.iter().zip(anchored) {
+                    let expected = realized.response_at(*frequency).unwrap();
+                    assert!((actual - expected).norm() < 1e-9 * (1.0 + expected.norm()));
+                }
+                // Changed taps must be observed by the next call, even with
+                // the same resource identity. Arbitrary grids remain scalar.
+                provider.taps = vec![0.25];
+                let arbitrary = [0.0, 57.3, 900.0, rate / 2.0];
+                let mut realized = RealizedDsp::new(&channel, rate, &mut provider).unwrap();
+                let actual = realized.response_grid(&arbitrary).unwrap();
+                for (f, h) in arbitrary.iter().zip(actual) {
+                    assert_eq!(h, realized.response_at(*f).unwrap());
+                }
+                let refreshed = realized.response_grid(&grid).unwrap();
+                assert_eq!(refreshed[0], realized.response_at(0.0).unwrap());
+            }
+        }
+    }
+
+    #[test]
+    fn scalar_fir_polynomial_matches_direct_phasor_sum() {
+        for rate in [44100.0, 48000.0, 96000.0] {
+            for length in [0, 1, 4096, 65537] {
+                let taps: Vec<_> = (0..length)
+                    .map(|i| (i as f64 * 0.113).cos() * (-0.0003 * i as f64).exp())
+                    .collect();
+                for frequency in [
+                    0.0,
+                    0.001,
+                    20.123,
+                    300.1,
+                    1000.0,
+                    rate * 0.49999,
+                    rate * 0.5,
+                    rate,
+                ] {
+                    let expected = math_audio_dsp::fir_complex_response(&taps, frequency, rate);
+                    let actual = fir_response_at(&taps, frequency, rate);
+                    assert!(
+                        (actual - expected).norm() < 1e-9 * (1.0 + expected.norm()),
+                        "{rate} Hz, {length} taps, {frequency} Hz: {actual} vs {expected}"
+                    );
+                }
+            }
+            // Exact DC and Nyquist nulls must remain nulls.
+            assert_eq!(
+                fir_response_at(&[1.0, -1.0], 0.0, rate),
+                Complex64::default()
+            );
+            assert!(fir_response_at(&[1.0, 1.0], rate / 2.0, rate).norm() < 1e-12);
+        }
     }
 
     #[test]

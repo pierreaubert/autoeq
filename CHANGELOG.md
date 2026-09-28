@@ -1,5 +1,9 @@
 # Unreleased
 
+- Speed up mixed/FIR finalization waveform and electrical replay with exact FFT-grid FIR
+  evaluation and reuse of unchanged temporal evidence across safety checks.
+  Preserve all taps, routing, and candidate acceptance requirements. Report
+  candidate counts and elapsed time, including progress for slow warning-only runs.
 - Accept routed main Post-EQ when target shortfall is at most 3.05 dB, or
   improves by at least 20% and 1 dB against the immediate input. Protect the
   main's requested target above twice crossover, and check incremental

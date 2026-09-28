@@ -589,6 +589,16 @@ physical-sub correction. Electrical drive, useful-output, temporal, and retained
 seat checks still apply. Passing the relative target rule does not guarantee
 that the optional pass will be exported.
 
+Finalization reports candidate counts and elapsed time at info level. During
+long searches with warning-only logging, it reports progress at candidate
+boundaries about every 30 seconds. Waveform replay uses FFT evaluation on its
+exact uniform grid, including FIRs longer than the transform. Electrical grids
+use the same acceleration while retaining direct evaluation at extra EQ and
+crossover frequencies. Arbitrary grids retain scalar evaluation; safety samples
+are never interpolated. Temporal evidence is reused across a safety check
+only when the channel state, source curves, and retained FIRs are unchanged.
+These optimizations do not reduce the candidate search or relax acceptance.
+
 For multi-position measurements, baseline construction selects
 `optimizer.multi_seat.primary_seat` (default 0) from each main and sub source,
 matching crossover alignment. Spatial power averages remain magnitude-only

@@ -11,6 +11,8 @@ import json
 import math
 from pathlib import Path
 
+from src.payload_binding import ALGORITHM, payload_digest
+
 
 def finite_tree(value, location="result"):
     if isinstance(value, float) and not math.isfinite(value):
@@ -32,6 +34,72 @@ def is_subwoofer_group(speaker):
             or "drivers" in speaker or "measurements" in speaker):
         return False
     return "subwoofers" in speaker or {"front", "rear"} <= speaker.keys()
+
+
+def iter_delay_observations(data):
+    """Yield (location, delay_ms) for every serialized physical delay."""
+    owners = [("global_plugins", data.get("global_plugins") or [])]
+    for name, chain in (data.get("channels") or {}).items():
+        owners.append((f"channels.{name}", chain.get("plugins") or []))
+        for driver in chain.get("drivers") or []:
+            owners.append((f"channels.{name}.drivers.{driver.get('name', '?')}",
+                           driver.get("plugins") or []))
+    for location, plugins in owners:
+        for index, plugin in enumerate(plugins):
+            if plugin.get("plugin_type") != "delay":
+                continue
+            parameters = plugin.get("parameters") or {}
+            if "delay_ms" in parameters:
+                yield f"{location}.plugins[{index}].delay_ms", parameters["delay_ms"]
+    graph = ((data.get("metadata") or {}).get("bass_management") or {}).get("routing_graph") or {}
+    for index, route in enumerate(graph.get("routes", [])):
+        if "delay_ms" in route:
+            yield f"routing_graph.routes[{index}].delay_ms", route["delay_ms"]
+
+
+def validate_causal_delays(data):
+    """Reject negative physical delays: a real-time block cannot pre-play.
+
+    Relative advances are a valid optimization variable, but the final
+    graph must carry the compiled causal realization (nonnegative delays
+    plus a serialized common offset). Any negative delay_ms is an
+    unresolved causal delay, not a host detail.
+    """
+    for location, delay_ms in iter_delay_observations(data):
+        if not isinstance(delay_ms, (int, float)) or isinstance(delay_ms, bool):
+            raise ValueError(f"non-numeric delay at {location}")
+        if delay_ms < 0.0:
+            raise ValueError(f"unresolved causal delay {delay_ms} ms at {location}")
+
+
+def validate_payload_binding(data):
+    """Reject decisions whose graph no longer matches their binding.
+
+    Any post-finalization change to a gain, FIR, delay, or route breaks
+    the digest; the earlier approval stays invalid until the graph is
+    re-finalized. Graphs without a binding predate the ledger and are
+    audited on their other evidence only. Resource-byte verification
+    stays in this script's convolution section below; this check covers
+    the digest and final-identity agreement only.
+    """
+    ledger = data.get("correction_decisions") or {}
+    binding = ledger.get("payload_binding")
+    if not isinstance(binding, dict):
+        return
+    if ledger.get("ledger_version") != "1.0.0" or binding.get("algorithm") != ALGORITHM:
+        raise ValueError("payload binding has an unsupported ledger or algorithm version")
+    identity = binding.get("graph_identity")
+    if not isinstance(identity, str) or not identity.strip():
+        raise ValueError("payload binding has no graph identity")
+    payload = {key: value for key, value in data.items() if key != "correction_decisions"}
+    if payload_digest(payload, identity) != binding.get("sha256"):
+        raise ValueError("delivered payload changed; recorded decisions are stale")
+    for record in ledger.get("decisions") or []:
+        if record.get("stage") == "final" and record.get("final_graph_identity") != identity:
+            raise ValueError(
+                f"final decision '{record.get('decision_id')}' does not match "
+                "the delivered payload binding"
+            )
 
 
 def validate_runtime_limiters(data, checks, policy):
@@ -71,6 +139,8 @@ def inspect(path):
     path = Path(path)
     data = json.loads(path.read_text())
     finite_tree(data)
+    validate_causal_delays(data)
+    validate_payload_binding(data)
     metadata = data["metadata"]
     electrical = [stage for stage in metadata.get("stage_outcomes", [])
                   if stage["stage"] == "final_graph_sampled_electrical_headroom"]

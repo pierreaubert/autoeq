@@ -27,7 +27,9 @@ class Mdat2CsvTests(unittest.TestCase):
             self.assertEqual(existing_config.read_text(), 'user configuration')
             measurement['name'] = 'missing_seat'
             created = mdat2csv.export_csv(measurement, directory, overwrite=False)
-            self.assertTrue(Path(created).read_text().startswith('freq_hz,spl_db,phase_deg'))
+            text = Path(created).read_text()
+            self.assertIn('freq_hz,spl_db,phase_deg', text.splitlines())
+            self.assertIn('80.000000', text)
 
     def test_csv_preserves_native_unequal_grids_and_narrow_null(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -39,7 +41,9 @@ class Mdat2CsvTests(unittest.TestCase):
                     'spl': levels, 'phase': phases,
                 }, directory)
                 with open(path, newline='') as stream:
-                    rows = list(csv.DictReader(stream))
+                    # Consumers skip `#` provenance lines like the curve loaders do.
+                    records = [line for line in stream if not line.startswith('#')]
+                    rows = list(csv.DictReader(records))
                 self.assertEqual([float(r['freq_hz']) for r in rows], frequencies)
                 self.assertEqual([float(r['spl_db']) for r in rows], levels)
                 for row, expected in zip(rows, phases):
@@ -204,6 +208,34 @@ class Mdat2CsvTests(unittest.TestCase):
             mdat2csv.sanitize_identifier('Left &  Right together'),
             'Left_Right_together',
         )
+
+    def test_exported_csv_carries_provenance_headers(self):
+        measurement = {
+            'name': 'L No EQ Sep 1', 'freq': [20., 80.],
+            'spl': [80., 81.], 'phase': [0., 10.],
+            'params': {'ppo': 96, 'sampleRate': 48000},
+            'html': {'date': 'Sep 1, 2026', 'time': '6:36:56 AM',
+                     'freq_range': '10 to 21,924 Hz', 'spl_range': '26 to 85 dB SPL'},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = mdat2csv.export_csv(measurement, directory, source_label='2.2.mdat')
+            text = Path(path).read_text()
+        lines = text.splitlines()
+        self.assertEqual(lines[0], '# Measurement: L No EQ Sep 1')
+        self.assertIn('# Dated: Sep 1, 2026 6:36:56 AM', lines)
+        self.assertIn('# Frequency Step: 96 ppo', lines)
+        self.assertIn('# Converted from: 2.2.mdat via mdat2csv.py', lines)
+        # Unrecovered facts stay absent: no microphone, timing, or smoothing claims.
+        for line in lines:
+            lowered = line.lower()
+            self.assertNotIn('microphone', lowered)
+            self.assertNotIn('timing reference', lowered)
+            self.assertNotIn('smoothing', lowered)
+        self.assertIn('freq_hz,spl_db,phase_deg', lines)
+
+    def test_header_block_omits_missing_metadata(self):
+        lines = mdat2csv.header_block({'name': 'seat'})
+        self.assertEqual(lines, ['# Measurement: seat'])
 
 
 if __name__ == '__main__':

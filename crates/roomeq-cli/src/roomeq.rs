@@ -28,8 +28,8 @@ use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig
 use roomeq_workflow::{
     ChannelOptimizationResult, DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomOptimizationResult,
     RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
-    load_config_with_frequency_samples, load_merged_config_strict, save_dsp_chain,
-    output_bundle as bundle,
+    load_config_with_frequency_samples, load_merged_config_strict, output_bundle as bundle,
+    save_dsp_chain,
 };
 
 /// Version of the [`RunManifest`] schema written next to every pipeline output.
@@ -221,6 +221,29 @@ struct RunManifest {
     /// Exact asset ownership: every file this run claims as its output.
     /// A failed export path is deliberately absent here.
     assets_owned: Vec<PathBuf>,
+    /// Fallback-chain provenance, present only when the CLI tried more
+    /// than one override. Names the requested (first) and realized
+    /// (winning) attempt so the shipped artifact says which override
+    /// produced it, not just the base config label.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fallback: Option<ManifestFallbackProvenance>,
+}
+
+/// Which fallback attempt produced the shipped native graph.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ManifestFallbackProvenance {
+    /// 1-based index of the winning attempt, or `None` when every attempt
+    /// failed and the manifest describes the last diagnostic.
+    winning_attempt: Option<usize>,
+    /// Total attempts in the fallback chain.
+    attempts_total: usize,
+    /// First (requested) attempt label: override path or `"(no override)"`.
+    requested_label: String,
+    /// Winning (realized) attempt label, or `"none"` when every attempt
+    /// failed and the manifest describes the last diagnostic.
+    realized_label: String,
+    /// Labels of every attempt that ran, in order.
+    tried_labels: Vec<String>,
 }
 
 /// Manifest path for a pipeline output. The manifest lives inside the sibling
@@ -257,13 +280,19 @@ fn source_dir_for_graph(graph_path: &std::path::Path) -> PathBuf {
             return dir.clone();
         }
     }
-    candidates.into_iter().next().unwrap_or_else(|| PathBuf::from("."))
+    candidates
+        .into_iter()
+        .next()
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Every file the run owns: the slim JSON plus all files in the sibling
 /// assets directory (sidecars, curves, manifest, log) plus an optional
 /// external export next to the JSON.
-fn owned_assets(output_path: &std::path::Path, export_path: Option<&std::path::Path>) -> Vec<PathBuf> {
+fn owned_assets(
+    output_path: &std::path::Path,
+    export_path: Option<&std::path::Path>,
+) -> Vec<PathBuf> {
     let mut owned = vec![output_path.to_path_buf()];
     let assets_dir = bundle::assets_dir_for(output_path);
     if let Ok(entries) = std::fs::read_dir(&assets_dir) {
@@ -271,7 +300,10 @@ fn owned_assets(output_path: &std::path::Path, export_path: Option<&std::path::P
         names.sort();
         owned.extend(names);
     }
-    for required in [manifest_path_for(output_path), run_log_path_for(output_path)] {
+    for required in [
+        manifest_path_for(output_path),
+        run_log_path_for(output_path),
+    ] {
         if !owned.contains(&required) {
             owned.push(required);
         }
@@ -319,6 +351,68 @@ fn write_run_manifest(output_path: &std::path::Path, manifest: &RunManifest) -> 
     std::fs::write(&path, json)
         .with_context(|| format!("Failed to write run manifest to {:?}", path))?;
     Ok(path)
+}
+
+/// Stamp fallback-chain provenance onto the shipped run manifest.
+///
+/// Best-effort: a missing or unreadable manifest keeps its previous
+/// content with a warning rather than failing the run. The manifest is
+/// a sidecar outside the payload binding, so post-hoc stamping cannot
+/// invalidate the shipped graph's ledger.
+fn record_fallback_provenance(
+    output_path: &std::path::Path,
+    winner: Option<usize>,
+    attempts: &[Option<PathBuf>],
+    ran: usize,
+    label_of: &dyn Fn(&Option<PathBuf>) -> String,
+) {
+    if attempts.len() < 2 {
+        return;
+    }
+    let path = manifest_path_for(output_path);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) => {
+            warn!(
+                "Fallback provenance skipped: cannot read {:?}: {:#}",
+                path, error
+            );
+            return;
+        }
+    };
+    let mut manifest: RunManifest = match serde_json::from_str(&text) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            warn!(
+                "Fallback provenance skipped: cannot parse {:?}: {:#}",
+                path, error
+            );
+            return;
+        }
+    };
+    let ran = ran.min(attempts.len());
+    let tried_labels: Vec<String> = attempts.iter().take(ran).map(label_of).collect();
+    manifest.fallback = Some(ManifestFallbackProvenance {
+        winning_attempt: winner.map(|index| index + 1),
+        attempts_total: attempts.len(),
+        requested_label: tried_labels
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "(no override)".to_string()),
+        realized_label: winner
+            .and_then(|index| tried_labels.get(index).cloned())
+            .unwrap_or_else(|| "none".to_string()),
+        tried_labels,
+    });
+    if let Err(error) = std::fs::write(
+        &path,
+        serde_json::to_string_pretty(&manifest).unwrap_or_default(),
+    ) {
+        warn!(
+            "Fallback provenance skipped: cannot write {:?}: {:#}",
+            path, error
+        );
+    }
 }
 
 /// Persist a run manifest without failing an otherwise good run.
@@ -521,6 +615,14 @@ struct Args {
     /// Path to override config JSON file (overrides any section: optimizer, speakers, crossovers, etc.)
     #[arg(long, alias = "optim-config")]
     override_config: Option<PathBuf>,
+
+    /// Fallback override configs, tried in order when earlier attempts do
+    /// not approve playback (comma-separated). The first attempt with an
+    /// accepted outcome wins; if none accepts, the first unchanged
+    /// (identity) result wins over diagnostics. Export and verification
+    /// bundle options apply via re-run or --convert on the shipped output.
+    #[arg(long, value_delimiter = ',')]
+    fallback_overrides: Vec<PathBuf>,
 
     /// Export DSP chain (camilladsp, apo, easyeffects, wavelet, pipewire, roon, rew, coefficients)
     #[arg(long, value_enum)]
@@ -755,23 +857,276 @@ pub fn run_command() -> Result<()> {
         );
     }
 
-    execute_optimization(
+    if args.fallback_overrides.is_empty() {
+        return execute_optimization(
+            args.sample_rate,
+            args.freq_samples,
+            config_path,
+            output_path,
+            args.override_config,
+            args.export_format,
+            args.export_path,
+            BundleOptions {
+                prediction_manifest: args.verification_prediction_inputs,
+                dest_dir: args.verification_bundle,
+                baseline_graph: args.baseline_graph,
+                calibration_id: args.calibration_id,
+                stimulus_hash: args.stimulus_hash,
+                seats: args.verification_seats,
+            },
+        );
+    }
+    if args.export_format.is_some() || args.verification_bundle.is_some() {
+        warn!(
+            "Fallback mode runs attempts without export/verification output; re-run the winning override or use --convert on the shipped output."
+        );
+    }
+    execute_with_fallback(
         args.sample_rate,
         args.freq_samples,
         config_path,
         output_path,
         args.override_config,
-        args.export_format,
-        args.export_path,
-        BundleOptions {
-            prediction_manifest: args.verification_prediction_inputs,
-            dest_dir: args.verification_bundle,
-            baseline_graph: args.baseline_graph,
-            calibration_id: args.calibration_id,
-            stimulus_hash: args.stimulus_hash,
-            seats: args.verification_seats,
-        },
+        args.fallback_overrides,
     )
+}
+
+/// Shippability of one fallback attempt, read back from its saved output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FallbackAttemptOutcome {
+    Accepted,
+    Unchanged,
+    NotShippable,
+}
+
+/// Winner selection over complete attempt outcomes: the first accepted
+/// attempt wins; otherwise the first unchanged (identity) result wins over
+/// diagnostics; otherwise nothing ships. The runtime loop stops at the
+/// first accepted attempt, which is equivalent: later attempts cannot
+/// displace an earlier accept.
+fn select_fallback_winner(outcomes: &[FallbackAttemptOutcome]) -> Option<usize> {
+    outcomes
+        .iter()
+        .position(|outcome| *outcome == FallbackAttemptOutcome::Accepted)
+        .or_else(|| {
+            outcomes
+                .iter()
+                .position(|outcome| *outcome == FallbackAttemptOutcome::Unchanged)
+        })
+}
+
+/// Read the playback outcome back from a saved DSP output. Evidence-based:
+/// a written file with an approving outcome ships, anything else does not.
+fn read_saved_outcome(output_path: &std::path::Path) -> FallbackAttemptOutcome {
+    let text = std::fs::read_to_string(output_path).unwrap_or_default();
+    let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+    match value
+        .pointer("/metadata/correction_acceptance/outcome")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("accepted") => FallbackAttemptOutcome::Accepted,
+        Some("unchanged") => FallbackAttemptOutcome::Unchanged,
+        _ => FallbackAttemptOutcome::NotShippable,
+    }
+}
+
+/// Remove one attempt's outputs while preserving the cumulative run log.
+fn clean_attempt_outputs(output_path: &std::path::Path) {
+    let log_path = run_log_path_for(output_path);
+    let preserved_log = std::fs::read_to_string(&log_path).unwrap_or_default();
+    let _ = std::fs::remove_file(output_path);
+    let _ = std::fs::remove_dir_all(bundle::assets_dir_for(output_path));
+    if !preserved_log.is_empty()
+        && let Some(parent) = log_path.parent()
+        && std::fs::create_dir_all(parent).is_ok()
+    {
+        let _ = std::fs::write(&log_path, preserved_log);
+    }
+}
+
+fn copy_dir_all(source: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dest)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let target = dest.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Try the primary override plus fallbacks in order; ship the winner.
+///
+/// Stops at the first accepted outcome. A first-unchanged result is cached
+/// aside and restored when nothing accepts. Attempts that leave no output
+/// file are infrastructure failures and abort the sequence immediately
+/// instead of burning optimization budget on a broken setup.
+#[allow(clippy::too_many_arguments)]
+fn execute_with_fallback(
+    sample_rate: f64,
+    freq_samples: usize,
+    config_path: PathBuf,
+    output_path: PathBuf,
+    override_config: Option<PathBuf>,
+    fallback_overrides: Vec<PathBuf>,
+) -> Result<()> {
+    let mut attempts: Vec<Option<PathBuf>> = vec![override_config];
+    attempts.extend(fallback_overrides.into_iter().map(Some));
+    attempts.dedup();
+    for attempt in attempts.iter().flatten() {
+        if !attempt.is_file() {
+            anyhow::bail!("Fallback override does not exist: {}", attempt.display());
+        }
+    }
+    let outcome_of = |over: &Option<PathBuf>| match over {
+        Some(path) => path.display().to_string(),
+        None => "(no override)".to_string(),
+    };
+    let cache_dir = std::env::temp_dir().join(format!("roomeq-fallback-{}", std::process::id()));
+    let mut cached_unchanged: Option<PathBuf> = None;
+    let mut outcomes: Vec<FallbackAttemptOutcome> = Vec::with_capacity(attempts.len());
+    for (index, attempt_override) in attempts.iter().enumerate() {
+        info!(
+            "Fallback attempt {}/{}: override {}",
+            index + 1,
+            attempts.len(),
+            outcome_of(attempt_override)
+        );
+        append_run_log(
+            &output_path,
+            &[format!(
+                "fallback: attempt {}/{} override {}",
+                index + 1,
+                attempts.len(),
+                outcome_of(attempt_override)
+            )],
+        );
+        clean_attempt_outputs(&output_path);
+        let attempt_result = execute_optimization(
+            sample_rate,
+            freq_samples,
+            config_path.clone(),
+            output_path.clone(),
+            attempt_override.clone(),
+            None,
+            None,
+            BundleOptions {
+                prediction_manifest: None,
+                dest_dir: None,
+                baseline_graph: None,
+                calibration_id: None,
+                stimulus_hash: None,
+                seats: None,
+            },
+        );
+        if !output_path.is_file() {
+            let _ = std::fs::remove_dir_all(&cache_dir);
+            return attempt_result.with_context(|| {
+                format!(
+                    "Fallback attempt {}/{} left no output; aborting sequence",
+                    index + 1,
+                    attempts.len()
+                )
+            });
+        }
+        let outcome = read_saved_outcome(&output_path);
+        outcomes.push(outcome);
+        append_run_log(
+            &output_path,
+            &[format!(
+                "fallback: attempt {}/{} outcome {outcome:?}",
+                index + 1,
+                attempts.len()
+            )],
+        );
+        match outcome {
+            FallbackAttemptOutcome::Accepted => {
+                info!(
+                    "Fallback selected attempt {}/{} (accepted).",
+                    index + 1,
+                    attempts.len()
+                );
+                append_run_log(
+                    &output_path,
+                    &[format!(
+                        "fallback: selected attempt {}/{} override {}",
+                        index + 1,
+                        attempts.len(),
+                        outcome_of(attempt_override)
+                    )],
+                );
+                record_fallback_provenance(
+                    &output_path,
+                    Some(index),
+                    &attempts,
+                    index + 1,
+                    &outcome_of,
+                );
+                let _ = std::fs::remove_dir_all(&cache_dir);
+                return Ok(());
+            }
+            FallbackAttemptOutcome::Unchanged if cached_unchanged.is_none() => {
+                let cache = cache_dir.join(format!("unchanged-{index}"));
+                let assets = bundle::assets_dir_for(&output_path);
+                if std::fs::create_dir_all(&cache).is_ok()
+                    && std::fs::copy(&output_path, cache.join("output.json")).is_ok()
+                    && (!assets.is_dir() || copy_dir_all(&assets, &cache.join("assets")).is_ok())
+                {
+                    cached_unchanged = Some(cache);
+                }
+            }
+            _ => {}
+        }
+        let _ = attempt_result;
+    }
+    if let Some(winner) = select_fallback_winner(&outcomes)
+        && outcomes[winner] == FallbackAttemptOutcome::Unchanged
+        && let Some(cache) = &cached_unchanged
+    {
+        clean_attempt_outputs(&output_path);
+        std::fs::copy(cache.join("output.json"), &output_path).with_context(|| {
+            format!(
+                "Failed to restore unchanged fallback result to {}",
+                output_path.display()
+            )
+        })?;
+        let cached_assets = cache.join("assets");
+        if cached_assets.is_dir() {
+            copy_dir_all(&cached_assets, &bundle::assets_dir_for(&output_path))
+                .with_context(|| "Failed to restore unchanged fallback assets")?;
+        }
+        append_run_log(
+            &output_path,
+            &[format!(
+                "fallback: selected unchanged attempt {}/{} (no accepted outcome)",
+                winner + 1,
+                attempts.len()
+            )],
+        );
+        info!(
+            "Fallback selected unchanged attempt {}/{}.",
+            winner + 1,
+            attempts.len()
+        );
+        let ran = attempts.len();
+        record_fallback_provenance(&output_path, Some(winner), &attempts, ran, &outcome_of);
+        let _ = std::fs::remove_dir_all(&cache_dir);
+        return Ok(());
+    }
+    let _ = std::fs::remove_dir_all(&cache_dir);
+    let ran = attempts.len();
+    record_fallback_provenance(&output_path, None, &attempts, ran, &outcome_of);
+    append_run_log(
+        &output_path,
+        &["fallback: no attempt approved playback; leaving last diagnostic.".to_string()],
+    );
+    Err(anyhow!(
+        "Fallback exhausted ({} attempts, outcomes: {outcomes:?}); no approved playback result",
+        attempts.len()
+    ))
 }
 
 /// Pipeline observer that logs to stderr.
@@ -866,6 +1221,25 @@ fn finalize_native_output(
             .ok_or_else(|| anyhow!("RoomEQ output is missing optimization metadata"))?;
         metadata.effective_config = Some(Box::new(config.clone()));
     }
+    // Requested-vs-realized audit labeling: the conversion stamped the
+    // realized family from shipped plugins; the requested mode only
+    // becomes known here, so name any divergence before binding.
+    let requested = output
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.effective_config.as_ref())
+        .map(|config| config.optimizer.processing_mode.clone());
+    if let Some(report) = output
+        .metadata
+        .as_mut()
+        .and_then(|metadata| metadata.correction_acceptance.as_mut())
+        && let Some(realized) = report.realized_processing
+    {
+        report.processing_fallback = roomeq_model::report_contracts::processing_fallback_reason(
+            requested.as_ref(),
+            &realized,
+        );
+    }
     roomeq_workflow::final_ledger::finalize_output_ledger(output, provisional, events)
         .map_err(|reason| anyhow!("final decision ledger refused delivered output: {reason}"))?;
     Ok(())
@@ -886,7 +1260,7 @@ fn execute_optimization(
     // Load room configuration
     info!("Loading room configuration from {:?}", config_path);
 
-    let (room_config, _config_dir, _validation) = load_config_with_frequency_samples(
+    let (room_config, config_dir, _validation) = load_config_with_frequency_samples(
         &config_path,
         override_config_path.as_deref(),
         freq_samples,
@@ -931,6 +1305,25 @@ fn execute_optimization(
     );
 
     let mut dsp_output = result.to_dsp_chain_output();
+    // Measured room IRs back the R1–R5 acoustic report: attach them (and
+    // the early/late analysis) before measurement extraction and ledger
+    // finalization bind the exact saved bytes.
+    if !room_config.measured_impulse_responses.is_empty() {
+        match roomeq_workflow::measured_ir::attach_measured_acoustics(
+            &mut dsp_output,
+            &room_config.measured_impulse_responses,
+            &config_dir,
+        ) {
+            Ok(warnings) => {
+                for warning in warnings {
+                    warn!("{warning}");
+                }
+            }
+            Err(reason) => {
+                anyhow::bail!("measured impulse responses refused delivered output: {reason}")
+            }
+        }
+    }
     let extracted = bundle::extract_measurements_to_assets(&mut dsp_output, &assets_dir);
     info!(
         "Extracted {} measurement files to {:?}",
@@ -1012,6 +1405,7 @@ fn execute_optimization(
                 export_status: Some("not_attempted".to_string()),
                 export_error: Some(error.to_string()),
                 assets_owned: owned_assets(&output_path, None),
+                fallback: None,
             },
         );
         return Err(error).with_context(|| {
@@ -1046,7 +1440,10 @@ fn execute_optimization(
         match export_outcome {
             Ok(()) => {
                 info!("Exported to {:?}", path);
-                append_run_log(&output_path, &[format!("export: {format:?} saved to {}", path.display())]);
+                append_run_log(
+                    &output_path,
+                    &[format!("export: {format:?} saved to {}", path.display())],
+                );
                 persist_run_manifest_best_effort(
                     &output_path,
                     &RunManifest {
@@ -1059,12 +1456,16 @@ fn execute_optimization(
                         export_status: Some("saved".to_string()),
                         export_error: None,
                         assets_owned: owned_assets(&output_path, Some(&path)),
+                        fallback: None,
                     },
                 );
             }
             Err(error) => {
                 let diagnostic = partial_export_diagnostic(&output_path, format, &path, &error);
-                append_run_log(&output_path, &[format!("export: {format:?} failed: {error:#}")]);
+                append_run_log(
+                    &output_path,
+                    &[format!("export: {format:?} failed: {error:#}")],
+                );
                 // Record the partial run: the native graph is owned and valid,
                 // the export path is deliberately absent from asset ownership.
                 persist_run_manifest_best_effort(
@@ -1079,6 +1480,7 @@ fn execute_optimization(
                         export_status: Some("failed".to_string()),
                         export_error: Some(format!("{error:#}")),
                         assets_owned: owned_assets(&output_path, None),
+                        fallback: None,
                     },
                 );
                 warn!("{}", diagnostic);
@@ -1099,6 +1501,7 @@ fn execute_optimization(
                 export_status: None,
                 export_error: None,
                 assets_owned: owned_assets(&output_path, None),
+                fallback: None,
             },
         );
     }
@@ -1853,6 +2256,69 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
 mod tests {
     use clap::{CommandFactory, Parser};
 
+    use super::{FallbackAttemptOutcome as Outcome, select_fallback_winner};
+
+    #[test]
+    fn fallback_selects_first_accepted_else_first_unchanged() {
+        assert_eq!(
+            select_fallback_winner(&[Outcome::NotShippable, Outcome::Accepted, Outcome::Accepted]),
+            Some(1)
+        );
+        assert_eq!(
+            select_fallback_winner(&[
+                Outcome::NotShippable,
+                Outcome::Unchanged,
+                Outcome::Unchanged
+            ]),
+            Some(1)
+        );
+        assert_eq!(
+            select_fallback_winner(&[Outcome::Unchanged, Outcome::Accepted]),
+            Some(1)
+        );
+        assert_eq!(
+            select_fallback_winner(&[Outcome::NotShippable, Outcome::NotShippable]),
+            None
+        );
+        assert_eq!(select_fallback_winner(&[]), None);
+    }
+
+    #[test]
+    fn fallback_reads_saved_outcome_evidence() {
+        let dir = std::env::temp_dir().join(format!("roomeq-fallback-test-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let probe = |body: &str| {
+            let path = dir.join("probe.json");
+            std::fs::write(&path, body).unwrap();
+            super::read_saved_outcome(&path)
+        };
+        assert_eq!(
+            probe(r#"{"metadata":{"correction_acceptance":{"outcome":"accepted"}}}"#),
+            super::FallbackAttemptOutcome::Accepted
+        );
+        assert_eq!(
+            probe(r#"{"metadata":{"correction_acceptance":{"outcome":"unchanged"}}}"#),
+            super::FallbackAttemptOutcome::Unchanged
+        );
+        assert_eq!(
+            probe(r#"{"metadata":{"correction_acceptance":{"outcome":"rejected"}}}"#),
+            super::FallbackAttemptOutcome::NotShippable
+        );
+        assert_eq!(
+            probe(r#"{"metadata":{}}"#),
+            super::FallbackAttemptOutcome::NotShippable
+        );
+        assert_eq!(
+            probe("not json"),
+            super::FallbackAttemptOutcome::NotShippable
+        );
+        assert_eq!(
+            super::read_saved_outcome(&dir.join("missing.json")),
+            super::FallbackAttemptOutcome::NotShippable
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn roadmap_correction_cli_override_preserves_final_ledger_binding() {
         use roomeq_model::decision_ledger::{CorrectionDecisionLedger, canonical_value_identity};
@@ -1957,6 +2423,57 @@ mod tests {
     }
 
     #[test]
+    fn fallback_provenance_names_requested_and_realized_attempt() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let output = dir.path().join("dsp.json");
+        std::fs::write(&output, "{}").expect("write native graph");
+        let manifest = RunManifest {
+            version: super::RUN_MANIFEST_VERSION,
+            status: super::RUN_STATUS_COMPLETE.to_string(),
+            sample_rate: 48000.0,
+            native_graph: output.clone(),
+            export_format: None,
+            export_path: None,
+            export_status: None,
+            export_error: None,
+            assets_owned: vec![output.clone()],
+            fallback: None,
+        };
+        super::write_run_manifest(&output, &manifest).expect("write manifest");
+        let attempts = vec![
+            None,
+            Some(std::path::PathBuf::from("optimiser-iir.json")),
+            Some(std::path::PathBuf::from("optimiser-fir.json")),
+        ];
+        let label_of = |over: &Option<std::path::PathBuf>| match over {
+            Some(path) => path.display().to_string(),
+            None => "(no override)".to_string(),
+        };
+        // Winner on the second attempt: only ran attempts are listed.
+        super::record_fallback_provenance(&output, Some(1), &attempts, 2, &label_of);
+        let stamped: RunManifest = serde_json::from_str(
+            &std::fs::read_to_string(super::manifest_path_for(&output)).expect("read"),
+        )
+        .expect("parse manifest");
+        let provenance = stamped.fallback.expect("fallback stamped");
+        assert_eq!(provenance.winning_attempt, Some(2));
+        assert_eq!(provenance.attempts_total, 3);
+        assert_eq!(provenance.requested_label, "(no override)");
+        assert_eq!(provenance.realized_label, "optimiser-iir.json");
+        assert_eq!(provenance.tried_labels.len(), 2);
+        // Exhausted chain: no winner, all attempts listed.
+        super::record_fallback_provenance(&output, None, &attempts, 3, &label_of);
+        let stamped: RunManifest = serde_json::from_str(
+            &std::fs::read_to_string(super::manifest_path_for(&output)).expect("read"),
+        )
+        .expect("parse manifest");
+        let provenance = stamped.fallback.expect("fallback stamped");
+        assert_eq!(provenance.winning_attempt, None);
+        assert_eq!(provenance.realized_label, "none");
+        assert_eq!(provenance.tried_labels.len(), 3);
+    }
+
+    #[test]
     fn sample_rate_default_is_48000() {
         let args = Args::try_parse_from(["roomeq", "--schema", "input"]).unwrap();
         assert_eq!(args.sample_rate, 48000.0);
@@ -2012,6 +2529,7 @@ mod tests {
                 manifest_path_for(&output),
                 dir.path().join("room_eq_cdsp.yaml"),
             ],
+            fallback: None,
         };
         let written = write_run_manifest(&output, &manifest).expect("write manifest");
         assert!(written.is_file(), "manifest output file must exist");
@@ -2038,6 +2556,7 @@ mod tests {
             export_status: Some("failed".to_string()),
             export_error: Some("boom".to_string()),
             assets_owned: vec![output.clone(), manifest_path_for(&output)],
+            fallback: None,
         };
         let written = write_run_manifest(&output, &manifest).expect("write manifest");
         // The good native graph is still on disk; only ownership is narrowed.

@@ -563,6 +563,8 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
         operation_gates: None,
 
         provisional_decisions: Vec::new(),
+        epa_provenance: None,
+        playback_summary: None,
     };
     let graph = DspGraph {
         deployed_source_curves: Default::default(),

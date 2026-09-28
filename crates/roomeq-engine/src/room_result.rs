@@ -154,6 +154,87 @@ impl RoomOptimizationResult {
             .iter()
             .map(|(channel, curve)| (channel.clone(), curve.into()))
             .collect();
+        // Requested-vs-realized audit labeling: derive the shipped
+        // correction family from serialized plugins and name any
+        // divergence from the requested mode. Conversion is the last
+        // point that sees both the final graph and the effective
+        // configuration before ledger finalization binds the payload.
+        if let Some(metadata) = output.metadata.as_mut()
+            && let Some(report) = metadata.correction_acceptance.as_mut()
+        {
+            let realized =
+                roomeq_model::report_contracts::assess_realized_processing(&output.channels);
+            let requested = metadata
+                .effective_config
+                .as_ref()
+                .map(|config| &config.optimizer.processing_mode);
+            report.realized_processing = Some(realized);
+            report.processing_fallback =
+                roomeq_model::report_contracts::processing_fallback_reason(requested, &realized);
+        }
+        // WP6 latency split: the modeled playback total is the FIR design
+        // delay plus the common alignment offset from causal delay
+        // compilation. Host/block buffering stays unmodeled (see docs).
+        let alignment = output
+            .metadata
+            .as_ref()
+            .map(|metadata| {
+                metadata
+                    .stage_outcomes
+                    .iter()
+                    .find(|stage| stage.stage == "delay_compile_causal")
+                    .and_then(|stage| {
+                        stage
+                            .checks
+                            .iter()
+                            .find(|check| check.id == "delay_compile:common_latency_ms")
+                            .and_then(|check| check.observed)
+                    })
+                    .filter(|offset| offset.is_finite() && *offset >= 0.0)
+            })
+            .unwrap_or(None);
+        if let Some(temporal) = output
+            .metadata
+            .as_mut()
+            .and_then(|metadata| metadata.correction_acceptance.as_mut())
+            .and_then(|report| report.acoustic_quality.as_mut())
+            .map(|score| &mut score.temporal)
+        {
+            temporal.alignment_delay_ms = alignment;
+            temporal.total_latency_ms = match (temporal.latency_ms, alignment) {
+                (Some(design), Some(align)) => Some(design + align),
+                _ => None,
+            };
+        }
+        // WP7 claim-level reporting: EPA provenance plus the playback
+        // summary. Both are pure projections of shipped evidence.
+        let summary = output
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.correction_acceptance.as_ref())
+            .map(roomeq_model::report_contracts::playback_summary);
+        if let Some(metadata) = output.metadata.as_mut() {
+            metadata.playback_summary = summary;
+            if metadata.epa_per_channel.is_some() || metadata.epa_multichannel.is_some() {
+                let epa_config = metadata
+                    .effective_config
+                    .as_ref()
+                    .and_then(|config| config.optimizer.epa_config.as_ref());
+                metadata.epa_provenance =
+                    Some(roomeq_model::report_contracts::EpaProvenance {
+                        model: "epa_spectral_diagnostic".to_string(),
+                        predicted_not_measured: true,
+                        listening_level_phon: epa_config
+                            .map(|config| config.listening_level_phon),
+                        target_sharpness_acum: epa_config
+                            .map(|config| config.target_sharpness),
+                        note: "Predicted preference dimensions from frequency response; not measured audibility. Validate with listening.".to_string(),
+                    });
+            }
+        }
+        // The ledger binds the exact payload being shipped, so the attach
+        // check runs after every derived field above is computed. Any
+        // future post-attach mutation reopens the mismatch demotion.
         if let Some(decisions) = &self.finalized_decisions {
             decisions.attach(&mut output);
         }

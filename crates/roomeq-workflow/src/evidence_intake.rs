@@ -34,7 +34,7 @@ use autoeq_measurements::{MatrixKey, Take, TakeDecision, TakeMatrix};
 use roomeq_model::decision_ledger::CaptureKind;
 use roomeq_model::eligibility::{
     ChannelOperationGate, CorrectionOperation, EligibilityRecord, EligibilityVerdict,
-    EvidencePolicy,
+    EvidencePolicy, GateRewHeaderFacts,
 };
 use roomeq_model::{AppliedThreshold, AssessmentRecord};
 use serde::{Deserialize, Serialize};
@@ -740,6 +740,56 @@ pub fn source_measurement_id(source: &MeasurementSource) -> String {
     }
 }
 
+/// Declared measurement file backing a source, if it names one.
+///
+/// Inline and in-memory curves carry no file to transcribe headers from;
+/// multi-take sets have no single header. Returns `None` for all of
+/// those; header absence there is a precise unknown, not an error.
+fn source_file_path(source: &MeasurementSource) -> Option<&std::path::Path> {
+    match source {
+        MeasurementSource::Single(single) => match single.measurement.original() {
+            autoeq_core::MeasurementRef::Loaded { .. } => {
+                unreachable!("original removes snapshot wrappers")
+            }
+            autoeq_core::MeasurementRef::Path(path) => Some(path.as_path()),
+            autoeq_core::MeasurementRef::Named { path, .. } => Some(path.as_path()),
+            autoeq_core::MeasurementRef::Inline(_) => None,
+        },
+        MeasurementSource::Multiple(_)
+        | MeasurementSource::InMemory(_)
+        | MeasurementSource::InMemoryMultiple(_) => None,
+    }
+}
+
+/// Transcribe REW header facts from a source file into report vocabulary.
+///
+/// Best-effort and report-only: I/O errors, unreadable files, and
+/// headerless curves all yield `None`. Verdicts never consult the
+/// result; it exists so the final report can cite what the source
+/// file declared, with conversion provenance when derived.
+fn rew_facts_for_source(source: &MeasurementSource) -> Option<GateRewHeaderFacts> {
+    let path = source_file_path(source)?;
+    let facts = autoeq_measurements::read::read_rew_header_facts(path).ok()?;
+    if facts.is_empty() {
+        return None;
+    }
+    Some(GateRewHeaderFacts {
+        rew_version: facts.rew_version,
+        microphone: facts.microphone,
+        acoustic_timing_reference: facts.acoustic_timing_reference,
+        clock_adjustment_ppm: facts.clock_adjustment_ppm,
+        estimated_ir_delay_ms: facts.estimated_ir_delay_ms,
+        timing_note: facts.timing_note,
+        smoothing: facts.smoothing,
+        frequency_step_ppo: facts.frequency_step_ppo,
+        stimulus: facts.stimulus,
+        target_level_db: facts.target_level_db,
+        measurement_name: facts.measurement_name,
+        dated: facts.dated,
+        converted_from: facts.converted_from,
+    })
+}
+
 /// Per-channel evidence assembled from declared provenance and the loaded grid.
 ///
 /// The valid band is the declared gate-limited band intersected with the
@@ -1129,6 +1179,53 @@ pub(crate) fn crossover_timing_reference(
     reference.ok_or_else(|| "no capture reference available".into())
 }
 
+/// Verify that all named channels share one declared timing reference.
+///
+/// Scorecard-scope check across the evaluated inputs: every channel must
+/// resolve to a single measurement source with a stationary capture kind
+/// and the same non-empty timing-reference identity. Band-scoped take
+/// coverage and quasi-anechoic support stay with the per-operation gates;
+/// this answers only whether one common reference exists to verify against.
+/// Returns the shared identity, or the precise reason verification fails.
+pub(crate) fn shared_timing_reference(
+    config: &roomeq_model::RoomConfig,
+    channels: &[String],
+) -> Result<String, String> {
+    if channels.is_empty() {
+        return Err("no evaluated channels".into());
+    }
+    let mut reference: Option<String> = None;
+    for channel in channels {
+        let source = resolve_channel_source(config, channel).ok_or_else(|| {
+            format!("channel '{channel}' has no single measurement source declaring provenance")
+        })?;
+        let provenance = source.provenance();
+        if !matches!(
+            provenance.capture_kind,
+            ProvenanceCaptureKind::StationaryIr | ProvenanceCaptureKind::DirectSound
+        ) {
+            return Err(format!(
+                "channel '{channel}' lacks stationary timing evidence"
+            ));
+        }
+        let declared = provenance
+            .timing_reference_id
+            .as_deref()
+            .filter(|id| !id.trim().is_empty())
+            .ok_or_else(|| format!("channel '{channel}' lacks a timing reference"))?;
+        if reference
+            .as_ref()
+            .is_some_and(|expected| expected != declared)
+        {
+            return Err(format!(
+                "channel '{channel}' has an incompatible timing reference"
+            ));
+        }
+        reference = Some(declared.to_string());
+    }
+    reference.ok_or_else(|| "no capture reference available".into())
+}
+
 /// One channel's intake input for cross-channel gating.
 pub struct ChannelGateInput<'a> {
     /// Logical channel name.
@@ -1203,6 +1300,7 @@ fn gate_one_channel(
             [20.0, 20_000.0],
             reason,
         )],
+        rew_header_facts: None,
     };
     let source = match input.source {
         Some(source) => source,
@@ -1238,6 +1336,9 @@ fn gate_one_channel(
             ),
         ));
     }
+    // Report-only provenance: cite what the source file declared. Attached
+    // after verdict computation so header text can never influence a gate.
+    gate.rew_header_facts = rew_facts_for_source(source);
     gate
 }
 
@@ -1306,6 +1407,7 @@ pub fn gate_channel_operations(
             channel: evidence.channel.clone(),
             measurement_id: evidence.measurement_id.clone(),
             records,
+            rew_header_facts: None,
         };
     }
 
@@ -1490,6 +1592,7 @@ pub fn gate_channel_operations(
         channel: evidence.channel.clone(),
         measurement_id: evidence.measurement_id.clone(),
         records,
+        rew_header_facts: None,
     }
 }
 
@@ -1562,6 +1665,147 @@ mod tests {
                 supported
             );
         }
+    }
+
+    #[test]
+    fn gate_cites_rew_header_facts_without_changing_verdicts() {
+        let dir = std::env::temp_dir().join(format!(
+            "autoeq_gate_header_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let headed = dir.join("headed.txt");
+        std::fs::write(
+            &headed,
+            "* Measurement data measured by REW V5.40 beta 124\n\
+             * Source: EXCL: Line (UMIK-2)\n\
+             * Format: 512k Log Swept Sine using an acoustic timing reference\n\
+             * Smoothing: Variable\n\
+             * Frequency Step: 96 ppo\n\
+             * Freq(Hz), SPL(dB), Phase(degrees)\n\
+             20.0, 80.0, 0.0\n100.0, 81.0, 1.0\n1000.0, 82.0, 2.0\n",
+        )
+        .unwrap();
+        let plain = dir.join("plain.csv");
+        std::fs::write(
+            &plain,
+            "freq_hz,spl_db,phase_deg\n20.0,80.0,0.0\n100.0,81.0,1.0\n1000.0,82.0,2.0\n",
+        )
+        .unwrap();
+        let grid = [20.0, 100.0, 1000.0];
+        let gate_for = |path: &std::path::Path| {
+            let source: MeasurementSource = serde_json::from_value(serde_json::json!({
+                "path": path.to_string_lossy(),
+                "provenance": {"capture_kind": "stationary_ir",
+                    "timing_reference_id": "fixed-emitter"}
+            }))
+            .unwrap();
+            gate_all_channels(
+                &[ChannelGateInput {
+                    channel: "left",
+                    source: Some(&source),
+                    freq_hz: &grid,
+                    has_phase_data: true,
+                }],
+                None,
+            )
+            .pop()
+            .unwrap()
+        };
+        let with_facts = gate_for(&headed);
+        let facts = with_facts
+            .rew_header_facts
+            .as_ref()
+            .expect("headed source cites its header declarations");
+        assert_eq!(facts.microphone.as_deref(), Some("UMIK-2"));
+        assert!(facts.acoustic_timing_reference);
+        assert_eq!(facts.smoothing.as_deref(), Some("Variable"));
+        let without_facts = gate_for(&plain);
+        assert!(
+            without_facts.rew_header_facts.is_none(),
+            "headerless source keeps a precise absent state"
+        );
+        // Verdicts are declaration-independent: same (operation, verdict)
+        // pairs with and without transcribed headers.
+        let verdicts = |gate: &ChannelOperationGate| {
+            gate.records
+                .iter()
+                .map(|record| (record.operation, record.verdict))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(verdicts(&with_facts), verdicts(&without_facts));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn shared_timing_reference_verifies_common_stationary_reference() {
+        use roomeq_model::{RoomConfig, SpeakerConfig};
+        let stationary = |id: &str| -> MeasurementSource {
+            serde_json::from_value(serde_json::json!({
+                "path": "not-loaded.csv",
+                "provenance": {"capture_kind": "stationary_ir", "timing_reference_id": id}
+            }))
+            .unwrap()
+        };
+        let config = RoomConfig {
+            speakers: std::collections::HashMap::from([
+                ("L".into(), SpeakerConfig::Single(stationary("clock-a"))),
+                ("R".into(), SpeakerConfig::Single(stationary("clock-a"))),
+            ]),
+            ..Default::default()
+        };
+        assert_eq!(
+            shared_timing_reference(&config, &["L".into(), "R".into()]).unwrap(),
+            "clock-a"
+        );
+        // Mismatched references refuse with the offending channel named.
+        let mut mismatched = config.clone();
+        mismatched
+            .speakers
+            .insert("R".into(), SpeakerConfig::Single(stationary("clock-b")));
+        assert!(
+            shared_timing_reference(&mismatched, &["L".into(), "R".into()])
+                .unwrap_err()
+                .contains("incompatible")
+        );
+        // Missing references and non-stationary captures refuse precisely.
+        let missing: MeasurementSource = serde_json::from_value(serde_json::json!({
+            "path": "not-loaded.csv",
+            "provenance": {"capture_kind": "stationary_ir"}
+        }))
+        .unwrap();
+        let mut no_id = config.clone();
+        no_id
+            .speakers
+            .insert("R".into(), SpeakerConfig::Single(missing));
+        assert!(
+            shared_timing_reference(&no_id, &["L".into(), "R".into()])
+                .unwrap_err()
+                .contains("lacks a timing reference")
+        );
+        let moving: MeasurementSource = serde_json::from_value(serde_json::json!({
+            "path": "not-loaded.csv",
+            "provenance": {"capture_kind": "spatial_magnitude", "timing_reference_id": "clock-a"}
+        }))
+        .unwrap();
+        let mut non_stationary = config.clone();
+        non_stationary
+            .speakers
+            .insert("R".into(), SpeakerConfig::Single(moving));
+        assert!(
+            shared_timing_reference(&non_stationary, &["L".into(), "R".into()])
+                .unwrap_err()
+                .contains("stationary")
+        );
+        // Unknown channels fail closed.
+        assert!(
+            shared_timing_reference(&config, &["L".into(), "C".into()])
+                .unwrap_err()
+                .contains("no single measurement source")
+        );
     }
 
     #[test]
@@ -2133,6 +2377,7 @@ mod tests {
             optimizer: fast_optimizer(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: None,
             reporting: None,
             cea2034_cache: None,

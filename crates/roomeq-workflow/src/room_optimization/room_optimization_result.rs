@@ -79,7 +79,14 @@ pub(super) fn apply_final_correction_safety_gate(
     let mut accepted_report = None;
     let mut score_basis_changed = false;
     let supporting_source_outputs = supporting_source_output_names(result);
-    for (name, channel) in &mut result.channel_results {
+    // Canonical order: per-channel stage pushes, revert lists, and the
+    // best-report tiebreak below must not depend on HashMap iteration.
+    let mut gate_names: Vec<String> = result.channel_results.keys().cloned().collect();
+    gate_names.sort();
+    for name in &gate_names {
+        let Some(channel) = result.channel_results.get_mut(name) else {
+            continue;
+        };
         if supporting_source_outputs.contains(name) {
             continue;
         }
@@ -618,7 +625,7 @@ pub(super) fn apply_final_correction_safety_gate(
                 quality.training.worst_position_improvement_db,
                 quality.max_boost_db,
                 quality.induced_group_delay_rms_ms,
-                quality.temporal.pre_ringing_energy_db,
+                quality.temporal.pre_ringing_audible_db,
                 quality.temporal.latency_ms,
                 realization.max_abs_error_db,
                 realization.failed_channels,
@@ -1601,7 +1608,7 @@ fn runtime_temporal_quality_evidence(
         // even when missing resources also removed the tap-count metadata.
         // A maximum over the remaining channels is not complete evidence.
         evidence.temporal_evidence_available = false;
-        evidence.pre_ringing_energy_db = None;
+        evidence.pre_ringing_audible_db = None;
         evidence.latency_ms = None;
     }
     evidence
@@ -2227,6 +2234,13 @@ pub(super) fn is_baseline_correction(plugin: &roomeq_model::PluginConfigWrapper)
                     | "post_dsp_output_headroom_safety"
             )
         )
+        // Compile-appended padding carries optimized relative timing, not a
+        // structural alignment. Refused graphs must not assert it.
+        || plugin
+            .parameters
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            == Some(crate::delay_compile::COMPILE_PADDING_LABEL)
 }
 
 fn remove_correction_stage(chain: &mut ChannelDspChain, stage: CorrectionStage) {
@@ -2464,6 +2478,22 @@ mod tests {
     use roomeq_engine::quality::CorrectionDecision;
     use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
+
+    #[test]
+    fn baseline_restoration_strips_marked_padding_but_keeps_structural_delays() {
+        let mut padding = roomeq_engine::output::create_delay_plugin(4.86);
+        padding
+            .parameters
+            .as_object_mut()
+            .expect("delay parameters are an object")
+            .insert(
+                "label".to_string(),
+                serde_json::json!(crate::delay_compile::COMPILE_PADDING_LABEL),
+            );
+        assert!(super::is_baseline_correction(&padding));
+        let structural = roomeq_engine::output::create_delay_plugin(4.86);
+        assert!(!super::is_baseline_correction(&structural));
+    }
 
     #[test]
     fn sync_chain_reported_curve_replaces_stale_eq_response() {
@@ -3084,7 +3114,7 @@ mod tests {
             roomeq_model::ProcessingMode::PhaseLinear,
         );
         assert!(!evidence.temporal_evidence_available);
-        assert!(evidence.pre_ringing_energy_db.is_none());
+        assert!(evidence.pre_ringing_audible_db.is_none());
         assert!(evidence.latency_ms.is_none());
     }
 
@@ -3105,7 +3135,14 @@ mod tests {
             post_ringing_peak_db: -30.0,
             pre_ringing_audible_db: -8.7,
             post_ringing_audible_db: -40.0,
+            pre_energy_ratio_db: -9.5,
             penalty: 1.0,
+            taps: 64,
+            sample_rate_hz: 48_000.0,
+            masking_profile: "mixed".to_string(),
+            pre_mask_ms: 2.0,
+            post_mask_ms: 20.0,
+            audibility_threshold_db: -20.0,
         });
         result.channel_results.get_mut("left").unwrap().fir_coeffs = Some(vec![0.0; 64]);
 
@@ -3119,7 +3156,7 @@ mod tests {
             let evidence =
                 runtime_temporal_quality_evidence(&result, &names, &[], &[], 48_000.0, mode);
             assert_eq!(
-                evidence.pre_ringing_energy_db,
+                evidence.pre_ringing_audible_db,
                 Some(-8.7),
                 "mode {label} must preserve the measured precursor"
             );
@@ -3151,7 +3188,14 @@ mod tests {
             post_ringing_peak_db: -80.0,
             pre_ringing_audible_db: -80.0,
             post_ringing_audible_db: -80.0,
+            pre_energy_ratio_db: -80.0,
             penalty: 0.0,
+            taps: 4096,
+            sample_rate_hz: 48_000.0,
+            masking_profile: "mixed".to_string(),
+            pre_mask_ms: 2.0,
+            post_mask_ms: 20.0,
+            audibility_threshold_db: -20.0,
         });
 
         let (acoustic, _, _) = runtime_acceptance_evidence(
@@ -3252,6 +3296,7 @@ mod tests {
             optimizer: roomeq_model::OptimizerConfig::default(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: None,
             reporting: None,
             cea2034_cache: None,
@@ -3272,6 +3317,7 @@ mod tests {
             optimizer: roomeq_model::OptimizerConfig::default(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: Some(CtcConfig::default()),
             reporting: None,
             cea2034_cache: None,
@@ -3293,6 +3339,7 @@ mod tests {
             optimizer: roomeq_model::OptimizerConfig::default(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: Some(CtcConfig::default()),
             reporting: None,
             cea2034_cache: None,
@@ -3321,6 +3368,7 @@ mod tests {
             optimizer: roomeq_model::OptimizerConfig::default(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: Some(CtcConfig::default()),
             reporting: None,
             cea2034_cache: None,
@@ -3490,7 +3538,7 @@ mod tests {
             .expect("final safety gate should attach the shared quality scorecard");
         assert!(quality.finite);
         assert_eq!(quality.training.curve_count, 1);
-        assert_eq!(quality.temporal.pre_ringing_energy_db, Some(-300.0));
+        assert_eq!(quality.temporal.pre_ringing_audible_db, Some(-300.0));
         assert_eq!(quality.temporal.latency_ms, Some(0.0));
         assert!(quality.temporal.available_headroom_db.is_some());
     }

@@ -17,8 +17,11 @@ from scripts.src.acoustic_report import (
     early_reflection_level_db,
     early_reflections_html,
     early_late_ratio_db,
+    landmarks_table_html,
     level_compensation,
+    operational_summaries_by_channel,
     pair_sum_difference,
+    response_landmarks,
     room_t60_rows,
     summary_table_html,
     symmetric_groups,
@@ -519,6 +522,81 @@ class SummarySectionTests(unittest.TestCase):
 
         self.assertEqual(html, "")
 
+    def test_all_eq_filters_renders_channel_buttonset(self):
+        html = _all_eq_filters_html(_driver_eq_split_data())
+
+        self.assertIn('<div class="eq-tabs">', html)
+        self.assertIn("openEqTab(event, 'alleq_0')", html)
+        self.assertIn('id="alleq_0" class="eq-tab-panel active"', html)
+        self.assertIn('id="alleq_1" class="eq-tab-panel"', html)
+        # Every channel panel keeps its filter tables.
+        self.assertIn("Driver: Left Sub (2)", html)
+        self.assertIn("Shared channel LFE (1)", html)
+
+    def test_operational_share_derives_from_legacy_final_decisions(self):
+        def decision(channel, status, decision_id, supersedes=()):
+            return {
+                "decision_id": decision_id,
+                "stage": "final",
+                "action": "equalize",
+                "status": status,
+                "logical_input": channel,
+                "physical_output": channel,
+                "final_graph_identity": "graph-1",
+                "supersedes_ids": list(supersedes),
+            }
+
+        data = {"correction_decisions": {"decisions": [
+            decision("L", "applied", "d-1"),
+            decision("L", "unresolved", "d-2"),
+            decision("R", "constrained", "d-3"),
+            # Provisional history never enters the scope.
+            dict(decision("R", "applied", "d-4"), stage="provisional"),
+            # A superseded record leaves both counts.
+            decision("R", "applied", "d-5", supersedes=["d-3"]),
+        ]}}
+        summaries = operational_summaries_by_channel(data)
+
+        self.assertEqual(summaries["L"], (50.0, 2, 1))
+        self.assertEqual(summaries["R"], (100.0, 1, 1))
+
+    def test_operational_share_stays_pending_without_final_scope(self):
+        data = {"correction_decisions": {"decisions": [{
+            "decision_id": "d-1", "stage": "provisional", "action": "equalize",
+            "status": "unresolved", "physical_output": "L",
+            "final_graph_identity": "",
+        }]}}
+        self.assertEqual(operational_summaries_by_channel(data), {})
+        html = summary_table_html({"channels": {"L": {}}, **data})
+        self.assertIn("correction_decisions.channel_summaries", html)
+
+    def test_level_residual_predicts_from_final_curve(self):
+        init_l, init_r = _stereo_curves([1.0, 1.0, 1.0, 1.0], [-1.0, -1.0, -1.0, -1.0])
+        rows = level_compensation({
+            "L": {"initial_curve": init_l,
+                  "final_curve": {"freq": [100.0, 1000.0, 2000.0, 3000.0],
+                                  "spl": [0.0, 0.0, 0.0, 0.0]}},
+            "R": {"initial_curve": init_r},
+        })
+        by_name = {r["speaker"]: r for r in rows}
+        self.assertAlmostEqual(by_name["L"]["residual_db"], 1.0)
+        self.assertIsNone(by_name["R"]["residual_db"])
+
+    def test_landmarks_report_peaks_and_lf_extension(self):
+        freq = [20.0, 30.0, 40.0, 60.0, 100.0, 200.0, 400.0, 1000.0, 2000.0]
+        spl = [-20.0, -8.0, -2.0, 0.0, 0.0, 0.0, 0.0, 8.0, 0.0]
+        marks = response_landmarks(
+            {"initial_curve": {"freq": list(freq), "spl": list(spl)}})
+        assert marks is not None
+        self.assertEqual(marks["lf_extension_hz"], 30.0)
+        self.assertTrue(marks["peaks"])
+        html = landmarks_table_html(
+            {"channels": {"L": {"initial_curve": {"freq": list(freq),
+                                                  "spl": list(spl)}}}})
+        self.assertIn("Frequency landmarks", html)
+        self.assertIn("30 Hz", html)
+        self.assertIsNone(response_landmarks({}))
+
     def test_crossover_config_lists_plugins_and_routes(self):
         html = _crossover_config_html(two_sub_overview_data())
 
@@ -555,7 +633,7 @@ class SummarySectionTests(unittest.TestCase):
         self.assertLess(html.index("Recorded final correction decisions"),
                         html.index("<h2>Optimization Summary</h2>"))
         self.assertLess(html.index("Recorded final correction decisions"),
-                        html.index('"title": "Combined Overview"'))
+                        html.index('"title": "Combined Overview — Before EQ"'))
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "comparison.html"
             create_comparison_html_report([("iir", data), ("fir", data)], output)
@@ -575,7 +653,7 @@ class SummarySectionTests(unittest.TestCase):
         self.assertIn("<h2>Crossover Configuration</h2>", html)
         self.assertIn("Not approved for playback", html)
         self.assertLess(html.index("Why this correction?"), html.index("<h2>Optimization Summary</h2>"))
-        self.assertLess(html.index("Why this correction?"), html.index('"title": "Combined Overview"'))
+        self.assertLess(html.index("Why this correction?"), html.index('"title": "Combined Overview — Before EQ"'))
         # Summaries precede the per-channel tabs (first non-null section tab).
         self.assertLess(
             html.index("<h2>All EQ Filters</h2>"),
@@ -914,6 +992,42 @@ class AcousticReportTests(unittest.TestCase):
             'within declared ±0.05 s of the complete-channel room mean">100.0',
             summary,
         )
+
+    def test_engine_early_late_renders_figure_and_ratio_cell(self):
+        # Engine shape from attach_measured_acoustics: full contract keys
+        # with 1-8 kHz coverage, as emitted for a measured room IR.
+        freq = [1000.0, 2000.0, 4000.0, 8000.0]
+        curves = {
+            "method": "incoherent_band_energy", "reference": "full_peak_band",
+            "smoothing": "third_octave", "split_ms": 20.0,
+            "basis": "measured_room_ir",
+            "direct_reference": "broadband envelope peak",
+            "valid_band_hz": [900.0, 9000.0],
+            "full": {"freq": list(freq), "spl": [0.0, -1.0, -2.0, -3.0]},
+            "early": {"freq": list(freq), "spl": [-0.5, -1.5, -2.5, -3.5]},
+            "late": {"freq": list(freq), "spl": [-6.5, -7.5, -8.5, -9.5]},
+        }
+        data = {"channels": {"L": {"initial_curve": {"freq": list(freq),
+                                                      "spl": [0.0] * 4},
+                                   "final_curve": {"freq": list(freq),
+                                                   "spl": [0.0] * 4},
+                                   "early_late_curves": curves}},
+                "metadata": {}}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+        payload = report_payload(html)
+        titles = [section["figure"]["title"] for section in payload["sections"]
+                  if section["kind"] == "figure" and section.get("tab") == "L"]
+        self.assertIn("L: early vs late band energy (20 ms split)", titles)
+        summary = next(
+            section["html"] for section in payload["sections"]
+            if "Results summary" in section.get("html", "")
+        )
+        # The ratio cell flips from pending to its +6 dB value.
+        self.assertIn(">+6.0<", summary)
+        self.assertNotIn("needs roomeq field: early_late_curves", summary)
 
 
 if __name__ == "__main__":

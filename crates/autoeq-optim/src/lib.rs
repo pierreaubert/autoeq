@@ -60,6 +60,14 @@ pub use penalty_mode::PenaltyMode;
 pub use problem::{ObjectiveEvaluator, OptimizationProblem, OptimizationResult};
 pub use smoothness_penalty_config::SmoothnessPenaltyConfig;
 
+/// Fallback seed for optimizer stages without an explicit seed.
+///
+/// Unspecified never means nondeterministic: every stochastic stage seeds
+/// from this value when its config seed is `None`. The value is arbitrary
+/// but stable; changing it perturbs all unseeded optimization results.
+/// Pass an explicit seed when the run needs experiment identity.
+pub const DEFAULT_SEED: u64 = 0x5EED_5EED;
+
 /// Adapter implemented by higher-level RoomEQ configuration crates.
 pub trait RoomOptimizerConfig {
     /// Convert configuration into optimizer parameters for an explicit sample

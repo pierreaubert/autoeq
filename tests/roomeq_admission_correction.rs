@@ -89,6 +89,7 @@ fn stereo_config() -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 
@@ -456,6 +457,7 @@ fn home_cinema_config() -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 
@@ -1550,6 +1552,7 @@ fn multisub_room_config() -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 
@@ -2232,6 +2235,13 @@ fn roadmap_correction_physical_phase_refusal_is_delivered_with_opt_in_policy() {
 
 fn assert_joint_drive_weight_discriminates(config: &RoomConfig) {
     let mut tradeoff = config.clone();
+    // This helper observes weight→ranking coupling in gain-candidate
+    // scores, not benefit gating: open the benefit floor so zero-benefit
+    // gain candidates stay observable as passing trials.
+    tradeoff
+        .optimizer
+        .finalization
+        .min_improvement_lower_bound_db = -1e9;
     let SpeakerConfig::MultiSub(group) = tradeoff.speakers.get_mut("subs").unwrap() else {
         panic!("tradeoff requires the joint-sub fixture");
     };

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Use `mbx` when installed, else plain `cargo` (mirrors the justfile).
+if [ -z "${CARGO:-}" ]; then
+    if command -v mbx >/dev/null 2>&1; then CARGO=mbx; else CARGO=cargo; fi
+fi
+
 # Run from the repository root even when invoked from another directory.
 ROOT=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
@@ -12,6 +17,15 @@ SCENARIOS=${SCENARIOS:-'2.2_unknown 2.2_sigberg1 2.2_sigberg2 2.2_sigberg3 2.2_g
 MODES=${MODES:-'iir fir mixed mixed-phase'}
 read -r -a scenarios <<< "$SCENARIOS"
 read -r -a modes <<< "$MODES"
+
+# Fresh run directories: refuse to mix new results with stale artifacts
+# unless reuse is explicitly allowed.
+if [ -d "$OUT" ] && [ -n "$(ls -A "$OUT" 2>/dev/null)" ] && [ -z "${ROOMEQ_ALLOW_REUSE_OUT:-}" ]; then
+    echo "Refusing to reuse non-empty OUT=$OUT (stale artifacts look like current failures)." >&2
+    echo "Set ROOMEQ_ALLOW_REUSE_OUT=1 to append, or point OUT at a fresh directory." >&2
+    exit 1
+fi
+mkdir -p "$OUT"
 
 if [[ -z ${PYTHON:-} ]]; then
     # A linked Git worktree can reuse the checkout's existing plot environment.
@@ -43,8 +57,41 @@ for scenario in "${scenarios[@]}"; do
     done
 done
 
-cargo build --release --locked --features cli --bin roomeq
+$CARGO build --release --locked --features cli --bin roomeq
 BIN=${CARGO_TARGET_DIR:-./target}/release/roomeq
+
+# WP1 run manifest preamble: identify this run before any optimization.
+RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)-$$
+if command -v sha256sum >/dev/null 2>&1; then
+    BIN_SHA=$(sha256sum "$BIN" | awk '{print $1}')
+else
+    BIN_SHA=$(shasum -a 256 "$BIN" | awk '{print $1}')
+fi
+GIT_REV=$(git rev-parse HEAD 2>/dev/null || echo unknown)
+if [ -z "$(git status --porcelain 2>/dev/null)" ]; then GIT_DIRTY=false; else GIT_DIRTY=true; fi
+STARTED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+RUN_ID="$RUN_ID" BIN_SHA="$BIN_SHA" GIT_REV="$GIT_REV" GIT_DIRTY="$GIT_DIRTY" \
+STARTED_UTC="$STARTED_UTC" SCENARIOS="$SCENARIOS" MODES="$MODES" BIN_PATH="$BIN" \
+    "$PYTHON" - "$OUT/manifest.json" "$0" "$@" <<'PYEOF'
+import json, os, sys
+manifest = {
+    "run_id": os.environ["RUN_ID"],
+    "started_utc": os.environ["STARTED_UTC"],
+    "command": sys.argv[2:],
+    "scenarios": os.environ["SCENARIOS"].split(),
+    "modes": os.environ["MODES"].split(),
+    "roomeq_bin": os.environ["BIN_PATH"],
+    "roomeq_sha256": os.environ["BIN_SHA"],
+    "git_revision": os.environ["GIT_REV"],
+    "git_dirty": os.environ["GIT_DIRTY"] == "true",
+    "finished_utc": None,
+    "suite_exit": None,
+}
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+print(f"RoomEQ run manifest: {sys.argv[1]} (run {manifest['run_id']})")
+PYEOF
 # REW captures are tracked, but their derived CSV directories are ignored.
 # Prepare missing derivatives in fresh worktrees without overwriting an
 # existing capture export (including any user edits to that export).
@@ -112,6 +159,22 @@ for scenario in "${scenarios[@]}"; do
         fi
     fi
 done
+# WP1: always publish machine-readable reports, even on failure.
+if ! "$PYTHON" ./scripts/roomeq_suite_report.py "$OUT"; then
+    failures+=("suite: report generation failed")
+fi
+FINISHED_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if (( ${#failures[@]} > 0 )); then SUITE_EXIT=1; else SUITE_EXIT=0; fi
+"$PYTHON" - "$OUT/manifest.json" "$FINISHED_UTC" "$SUITE_EXIT" <<'PYEOF'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    manifest = json.load(handle)
+manifest["finished_utc"] = sys.argv[2]
+manifest["suite_exit"] = int(sys.argv[3])
+with open(sys.argv[1], "w", encoding="utf-8") as handle:
+    json.dump(manifest, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PYEOF
 if (( ${#failures[@]} > 0 )); then
     echo "=== RoomEQ measured failures (${#failures[@]}) ===" >&2
     for failure in "${failures[@]}"; do

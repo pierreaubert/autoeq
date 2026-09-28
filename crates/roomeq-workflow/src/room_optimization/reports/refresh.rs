@@ -560,7 +560,46 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
             );
         }
     }
+    stamp_convolution_identities(result, sidecar_dir);
     super::waveform_status::record(result, &waveform_errors);
+}
+
+/// Stamp actual tap count and sample rate on every resolvable convolution.
+///
+/// WP6 reports the shipped bytes' own dimensions, not design-time intent:
+/// each `ir_file` is decoded and its length and rate recorded alongside
+/// the design delay. Unresolvable references stay unstamped (an explicit
+/// absence later stages can see), never zero-filled.
+fn stamp_convolution_identities(result: &mut RoomOptimizationResult, sidecar_dir: &Path) {
+    for chain in result.channels.values_mut() {
+        for plugin in chain
+            .plugins
+            .iter_mut()
+            .chain(chain.drivers.iter_mut().flat_map(|drivers| {
+                drivers
+                    .iter_mut()
+                    .flat_map(|driver| driver.plugins.iter_mut())
+            }))
+        {
+            if plugin.plugin_type != "convolution" {
+                continue;
+            }
+            let Some(ir_file) = plugin.parameters.get("ir_file").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let path = Path::new(ir_file);
+            let path = if path.is_relative() {
+                sidecar_dir.join(path)
+            } else {
+                path.to_path_buf()
+            };
+            let Ok(wav) = crate::wav::decode_first_channel(&path) else {
+                continue;
+            };
+            plugin.parameters["taps"] = serde_json::json!(wav.samples.len());
+            plugin.parameters["sample_rate_hz"] = serde_json::json!(wav.sample_rate);
+        }
+    }
 }
 
 /// Compose every serial convolution, without substituting a partial resource set.

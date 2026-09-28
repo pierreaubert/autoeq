@@ -502,6 +502,8 @@ fn test_create_dsp_chain_output() {
         operation_gates: None,
 
         provisional_decisions: Vec::new(),
+        epa_provenance: None,
+        playback_summary: None,
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));
@@ -584,6 +586,8 @@ fn test_create_dsp_chain_output_adds_ctc_global_xtc_plugin() {
         operation_gates: None,
 
         provisional_decisions: Vec::new(),
+        epa_provenance: None,
+        playback_summary: None,
     };
 
     let output = create_dsp_chain_output(channels, Some(metadata));

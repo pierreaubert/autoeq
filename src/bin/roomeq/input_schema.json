@@ -2214,6 +2214,12 @@
           "format": "double",
           "type": "number"
         },
+        "min_improvement_lower_bound_db": {
+          "default": 0.0,
+          "description": "Minimum uncertainty-adjusted improvement for a candidate to ship, in dB.\n\nEvery training seat's `improvement_lower_bound_db` (improvement after\nsubtracting summation uncertainty) must exceed this floor, or the\ncandidate is rejected as showing no demonstrated benefit and selection\nfalls back to a simpler protected result. Identity candidates (no\nmeaningful correction applied) skip the floor: with nothing applied\nthere is nothing to reject, and they flow through as the protected\nbaseline. The default 0.0 is the measurement-uncertainty boundary,\nnot a perceptual threshold: raising it needs repeat-capture and\nlistening evidence (WP7), never a guess.",
+          "format": "double",
+          "type": "number"
+        },
         "output_ceiling_dbfs": {
           "default": 0.0,
           "description": "Maximum sampled physical-output level, in dBFS (must be <= 0).",
@@ -2675,6 +2681,35 @@
       },
       "type": "object"
     },
+    "MeasuredIrSource": {
+      "additionalProperties": false,
+      "description": "One measured room impulse response backing a channel's acoustic report.",
+      "properties": {
+        "path": {
+          "description": "IR file path, resolved against the configuration directory.\nCSV with a `time_ms,amplitude` header.",
+          "type": "string"
+        },
+        "sample_rate_hz": {
+          "description": "Declared IR sample rate in Hz. When present it is verified against\nthe file's time grid; a mismatch fails ingestion fail-closed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "timing_reference_id": {
+          "description": "Shared clock identity across simultaneously captured channels.\nRequired on every entry when more than one channel declares a\nmeasured IR, so no cross-channel analysis can silently mix clocks.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "MeasurementInlineSchema": {
       "additionalProperties": false,
       "properties": {
@@ -3009,7 +3044,7 @@
         },
         "pre_ringing_threshold_db": {
           "default": -30.0,
-          "description": "Pre-ringing threshold in dB. Default: -30.0",
+          "description": "Pre-ringing threshold in dB. Default: -30.0\n\nDesign-time per-channel threshold for excess-phase FIR design; see\n`PreRingingSerdeConfig.threshold_db` for its relation to the\nruntime aggregate ceiling.",
           "format": "double",
           "type": "number"
         }
@@ -3526,6 +3561,7 @@
             "input_peak_limits": {},
             "max_attenuation_db": 12.0,
             "max_useful_output_loss_db": 3.0,
+            "min_improvement_lower_bound_db": 0.0,
             "output_ceiling_dbfs": 0.0,
             "physical_drive": null,
             "physical_drive_weight": 0.0,
@@ -4231,7 +4267,7 @@
         },
         "threshold_db": {
           "default": -30.0,
-          "description": "Maximum pre-ringing level in dB relative to main tap. Default: -30.0",
+          "description": "Maximum pre-ringing level in dB relative to main tap. Default: -30.0\n\nDesign-time per-channel threshold: it constrains FIR design, not the\nreported cross-channel aggregate. Runtime acceptance compares the\naggregate masking-derived audible value against its own −20 dB\nceiling, so an aggregate between the two is expected, not a\ndemonstrated design violation.",
           "format": "double",
           "type": "number"
         }
@@ -6040,7 +6076,7 @@
     },
     "UpperBandAcousticBound": {
       "additionalProperties": false,
-      "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nThis is an external evidence declaration, not a fitted extrapolation.",
+      "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nAn explicit declaration is a flat cap, not a fitted extrapolation. The\nsubwoofer stopband inference may instead record a measured rolloff, in\nwhich case `max_spl_db` is the bound level at `band_hz[0]` and the bound\ndeclines at `rolloff_db_per_oct` above it.",
       "properties": {
         "band_hz": {
           "description": "Bound must overlap the measurement endpoint and cover the assessed band.",
@@ -6057,13 +6093,21 @@
           "type": "string"
         },
         "max_spl_db": {
-          "description": "Same input reference and SPL calibration as the corresponding capture.",
+          "description": "Same input reference and SPL calibration as the corresponding capture.\nFlat cap everywhere when `rolloff_db_per_oct` is absent, level at\n`band_hz[0]` when a rolloff is present.",
           "format": "double",
           "type": "number"
         },
         "partition": {
           "description": "`training` or `held_out`, matching the immutable capture partition.",
           "type": "string"
+        },
+        "rolloff_db_per_oct": {
+          "description": "Measured decline in dB per octave above `band_hz[0]`. Absent means a\nflat cap. Only a non-positive (falling or flat) slope is admissible;\na rising tail can never bound unmeasured output.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "seat_index": {
           "format": "uint",
@@ -6173,6 +6217,13 @@
     "description": {
       "type": "string"
     },
+    "measured_impulse_responses": {
+      "additionalProperties": {
+        "$ref": "#/$defs/MeasuredIrSource"
+      },
+      "description": "Measured room impulse responses per channel, backing the R1–R5\nacoustic report fields. Keys are output channel names; values are\n`time_ms,amplitude` CSVs captured in the room. Channels without an\nentry keep synthesized IRs and their report cells stay pending.",
+      "type": "object"
+    },
     "optimizer": {
       "$ref": "#/$defs/OptimizerConfig",
       "default": {
@@ -6185,6 +6236,7 @@
           "input_peak_limits": {},
           "max_attenuation_db": 12.0,
           "max_useful_output_loss_db": 3.0,
+          "min_improvement_lower_bound_db": 0.0,
           "output_ceiling_dbfs": 0.0,
           "physical_drive": null,
           "physical_drive_weight": 0.0,

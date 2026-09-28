@@ -68,6 +68,16 @@ fn config(measurements: usize, report_only: bool) -> RoomConfig {
                 aggregation: roomeq_model::BudgetAggregation::Max,
                 ..Default::default()
             }),
+            // These rows verify pruning adjudication and export mechanics, not
+            // benefit: the tiny-bounded analytic plant can yield exactly-zero
+            // improvement, which the default benefit floor correctly rejects.
+            // Open the floor here so pruning stays observable; NaN bounds
+            // still fail closed, and the floor itself is covered by
+            // finalization unit tests plus measured-matrix flips.
+            finalization: roomeq_model::FinalizationConfig {
+                min_improvement_lower_bound_db: -1e9,
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Default::default()

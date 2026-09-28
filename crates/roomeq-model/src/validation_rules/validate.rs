@@ -129,6 +129,13 @@ fn validate_room_config_rules(config: &RoomConfig) -> ValidationResult {
     // Validate speaker configurations
     validate_speakers(&config.speakers, &mut result);
 
+    // Validate measured-IR declarations (file existence is verified at
+    // ingestion, where the configuration directory is known).
+    if let Err(reason) = crate::config::validate_measured_ir_map(&config.measured_impulse_responses)
+    {
+        result.add_error(reason);
+    }
+
     // Validate crossover references
     validate_crossovers(&config.speakers, config.crossovers.as_ref(), &mut result);
 
@@ -1667,6 +1674,7 @@ mod room_config_validation_tests {
             optimizer: OptimizerConfig::default(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: None,
             reporting: None,
             cea2034_cache: None,

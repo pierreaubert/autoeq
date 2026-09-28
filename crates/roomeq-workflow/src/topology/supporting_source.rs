@@ -162,6 +162,7 @@ mod tests {
             reporting: None,
             cea2034_cache: None,
             ctc: None,
+            measured_impulse_responses: Default::default(),
         }
     }
 
@@ -314,6 +315,8 @@ mod tests {
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         };
 
         process_supporting_source_channels_with_frequency_samples(
@@ -387,6 +390,8 @@ mod tests {
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         };
 
         process_supporting_source_channels_with_frequency_samples(

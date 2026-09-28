@@ -339,6 +339,17 @@ retaining the other quality gates. It is independent of PEQ boost/headroom,
 electrical `max_attenuation_db`, and `default_input_peak` assumptions. Never
 derive an input-peak budget from a PEQ headroom reserve.
 
+`optimizer.finalization.min_improvement_lower_bound_db` (default `0.0`) is the
+benefit floor: every training seat's uncertainty-adjusted improvement
+(`improvement_lower_bound_db`, after subtracting pre/post summation
+uncertainty budgets) must exceed it, or the candidate is rejected as showing
+no demonstrated benefit and selection falls back to a simpler protected
+result. Identity candidates (no meaningful correction applied) skip the
+floor and flow through as the protected baseline. The default is the
+measurement-uncertainty boundary, not a perceptual threshold: raising it
+needs repeat-capture and listening evidence (see
+`docs/ROOMEQ_LISTENING_PLAN.md`), never a guess.
+
 `optimizer.finalization` defines the electrical assumptions used after all
 processing and artifact assembly:
 
@@ -588,12 +599,14 @@ inside the usable band; declaring a band does not supply that evidence.
 
 Final coherent replay does not extrapolate subwoofer phase or silently truncate
 a full-range main. For a routed subwoofer measured through twice its deployed
-low-pass frequency, replay assumes the unmeasured stopband stays below the peak
-of the capture's final half-octave. The actual branch DSP is applied to this
-envelope; omission still requires at most 0.1 dB aggregate magnitude uncertainty.
-This assumption is recorded as `assumed_subwoofer_stopband_below_measured_tail`
-in final-seat summation support. It applies to route-owned and per-driver
-low-passes, not to mains or missing crossover-band measurements.
+low-pass frequency, replay bounds the unmeasured stopband from the capture's
+final half-octave: a falling measured tail continues at its fitted rolloff in
+dB per octave, recorded as `measured_subwoofer_stopband_rolloff`. A rising tail
+or fewer than two points in the window keeps the older flat peak-hold
+assumption, recorded as `assumed_subwoofer_stopband_below_measured_tail`.
+The actual branch DSP is applied to this envelope; omission still requires at
+most 0.1 dB aggregate magnitude uncertainty. Both forms apply to route-owned
+and per-driver low-passes, not to mains or missing crossover-band measurements.
 
 An explicit calibrated acoustic upper bound overrides this assumption. It is
 identified separately for each physical output, partition (`training` or
@@ -615,8 +628,11 @@ identified separately for each physical output, partition (`training` or
 
 An explicit bound must use the original capture calibration and input reference,
 overlap its measured endpoint, and cover the assessment band. Bounds cannot be
-broadcast across seats. Replay applies the actual branch DSP to the bound and
-allows omission only when aggregate magnitude uncertainty is at most 0.1 dB.
+broadcast across seats. An explicit declaration is a flat cap unless it carries
+a non-positive `rolloff_db_per_oct`, in which case the bound declines at that
+rate above `band_hz[0]`; a rising slope is rejected. Replay applies the actual
+branch DSP to the bound and allows omission only when aggregate magnitude
+uncertainty is at most 0.1 dB.
 It does not invent unmeasured phase. Final-seat support evidence records both
 magnitude and phase uncertainty, and the improvement lower bound includes
 baseline and candidate uncertainty. Missing bounds outside the automatic
@@ -1077,6 +1093,43 @@ Enable the prototype by adding a `rir_prototype` block inside the speaker's
   is enabled, because the prototype builder has already collapsed the
   measurements into a single curve.
 - Time-domain / IR averaging is not supported in this iteration.
+
+## Measured room impulse responses
+
+Channels can declare a measured room IR backing the R1–R5 acoustic report
+fields (early reflections, early/late curves, octave T60, waterfall with
+resonance decays, wavelet). Keys are output channel names; each entry is a
+`time_ms,amplitude` CSV captured in the room (swept-sine deconvolution or
+equivalent), resolved against the configuration directory:
+
+```json
+{
+  "measured_impulse_responses": {
+    "left": {
+      "path": "measurements/left__ir.csv",
+      "sample_rate_hz": 48000.0,
+      "timing_reference_id": "clock-1"
+    }
+  }
+}
+```
+
+- `path` (required): IR file with a `time_ms,amplitude` header.
+- `sample_rate_hz` (optional): verified against the file's time grid;
+  a mismatch fails ingestion fail-closed.
+- `timing_reference_id` (optional for one channel, required on every entry
+  when several channels declare IRs): shared clock identity so no
+  cross-channel analysis can silently mix clocks.
+
+Ingestion gates (all fail-closed): uniform time grid, finite samples with a
+nonzero peak, a declaration for a channel the run actually outputs. The
+measured waveform replaces the synthesized `pre_ir`; the R1–R5 acoustic
+analyses (reflection table, early/late, octave T60, waterfall with
+resonances, wavelet) run on it at finalization, before measurement
+extraction and ledger binding. Each analysis that declines on a valid file
+leaves its cells pending with a warning. Channels without a declaration
+keep synthesized IRs and their report cells stay pending: room-acoustic
+analysis never runs on a synthesized IR.
 
 Bass measurements retain their native frequency resolution. Main analysis keeps
 its full measured range even when a sub measurement ends near 200 Hz; only a

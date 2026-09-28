@@ -669,6 +669,12 @@ impl Default for FirConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct PreRingingSerdeConfig {
     /// Maximum pre-ringing level in dB relative to main tap. Default: -30.0
+    ///
+    /// Design-time per-channel threshold: it constrains FIR design, not the
+    /// reported cross-channel aggregate. Runtime acceptance compares the
+    /// aggregate masking-derived audible value against its own −20 dB
+    /// ceiling, so an aggregate between the two is expected, not a
+    /// demonstrated design violation.
     #[serde(default = "default_pre_ringing_threshold")]
     pub threshold_db: f64,
     /// Maximum pre-ringing time in seconds. Default: 0.005 (5 ms)
@@ -683,6 +689,10 @@ pub struct MixedPhaseSerdeConfig {
     #[serde(default = "default_mixed_phase_fir_length")]
     pub max_fir_length_ms: f64,
     /// Pre-ringing threshold in dB. Default: -30.0
+    ///
+    /// Design-time per-channel threshold for excess-phase FIR design; see
+    /// `PreRingingSerdeConfig.threshold_db` for its relation to the
+    /// runtime aggregate ceiling.
     #[serde(default = "default_pre_ringing_threshold")]
     pub pre_ringing_threshold_db: f64,
     /// Minimum spatial correction depth for excess phase correction. Default: 0.5

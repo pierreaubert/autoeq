@@ -86,6 +86,7 @@ fn make_stereo_config(optimizer: OptimizerConfig) -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 
@@ -321,6 +322,7 @@ fn make_stereo_2_1_config(optimizer: OptimizerConfig) -> RoomConfig {
         ctc: None,
         reporting: None,
         cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
     }
 }
 

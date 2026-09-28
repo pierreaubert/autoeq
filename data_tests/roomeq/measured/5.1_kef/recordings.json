@@ -38,31 +38,66 @@
   "speakers": {
     "L_r3m_ported_48k_FL_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_r3m_ported_48k_FL_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "L r3m_ported_48k_FL_260706a_direct"
+      "name": "L r3m_ported_48k_FL_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "R_r3m_ported_48k_FR_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/R_r3m_ported_48k_FR_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "R r3m_ported_48k_FR_260706a_direct"
+      "name": "R r3m_ported_48k_FR_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "C_r3m_ported_48k_FC_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/C_r3m_ported_48k_FC_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "C r3m_ported_48k_FC_260706a_direct"
+      "name": "C r3m_ported_48k_FC_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "LFE_r3m_ported_48k_LFE_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/LFE_r3m_ported_48k_LFE_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "LFE r3m_ported_48k_LFE_260706a_direct"
+      "name": "LFE r3m_ported_48k_LFE_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "BL_r3m_ported_48k_RL_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/BL_r3m_ported_48k_RL_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "BL r3m_ported_48k_RL_260706a_direct"
+      "name": "BL r3m_ported_48k_RL_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "BR_r3m_ported_48k_RR_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/BR_r3m_ported_48k_RR_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "BR r3m_ported_48k_RR_260706a_direct"
+      "name": "BR r3m_ported_48k_RR_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     },
     "L_R_r3m_ported_48k_FL_R_260706a_direct": {
       "path": "260706a_1800_cdsp_straightthru_baseline_csv/L_R_r3m_ported_48k_FL_R_260706a_direct_Jul_6_-20_dBFS.csv",
-      "name": "L+R r3m_ported_48k_FL&R_260706a_direct"
+      "name": "L+R r3m_ported_48k_FL&R_260706a_direct",
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "kef-mlp-session-1",
+        "has_measured_spl": true
+      }
     }
   },
   "optimizer": {

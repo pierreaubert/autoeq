@@ -735,10 +735,15 @@ fn fnv1a_hex(input: &str) -> String {
 /// Compute the immutable identity of any delivered JSON value.
 ///
 /// The caller binds the DSP content, never the ledger itself: compute
-/// over the payload with its ledger attachment cleared.
+/// over the payload with its ledger attachment cleared. Volatile
+/// wall-clock fields are normalized out before hashing (see
+/// [`crate::payload_binding::strip_volatile_identity_fields`]) so the
+/// fingerprint binds content, not the emission moment.
 pub fn canonical_value_identity(value: &serde_json::Value) -> GraphIdentity {
+    let mut normalized = value.clone();
+    crate::payload_binding::strip_volatile_identity_fields(&mut normalized);
     let canonical_json =
-        serde_json::to_string(&sort_canonical(value.clone())).expect("canonical JSON");
+        serde_json::to_string(&sort_canonical(normalized)).expect("canonical JSON");
     let fingerprint = fnv1a_hex(&canonical_json);
     GraphIdentity {
         canonical_json,

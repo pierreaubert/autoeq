@@ -8,13 +8,18 @@
 
 set -euo pipefail
 
+# Use `mbx` when installed, else plain `cargo` (mirrors the justfile).
+if [ -z "${CARGO:-}" ]; then
+    if command -v mbx >/dev/null 2>&1; then CARGO=mbx; else CARGO=cargo; fi
+fi
+
 SCENARIO="${1:-small_stereo_2_0}"
 OUTPUT_DIR="data_generated/roomeq_comparison/${SCENARIO}"
 
 echo "=== Running multi-mode comparison for: ${SCENARIO} ==="
 
 # Run the comparison test (generates JSON outputs for all modes)
-cargo test -p autoeq "test_multimode_comparison_${SCENARIO}" --release -- --nocapture
+$CARGO test -p autoeq "test_multimode_comparison_${SCENARIO}" --release -- --nocapture
 
 # Find the generated JSONs
 JSONS=()

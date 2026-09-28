@@ -165,6 +165,65 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         context.artifact_store,
         frequency_samples,
     )?;
+    // F4 graph boundary: compile relative advances to causal delays before
+    // downstream replay, selection, and save. Amendment 4 enforces the
+    // ordering structurally: the boundary always stamps the ledger (even a
+    // zero-offset no-op), replay divergence fails closed here because the
+    // pre-compile splice verdict would no longer cover the shipped graph,
+    // and the final ledger refuses any negative delay that a later stage
+    // might reintroduce. Compilation preserves inter-branch timing on
+    // replayed stages, so replay evaluates the same acoustics the host
+    // will realize everywhere the transfer condition holds.
+    {
+        let routes = result
+            .metadata
+            .bass_management
+            .as_mut()
+            .and_then(|bass| bass.routing_graph.as_mut())
+            .map(|graph| &mut graph.routes);
+        let compilation =
+            crate::delay_compile::compile_graph_delays_causal(&mut result.channels, routes);
+        if compilation.common_latency_ms > 0.0 {
+            info!(
+                "  Delay compilation: {} branches shifted by {:.3} ms common latency",
+                compilation.branches, compilation.common_latency_ms
+            );
+        }
+        if compilation.replay_diverged {
+            return Err(AutoeqError::OptimizationFailed {
+                message: format!(
+                    "delay compilation diverged from pre-compile replay ({}); \
+                     splice verdict does not cover the shipped graph",
+                    compilation.advisories.join("; "),
+                ),
+            });
+        }
+        // Serialize the common offset the host must realize: every branch
+        // total rose by this amount, preserving inter-branch timing. The
+        // stamp is unconditional so the ledger distinguishes "compiled
+        // clean" from "compile never ran". The native-result audit
+        // independently verifies that the final graph carries no negative
+        // delays.
+        let mut compile_check = StageCheck::pass(
+            "delay_compile:common_latency_ms",
+            StageCheckKind::Structural,
+        );
+        compile_check.observed = Some(compilation.common_latency_ms);
+        compile_check.diagnostic = Some(format!(
+            "{} branches share {:.6} ms common latency after causal compilation",
+            compilation.branches, compilation.common_latency_ms
+        ));
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "delay_compile_causal".to_string(),
+            status: if compilation.common_latency_ms > 0.0 || !compilation.advisories.is_empty() {
+                StageStatus::Applied
+            } else {
+                StageStatus::Skipped
+            },
+            advisories: compilation.advisories,
+            checks: vec![compile_check],
+        });
+    }
     room_optimization_result::record_peq_candidates(&mut result, request.config);
     let decision_processing = crate::final_ledger::processing_snapshot(&result)
         .map_err(|message| AutoeqError::OptimizationFailed { message })?;
@@ -1490,14 +1549,28 @@ fn apply_final_channel_level_alignment(
         && let Some(graph) = report.routing_graph.as_ref()
     {
         let fir_coeffs = retained_fir_coeffs_by_channel(result);
-        crate::topology::reconstruct_deployed_source_curves(
-            &result.channels,
-            &fir_coeffs,
-            graph,
-            report.optimization.as_ref(),
-            sample_rate,
-            sidecar_dir,
-        )
+        // Without calibrated main/sub timing the coherent splice verdict is
+        // arbitrary: verify levels on unenforced curves instead of rejecting
+        // the alignment on luck. Level matching itself is phase-independent.
+        if crate::topology::crossover_timing_refused(report.optimization.as_ref()) {
+            crate::topology::reconstruct_deployed_source_curves_unenforced(
+                &result.channels,
+                &fir_coeffs,
+                graph,
+                report.optimization.as_ref(),
+                sample_rate,
+                sidecar_dir,
+            )
+        } else {
+            crate::topology::reconstruct_deployed_source_curves(
+                &result.channels,
+                &fir_coeffs,
+                graph,
+                report.optimization.as_ref(),
+                sample_rate,
+                sidecar_dir,
+            )
+        }
     } else {
         Ok(result
             .channel_results
@@ -1902,7 +1975,10 @@ fn assemble_workflow_result_with_frequency_samples(
     // Evidence intake runs on every pipeline pass: per-channel operation
     // boundaries are evaluated from declared provenance and attached to the
     // result whether or not phase correction is enabled.
-    let phase_names: Vec<String> = result.channel_results.keys().cloned().collect();
+    let mut phase_names: Vec<String> = result.channel_results.keys().cloned().collect();
+    // Canonical order: HashMap iteration is per-process random; sort so
+    // `operation_gates` (and hashes over it) are deterministic across runs.
+    phase_names.sort();
     let gate_inputs: Vec<crate::evidence_intake::ChannelGateInput<'_>> = phase_names
         .iter()
         .filter_map(|name| {
@@ -2519,16 +2595,30 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
         // An accepted joint-route residual must not fail the run here after
         // surviving every correction stage: snapshot best-effort curves with
         // a degraded advisory instead. Anything else keeps the hard error.
+        // Without calibrated main/sub timing there is no coherent verdict to
+        // snapshot: use unenforced curves directly instead of rejecting the
+        // safety replay on luck.
         let mut splice_degraded = Vec::new();
-        let deployed = crate::topology::reconstruct_deployed_snapshot_best_effort(
-            &result.channels,
-            &fir_coeffs,
-            &graph,
-            optimization.as_ref(),
-            sample_rate,
-            sidecar_dir,
-            &mut splice_degraded,
-        )?;
+        let deployed = if crate::topology::crossover_timing_refused(optimization.as_ref()) {
+            crate::topology::reconstruct_deployed_source_curves_unenforced(
+                &result.channels,
+                &fir_coeffs,
+                &graph,
+                optimization.as_ref(),
+                sample_rate,
+                sidecar_dir,
+            )?
+        } else {
+            crate::topology::reconstruct_deployed_snapshot_best_effort(
+                &result.channels,
+                &fir_coeffs,
+                &graph,
+                optimization.as_ref(),
+                sample_rate,
+                sidecar_dir,
+                &mut splice_degraded,
+            )?
+        };
         for entry in &splice_degraded {
             result.metadata.stage_outcomes.push(StageOutcome {
                 checks: Vec::new(),
@@ -2562,14 +2652,29 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
 
     if let Some((pre_safety_result, pre_safety_deployed, graph, optimization)) = routed_snapshot {
         let fir_coeffs = retained_fir_coeffs_by_channel(result);
-        let post_safety_deployed = crate::topology::reconstruct_deployed_source_curves(
-            &result.channels,
-            &fir_coeffs,
-            &graph,
-            optimization.as_ref(),
-            sample_rate,
-            sidecar_dir,
-        );
+        // Without calibrated main/sub timing the coherent splice verdict is
+        // arbitrary: replay unenforced instead of restoring pre-gate DSP on
+        // luck. Structural replay failures still restore and fail.
+        let post_safety_deployed =
+            if crate::topology::crossover_timing_refused(optimization.as_ref()) {
+                crate::topology::reconstruct_deployed_source_curves_unenforced(
+                    &result.channels,
+                    &fir_coeffs,
+                    &graph,
+                    optimization.as_ref(),
+                    sample_rate,
+                    sidecar_dir,
+                )
+            } else {
+                crate::topology::reconstruct_deployed_source_curves(
+                    &result.channels,
+                    &fir_coeffs,
+                    &graph,
+                    optimization.as_ref(),
+                    sample_rate,
+                    sidecar_dir,
+                )
+            };
         commit_or_restore_routed_safety_replay(
             result,
             pre_safety_result,
@@ -3893,7 +3998,10 @@ fn assemble_generic_result_with_frequency_samples(
     // Evidence intake runs on every assembly: per-channel operation
     // boundaries are evaluated from declared provenance and attached to the
     // result whether or not phase correction is enabled.
-    let phase_names: Vec<String> = channel_results.keys().cloned().collect();
+    let mut phase_names: Vec<String> = channel_results.keys().cloned().collect();
+    // Canonical order: HashMap iteration is per-process random; sort so
+    // `operation_gates` (and hashes over it) are deterministic across runs.
+    phase_names.sort();
     let gate_inputs: Vec<crate::evidence_intake::ChannelGateInput<'_>> = phase_names
         .iter()
         .filter_map(|name| {
@@ -4150,6 +4258,8 @@ fn assemble_generic_result_with_frequency_samples(
         operation_gates: None,
 
         provisional_decisions: phase_refusals,
+        epa_provenance: None,
+        playback_summary: None,
     };
 
     let mut result = RoomOptimizationResult {
@@ -4263,6 +4373,7 @@ pub fn optimize_speaker(
         target_curve: target_curve.cloned(),
         optimizer: optimizer_config,
         recording_config: None,
+        measured_impulse_responses: Default::default(),
         ctc: None,
         reporting: None,
         cea2034_cache: None,

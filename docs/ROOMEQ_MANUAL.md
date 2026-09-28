@@ -860,12 +860,22 @@ directory. The assets directory holds every run-generated file:
 self-contained HTML file: the plots render from an embedded versioned JSON
 payload (`autoeq-report-data-v1`, documented in
 `crates/autoeq-report-wasm/SCHEMA.md`) with a WebAssembly 2D canvas renderer,
-so the file needs no network access and no Plotly install. Per-channel
-sections open under shell tabs; legends toggle series by click. Browsers with
-WebGPU offer a GPUI viewer toggle rendering the same payload as an
-interactive section explorer (single-threaded; needs no COOP/COEP serving).
-Without a WebGPU adapter the toggle shows a note and falls back to the 2D
-plots.
+so the file needs no network access and no Plotly install. The title line
+carries the 2D-plots / GPUI-view toggle at its end; the toggle always shows
+and both views render the same payload (the GPUI viewer is an interactive
+section explorer; single-threaded, needs no COOP/COEP serving). Without a
+WebGPU adapter the GPUI view shows a note and falls back to the 2D plots.
+Per-channel sections open under shell tabs placed below the summary
+sections; legends toggle series by click. The combined overview is three
+stacked panels sharing the frequency axis — Before EQ (all channels plus
+dotted targets), EQ (all shaping curves), Corrected (all post-DSP channels
+plus dotted targets) — with the Before/Corrected panels on one SPL range.
+**All EQ Filters** lists every channel behind a channel button set. A
+frequency-landmarks table reports per-speaker peaks, notches and −6 dB LF
+extension from the measured response; level residuals are predicted from the
+post-DSP curve. The Section 1 operational share reads emitted
+`channel_summaries` when present and otherwise derives the same share from
+legacy final `decisions` (provisional history never enters the scope).
 Rebuild the embedded bundles with `just report-dist` (stable) and
 `just report-dist-gpui` (nightly) after touching the renderer crates.
 
@@ -879,6 +889,29 @@ stays small. The Python viewer (`scripts/display-roomeq.py`, via
 `scripts/src/loaders.py`) re-injects the external curves from the sibling
 directory automatically, so plots are unchanged. Legacy outputs with
 embedded curves and sidecars next to the JSON keep loading as before.
+
+### Reading the playback summary
+
+`metadata.playback_summary` is the claim-level answer to "what did this run
+ship, and what does it cost". It restates the acceptance report without new
+judgment: the shipped outcome, how many training seats improved beyond
+uncertainty (`training_seats_improved/total`), the worst seat (report it next
+to the average), the modeled latency and headroom cost, the correction
+family actually present in the graph (`realized_processing`, which can differ
+from the requested mode — see `processing_fallback`), and the limits in
+force. `headlines` renders these as one deterministic sentence per outcome;
+rejected and unchanged runs name their violations there.
+
+EPA numbers (`epa_per_channel`, `epa_multichannel`,
+`perceptual_metrics.epa_preference_delta`) are configured model predictions
+from frequency response, labeled as such by `metadata.epa_provenance` — not
+measured audibility. EPA preference can fall while the acceptance metric
+improves: acceptance measures target-weighted RMS shape improvement, while
+EPA weights loudness, sharpness, and roughness dimensions that move with
+level balance and tilt. When they disagree, the correction changed something
+one objective weights and the other does not. Neither number proves
+audibility; see `docs/ROOMEQ_LISTENING_PLAN.md` for the claim wording each
+evidence level supports.
 
 ### Playback verification (operator captures)
 
@@ -2275,10 +2308,10 @@ and physical-device certification remain separate work.
 Final-seat replay preserves the full-range main assessment without requiring
 subwoofer measurements through the treble. A routed subwoofer measured through
 twice its deployed low-pass frequency uses an automatic stopband assumption:
-the unmeasured acoustic tail stays below the peak of the final measured
-half-octave. Actual branch DSP is applied to that envelope, and aggregate
-omission must stay within 0.1 dB magnitude uncertainty. The report labels this
-assumption `assumed_subwoofer_stopband_below_measured_tail`; no subwoofer phase
+a falling measured tail continues at its fitted rolloff (`measured_subwoofer_stopband_rolloff`),
+while a rising tail keeps the flat peak-hold form (`assumed_subwoofer_stopband_below_measured_tail`).
+Actual branch DSP is applied to that envelope, and aggregate
+omission must stay within 0.1 dB magnitude uncertainty. No subwoofer phase
 is extrapolated. Mains and missing crossover-band measurements are not exempt.
 
 Explicit calibrated `optimizer.upper_band_acoustic_bounds` declarations take

@@ -1,8 +1,8 @@
 //! Raw, position-identified evidence survives optimization until final replay.
 use super::RoomOptimizationResult;
 use roomeq_model::{
-    AutoeqError, ChannelDspChain, Curve, FinalSeatEvaluation, MeasurementSource,
-    PluginConfigWrapper, Result, RoomConfig, SpeakerConfig,
+    AutoeqError, ChannelDspChain, CoherentTimingEvidence, Curve, FinalSeatEvaluation,
+    MeasurementSource, PluginConfigWrapper, Result, RoomConfig, SpeakerConfig,
 };
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
@@ -542,6 +542,193 @@ pub fn replay_final_physical_seat(
         baseline_support: pre.support,
         delivered_support: post.support,
     })
+}
+
+/// Upper edge of the fixed mono-bass assessment band in Hz.
+///
+/// Covers every redirected-bass and LFE low-pass in the validated range
+/// (the LFE low-pass validates within 20..=250 Hz) with margin, without
+/// claiming a per-system crossover derivation.
+const MONO_BASS_MAX_HZ: f64 = 300.0;
+
+/// Correlated (identical-drive) bass sum over the mono band.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct MonoBassAssessment {
+    /// Mains inputs summed.
+    pub inputs: usize,
+    /// Assessed band actually covered by common bins.
+    pub band_hz: [f64; 2],
+    /// Peak coherent level in dB.
+    pub peak_coherent_db: f64,
+    /// Frequency of the coherent peak in Hz.
+    pub peak_freq_hz: f64,
+    /// Maximum coherent buildup over the incoherent (RSS) sum in dB.
+    pub max_buildup_db: f64,
+    /// Frequency of maximum buildup in Hz.
+    pub buildup_freq_hz: f64,
+}
+
+/// Coherent identical-drive sum of delivered per-input seat responses.
+///
+/// F6 answers correlated program (L=R and wider) through the exact
+/// serialized matrix as the acoustic sibling of the electrical
+/// correlated-bus headroom bound. Every curve must share one frequency
+/// grid and carry measured phase; grid mismatch or missing phase refuses
+/// rather than interpolates or invents (WP2a). Reports the peak coherent
+/// level and the buildup over the incoherent power sum across the mono
+/// band. Advisory: no acceptance limit is attached until matrix evidence
+/// justifies one.
+fn assess_mono_bass_sums(
+    delivered: &[Curve],
+    max_mono_hz: f64,
+) -> std::result::Result<MonoBassAssessment, String> {
+    if delivered.len() < 2 {
+        return Err("mono-bass assessment needs at least two inputs".to_string());
+    }
+    let grid = &delivered[0].freq;
+    for (index, curve) in delivered.iter().enumerate() {
+        if !roomeq_analysis::frequency_grid::same_frequency_grid(grid, &curve.freq) {
+            return Err(format!("mono-bass input {index} leaves the common grid"));
+        }
+        if curve.spl.len() != grid.len() {
+            return Err(format!("mono-bass input {index} has ragged levels"));
+        }
+        match curve.phase.as_ref() {
+            Some(phase) if phase.len() == grid.len() => {}
+            _ => return Err(format!("mono-bass input {index} has no measured phase")),
+        }
+        if curve.spl.iter().any(|value| !value.is_finite())
+            || curve
+                .phase
+                .as_ref()
+                .is_some_and(|phase| phase.iter().any(|value| !value.is_finite()))
+        {
+            return Err(format!("mono-bass input {index} is nonfinite"));
+        }
+    }
+    let bins: Vec<usize> = grid
+        .iter()
+        .enumerate()
+        .filter(|(_, frequency)| **frequency <= max_mono_hz)
+        .map(|(index, _)| index)
+        .collect();
+    if bins.len() < 2 {
+        return Err("mono-bass band has no common support".to_string());
+    }
+    let mut peak = (f64::NEG_INFINITY, grid[bins[0]]);
+    let mut buildup = (f64::NEG_INFINITY, grid[bins[0]]);
+    for bin in &bins {
+        let mut coherent = num_complex::Complex64::new(0.0, 0.0);
+        let mut power = 0.0;
+        for curve in delivered {
+            let magnitude = 10.0_f64.powf(curve.spl[*bin] / 20.0);
+            let angle = curve.phase.as_ref().expect("checked above")[*bin].to_radians();
+            coherent += num_complex::Complex64::from_polar(magnitude, angle);
+            power += magnitude * magnitude;
+        }
+        let coherent_db = 20.0 * coherent.norm().max(1e-24).log10();
+        let rss_db = 10.0 * power.max(1e-24).log10();
+        if coherent_db > peak.0 {
+            peak = (coherent_db, grid[*bin]);
+        }
+        let ratio = coherent_db - rss_db;
+        if ratio > buildup.0 {
+            buildup = (ratio, grid[*bin]);
+        }
+    }
+    if !peak.0.is_finite() || !buildup.0.is_finite() {
+        return Err("mono-bass sums are nonfinite".to_string());
+    }
+    Ok(MonoBassAssessment {
+        inputs: delivered.len(),
+        band_hz: [grid[bins[0]], grid[*bins.last().expect("checked above")]],
+        peak_coherent_db: peak.0,
+        peak_freq_hz: peak.1,
+        max_buildup_db: buildup.0,
+        buildup_freq_hz: buildup.1,
+    })
+}
+
+/// Final-boundary correlated-bass stage for the delivered graph.
+///
+/// Replays every mains input at the prime training seat through the final
+/// serialized matrix and sums them as identical-drive program. Never fails:
+/// single-input systems, CTC, replay errors, and missing phase each record
+/// an explicit skip/unassessed advisory instead of a verdict.
+pub(super) fn correlated_bass_stage(
+    result: &RoomOptimizationResult,
+    captures: &[Capture],
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> roomeq_model::StageOutcome {
+    let skipped = |reason: String| roomeq_model::StageOutcome {
+        stage: "final_correlated_bass_sum".into(),
+        status: roomeq_model::StageStatus::Skipped,
+        advisories: vec![reason],
+        checks: Vec::new(),
+    };
+    if result.metadata.ctc.is_some() {
+        return skipped("mono_bass_skipped:ctc".to_string());
+    }
+    let mut inputs: Vec<String> = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+        .map(|graph| {
+            graph
+                .input_channels
+                .iter()
+                .filter(|input| {
+                    graph
+                        .routes
+                        .iter()
+                        .any(|route| &route.source_channel == *input)
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_else(|| independent_input_channels(captures, result).unwrap_or_default());
+    inputs.retain(|input| {
+        roomeq_model::home_cinema::role_for_channel(input) != roomeq_model::HomeCinemaRole::Lfe
+    });
+    inputs.sort();
+    inputs.dedup();
+    if inputs.len() < 2 {
+        return skipped("mono_bass_skipped:single_mains_input".to_string());
+    }
+    let physical = match training_physical_captures(captures, result) {
+        Ok(physical) => physical,
+        Err(error) => return skipped(format!("mono_bass_unassessed:captures:{error}")),
+    };
+    let mut delivered = Vec::with_capacity(inputs.len());
+    for input in &inputs {
+        match replay_final_physical_seat(result, &physical, input, 0, config, fs, dir, "training") {
+            Ok(playback) => delivered.push(playback.delivered),
+            Err(error) => {
+                return skipped(format!("mono_bass_unassessed:{input}:{error}"));
+            }
+        }
+    }
+    match assess_mono_bass_sums(&delivered, MONO_BASS_MAX_HZ) {
+        Ok(assessment) => roomeq_model::StageOutcome {
+            stage: "final_correlated_bass_sum".into(),
+            status: roomeq_model::StageStatus::Applied,
+            advisories: vec![format!(
+                "mono_bass:inputs={}:band_hz={:.1}-{:.1}:peak_db={:.2}:peak_hz={:.1}:max_buildup_db={:.2}:buildup_hz={:.1}",
+                assessment.inputs,
+                assessment.band_hz[0],
+                assessment.band_hz[1],
+                assessment.peak_coherent_db,
+                assessment.peak_freq_hz,
+                assessment.max_buildup_db,
+                assessment.buildup_freq_hz,
+            )],
+            checks: Vec::new(),
+        },
+        Err(reason) => skipped(format!("mono_bass_unassessed:{reason}")),
+    }
 }
 
 /// Standalone subwoofer groups are assessed over their common measured band,
@@ -1096,6 +1283,99 @@ fn independent_input_channels(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Routed crossover frequency for one logical input, when the graph states it.
+///
+/// Mirrors the splice assessment lookup: the redirected-bass low-pass first,
+/// then the main high-pass fallback. Absent on unrouted graphs and inputs.
+fn routed_crossover_hz(result: &RoomOptimizationResult, input: &str) -> Option<f64> {
+    let graph = result
+        .metadata
+        .bass_management
+        .as_ref()?
+        .routing_graph
+        .as_ref()?;
+    graph
+        .routes
+        .iter()
+        .find(|route| {
+            route.source_channel == input && route.route_kind == "redirected_bass_lowpass_to_sub"
+        })
+        .and_then(|route| route.low_pass_hz)
+        .or_else(|| {
+            graph
+                .routes
+                .iter()
+                .find(|route| {
+                    route.source_channel == input && route.route_kind == "main_highpass_to_self"
+                })
+                .and_then(|route| route.high_pass_hz)
+        })
+        .filter(|hertz| hertz.is_finite() && *hertz > 0.0)
+}
+
+/// Per-band raw improvements for one seat over modal bass, crossover
+/// overlap, and the remaining upper band.
+///
+/// Re-evaluates the same pre/post/target evidence over each sub-band with
+/// the shared quality evaluator. Bands with fewer than two supported bins
+/// stay absent, as does the crossover band without a routed crossover
+/// frequency. Without a configured Schroeder split the conventional 200 Hz
+/// bass edge applies; the used value is recorded, never silent.
+#[allow(clippy::too_many_arguments)]
+fn band_improvements(
+    pre: &Curve,
+    post: &Curve,
+    target: Option<&Curve>,
+    lo: f64,
+    hi: f64,
+    schroeder_hz: Option<f64>,
+    crossover_hz: Option<f64>,
+    permitted_gain_db: f64,
+) -> roomeq_model::BandImprovement {
+    let split = schroeder_hz
+        .filter(|hertz| hertz.is_finite() && *hertz > 0.0)
+        .unwrap_or(200.0);
+    let eval = |band_lo: f64, band_hi: f64| -> Option<f64> {
+        // Degenerate, unordered, or NaN bands carry no evidence; refuse them.
+        if band_lo.partial_cmp(&band_hi) != Some(std::cmp::Ordering::Less) {
+            return None;
+        }
+        roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
+            std::slice::from_ref(pre),
+            std::slice::from_ref(post),
+            &[],
+            &[],
+            target,
+            roomeq_engine::quality::QualityEvaluationConfig {
+                min_freq_hz: band_lo,
+                max_freq_hz: band_hi,
+                schroeder_hz: Some(split),
+                normalize_level: true,
+            },
+            Default::default(),
+            permitted_gain_db,
+        )
+        .ok()
+        .map(|score| score.training.worst_position_improvement_db)
+        .filter(|value| value.is_finite())
+    };
+    let bass_band = [lo, split.min(hi)];
+    let upper_band = [split.max(lo), hi];
+    let crossover_band = crossover_hz
+        .filter(|hertz| hertz.is_finite() && *hertz > 0.0)
+        .map(|hertz| [(hertz / 2.0).max(lo), (hertz * 2.0).min(hi)])
+        .filter(|band| band[0] < band[1]);
+    roomeq_model::BandImprovement {
+        schroeder_hz: split,
+        bass_band_hz: bass_band,
+        bass_improvement_db: eval(bass_band[0], bass_band[1]),
+        crossover_band_hz: crossover_band,
+        crossover_improvement_db: crossover_band.and_then(|band| eval(band[0], band[1])),
+        upper_band_hz: upper_band,
+        upper_improvement_db: eval(upper_band[0], upper_band[1]),
+    }
+}
+
 fn validate_final_seats_impl(
     result: &mut RoomOptimizationResult,
     captures: &[Capture],
@@ -1319,8 +1599,8 @@ fn validate_final_seats_impl(
                     .min(*post.freq.last().unwrap());
                 let mut score =
                     roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
-                        &[pre],
-                        &[post],
+                        std::slice::from_ref(&pre),
+                        std::slice::from_ref(&post),
                         &[],
                         &[],
                         target.as_ref(),
@@ -1388,6 +1668,21 @@ fn validate_final_seats_impl(
                     improvement_db: score.training.worst_position_improvement_db,
                     improvement_lower_bound_db: score.training.worst_position_improvement_db
                         - uncertainty_db,
+                    band_improvement_db: Some(band_improvements(
+                        &pre,
+                        &post,
+                        target.as_ref(),
+                        lo,
+                        hi,
+                        schroeder_hz,
+                        routed_crossover_hz(result, input),
+                        config
+                            .optimizer
+                            .permitted_output_gain_db
+                            .get(input)
+                            .copied()
+                            .unwrap_or(0.0),
+                    )),
                 });
                 if partition == "training" {
                     training_scores.push(score);
@@ -1436,10 +1731,30 @@ fn validate_final_seats_impl(
         .as_mut()
         .ok_or_else(|| invalid("final-seat acceptance report unavailable"))?;
     if let Some(previous) = &report.acoustic_quality {
-        score.temporal = previous.temporal;
+        score.temporal = previous.temporal.clone();
     }
     score.temporal.phase_evidence_available =
         phase_evidence_available && !score.final_seats.is_empty();
+    // Presence is not verification: upgrade the scorecard verdict from the
+    // evaluated inputs' declared provenance. Advisory-only: acceptance still
+    // keys on phase presence; coherent claims must consult this verdict.
+    score.temporal.coherent_timing =
+        match crate::evidence_intake::shared_timing_reference(config, &inputs) {
+            Ok(reference_id) => CoherentTimingEvidence::Verified { reference_id },
+            Err(reason) => CoherentTimingEvidence::Refused { reason },
+        };
+    // Electrical upper bound: the gain backstop's checked quantity.
+    // Enforcement compares this bound (see acceptance); the acoustic
+    // ratio stays reported alongside for the near-null explanation.
+    score.max_electrical_boost_db = crate::delay_compile::electrical_boost_bound_db(
+        &result.channels,
+        result
+            .metadata
+            .bass_management
+            .as_ref()
+            .and_then(|bass| bass.routing_graph.as_ref())
+            .map(|graph| graph.routes.as_slice()),
+    );
     if score.temporal.phase_evidence_available {
         let only_phase_missing = report.violations.as_slice() == ["phase_evidence_missing"];
         report
@@ -1493,7 +1808,9 @@ fn validate_final_seats_impl(
     let output_failed: Vec<_> = score.useful_output.iter().filter_map(|output| {
         // f64::max masks a NaN if its other operand is finite.
         let finite = output.unexplained_loss_rms_db.is_finite()
-            && output.bass_unexplained_loss_rms_db.is_none_or(f64::is_finite);
+            && output.bass_unexplained_loss_rms_db.is_none_or(f64::is_finite)
+            && output.extension_loss_db.is_none_or(f64::is_finite)
+            && output.peak_demand_change_db.is_none_or(f64::is_finite);
         let loss = output.unexplained_loss_rms_db
             .max(output.bass_unexplained_loss_rms_db.unwrap_or(0.0));
         // Subwoofer peak cuts are not constrained by the main-speaker SPL
@@ -1524,7 +1841,68 @@ fn validate_final_seats_impl(
     if !failed.is_empty() {
         report.violations.push("worst_position_regressed".into());
     }
-    let failures: Vec<_> = failed.into_iter().chain(output_failed).collect();
+    // WP3 final boundary: the replayed score replaces the evidence the
+    // safety gate enforced, so reevaluate the runtime policy against what
+    // is now attached. Without this, the report can show a limit, an
+    // exceeding replayed value, and an accepted outcome that was computed
+    // from different evidence. New violations fail closed like the seat
+    // and output regressions above.
+    let mut boundary_failures = Vec::new();
+    if report.policy == roomeq_model::CorrectionAcceptancePolicy::RuntimeSafety
+        && let Some(attached) = report.acoustic_quality.clone()
+        && let Some(policy) = report.runtime_policy.clone()
+    {
+        if let Some(realization) = report.realization_quality.clone() {
+            let before = report.violations.clone();
+            roomeq_quality::enforce_runtime_acceptance_evidence(
+                report,
+                attached.clone(),
+                realization,
+                policy.clone(),
+            )
+            .map_err(|reason| invalid(format!("replayed evidence refused: {reason}")))?;
+            let fresh: Vec<String> = report
+                .violations
+                .iter()
+                .filter(|violation| !before.contains(violation))
+                .cloned()
+                .collect();
+            for violation in &fresh {
+                // The boost backstop carries two quantities; name the
+                // values so a rejection names its evidence, not just the
+                // limit. The applier re-pushes the same violation string,
+                // deduplicated below.
+                if violation == "max_boost_limit_exceeded"
+                    && let Some(detail) = roomeq_quality::apply_boost_limit_agreement(
+                        report,
+                        attached.max_boost_db,
+                        attached.max_electrical_boost_db,
+                        &policy,
+                    )
+                {
+                    boundary_failures.push(format!(
+                        "replayed evidence violates max_boost_limit_exceeded ({detail})"
+                    ));
+                    continue;
+                }
+                boundary_failures.push(format!("replayed evidence violates {violation}"));
+            }
+            report.violations.sort();
+            report.violations.dedup();
+        } else if let Some(message) = roomeq_quality::apply_boost_limit_agreement(
+            report,
+            attached.max_boost_db,
+            attached.max_electrical_boost_db,
+            &policy,
+        ) {
+            boundary_failures.push(message);
+        }
+    }
+    let failures: Vec<_> = failed
+        .into_iter()
+        .chain(output_failed)
+        .chain(boundary_failures)
+        .collect();
     if !failures.is_empty() {
         report.accepted = false;
         report.decision = roomeq_model::CorrectionDecision::Rejected;
@@ -1535,12 +1913,210 @@ fn validate_final_seats_impl(
             message: failures.join("; "),
         });
     }
+    let concealment = band_concealment_findings(
+        &report
+            .acoustic_quality
+            .as_ref()
+            .map(|score| score.final_seats.clone())
+            .unwrap_or_default(),
+        config.optimizer.finalization.min_improvement_lower_bound_db,
+        budget,
+    );
+    result
+        .metadata
+        .stage_outcomes
+        .push(concealment_stage(concealment));
     Ok(())
+}
+
+/// Training seats whose broadband gain conceals a band regression.
+///
+/// A seat conceals when its uncertainty-adjusted broadband improvement
+/// clears the benefit floor while any assessed band's raw improvement
+/// falls beyond the regression budget. Advisory findings; enforcement
+/// waits on matrix evidence that no accepted correction trips it.
+fn band_concealment_findings(
+    final_seats: &[FinalSeatEvaluation],
+    benefit_floor_db: f64,
+    regression_budget_db: f64,
+) -> Vec<String> {
+    let mut findings = Vec::new();
+    for seat in final_seats
+        .iter()
+        .filter(|seat| seat.partition == "training")
+    {
+        // NaN lower bounds fail closed: only a strict improvement counts.
+        if seat
+            .improvement_lower_bound_db
+            .partial_cmp(&benefit_floor_db)
+            != Some(std::cmp::Ordering::Greater)
+        {
+            continue;
+        }
+        let Some(bands) = seat.band_improvement_db.as_ref() else {
+            continue;
+        };
+        for (name, value) in [
+            ("bass", bands.bass_improvement_db),
+            ("crossover", bands.crossover_improvement_db),
+            ("upper", bands.upper_improvement_db),
+        ] {
+            if let Some(db) = value
+                && db < -regression_budget_db
+            {
+                findings.push(format!(
+                    "band_concealment:{}:{}:{}:band_improvement_db={:.3}:broadband_lb_db={:.3}:budget_db={:.3}",
+                    seat.logical_input,
+                    seat.seat_index,
+                    name,
+                    db,
+                    seat.improvement_lower_bound_db,
+                    regression_budget_db,
+                ));
+            }
+        }
+    }
+    findings.sort();
+    findings
+}
+
+/// Advisory stage carrying band-concealment findings, if any.
+fn concealment_stage(findings: Vec<String>) -> roomeq_model::StageOutcome {
+    roomeq_model::StageOutcome {
+        stage: "final_band_concealment".into(),
+        status: roomeq_model::StageStatus::Applied,
+        advisories: if findings.is_empty() {
+            vec!["no_band_concealment_detected".to_string()]
+        } else {
+            findings
+        },
+        checks: Vec::new(),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn phased_curve(level_db: f64, phase_deg: f64) -> Curve {
+        let mut curve = crate::test_fixtures::flat_curve();
+        curve.spl.fill(level_db);
+        curve.phase = Some(ndarray::Array1::from_elem(curve.freq.len(), phase_deg));
+        curve
+    }
+
+    fn concealment_seat(
+        partition: &str,
+        lower_bound_db: f64,
+        bands: Option<roomeq_model::BandImprovement>,
+    ) -> FinalSeatEvaluation {
+        FinalSeatEvaluation {
+            partition: partition.into(),
+            logical_input: "L".into(),
+            seat_index: 0,
+            seat_label: None,
+            physical_outputs: vec!["L".into()],
+            pre_summation_support: Vec::new(),
+            post_summation_support: Vec::new(),
+            unassessed_bands_hz: Vec::new(),
+            evaluated_band_hz: [20.0, 20_000.0],
+            pre_weighted_rms_db: 5.0,
+            post_weighted_rms_db: 4.0,
+            improvement_db: 1.0,
+            improvement_lower_bound_db: lower_bound_db,
+            band_improvement_db: bands,
+        }
+    }
+
+    fn bands(
+        bass: Option<f64>,
+        crossover: Option<f64>,
+        upper: Option<f64>,
+    ) -> roomeq_model::BandImprovement {
+        roomeq_model::BandImprovement {
+            schroeder_hz: 200.0,
+            bass_band_hz: [20.0, 200.0],
+            bass_improvement_db: bass,
+            crossover_band_hz: Some([40.0, 160.0]),
+            crossover_improvement_db: crossover,
+            upper_band_hz: [200.0, 20_000.0],
+            upper_improvement_db: upper,
+        }
+    }
+
+    #[test]
+    fn band_concealment_flags_only_passing_broadband_with_regressed_band() {
+        // Broadband gain with a regressed upper band: concealed.
+        let seats = vec![concealment_seat(
+            "training",
+            1.0,
+            Some(bands(Some(2.0), Some(0.5), Some(-0.5))),
+        )];
+        let findings = super::band_concealment_findings(&seats, 0.0, 0.25);
+        assert_eq!(findings.len(), 1);
+        assert!(
+            findings[0].contains("band_concealment:L:0:upper")
+                && findings[0].contains("band_improvement_db=-0.500"),
+            "unexpected finding: {}",
+            findings[0]
+        );
+        // Broadband itself failing benefit: no concealment question.
+        let seats = vec![concealment_seat(
+            "training",
+            -0.1,
+            Some(bands(Some(2.0), Some(0.5), Some(-0.5))),
+        )];
+        assert!(super::band_concealment_findings(&seats, 0.0, 0.25).is_empty());
+        // Clean bands, held-out partition, and absent bands: silent.
+        let seats = vec![
+            concealment_seat(
+                "training",
+                1.0,
+                Some(bands(Some(2.0), Some(0.5), Some(0.1))),
+            ),
+            concealment_seat(
+                "held_out",
+                1.0,
+                Some(bands(Some(2.0), Some(0.5), Some(-5.0))),
+            ),
+            concealment_seat("training", 1.0, None),
+        ];
+        assert!(super::band_concealment_findings(&seats, 0.0, 0.25).is_empty());
+    }
+
+    #[test]
+    fn mono_bass_sums_report_coherent_buildup_and_refuse_without_phase() {
+        // Identical in-phase inputs: coherent +6.02 dB, buildup +3.01 dB
+        // over the incoherent power sum at every mono bin.
+        let pair = vec![phased_curve(80.0, 0.0), phased_curve(80.0, 0.0)];
+        let assessed = super::assess_mono_bass_sums(&pair, 300.0).unwrap();
+        assert_eq!(assessed.inputs, 2);
+        assert!((assessed.peak_coherent_db - 86.0206).abs() < 1e-3);
+        assert!((assessed.max_buildup_db - 3.0103).abs() < 1e-3);
+        assert!(assessed.band_hz[0] <= 20.0 + 1e-6 && assessed.band_hz[1] <= 300.0);
+        // Opposite phase cancels instead of building up; the ratio stays
+        // finite and deeply negative rather than NaN.
+        let opposed = vec![phased_curve(80.0, 0.0), phased_curve(80.0, 180.0)];
+        let assessed = super::assess_mono_bass_sums(&opposed, 300.0).unwrap();
+        assert!(assessed.max_buildup_db < -100.0);
+        // Missing phase refuses rather than invents a coherent sum.
+        let mut phaseless = pair.clone();
+        phaseless[1].phase = None;
+        assert!(
+            super::assess_mono_bass_sums(&phaseless, 300.0)
+                .unwrap_err()
+                .contains("no measured phase")
+        );
+        // Grid mismatch and single inputs refuse likewise.
+        let mut shifted = pair.clone();
+        shifted[1].freq[0] += 1.0;
+        assert!(
+            super::assess_mono_bass_sums(&shifted, 300.0)
+                .unwrap_err()
+                .contains("common grid")
+        );
+        assert!(super::assess_mono_bass_sums(&pair[..1], 300.0).is_err());
+    }
 
     #[test]
     fn grouped_physical_output_captures_keep_declared_branch_order() {
@@ -1900,6 +2476,7 @@ mod tests {
             post_weighted_rms_db: 0.0,
             improvement_db: 0.0,
             improvement_lower_bound_db: 0.0,
+            band_improvement_db: None,
         };
         let mut seats = vec![
             seat("sub", 0, [20.0, 150.0]),
@@ -2961,6 +3538,7 @@ mod tests {
                     seat_index,
                     band_hz: [200.0, 20_000.0],
                     max_spl_db: 20.0,
+                    rolloff_db_per_oct: None,
                     evidence_id: format!("analytic-qualified-stopband-seat-{seat_index}"),
                 })
                 .collect(),
@@ -3120,6 +3698,7 @@ mod tests {
                 seat_index: 0,
                 band_hz: [200.0, 20_000.0],
                 max_spl_db: 80.0,
+                rolloff_db_per_oct: None,
                 evidence_id: "analytic-energetic-tail".into(),
             }],
         );

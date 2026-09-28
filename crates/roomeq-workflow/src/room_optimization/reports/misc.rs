@@ -366,11 +366,15 @@ pub(super) fn max_optional(values: impl Iterator<Item = f64>) -> Option<f64> {
 pub(in super::super) fn bass_consistency_rms_db(
     channels: &HashMap<String, ChannelDspChain>,
 ) -> Option<f64> {
-    let bass_channels: Vec<&ChannelDspChain> = channels
-        .iter()
-        .filter_map(|(name, chain)| {
+    // Canonical order: the RMS summation below is sensitive to member
+    // order at the last ulp, so collect bass channels by sorted name.
+    let mut names: Vec<&String> = channels.keys().collect();
+    names.sort();
+    let bass_channels: Vec<&ChannelDspChain> = names
+        .into_iter()
+        .filter_map(|name| {
             if roomeq_engine::home_cinema::role_for_channel(name).is_sub_or_lfe() {
-                Some(chain)
+                Some(&channels[name])
             } else {
                 None
             }
@@ -611,6 +615,7 @@ mod tests {
             },
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: None,
             reporting: None,
             cea2034_cache: None,
@@ -627,6 +632,7 @@ mod tests {
             optimizer: OptimizerConfig::default(),
             provenance: Default::default(),
             recording_config: None,
+            measured_impulse_responses: Default::default(),
             ctc: None,
             reporting: None,
             cea2034_cache: None,

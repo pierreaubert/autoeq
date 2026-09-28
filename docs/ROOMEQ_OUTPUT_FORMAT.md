@@ -199,7 +199,7 @@ Each channel contains an ordered list of plugins that process audio in sequence.
 | `final_curve` | CurveData or null | Final frequency response after applying correction (normalized) |
 | `eq_response` | CurveData or null | EQ filter response curve (correction magnitude in dB) |
 | `target_curve` | CurveData or null | Effective target curve the optimizer worked against (mean-shifted + tilt, in absolute SPL) |
-| `pre_ir` | IrWaveform or null | Impulse response before correction (requires phase data) |
+| `pre_ir` | IrWaveform or null | Impulse response before correction (requires phase data, or a declared `measured_impulse_responses` entry, which takes precedence over the synthesized prediction) |
 | `post_ir` | IrWaveform or null | Impulse response after correction (requires phase data) |
 | `fir_temporal_masking` | TemporalIrMaskingMetrics or null | True FIR impulse-response temporal masking metrics for FIR, mixed-phase, hybrid, or standalone phase-correction filters. |
 | `direct_early_late_correction` | object or null | Direct/early/late correction-energy diagnostic, when that policy is enabled. |
@@ -445,6 +445,7 @@ Time delay for driver alignment.
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `delay_ms` | number (ms) | Delay amount in milliseconds |
+| `label` | string (optional) | `delay_compile_common_latency` marks padding appended by causal delay compilation: the branch's share of the common latency offset, derived from optimized relative timing. Baseline restoration strips marked padding so refused graphs assert no compile-derived timing; structural delays carry no label. |
 
 ### Convolution Plugin
 
@@ -654,6 +655,8 @@ Information about the optimization process.
 | `perceptual_metrics.fir_temporal_masking_penalty` | number or null | Worst scalar FIR temporal masking penalty across channels. |
 | `supporting_source` | object or null | Per-channel supporting-source room-compensation reports. Present when at least one `SupportingSourceGroup` was processed. |
 | `correction_acceptance` | object or null | Versioned final runtime decision. Includes enforced spectral/spatial/boost/headroom/temporal/realization limits, violations, and correction stages reverted before output. Mixed-phase output is exempt from the pre-ringing budget: its unity-magnitude excess-phase FIR carries the phase correction in its precursor by design (budget enforced at design time via `pre_ringing_threshold_db`). |
+| `epa_provenance` | object | Declares the EPA numbers a configured model prediction, not measured audibility. See [EPA Provenance](#epa-provenance). |
+| `playback_summary` | object | Claim-level projection of the acceptance report: outcome, seat counts, worst seat, latency/headroom echoes, limits in force, and templated headlines. See [Playback Summary](#playback-summary). |
 | `optimizer_evidence` | object or null | Versioned room-level optimizer confidence plus every per-channel backend run. Each run records termination, convergence/best-effort status, objective, evaluation count/limit, seed, bound violation, restart history, and whether it supplied the emitted parameters. Selected `unusable` evidence cannot pass production acceptance. |
 | `stage_outcomes` | array | Machine-readable applied/skipped/degraded/failed outcomes for optional processing and safety stages. Each outcome may include additive `checks` entries (`id`, `kind`, `passed`, optional `observed`/`limit`, and diagnostic). |
 | `t60_flatness_tolerance_s` | number or null | Declared ±tolerance in seconds for the report Section 1 T60 flatness share, carried from the input `reporting` policy. When absent the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of ±0.05 s and labels the cell accordingly; it changes no acceptance math. |
@@ -691,6 +694,52 @@ EPA tuning knobs are described in [`INPUT_FORMAT.md`](./INPUT_FORMAT.md#epa-conf
 `epa_per_channel`, but the input spectrum is first aggregated across channels
 with BS.1770-style energy weights. This is a frequency-response diagnostic, not
 a replacement for time-domain LUFS metering.
+
+### EPA Provenance
+
+`metadata.epa_provenance` labels every EPA number in the bundle as a
+configured model estimate:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `model` | string | Model identifier (`"epa_spectral_diagnostic"`). |
+| `predicted_not_measured` | boolean | Always `true`: EPA dimensions are predicted from frequency response, never measured audibility. |
+| `note` | string | Fixed audit note pointing at listening validation. |
+
+EPA preference can fall while the acceptance metric improves (or vice versa).
+That disagreement is expected, not a defect: acceptance measures
+target-weighted RMS shape improvement at the seats, while EPA preference is a
+loudness/sharpness/roughness-weighted composite that also moves with level
+balance, bandwidth, and spectral tilt changes the correction introduces. Read
+`perceptual_metrics.epa_preference_delta` next to the acceptance improvement:
+when they disagree, the correction changed something EPA weights that the
+target-weighted objective does not (or the reverse). Neither number proves
+audibility without a controlled listening result.
+
+### Playback Summary
+
+`metadata.playback_summary` is a pure projection of `correction_acceptance`
+for claim-level reporting: it introduces no new judgment, only restates the
+shipped outcome, the training-seat counts behind it, and the cost echoes.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `outcome` | string | Shipped outcome (`accepted`, `unchanged`, `rejected`, `insufficient_evidence`). |
+| `improvement_db` | number | Aggregate shape improvement in dB (echoes the acceptance metrics). |
+| `training_seats_improved` | integer | Training seats whose uncertainty-adjusted improvement clears zero. |
+| `training_seats_total` | integer | Training seats evaluated. |
+| `worst_seat` | string or null | Lowest-benefit training seat as `input:index`, when evaluated. Report it next to the average: a good mean with a regressed worst seat is a different claim than uniform benefit. |
+| `total_latency_ms` | number or null | Modeled total playback latency in ms, when assessed; absent stays absent. |
+| `available_headroom_db` | number or null | Available headroom in dB, when assessed; the output margin next to the average benefit. |
+| `realized_processing` | string or null | Correction family actually present in the shipped graph. |
+| `processing_fallback` | string or null | Requested-vs-realized divergence, when any. |
+| `limits` | array | Applicable acceptance limits in force, as `name=value`. |
+| `headlines` | array | Templated human-readable claims, deterministic for a fixed report. |
+
+Until a controlled listening result exists, the supported claim wording is
+"predicted improvement with plausible listening benefit". The wording
+"audibly preferred under these conditions" requires the listening plan in
+`docs/ROOMEQ_LISTENING_PLAN.md` to have been run.
 
 ### Inter-Channel Deviation (ICD)
 

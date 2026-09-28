@@ -6,8 +6,10 @@ pub mod channel;
 pub mod channel_acoustics;
 pub mod channel_measurements;
 pub mod config_loader;
+pub mod crossover_summation;
 pub mod ctc;
 pub mod dba;
+pub mod delay_compile;
 pub mod electrical_headroom;
 pub mod eq;
 pub mod eq_resources;
@@ -20,6 +22,7 @@ pub mod group_measurements;
 pub mod group_processing;
 pub mod home_cinema;
 pub mod listening_stimuli;
+pub mod measured_ir;
 pub mod measurement;
 pub mod multisub;
 pub mod output;
@@ -29,9 +32,8 @@ pub mod pruning_audit;
 pub mod room_optimization;
 pub mod sidecar;
 pub mod supporting_source;
-pub mod topology;
-pub mod crossover_summation;
 pub mod target_enforcement;
+pub mod topology;
 pub mod verification;
 mod wav;
 
@@ -60,9 +62,8 @@ pub use measurement::{
 pub use output::save_dsp_chain;
 pub use output_bundle::{
     MEASUREMENTS_INDEX_FILENAME, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
-    candidate_asset_dirs, load_output_bundle,
-    manifest_path_for as bundle_manifest_path_for, read_convolution_bytes,
-    resolve_convolution_path, run_log_path_for, save_output_bundle,
+    candidate_asset_dirs, load_output_bundle, manifest_path_for as bundle_manifest_path_for,
+    read_convolution_bytes, resolve_convolution_path, run_log_path_for, save_output_bundle,
 };
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
 pub use room_optimization::{

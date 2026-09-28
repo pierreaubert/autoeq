@@ -30,8 +30,27 @@ pub struct TemporalIrMaskingMetrics {
     pub pre_ringing_audible_db: f64,
     /// Post-masked audible post-ringing energy, dB relative to main peak energy.
     pub post_ringing_audible_db: f64,
+    /// Physical pre-main energy (unmasked), dB relative to main peak energy.
+    ///
+    /// The raw precursor energy before any masking model applies: peak
+    /// (`pre_ringing_peak_db`), physical energy (this field), and the
+    /// masking-model prediction (`pre_ringing_audible_db`) answer three
+    /// different questions and must never be conflated.
+    pub pre_energy_ratio_db: f64,
     /// Scalar penalty using the configured material profile and IR weights.
     pub penalty: f64,
+    /// Analyzed impulse length in taps.
+    pub taps: usize,
+    /// Sample rate the impulse was analyzed at, in Hz.
+    pub sample_rate_hz: f64,
+    /// Masking-model programme profile assumed (`transient`/`mixed`/`sustained`).
+    pub masking_profile: String,
+    /// Pre-masking window retained from the analysis assumptions, in ms.
+    pub pre_mask_ms: f64,
+    /// Post-masking window retained from the analysis assumptions, in ms.
+    pub post_mask_ms: f64,
+    /// Audibility threshold retained from the analysis assumptions, in dB.
+    pub audibility_threshold_db: f64,
 }
 
 /// Modal descriptor retained for experimental temporal diagnostics.

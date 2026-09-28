@@ -57,11 +57,21 @@ th, td {
 th {
     background: #f0f4f8;
 }
+.header-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.header-row h1 {
+    flex: 1;
+    margin: 0;
+}
 .viewbar {
     display: flex;
     gap: 10px;
     align-items: center;
-    margin-bottom: 16px;
+    margin-bottom: 0;
+    flex-shrink: 0;
 }
 .viewbar button {
     font: inherit;
@@ -180,10 +190,12 @@ th {
 </head>
 <body>
 <div class="container">
+<div class="header-row">
 <h1 id="report-title"></h1>
 <div class="viewbar" id="viewbar" style="display:none">
 <button id="view-2d" class="active" type="button">2D plots</button>
 <button id="view-gpui" type="button">GPUI view (WebGPU)</button>
+</div>
 </div>
 <div id="report-2d"></div>
 <div id="report-gpui" style="display:none"></div>
@@ -269,54 +281,61 @@ window.openEqTab = function (evt, panelId) {
     evt.currentTarget.classList.add("active");
 };
 
+function appendSection(host, sec, i) {
+    if (sec.kind === "html") {
+        const div = document.createElement("div");
+        div.className = "html-section";
+        div.innerHTML = sec.html;
+        host.appendChild(div);
+        return;
+    }
+    const wrap = document.createElement("div");
+    wrap.className = "plot-container";
+    const canvas = document.createElement("canvas");
+    const id = "sec-" + i;
+    canvas.id = id;
+    wrap.appendChild(canvas);
+    host.appendChild(wrap);
+    canvases.push({ id, section: sec, el: canvas, tab: sec.tab || null });
+}
+
 function buildDom() {
     const root = document.getElementById("report-2d");
+    const sections = payload.sections || [];
     const tabs = [];
-    for (const sec of payload.sections || []) {
+    for (const sec of sections) {
         if (sec.tab && !tabs.includes(sec.tab)) tabs.push(sec.tab);
     }
+    // Summary (untabbed) sections render first, at the top of the page.
+    sections.forEach((sec, i) => {
+        if (!sec.tab) appendSection(root, sec, i);
+    });
+    if (!tabs.length) return;
+    // The channel tab bar lives below the summaries, where the per-channel
+    // content it switches between starts.
+    activeTab = tabs[0];
+    const bar = document.createElement("div");
+    bar.className = "tabbar";
+    tabs.forEach((name, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = name;
+        if (i === 0) btn.classList.add("active");
+        btn.addEventListener("click", () => activateTab(name));
+        bar.appendChild(btn);
+    });
+    root.appendChild(bar);
     const pages = {};
-    if (tabs.length) {
-        const bar = document.createElement("div");
-        bar.className = "tabbar";
-        tabs.forEach((name, i) => {
-            const btn = document.createElement("button");
-            btn.type = "button";
-            btn.textContent = name;
-            if (i === 0) btn.classList.add("active");
-            btn.addEventListener("click", () => activateTab(name));
-            bar.appendChild(btn);
-        });
-        root.appendChild(bar);
-        activeTab = tabs[0];
-    }
-    (payload.sections || []).forEach((sec, i) => {
-        let host = root;
-        if (sec.tab) {
-            if (!pages[sec.tab]) {
-                const page = document.createElement("div");
-                page.className = "tabpage" + (sec.tab === activeTab ? " active" : "");
-                page.dataset.tab = sec.tab;
-                root.appendChild(page);
-                pages[sec.tab] = page;
-            }
-            host = pages[sec.tab];
+    sections.forEach((sec, i) => {
+        if (!sec.tab) return;
+        if (!pages[sec.tab]) {
+            const page = document.createElement("div");
+            page.className = "tabpage" + (sec.tab === activeTab ? " active" : "");
+            page.dataset.tab = sec.tab;
+            root.appendChild(page);
+            pages[sec.tab] = page;
         }
-        if (sec.kind === "html") {
-            const div = document.createElement("div");
-            div.className = "html-section";
-            div.innerHTML = sec.html;
-            host.appendChild(div);
-            return;
-        }
-        const wrap = document.createElement("div");
-        wrap.className = "plot-container";
-        const canvas = document.createElement("canvas");
-        const id = "sec-" + i;
-        canvas.id = id;
-        wrap.appendChild(canvas);
-        host.appendChild(wrap);
-        canvases.push({ id, section: sec, el: canvas, tab: sec.tab || null });
+        appendSection(pages[sec.tab], sec, i);
     });
 }
 
@@ -423,11 +442,11 @@ function show2d() {
 }
 
 if (payload) {
-    if (navigator.gpu) {
-        document.getElementById("viewbar").style.display = "";
-        document.getElementById("view-gpui").addEventListener("click", mountGpui);
-        document.getElementById("view-2d").addEventListener("click", show2d);
-    }
+    // The 2D/GPUI toggle always sits at the end of the title line. Without
+    // a WebGPU adapter the GPUI viewer falls back to 2D with a note.
+    document.getElementById("viewbar").style.display = "";
+    document.getElementById("view-gpui").addEventListener("click", mountGpui);
+    document.getElementById("view-2d").addEventListener("click", show2d);
     boot2d();
 }
 </script>

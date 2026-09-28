@@ -359,6 +359,60 @@ pub struct EligibilityRecord {
     pub assessment: AssessmentRecord,
 }
 
+/// Declared REW export-header facts attached to a channel gate.
+///
+/// Report-side transcription of the loader's header facts (see
+/// `autoeq_measurements::read::RewHeaderFacts`). Every field is a
+/// declaration from the measurement file's comment lines, never an
+/// independently verified claim: a timing-reference declaration does not
+/// verify a shared time zero, and a target level never authenticates
+/// absolute playback calibration. `None` on the gate means the source
+/// file carried no transcribable header (or was not a file at all).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct GateRewHeaderFacts {
+    /// REW version string, e.g. `"V5.40 beta 124"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rew_version: Option<String>,
+    /// Microphone token from the Source line, e.g. `"UMIK-2"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone: Option<String>,
+    /// Whether a Format line declares an acoustic timing reference.
+    /// `false` means "no declaration seen", not "declared absent".
+    #[serde(default)]
+    pub acoustic_timing_reference: bool,
+    /// Clock adjustment in ppm from the Note line, when stated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clock_adjustment_ppm: Option<f64>,
+    /// Estimated IR delay in ms from the Note line, when stated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_ir_delay_ms: Option<f64>,
+    /// Full Note line content, preserving reference-channel and offset detail.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing_note: Option<String>,
+    /// Smoothing declaration, e.g. `"Variable"` or `"1/12 octave"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub smoothing: Option<String>,
+    /// Export frequency resolution in points per octave, when stated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frequency_step_ppo: Option<f64>,
+    /// Stimulus description without the timing-reference suffix.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stimulus: Option<String>,
+    /// REW target level in dB. Not absolute playback calibration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_level_db: Option<f64>,
+    /// Measurement name from the header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_name: Option<String>,
+    /// Capture date string, transcribed verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dated: Option<String>,
+    /// Conversion provenance for derived exports, e.g. `"2.2.mdat via
+    /// mdat2csv.py"`. Absent on original REW text exports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub converted_from: Option<String>,
+}
+
 /// Operation-boundary verdicts for one channel on the public workflow path.
 ///
 /// The workflow intake evaluates every applicable operation against the
@@ -374,6 +428,13 @@ pub struct ChannelOperationGate {
     pub measurement_id: String,
     /// One record per evaluated operation and band, in evaluation order.
     pub records: Vec<EligibilityRecord>,
+    /// Declared REW header facts transcribed from the source file.
+    ///
+    /// Report-only provenance: verdicts never read these fields (a
+    /// declaration is not verification). `None` means the source carried
+    /// no transcribable header.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rew_header_facts: Option<GateRewHeaderFacts>,
 }
 
 impl ChannelOperationGate {

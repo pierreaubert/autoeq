@@ -147,6 +147,8 @@ pub(super) fn make_test_output() -> DspGraph {
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         }),
         correction_decisions: None,
     }
@@ -444,6 +446,8 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             operation_gates: None,
 
             provisional_decisions: Vec::new(),
+            epa_provenance: None,
+            playback_summary: None,
         }),
         correction_decisions: None,
     }

@@ -23,15 +23,20 @@ pub(in super::super) fn update_perceptual_metrics(
         return;
     }
 
+    // Canonical order: HashMap iteration is per-process random, and even
+    // summation order changes the last ulp. Sort once for every reduction
+    // below so reports and hashes are deterministic across runs.
+    let mut epa_names: Vec<&String> = epa_per_channel.keys().collect();
+    epa_names.sort();
     let count = epa_per_channel.len() as f64;
-    let epa_preference_pre = epa_per_channel
-        .values()
-        .map(|metrics| metrics.pre.preference)
+    let epa_preference_pre = epa_names
+        .iter()
+        .map(|name| epa_per_channel[*name].pre.preference)
         .sum::<f64>()
         / count;
-    let epa_preference_post = epa_per_channel
-        .values()
-        .map(|metrics| metrics.post.preference)
+    let epa_preference_post = epa_names
+        .iter()
+        .map(|name| epa_per_channel[*name].post.preference)
         .sum::<f64>()
         / count;
     let channel_matching_midrange_rms_db = metadata
@@ -42,40 +47,45 @@ pub(in super::super) fn update_perceptual_metrics(
     let bass_consistency_rms_db = channels.and_then(bass_consistency_rms_db);
     let dialog_band_roughness_rms_db = channels.and_then(dialog_band_roughness_rms_db);
     let headroom_peak_boost_db = channels.and_then(headroom_peak_boost_db);
-    let fir_pre_ringing_audible_db = channels.and_then(|channels| {
-        max_optional(channels.values().filter_map(|chain| {
+    let sorted_chains: Option<Vec<&ChannelDspChain>> = channels.map(|channels| {
+        let mut names: Vec<&String> = channels.keys().collect();
+        names.sort();
+        names.into_iter().map(|name| &channels[name]).collect()
+    });
+    let fir_pre_ringing_audible_db = sorted_chains.as_deref().and_then(|chains| {
+        max_optional(chains.iter().filter_map(|chain| {
             chain
                 .fir_temporal_masking
                 .as_ref()
                 .map(|m| m.pre_ringing_audible_db)
         }))
     });
-    let fir_post_ringing_audible_db = channels.and_then(|channels| {
-        max_optional(channels.values().filter_map(|chain| {
+    let fir_post_ringing_audible_db = sorted_chains.as_deref().and_then(|chains| {
+        max_optional(chains.iter().filter_map(|chain| {
             chain
                 .fir_temporal_masking
                 .as_ref()
                 .map(|m| m.post_ringing_audible_db)
         }))
     });
-    let fir_temporal_masking_penalty = channels.and_then(|channels| {
+    let fir_temporal_masking_penalty = sorted_chains.as_deref().and_then(|chains| {
         max_optional(
-            channels
-                .values()
+            chains
+                .iter()
                 .filter_map(|chain| chain.fir_temporal_masking.as_ref().map(|m| m.penalty)),
         )
     });
-    let direct_plus_early_correction_energy_db = channels.and_then(|channels| {
-        max_optional(channels.values().filter_map(|chain| {
+    let direct_plus_early_correction_energy_db = sorted_chains.as_deref().and_then(|chains| {
+        max_optional(chains.iter().filter_map(|chain| {
             chain
                 .direct_early_late_correction
                 .as_ref()
                 .map(|m| m.direct_plus_early_energy_db)
         }))
     });
-    let early_cue_advisory = channels.and_then(|channels| {
-        channels
-            .values()
+    let early_cue_advisory = sorted_chains.as_deref().and_then(|chains| {
+        chains
+            .iter()
             .filter_map(|chain| chain.direct_early_late_correction.as_ref())
             .find(|metrics| metrics.advisory != "ok")
             .map(|metrics| metrics.advisory.clone())
@@ -126,15 +136,23 @@ pub(in super::super) fn update_perceptual_metrics(
 pub(in super::super) fn role_channel_matching_rms_db(
     channels: &HashMap<String, ChannelDspChain>,
 ) -> Option<f64> {
+    // Canonical order: both the channel iteration (group membership
+    // order feeds RMS summation) and the group iteration (feeds the
+    // final mean) must be deterministic across runs.
+    let mut names: Vec<&String> = channels.keys().collect();
+    names.sort();
     let mut grouped: HashMap<&'static str, Vec<&ChannelDspChain>> = HashMap::new();
-    for (name, chain) in channels {
+    for name in names {
         if let Some(key) = channel_matching_role_key(name) {
-            grouped.entry(key).or_default().push(chain);
+            grouped.entry(key).or_default().push(&channels[name]);
         }
     }
 
+    let mut group_keys: Vec<&&'static str> = grouped.keys().collect();
+    group_keys.sort();
     let mut group_rms = Vec::new();
-    for group in grouped.values() {
+    for key in group_keys {
+        let group = &grouped[key];
         if group.len() < 2 {
             continue;
         }

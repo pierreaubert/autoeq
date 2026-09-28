@@ -1,6 +1,7 @@
 //! Deterministic bass-management planning, prediction, and optimization.
 
 mod bass;
+pub mod headroom_assess;
 mod misc;
 mod optimize;
 mod predict;

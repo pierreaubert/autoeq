@@ -87,12 +87,25 @@ def is_sub_channel(name):
     return str(name).strip().lower() in SUB_NAMES or str(name).lower().startswith("sub")
 
 
+def _predicted_band_mean(channel, lo_hz, hi_hz):
+    """Band mean of the predicted post-DSP curve, or None when absent."""
+    if not isinstance(channel, dict):
+        return None
+    curve = channel.get("final_curve")
+    if not curve or not curve.get("freq"):
+        return None
+    return band_mean(curve["freq"], curve.get("spl"), lo_hz, hi_hz)
+
+
 def level_compensation(channels):
     """Proposed attenuation to align measured monitor band levels.
 
     Monitor reference band 0.5-3 kHz, sub band 30-80 Hz. Use the quietest
-    monitor as reference so monitor proposals only attenuate. The JSON has no
-    independent post-calibration measurement, so residuals remain unknown.
+    monitor as reference so monitor proposals only attenuate. The residual
+    is the predicted post-DSP band offset vs the reference, read off the
+    optimizer's predicted curve (final_curve) — not an independent
+    post-calibration measurement, so it stays None when no predicted
+    curve exists.
     """
     rows = []
     monitor_means = {}
@@ -116,13 +129,16 @@ def level_compensation(channels):
         if is_sub_channel(name):
             mean = band_mean(curve["freq"], curve.get("spl"), 30.0, 80.0)
             comp = (reference - mean) if mean is not None else None
+            predicted = _predicted_band_mean(ch, 30.0, 80.0)
         else:
             mean = monitor_means.get(name)
             comp = reference - mean if mean is not None else None
+            predicted = _predicted_band_mean(ch, 500.0, 3000.0)
+        residual = (predicted - reference) if predicted is not None else None
         rows.append({
             "speaker": str(name),
             "comp_db": comp,
-            "residual_db": None,
+            "residual_db": residual,
         })
     return rows
 
@@ -140,6 +156,135 @@ def deepest_notch_db(channel_data):
     if ref is None or not lows:
         return None
     return min(lows) - ref
+
+
+def response_landmarks(channel_data):
+    """Peaks, notches and LF extension from the measured initial curve.
+
+    Runs on a 1/3-octave-smoothed copy of ``initial_curve`` (Genelec GRADE
+    §3.1/§3.5 style landmarks, computed viewer-side from the magnitude
+    response only):
+
+    - peaks/notches: local extrema with prominence >= 3 dB, merged within
+      1/12 octave keeping the strongest; top 3 each by prominence;
+    - lf_extension_hz: -6 dB point below the 30-200 Hz peak, scanning down
+      from the peak; None when the curve never drops 6 dB (reported as
+      "< 20 Hz" upstream) or the band is empty.
+
+    Returns None when no usable initial curve exists.
+    """
+    curve = (channel_data or {}).get("initial_curve")
+    if not curve or not curve.get("freq") or not curve.get("spl"):
+        return None
+    points = _valid_curve_points(curve["freq"], curve["spl"])
+    if points is None or len(points) < 5:
+        return None
+    freq = [f for f, _ in points]
+    smoothed = smooth_octave(freq, [s for _, s in points], 1.0 / 3.0)
+    n = len(freq)
+
+    def prominence(index, sign):
+        """Prominence of an extremum at index (sign=+1 peak, -1 notch)."""
+        level = smoothed[index] * sign
+        left_base = level
+        j = index - 1
+        while j >= 0:
+            v = smoothed[j] * sign
+            if v > level:
+                break
+            left_base = min(left_base, v)
+            j -= 1
+        right_base = level
+        j = index + 1
+        while j < n:
+            v = smoothed[j] * sign
+            if v > level:
+                break
+            right_base = min(right_base, v)
+            j += 1
+        return level - max(left_base, right_base)
+
+    extrema = []
+    for i in range(1, n - 1):
+        if not (20.0 <= freq[i] <= 20000.0):
+            continue
+        if smoothed[i] > smoothed[i - 1] and smoothed[i] >= smoothed[i + 1]:
+            prom = prominence(i, 1.0)
+            if prom >= 3.0:
+                extrema.append(("peak", freq[i], smoothed[i], prom))
+        elif smoothed[i] < smoothed[i - 1] and smoothed[i] <= smoothed[i + 1]:
+            prom = prominence(i, -1.0)
+            if prom >= 3.0:
+                extrema.append(("notch", freq[i], smoothed[i], prom))
+
+    def merged(kind):
+        """Strongest-first extrema of one kind, 1/12 octave apart."""
+        selected = []
+        for _, f, level, prom in sorted(
+            (e for e in extrema if e[0] == kind), key=lambda e: -e[3]
+        ):
+            if all(abs(math.log2(f / kept)) >= 1.0 / 12.0 for kept, _ in selected):
+                selected.append((f, level))
+            if len(selected) == 3:
+                break
+        return selected
+
+    peaks = merged("peak")
+    notches = merged("notch")
+
+    lf_extension = None
+    band = [(f, s) for f, s in zip(freq, smoothed) if 30.0 <= f <= 200.0]
+    if band:
+        peak_level = max(s for _, s in band)
+        peak_freq = next(f for f, s in band if s == peak_level)
+        # Scan down from the peak: the -6 dB point is the highest frequency
+        # at or below the peak whose level has fallen 6 dB.
+        below_peak = [(f, s) for f, s in zip(freq, smoothed) if f <= peak_freq]
+        for f, s in reversed(below_peak):
+            if s < peak_level - 6.0:
+                lf_extension = f
+                break
+    return {"peaks": peaks, "notches": notches, "lf_extension_hz": lf_extension}
+
+
+def landmarks_table_html(data):
+    """Per-speaker peaks, notches and LF extension (Genelec GRADE §3.5/§3.3)."""
+    channels = data.get("channels", {}) or {}
+    if not channels:
+        return ""
+    parts = [
+        '<div class="filters-section">\n<h3>Frequency landmarks — peaks, notches, LF extension</h3>\n',
+        '<p class="epa-footer">1/3-octave-smoothed measured response. '
+        "Extrema need 3 dB prominence, 1/12 octave apart (top 3 each). "
+        "LF extension is the −6 dB point below the 30–200 Hz peak.</p>\n",
+        '<table class="epa-table"><thead><tr><th>Speaker</th>'
+        "<th>LF extension (−6 dB)</th>"
+        "<th>Strongest peaks (freq / level)</th>"
+        "<th>Strongest notches (freq / level)</th>"
+        "</tr></thead><tbody>\n",
+    ]
+    for name in sorted(channels.keys()):
+        marks = response_landmarks(channels[name])
+        if marks is None:
+            parts.append(
+                f"<tr><td>{escape(str(name))}</td>"
+                '<td style="color:#999">n/a</td>'
+                '<td style="color:#999">n/a</td>'
+                '<td style="color:#999">n/a</td></tr>\n'
+            )
+            continue
+        lf = marks["lf_extension_hz"]
+        lf_str = f"{lf:.0f} Hz" if lf is not None else "&lt; 20 Hz"
+        peak_str = ("; ".join(f"{f:.0f} Hz / {level:+.1f} dB" for f, level in marks["peaks"])
+                    or "—")
+        notch_str = ("; ".join(f"{f:.0f} Hz / {level:+.1f} dB" for f, level in marks["notches"])
+                     or "—")
+        parts.append(
+            f"<tr><td>{escape(str(name))}</td><td>{lf_str}</td>"
+            f"<td>{peak_str}</td><td>{notch_str}</td></tr>\n"
+        )
+    parts.append("</tbody></table></div>\n")
+    return "".join(parts)
 
 
 def _pair_key(name):
@@ -575,8 +720,69 @@ def pending_cell(field):
     return f'<td style="background:#eee;color:#888" title="needs roomeq field: {escape(field)}">pending</td>'
 
 
+_DELIVERED_STATUSES = {"applied", "already_acceptable", "constrained"}
+
+
+def _derive_summaries_from_decisions(decisions):
+    """Derive req-R6 channel summaries from legacy decision records.
+
+    Mirrors the normative rule in
+    ``crates/roomeq-model/src/decision_ledger.rs`` (``operational_summaries``):
+    scope is final-claim records (stage ``final`` with a non-empty
+    ``final_graph_identity``) with action ``equalize``, grouped by
+    ``physical_output``; records superseded by another record are excluded
+    from both counts; delivered scope carries status ``applied``,
+    ``already_acceptable`` or ``constrained``. Channels without decided
+    final equalization scope stay absent (rendered as pending, never 100%).
+    """
+    superseded = set()
+    for record in decisions:
+        if not isinstance(record, dict):
+            continue
+        ids = record.get("supersedes_ids") or []
+        if isinstance(ids, list):
+            superseded.update(i for i in ids if isinstance(i, str))
+    decided: dict[str, int] = {}
+    delivered: dict[str, int] = {}
+    for record in decisions:
+        if not isinstance(record, dict):
+            continue
+        if record.get("stage") != "final":
+            continue
+        identity = record.get("final_graph_identity")
+        if not isinstance(identity, str) or not identity.strip():
+            continue
+        if record.get("action") != "equalize":
+            continue
+        decision_id = record.get("decision_id")
+        if isinstance(decision_id, str) and decision_id in superseded:
+            continue
+        channel = record.get("physical_output") or record.get("logical_input")
+        if not isinstance(channel, str) or not channel:
+            continue
+        decided[channel] = decided.get(channel, 0) + 1
+        if record.get("status") in _DELIVERED_STATUSES:
+            delivered[channel] = delivered.get(channel, 0) + 1
+    indexed = {}
+    for channel, decided_count in decided.items():
+        delivered_count = delivered.get(channel, 0)
+        if delivered_count > decided_count:
+            continue
+        indexed[channel] = (
+            100.0 * delivered_count / decided_count,
+            decided_count,
+            delivered_count,
+        )
+    return indexed
+
+
 def operational_summaries_by_channel(data):
-    """Index emitted req-R6 channel summaries by delivered output identity."""
+    """Index emitted req-R6 channel summaries by delivered output identity.
+
+    Uses the engine-emitted ``channel_summaries`` when present; legacy
+    outputs carry only ``decisions``, from which the same shares are
+    derived with the normative ledger rule.
+    """
     ledger = data.get("correction_decisions", {}) or {}
     summaries = ledger.get("channel_summaries", []) or []
     indexed = {}
@@ -592,6 +798,11 @@ def operational_summaries_by_channel(data):
                 or not math.isfinite(pct)):
             continue
         indexed[channel] = (float(pct), decided, delivered)
+    if indexed:
+        return indexed
+    decisions = ledger.get("decisions", []) or []
+    if isinstance(decisions, list) and decisions:
+        return _derive_summaries_from_decisions(decisions)
     return indexed
 
 
@@ -650,11 +861,12 @@ def level_compensation_html(data):
     parts = [
         '<div class="filters-section">\n<h3>Section 2 — Relative level compensation</h3>\n',
         '<p class="epa-footer">Monitor band 0.5–3 kHz, sub band 30–80 Hz. '
-        "Reference: quietest monitor. These are proposed attenuation values; "
-        "the post-calibration offset needs an independent measurement.</p>\n",
+        "Reference: quietest monitor. Compensation is a proposed attenuation; "
+        "the residual is predicted from the optimizer post-DSP curve, not an "
+        "independent post-calibration measurement.</p>\n",
         '<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>Level compensation (dB)</th>"
-        "<th>Level offset after calibration (dB)</th>"
+        "<th>Predicted residual after EQ (dB)</th>"
         "</tr></thead><tbody>\n",
     ]
     for r in rows:

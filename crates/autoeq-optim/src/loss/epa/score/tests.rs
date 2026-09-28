@@ -284,6 +284,15 @@ fn temporal_ir_masking_detects_pre_ringing() {
     assert!(clean_metrics.penalty <= 1e-12);
     assert!(ringing_metrics.pre_ringing_audible_db > -10.0);
     assert!(ringing_metrics.penalty > clean_metrics.penalty);
+    // WP6: physical precursor energy (unmasked 0.35^2 = -9.12 dB) plus the
+    // retained analysis identity and assumptions.
+    assert!((ringing_metrics.pre_energy_ratio_db + 9.11864).abs() < 1e-4);
+    assert_eq!(ringing_metrics.taps, 5);
+    assert_eq!(ringing_metrics.sample_rate_hz, 1000.0);
+    assert_eq!(ringing_metrics.masking_profile, "mixed");
+    assert_eq!(ringing_metrics.pre_mask_ms, 0.0);
+    assert_eq!(ringing_metrics.post_mask_ms, 0.0);
+    assert_eq!(ringing_metrics.audibility_threshold_db, -45.0);
 }
 
 #[test]

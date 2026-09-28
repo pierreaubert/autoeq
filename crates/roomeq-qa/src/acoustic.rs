@@ -656,7 +656,7 @@ fn evaluate_variant(
             schroeder_hz: scenario.schroeder_hz,
             normalize_level: true,
         },
-        temporal,
+        temporal.clone(),
     )
     .map_err(|error| anyhow!(error))
     .with_context(|| {
@@ -917,7 +917,7 @@ fn evaluate_robustness(
                 schroeder_hz: scenario.schroeder_hz,
                 normalize_level: true,
             },
-            temporal,
+            temporal.clone(),
         )
         .map_err(|error| anyhow!(error))?;
         worst_weighted_rms_delta_db = worst_weighted_rms_delta_db.max(

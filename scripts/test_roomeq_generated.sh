@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Use `mbx` when installed, else plain `cargo` (mirrors the justfile).
+if [ -z "${CARGO:-}" ]; then
+    if command -v mbx >/dev/null 2>&1; then CARGO=mbx; else CARGO=cargo; fi
+fi
+
 IN=${IN:-./data_tests/roomeq/generate}
 OUT=${OUT:-./data_generated/roomeq/generated}
 LOG=${LOG:-warn}
@@ -10,7 +15,7 @@ command -v jq >/dev/null || {
     exit 1
 }
 
-cargo build --release --features cli --bin roomeq
+$CARGO build --release --features cli --bin roomeq
 
 # Validate the complete checked-in fixture set before starting expensive runs.
 while IFS= read -r -d '' json; do

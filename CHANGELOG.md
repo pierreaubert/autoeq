@@ -1,5 +1,7 @@
 # Unreleased
 
+- RoomEQ finalization exempts physical subwoofer-only attenuation from the main
+  attenuation budget, preserves electrical ceilings, and names constrained outputs.
 - Speed up mixed/FIR finalization waveform and electrical replay with exact FFT-grid FIR
   evaluation and reuse of unchanged temporal evidence across safety checks.
   Preserve all taps, routing, and candidate acceptance requirements. Report

@@ -21,8 +21,9 @@ pub struct FinalizationConfig {
     pub input_peak_limits: BTreeMap<String, f64>,
     /// Maximum sampled physical-output level, in dBFS (must be <= 0).
     pub output_ceiling_dbfs: f64,
-    /// Maximum additional attenuation the selector may install. It does not
-    /// authorize acoustic output loss: the final acoustic gate still applies.
+    /// Maximum additional attenuation installed on non-subwoofer outputs, in dB.
+    /// Subwoofer-only cuts are exempt; common cuts remain bounded because they affect mains.
+    /// Electrical ceilings and final acoustic checks still apply to every candidate.
     pub max_attenuation_db: f64,
     /// Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.
     /// Subwoofers are exempt. This is not input attenuation or PEQ boost.

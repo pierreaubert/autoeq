@@ -355,6 +355,14 @@ upstream chain must honor them; otherwise the electrical guarantee does not
 apply. `system.bass_management.headroom_margin_db` alone does not establish an
 input bound. Unspecified budgets retain the default full-scale assumption.
 
+### Finalization attenuation by output role
+
+`optimizer.finalization.max_attenuation_db` limits additional attenuation on
+mains, surrounds, and heights. Physical subwoofer-only cuts have no attenuation
+budget; their electrical output ceiling and final acoustic checks still apply.
+A shared cut remains bounded because it also reduces main output. Rejection
+diagnostics name the constrained output and list the required cuts by role.
+
 ### Declared physical drive limits
 
 `optimizer.finalization.physical_drive_weight` optionally ranks feasible final

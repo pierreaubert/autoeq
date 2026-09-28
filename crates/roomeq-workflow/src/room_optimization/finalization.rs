@@ -4,6 +4,7 @@
 //! participates in acoustic replay; it is never normalized into the baseline.
 use super::*;
 use roomeq_model::PluginConfigWrapper;
+mod attenuation_budget;
 mod joint_drive;
 mod kautz;
 mod physical_drive;
@@ -593,16 +594,22 @@ fn select_inner(
                 policy.output_ceiling_dbfs,
             );
             let attenuation = required.values().copied().fold(0.0_f64, f64::max) + drive_cut_db;
-            if attenuation > policy.max_attenuation_db + 1e-6 {
-                return Err(failed(format!(
-                    "final graph needs {attenuation:.3} dB attenuation beyond {:.3} dB limit",
-                    policy.max_attenuation_db
-                )));
-            }
+            attenuation_budget::check(
+                &candidate,
+                config,
+                &required,
+                (attenuation_mode == "common").then_some(attenuation),
+                "final graph",
+            )?;
             if attenuation > 1e-6 || physical.values().any(|value| value.attenuation_db > 0.0) {
                 // A small numerical reserve avoids accepting a positive residue
                 // caused by serializing gain parameters and replaying the chain.
                 if attenuation_mode == "spectral" {
+                    // Large sub-only cuts must not consume the common spectral
+                    // budget. Preserve existing spectral trials within budget.
+                    let sub_cuts =
+                        attenuation_budget::sub_requirements(&candidate, config, &required);
+                    install_output_attenuation_requirements(&mut candidate, &sub_cuts)?;
                     install_spectral_attenuation(&mut candidate, config, fs, dir)?;
                 } else if attenuation_mode == "common" {
                     install_attenuation(&mut candidate, attenuation + 1e-6)?;
@@ -1158,24 +1165,7 @@ fn publish_baseline(
     let required =
         physical_drive::combined_attenuations(&unprotected, &physical, policy.output_ceiling_dbfs);
     let attenuation = required.values().copied().fold(0.0_f64, f64::max);
-    if attenuation > policy.max_attenuation_db + 1e-6 {
-        // Preserve the scoped physical failure when no permitted attenuation
-        // can bring even the protected structural baseline into its domain.
-        verify_declared_physical_drive(&mut baseline, config, fs, dir)?;
-        let output_peaks = unprotected
-            .iter()
-            .filter_map(|output| {
-                output
-                    .peak_dbfs
-                    .map(|peak| format!("{}={peak:.3} dBFS", output.output))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(failed(format!(
-            "structural baseline requires {attenuation:.3} dB safety attenuation beyond {:.3} dB limit (physical output peaks: {output_peaks})",
-            policy.max_attenuation_db,
-        )));
-    }
+    attenuation_budget::check(&baseline, config, &required, None, "structural baseline")?;
     if attenuation > 1e-6 || physical.values().any(|value| value.attenuation_db > 0.0) {
         // A bass-bus overload must not attenuate unrelated physical mains.
         // Recheck acoustic integration below rather than preserving it by

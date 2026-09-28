@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 
 const COMPENSATION: &str = "room_eq_limiter_latency";
 
-fn sub_outputs(result: &RoomOptimizationResult) -> BTreeSet<String> {
+pub(super) fn sub_outputs(result: &RoomOptimizationResult) -> BTreeSet<String> {
     result
         .metadata
         .bass_management

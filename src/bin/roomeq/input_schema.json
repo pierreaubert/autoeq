@@ -2204,7 +2204,7 @@
         },
         "max_attenuation_db": {
           "default": 12.0,
-          "description": "Maximum additional attenuation the selector may install. It does not\nauthorize acoustic output loss: the final acoustic gate still applies.",
+          "description": "Maximum additional attenuation installed on non-subwoofer outputs, in dB.\nSubwoofer-only cuts are exempt; common cuts remain bounded because they affect mains.\nElectrical ceilings and final acoustic checks still apply to every candidate.",
           "format": "double",
           "type": "number"
         },

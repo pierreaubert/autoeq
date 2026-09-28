@@ -464,7 +464,13 @@ gain alone, decides whether the electrical ceiling is satisfied.
 Electrical overload outside that band uses a shelf anchored at the band edge;
 its in-band acoustic effect must still pass the same seat checks.
 
-`max_attenuation_db` limits what DSP may be tried; it does **not** grant an
+`max_attenuation_db` bounds additional attenuation on mains, surrounds, and
+heights. Cuts confined to physical subwoofer outputs are exempt. Common cuts
+remain bounded because they also attenuate mains. If a subwoofer requires a cut
+beyond that budget, spectral trials first apply its output-only safety cut,
+then use the bounded common PEQ budget for remaining overloads. All physical
+outputs must still satisfy the electrical ceiling, and
+every candidate must pass the acoustic checks. The budget does **not** grant an
 acoustic output-loss allowance. An intended level reduction must be declared
 separately through `optimizer.permitted_output_gain_db`. The selector never
 derives that allowance from its candidate. Cutting excess output above the

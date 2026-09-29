@@ -98,6 +98,23 @@ impl Default for RoomConfig {
 }
 
 impl RoomConfig {
+    /// Populate engine dimensions from the single recording-level declaration.
+    ///
+    /// Replaces stale runtime copies, including clearing them when absent.
+    /// Does not enable correction modes or change explicit fallback frequencies.
+    pub fn resolve_room_dimensions(&mut self) {
+        let dimensions = self
+            .recording_config
+            .as_ref()
+            .and_then(|recording| recording.room_dimensions.clone());
+        if let Some(split) = &mut self.optimizer.schroeder_split {
+            split.room_dimensions = dimensions.clone();
+        }
+        if let Some(decomposed) = &mut self.optimizer.decomposed_correction {
+            decomposed.room_dimensions = dimensions;
+        }
+    }
+
     /// Declared T60 flatness tolerance for report summary cells, if the
     /// operator supplied a `reporting` policy. Structural validation rejects
     /// nonfinite/nonpositive tolerances before any run, so topology plumbing
@@ -139,6 +156,24 @@ impl RoomConfig {
 
     fn structural_errors(&self) -> Vec<String> {
         let mut errors = Vec::new();
+        if let Some(dimensions) = self
+            .recording_config
+            .as_ref()
+            .and_then(|recording| recording.room_dimensions.as_ref())
+        {
+            let volume = dimensions.length * dimensions.width * dimensions.height;
+            if [
+                dimensions.length,
+                dimensions.width,
+                dimensions.height,
+                volume,
+            ]
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+            {
+                errors.push("recording_config.room_dimensions must have finite positive dimensions and volume (meters)".into());
+            }
+        }
         if !self.optimizer.max_crossover_cancellation_db.is_finite()
             || self.optimizer.max_crossover_cancellation_db < 0.0
         {

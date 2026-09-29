@@ -4,6 +4,7 @@ import math
 from html import escape
 
 from .capture_clock_views import _capture_reason, _configuration, _finite, _mapping, _source
+from .wasm_report import axis, series, figure, embedded_figure
 
 
 def direction_reason(source, event):
@@ -73,10 +74,8 @@ def capture_reflections_html(data):
                 if horizontal <= 1e-6:
                     status = f"Conditional vertical arrival; azimuth undefined, elevation {math.degrees(elevation):.1f}°"
                 if event is not direct and horizontal > 1e-6:
-                    radius = relative / 80 * 110
-                    x, y = 140 + radius * math.cos(azimuth), 140 - radius * math.sin(azimuth)
-                    points.append(f'<circle class="capture-arrival-point" cx="{x:.2f}" cy="{y:.2f}" r="4" fill="#56b4e9">'
-                                  f'<title>{escape(label)}: {relative:.2f} ms, {level:.1f} dB</title></circle>')
+                    points.append(series(f'{label}: {level:.1f} dB',
+                                         [math.degrees(azimuth)] * 2, [0, relative], color="#56b4e9"))
             issues = event.get("issues")
             if isinstance(issues, list):
                 status += "; " + "; ".join(str(issue) for issue in issues)
@@ -85,12 +84,10 @@ def capture_reflections_html(data):
             rows.append(f"<tr><td>{escape(label)}</td><td>{time_text}</td><td>{level_text}</td><td>{escape(status)}</td></tr>")
         plot = ""
         if points:
-            rings = "".join(f'<circle cx="140" cy="140" r="{radius}" fill="none" stroke="currentColor" opacity="0.2"/>'
-                            for radius in (27.5, 55, 82.5, 110))
-            plot = ('<svg viewBox="0 0 280 280" width="280" height="280" role="img" aria-label="Conditional arrival azimuth and delay">'
-                    + rings + '<text x="247" y="145">+x</text><text x="135" y="20">+y</text>'
-                    + "".join(points) + '</svg><p>Radius: delay from direct candidate, 20 ms per ring. '
-                    'Azimuth uses the recorded session axes. Mirror-ambiguous arrivals are omitted.</p>')
+            plot = (embedded_figure(figure("Conditional arrival azimuth and delay",
+                    axis("Azimuth (degrees)", vmin=-180, vmax=180),
+                    axis("Delay from direct candidate (ms)", vmin=0, vmax=80), series_list=points))
+                    + '<p>Azimuth uses the recorded session axes. Mirror-ambiguous arrivals are omitted.</p>')
         issues = report.get("issues")
         notes = "; ".join(str(issue) for issue in issues) if isinstance(issues, list) else ""
         sections.append(f'<section class="capture-reflections"><h3>{escape(str(channel))}: early-arrival candidates</h3>'

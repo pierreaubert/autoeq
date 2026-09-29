@@ -100,7 +100,7 @@ impl ExplorerModel {
                 Section::Html { html: _, tab } => {
                     (tab.clone(), "Report block".to_string(), vec!["tables and notes".to_string()], vec![])
                 }
-                Section::Figure { figure, tab } => {
+                Section::Figure { figure, tab } | Section::Grid { figure, tab, .. } => {
                     let stats: Vec<SeriesStat> = figure.series.iter().map(series_stat).collect();
                     let detail = format!("{} series", stats.len());
                     (tab.clone(), figure.title.clone(), vec![detail], stats)

@@ -1,3 +1,7 @@
+# Measurement: L Sep 12
+# Dated: Sep 12, 2026 5:17:22 PM
+# Frequency Step: 96 ppo
+# Converted from: 2.0_t7v_20260912.mdat via mdat2csv.py
 freq_hz,spl_db,phase_deg
 20.141602,65.410255,-1.069895
 20.287556,65.527084,-2.545104

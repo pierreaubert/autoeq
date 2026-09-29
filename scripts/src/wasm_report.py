@@ -11,6 +11,7 @@ mechanically.
 
 import base64
 import json
+from html import escape
 from pathlib import Path
 
 SCHEMA_VERSION = "autoeq-report-data-v1"
@@ -201,3 +202,21 @@ def write_report(output_path, title, payload_dict, dist_dir=None,
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(html, encoding="utf-8")
     return output
+def embedded_figure(section):
+    """Embed a chart declaration inside a text/table block, never SVG geometry."""
+    encoded = escape(json.dumps(section, allow_nan=False, ensure_ascii=False), quote=True)
+    return f'<div class="report-figure" data-section="{encoded}"></div>'
+
+
+def grid_figure(title, freqs, times, rows, *, surface=False, highlights=None):
+    """Rows are time-major; full exported levels retain their original reference."""
+    section = figure(title, axis("Frequency (Hz)", "log", freqs[0], min(20000, freqs[-1])),
+                     axis("Time from broadband peak (ms)", "linear", max(-1, times[0]),
+                          times[-1] if surface else min(15, times[-1])))
+    section["kind"] = "grid"
+    section["grid"] = {"x": freqs, "y": times, "z": rows, "surface": surface,
+                       "zmin": -60 if surface else -30, "zmax": 0, "highlights": []}
+    for index, name, color in highlights or []:
+        section["grid"]["highlights"].append(index)
+        section["figure"]["series"].append(series(name, [], [], color=color))
+    return section

@@ -25,11 +25,11 @@ pub struct DecomposedCorrectionSerdeConfig {
     pub enabled: bool,
     /// Schroeder frequency (Hz). Below: modal, above: statistical.
     ///
-    /// When `room_dimensions` is also provided AND an impulse response is
+    /// When `recording_config.room_dimensions` is provided AND an impulse response is
     /// available, this value is overridden at run time by a
     /// measurement-driven Schroeder frequency: the optimizer measures
     /// RT60 from the IR via Schroeder backward integration and plugs it
-    /// into `f_S ≈ 2000 · √(RT60 / V)` with V from `room_dimensions`. In
+    /// into `f_S ≈ 2000 · √(RT60 / V)` with V from the recording dimensions. In
     /// that case this field is used only as the fallback if the RT60 fit
     /// fails.
     #[serde(default = "default_decomposed_schroeder")]
@@ -37,12 +37,13 @@ pub struct DecomposedCorrectionSerdeConfig {
     /// Width of the modal-to-statistical transition in octaves. Default: 0.5.
     #[serde(default = "default_transition_width_oct")]
     pub transition_width_oct: f64,
-    /// Room dimensions (L × W × H in metres). When present together with
-    /// a measured impulse response, enables a measurement-driven
-    /// Schroeder frequency via `RoomDimensions::schroeder_frequency_with_rt60`
-    /// using the RT60 measured from the IR. When absent, the optimizer
-    /// falls back to the `schroeder_freq` field above.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Runtime dimensions derived exclusively from `recording_config.room_dimensions`.
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "super::room_dimensions::reject_optimizer_room_dimensions"
+    )]
+    #[schemars(skip)]
     pub room_dimensions: Option<RoomDimensions>,
     /// Minimum Q to qualify as a room mode. Default: 3.0
     #[serde(default = "default_decomposed_min_q")]
@@ -101,7 +102,6 @@ pub(super) fn decomposed_correction_is_default(config: &DecomposedCorrectionSerd
     config.enabled
         && (config.schroeder_freq - default_decomposed_schroeder()).abs() < 1e-9
         && (config.transition_width_oct - default_transition_width_oct()).abs() < 1e-9
-        && config.room_dimensions.is_none()
         && (config.min_mode_q - default_decomposed_min_q()).abs() < 1e-9
         && (config.min_mode_prominence_db - default_decomposed_prominence()).abs() < 1e-9
         && (config.mode_correction_weight - default_decomposed_mode_weight()).abs() < 1e-9

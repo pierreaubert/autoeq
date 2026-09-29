@@ -93,7 +93,7 @@ pub fn deserialize_room_config_strict(mut config: serde_json::Value) -> Result<R
     let encoded = serde_json::to_vec(&config).context("Failed to encode merged config JSON")?;
     let mut deserializer = serde_json::Deserializer::from_slice(&encoded);
     let mut unknown_fields = Vec::new();
-    let room_config: RoomConfig = serde_ignored::deserialize(&mut deserializer, |path| {
+    let mut room_config: RoomConfig = serde_ignored::deserialize(&mut deserializer, |path| {
         unknown_fields.push(path.to_string());
     })
     .context("Failed to deserialize merged config into RoomConfig")?;
@@ -108,6 +108,7 @@ pub fn deserialize_room_config_strict(mut config: serde_json::Value) -> Result<R
         );
     }
 
+    room_config.resolve_room_dimensions();
     Ok(room_config)
 }
 
@@ -318,6 +319,42 @@ mod tests {
         let path = dir.path().join(name);
         std::fs::write(&path, content).expect("write config");
         path
+    }
+
+    #[test]
+    fn strict_loader_resolves_canonical_room_dimensions() {
+        let config = deserialize_room_config_strict(serde_json::json!({
+            "speakers": {},
+            "recording_config": {"room_dimensions": {"length": 5, "width": 4, "height": 2.5}},
+            "optimizer": {"schroeder_split": {"enabled": true}, "decomposed_correction": {}}
+        }))
+        .unwrap();
+        assert_eq!(
+            config
+                .optimizer
+                .schroeder_split
+                .unwrap()
+                .room_dimensions
+                .unwrap()
+                .length,
+            5.0
+        );
+        assert_eq!(
+            config
+                .optimizer
+                .decomposed_correction
+                .unwrap()
+                .room_dimensions
+                .unwrap()
+                .height,
+            2.5
+        );
+        for mode in ["schroeder_split", "decomposed_correction"] {
+            let error = deserialize_room_config_strict(serde_json::json!({
+                "speakers": {}, "optimizer": {mode: {"room_dimensions": {"length": 5, "width": 4, "height": 2.5}}}
+            })).unwrap_err();
+            assert!(format!("{error:#}").contains("recording_config.room_dimensions"));
+        }
     }
 
     #[test]

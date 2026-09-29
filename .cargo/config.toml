@@ -1,10 +1,18 @@
 [env]
 # macOS-specific configuration
 MACOSX_DEPLOYMENT_TARGET = "15.0"
+
 # Disabled: -Zthreads is nightly-only and the pinned toolchain is stable
 # 1.92.0, so any cargo invocation fails while this is set. (Uncomment to
 # restore: RUSTFLAGS = "-Zthreads=8".)
 # RUSTFLAGS = "-Zthreads=8"
+
+# Development dependency for the dense RoomEQ wavelet report. Keep the DSP
+# and biquad crates on the same source to avoid incompatible duplicate types.
+# Remove when the pinned math-audio revision includes wavelet_heatmap_detailed.
+[patch."https://github.com/pierreaubert/math-audio"]
+math-dsp = { path = "../math-audio/crates/math-dsp" }
+math-iir-fir = { path = "../math-audio/crates/math-iir-fir" }
 
 [build]
 rustflags = ["-Ctarget-cpu=native"]

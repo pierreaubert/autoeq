@@ -36,6 +36,7 @@ pub mod target_enforcement;
 pub mod topology;
 pub mod verification;
 mod wav;
+pub mod symmetric_report;
 
 pub use arrival::{prepare_channel_arrival_time, prepare_channel_input};
 pub use channel::{ChannelWorkflowResult, process_single_channel};

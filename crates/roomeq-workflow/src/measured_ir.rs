@@ -9,7 +9,7 @@
 //! exactly as before.
 
 use math_audio_dsp::rir_waterfall::{WaterfallConfig, detect_resonances, waterfall_grid};
-use math_audio_dsp::rir_wavelet::{WaveletConfig, wavelet_heatmap};
+use math_audio_dsp::rir_wavelet::{WaveletConfig, wavelet_heatmap_detailed};
 use math_rir::report::{
     DEFAULT_MIN_R2, ReflectionTableConfig, T60BatchConfig, T60FitRange, analyze_t60_octaves,
     early_reflection_table,
@@ -40,13 +40,13 @@ const REFLECTION_WINDOW_MS: f64 = 15.0;
 /// R1 minimum separation between picked reflections in ms.
 const REFLECTION_MIN_SEPARATION_MS: f64 = 0.5;
 
-/// R4/R5 frame/bin caps matching the viewer grid bounds (100 times,
-/// 64 frequencies).
-const GRID_MAX_FRAMES: usize = 100;
-const GRID_MAX_BINS: usize = 64;
+/// Retain all 2 ms waterfall frames and dense early wavelet samples.
+const GRID_MAX_FRAMES: usize = 800;
+/// Retain the positive FFT bins at 48 kHz without losing the bass in pooling.
+const GRID_MAX_BINS: usize = 2049;
 
 /// R5 log-grid density in frequencies per octave (viewer contract).
-const WAVELET_FREQS_PER_OCTAVE: f64 = 6.0;
+const WAVELET_FREQS_PER_OCTAVE: f64 = 48.0;
 
 /// Contract strings shared with the viewer (single source; the model
 /// doc-comments pin the same values).
@@ -361,7 +361,14 @@ fn waterfall_report(
         max_bins: GRID_MAX_BINS,
         ..WaterfallConfig::default()
     };
-    let grid = waterfall_grid(samples, sample_rate_hz, &config);
+    let mut grid = waterfall_grid(samples, sample_rate_hz, &config);
+    // DC cannot be represented on a log-frequency axis. Preserve every positive bin.
+    if grid.freqs_hz.first() == Some(&0.0) {
+        grid.freqs_hz.remove(0);
+        for row in &mut grid.mags_db {
+            row.remove(0);
+        }
+    }
     if grid.times_ms.is_empty()
         || grid.freqs_hz.is_empty()
         || !grid_shape_ok(&grid.times_ms, &grid.freqs_hz, &grid.mags_db, -100.0)
@@ -439,7 +446,7 @@ fn wavelet_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelWavelet
         max_freqs: GRID_MAX_BINS,
         max_frames: GRID_MAX_FRAMES,
     };
-    let heatmap = wavelet_heatmap(samples, sample_rate_hz, &config);
+    let heatmap = wavelet_heatmap_detailed(samples, sample_rate_hz, &config);
     if heatmap.freqs_hz.is_empty()
         || heatmap.times_ms.is_empty()
         || heatmap.mags_db.len() != heatmap.freqs_hz.len()
@@ -475,7 +482,7 @@ fn wavelet_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelWavelet
         valid_band_hz: [first_hz, last_hz],
         cycles: 3.0,
         freqs_per_octave: WAVELET_FREQS_PER_OCTAVE,
-        hop_ms: 1.0,
+        hop_ms: 0.1,
         display_range_db: [-30.0, 0.0],
         freqs_hz: heatmap.freqs_hz.clone(),
         times_ms: heatmap.times_ms.clone(),
@@ -750,8 +757,9 @@ mod tests {
             (waterfall.window_ms, waterfall.hop_ms, waterfall.post_ms),
             (32.0, 2.0, 500.0)
         );
-        assert!((2..=100).contains(&waterfall.times_ms.len()));
-        assert!((2..=64).contains(&waterfall.freqs_hz.len()));
+        assert!((200..=GRID_MAX_FRAMES).contains(&waterfall.times_ms.len()));
+        assert!((1000..=GRID_MAX_BINS).contains(&waterfall.freqs_hz.len()));
+        assert!(waterfall.freqs_hz[0] > 0.0 && waterfall.freqs_hz[0] < 30.0);
         assert_eq!(waterfall.mags_db.len(), waterfall.times_ms.len());
         for row in &waterfall.mags_db {
             assert_eq!(row.len(), waterfall.freqs_hz.len());
@@ -769,11 +777,19 @@ mod tests {
         assert_eq!(report.method, "complex_morlet_three_cycle_v1");
         assert_eq!(
             (report.cycles, report.freqs_per_octave, report.hop_ms),
-            (3.0, 6.0, 1.0)
+            (3.0, 48.0, 0.1)
         );
         assert_eq!(report.display_range_db, [-30.0, 0.0]);
-        assert!((2..=64).contains(&report.freqs_hz.len()));
-        assert!((2..=100).contains(&report.times_ms.len()));
+        assert!((390..=GRID_MAX_BINS).contains(&report.freqs_hz.len()));
+        assert!((500..=GRID_MAX_FRAMES).contains(&report.times_ms.len()));
+        assert!(
+            report
+                .times_ms
+                .iter()
+                .filter(|t| **t >= 0.0 && **t <= 15.0)
+                .count()
+                >= 150
+        );
         assert_eq!(report.mags_db.len(), report.freqs_hz.len());
     }
 

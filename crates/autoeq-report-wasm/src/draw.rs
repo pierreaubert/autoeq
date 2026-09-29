@@ -329,6 +329,49 @@ fn domain(auto: Option<(f64, f64)>, explicit_min: Option<f64>, explicit_max: Opt
     (lo, hi)
 }
 
+/// Pad logarithmic domains in log space, keeping automatic bounds positive.
+fn log_domain(
+    auto: Option<(f64, f64)>,
+    explicit_min: Option<f64>,
+    explicit_max: Option<f64>,
+) -> (f64, f64) {
+    let valid = |v: &f64| v.is_finite() && *v > 0.0;
+    let auto = auto
+        .filter(|(lo, hi)| valid(lo) && valid(hi))
+        .map(|(lo, hi)| (lo.ln(), hi.ln()));
+    let (lo, hi) = domain(
+        auto,
+        explicit_min.filter(valid).map(f64::ln),
+        explicit_max.filter(valid).map(f64::ln),
+    );
+    (lo.exp(), hi.exp())
+}
+
+/// Return conventional audio grid positions within a logarithmic viewport.
+pub(crate) fn log_grid_ticks(lo: f64, hi: f64) -> Vec<f64> {
+    // Decade subdivisions requested for audio reports; omit 7 to limit clutter.
+    let mut ticks = Vec::new();
+    for exponent in (lo.log10().floor() as i32).max(-307)..=(hi.log10().ceil() as i32).min(308) {
+        let decade = 10.0_f64.powi(exponent);
+        for multiple in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 9.0] {
+            let value = decade * multiple;
+            if value >= lo * (1.0 - 1e-12) && value < hi * (1.0 - 1e-12) {
+                ticks.push(value);
+            }
+        }
+    }
+    ticks
+}
+
+/// Label decades and the audio-band start, keeping dense gridlines legible.
+pub(crate) fn fmt_log_grid(v: f64) -> String {
+    if (v.log10() - v.log10().round()).abs() < 1e-10 || (v - 20.0).abs() < 1e-10 {
+        fmt_freq(v)
+    } else {
+        String::new()
+    }
+}
+
 /// Draw one Cartesian line figure; returns legend geometry.
 pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta {
     ctx.set_fill("#ffffff");
@@ -391,13 +434,12 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
                 }
             }
         }
-        x_auto = if lo <= hi { Some((lo, hi)) } else { x_auto };
+        x_auto = if lo <= hi { Some((lo, hi)) } else { None };
     }
-    let (x_lo, x_hi) = domain(x_auto, fig.x.min, fig.x.max);
     let (x_lo, x_hi) = if log_x {
-        (x_lo.max(f64::MIN_POSITIVE), x_hi.max(f64::MIN_POSITIVE * 10.0))
+        log_domain(x_auto, fig.x.min, fig.x.max)
     } else {
-        (x_lo, x_hi)
+        domain(x_auto, fig.x.min, fig.x.max)
     };
 
     let y_auto = extent_opt(&fig.series, &visible, |s| {
@@ -471,12 +513,15 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
     }
 
     // Axes via d3rs renderer-independent layout.
-    let x_formatter: fn(f64) -> String = if log_x { fmt_freq } else { fmt_num };
-    let x_cfg = AxisConfig::bottom()
+    let x_formatter: fn(f64) -> String = if log_x { fmt_log_grid } else { fmt_num };
+    let mut x_cfg = AxisConfig::bottom()
         .with_ticks(10)
         .with_tick_size(5.0)
         .with_formatter(x_formatter)
         .with_title(fig.x.label.clone());
+    if log_x {
+        x_cfg = x_cfg.with_tick_values(log_grid_ticks(x_lo, x_hi));
+    }
     let x_layout = match &xmap {
         XMap::Log(s) => AxisLayout::from_scale(s, &x_cfg, plot_w as f32),
         XMap::Linear(s) => AxisLayout::from_scale(s, &x_cfg, plot_w as f32),
@@ -487,7 +532,7 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
         .with_formatter(fmt_num)
         .with_title(fig.y.label.clone());
     let y_layout = AxisLayout::from_scale(&yscale, &y_cfg, plot_h as f32);
-    draw_axis_layout(ctx, &x_layout, plot_y + plot_h, plot_w, true, false);
+    draw_axis_layout(ctx, &x_layout, plot_y + plot_h, plot_h, true, false);
     draw_axis_layout(ctx, &y_layout, plot_x, plot_w, false, false);
     if let (Some(spec), Some(scale)) = (fig.y2.as_ref(), y2scale.as_ref()) {
         let y2_cfg = AxisConfig::right()
@@ -625,7 +670,7 @@ fn mark_dash(d: crate::schema::DashOption) -> &'static [f64] {
 /// `cross` is the axis-line position (canvas y for a bottom axis, canvas x
 /// for a left axis); `plot_len` is the plot-area length along the axis and
 /// is only used for gridlines.
-fn draw_axis_layout(
+pub(crate) fn draw_axis_layout(
     ctx: &mut impl Ctx,
     layout: &AxisLayout,
     cross: f64,
@@ -997,6 +1042,44 @@ mod tests {
     use crate::schema::{AxisSpec, DashOption, LineMark, Series, XScale};
     use std::cell::RefCell;
 
+    #[test]
+    fn audio_log_grid_has_requested_subdivisions_and_no_end_tick() {
+        let ticks = log_grid_ticks(20.0, 20000.0);
+        for multiple in [1.0, 10.0, 100.0] {
+            for base in [20.0, 30.0, 40.0, 50.0, 60.0, 80.0, 90.0] {
+                assert!(ticks.contains(&(base * multiple)));
+            }
+        }
+        assert_eq!(ticks.last(), Some(&10000.0));
+        assert_eq!(fmt_log_grid(10000.0), "10k");
+        assert!(fmt_log_grid(90.0).is_empty());
+        assert!(log_grid_ticks(300.0, 600.0).iter().all(|v| *v >= 300.0 && *v < 600.0));
+    }
+
+    #[test]
+    fn octave_log_domain_uses_multiplicative_padding() {
+        let (lo, hi) = log_domain(Some((63.0, 16000.0)), None, None);
+        assert!(lo > 50.0 && lo < 63.0);
+        assert!(hi > 16000.0 && hi < 20000.0);
+        assert!((63.0 / lo - hi / 16000.0).abs() < 1e-12);
+        let (lo, hi) = log_domain(Some((63.0, 16000.0)), Some(20.0), Some(20000.0));
+        assert!((lo - 20.0).abs() < 1e-10);
+        assert!((hi - 20000.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn log_domain_handles_empty_singleton_and_invalid_bounds() {
+        for (auto, min) in [
+            (None, None),
+            (Some((1000.0, 1000.0)), None),
+            (Some((63.0, 16000.0)), Some(0.0)),
+        ] {
+            let (lo, hi) = log_domain(auto, min, None);
+            assert!(lo.is_finite() && hi.is_finite() && lo > 0.0 && hi > lo);
+            assert!(hi / lo < 1000.0);
+        }
+    }
+
     /// Recording 2D backend for native unit tests.
     #[derive(Default)]
     struct Rec {
@@ -1057,6 +1140,38 @@ mod tests {
         fn text_width(&mut self, t: &str) -> f64 {
             t.chars().count() as f64 * 6.5
         }
+    }
+
+    #[test]
+    fn grid_views_draw_axes_and_reject_ragged_data() {
+        let mut fig = demo_figure();
+        fig.y.label = "Time (ms)".to_string();
+        fig.y.min = Some(0.0);
+        fig.y.max = Some(15.0);
+        let mut grid = crate::schema::GridData {
+            x: vec![20.0, 1000.0, 20000.0], y: vec![0.0, 5.0, 15.0],
+            z: vec![vec![0.0, -10.0, -20.0], vec![-5.0, -15.0, -25.0], vec![-10.0, -20.0, -30.0]],
+            surface: false, zmin: -30.0, zmax: 0.0, highlights: vec![1], rotation: None,
+        };
+        for surface in [false, true] {
+            grid.surface = surface;
+            let mut ctx = Rec::default();
+            let meta = crate::grid::draw_grid(&mut ctx, &fig, &grid, 900.0, 500.0);
+            assert_eq!(meta.legend.len(), 2);
+            let texts = ctx.texts.borrow();
+            assert!(texts.iter().any(|t| t.0 == "Frequency (Hz)"));
+            assert!(texts.iter().any(|t| t.0 == "Time (ms)"));
+            assert!(texts.iter().any(|t| t.0 == "dB"));
+            assert!(!ctx.ops.borrow().iter().any(|op| op.contains("NaN")));
+        }
+        grid.rotation = Some([40.0, 50.0]);
+        let mut rotated = Rec::default();
+        crate::grid::draw_grid(&mut rotated, &fig, &grid, 900.0, 500.0);
+        assert!(!rotated.ops.borrow().iter().any(|op| op.contains("NaN")));
+        grid.z[0].pop();
+        let mut ctx = Rec::default();
+        crate::grid::draw_grid(&mut ctx, &fig, &grid, 900.0, 500.0);
+        assert!(ctx.texts.borrow().iter().any(|t| t.0.contains("invalid time-frequency grid")));
     }
 
     fn demo_figure() -> Figure {

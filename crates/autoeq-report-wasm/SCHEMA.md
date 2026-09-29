@@ -12,6 +12,13 @@ human-readable contract.
 
 ## Top level
 
+The HTML shell accepts optional `group` titles on sections, grouping them into
+collapsible panels in first-occurrence order. `tab` selectors are independent
+inside each group; ungrouped sections remain above them. A `footer: true`
+section follows its group's tab pages. These are shell layout hints, ignored
+by the Rust chart renderer. Grid `rotation: [elevation, azimuth]` is optional
+display-only d3rs camera state in degrees; Reset restores `[65, -12]`.
+
 ```json
 {
   "schema": "autoeq-report-data-v1",
@@ -25,7 +32,7 @@ The shell refuses to render when `schema` does not match
 
 ## Sections
 
-Tagged on `kind`: `html`, `figure`, `bar`, `sankey`. Every section carries
+Tagged on `kind`: `html`, `figure`, `grid`, `bar`, `sankey`. Every section carries
 an optional `tab` string: when any section has one, the shell groups
 sections under a tab bar (roomeq per-channel tabs); renderers ignore `tab`.
 
@@ -37,6 +44,28 @@ sections under a tab bar (roomeq per-channel tabs); renderers ignore `tab`.
 
 Raw HTML (tables, summaries, filter lists). Inserted verbatim; producers
 must escape untrusted text before building it.
+
+The shell also accepts `footer: true` to place an HTML section after the tabs.
+HTML may contain `.report-figure` placeholders whose `data-section` attribute
+contains an HTML-escaped JSON figure/grid section. The shell mounts those through
+the same WASM renderer, inheriting the enclosing tab. Producers must escape the
+entire attribute value, not interpolate raw JSON into HTML.
+
+### `grid`
+
+Carries `figure` axis/title/legend metadata and `grid` data:
+`x` (positive increasing frequencies), `y` (increasing times in ms),
+`z` (finite rectangular values indexed `[time][frequency]`), `surface`
+(true for a filled projected surface, false for a heatmap), and `zmin`/`zmax`
+(fixed colour/display range). Optional `highlights` contains frequency-column
+indices; matching `figure.series` entries provide names, colours and visibility.
+
+Both axes require at least two values. Arrays are limited to 4096 per axis and
+one million cells. Invalid grids render an explicit unavailable message.
+Figure bounds control the viewport without changing the stored level reference.
+Surface geometry/projection and axes come from d3rs; the WASM Canvas renderer
+does not require a WebGPU adapter. Grid views support zoom, pan, reset and
+highlight legend toggles; fractional-octave smoothing is not applied to grids.
 
 ### `figure`
 

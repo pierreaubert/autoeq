@@ -43,6 +43,71 @@ check-jsonschema --schemafile input_schema.json your_config.json
 
 ---
 
+## Recording Configuration (`recording_config`)
+
+This optional root-level object describes the physical room and the measurement
+session. All its fields are optional; omit unknown values rather than inventing
+them. It does not replace the measurement paths in `speakers` or the measured IR
+declarations in `measured_impulse_responses`.
+
+```json
+{
+  "recording_config": {
+    "room_dimensions": { "length": 5.0, "width": 4.0, "height": 2.5 },
+    "setup_description": "Treated room; microphone at the main listening seat",
+    "channel_names": ["L", "R"],
+    "channel_speakers": { "L": "Adam T7V", "R": "Adam T7V" },
+    "recording_sample_rate": 48000,
+    "signal_type": "Sweep",
+    "signal_duration_secs": 10.0,
+    "sweep_start_freq": 20.0,
+    "sweep_end_freq": 20000.0
+  }
+}
+```
+
+### Room dimensions: single source of truth
+
+`recording_config.room_dimensions` contains `length`, `width`, and `height`, all
+required when the object is present, in **meters**. Each dimension and their
+product must be finite and positive. The example describes a 50 m³ room.
+
+Both Schroeder split and decomposed correction use this declaration. RoomEQ
+resolves the dimensions into runtime engine settings on file load and again
+before optimization, including for programmatically constructed configurations.
+Supplying dimensions does not enable either correction mode. Without dimensions,
+the existing explicit/default Schroeder frequency remains the fallback.
+
+**Migration:** move the whole `room_dimensions` object out of
+`optimizer.schroeder_split` or `optimizer.decomposed_correction` and into
+`recording_config`. The old nested fields are rejected with migration guidance;
+there is no optimizer-level override. Saved effective configurations retain only
+the recording-level declaration, so reports can use the same room volume.
+
+### Measurement-session fields
+
+| Fields | Type / units | Purpose |
+|---|---|---|
+| `setup_description` | string | Room treatment, seating and placement notes |
+| `speaker_configuration`, `channel_names`, `channel_speakers` | string, string array, channel-to-string map | Layout and speaker identity |
+| `playback_device_name`, `playback_device_id`, `recording_device_name`, `recording_device_id` | strings | Capture device identities |
+| `recording_sample_rate`, `recording_channels`, `recording_directory` | Hz, count, string | Capture settings and location |
+| `signal_type`, `signal_duration_secs`, `signal_level_db` | string, seconds, dB | Emitted measurement signal settings |
+| `sweep_start_freq`, `sweep_end_freq` | Hz | Sweep endpoints |
+| `mic_calibration_path`, `mic_phase_calibration_path` | strings | Magnitude/phase calibration file references |
+| `mic_calibration_paths`, `mic_phase_calibration_paths` | arrays of strings or nulls | Per-channel calibration references |
+| `probe_results`, `bass_anchor_results` | objects | Recorded timing/phase evidence; use the generated schema for their nested contracts |
+| `probe_wav_relative`, `bass_anchor_wav_relative` | strings | Raw probe paths relative to the recording directory |
+| `bass_octave_duration_s`, `pre_silence_s`, `post_silence_s`, `bass_probe_duration_s` | seconds | Sweep/probe acquisition timing |
+| `num_sweeps`, `num_positions`, `recording_seed` | integers | Capture repetition, positions and reproducibility |
+| `coherence_threshold`, `bass_probe_freq_hz` | ratio, Hz | Bass phase confidence and probe frequency |
+| `sweep_level_db_spl`, `spl_calibration` | dB SPL, object | Calibrated level and calibration evidence |
+
+Device names and setup notes are provenance, not proof of calibration or a shared
+timing reference. Merely filling this object does not turn an arbitrary WAV into
+a valid room IR. See the [generated schema](../src/bin/roomeq/input_schema.json)
+for nested evidence objects and exact accepted types.
+
 ## Cross-talk Cancellation (CTC)
 
 The optional `ctc` block exports a `recommended_xtc_matrix.json` artifact that can be loaded by the XTC plugin with `source_mode: "roomeq_recommended"`.
@@ -1153,14 +1218,12 @@ Applies different Q constraints below and above the Schroeder frequency:
 With automatic Schroeder frequency from room dimensions:
 ```json
 {
+  "recording_config": {
+    "room_dimensions": { "length": 6.0, "width": 4.5, "height": 2.8 }
+  },
   "optimizer": {
     "schroeder_split": {
-      "enabled": true,
-      "room_dimensions": {
-        "length": 6.0,
-        "width": 4.5,
-        "height": 2.8
-      }
+      "enabled": true
     }
   }
 }
@@ -1172,11 +1235,10 @@ With automatic Schroeder frequency from room dimensions:
 |-------|------|---------|-------------|
 | `enabled` | boolean | `false` | Enable Schroeder split optimization |
 | `schroeder_freq` | number (Hz) | `300` | Schroeder frequency (typical: 200-500 Hz for domestic rooms) |
-| `room_dimensions` | object | - | Room dimensions for automatic Schroeder frequency calculation |
 | `low_freq_config` | object | - | Low frequency filter configuration (below Schroeder) |
 | `high_freq_config` | object | - | High frequency filter configuration (above Schroeder) |
 
-**RoomDimensions Fields:**
+**RoomDimensions Fields** (under `recording_config.room_dimensions`):
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -1556,16 +1618,17 @@ Applies frequency-dependent correction weights based on acoustic decomposition. 
 The feature is opt-in: omitting `decomposed_correction` disables it. When the
 object is present, its nested `enabled` field defaults to `true`.
 
+With `recording_config.room_dimensions` and a measured IR, the optimizer can
+derive the Schroeder frequency as `2000 · √(RT60 / V)` using measured RT60.
+
 ```json
 {
+  "recording_config": {
+    "room_dimensions": { "length": 4.0, "width": 3.0, "height": 2.5 }
+  },
   "optimizer": {
     "decomposed_correction": {
       "schroeder_freq": 300,
-      "room_dimensions": {
-        "length": 4.0,
-        "width": 3.0,
-        "height": 2.5
-      },
       "min_mode_q": 3.0,
       "min_mode_prominence_db": 3.0,
       "mode_correction_weight": 1.0,
@@ -1583,8 +1646,7 @@ object is present, its nested `enabled` field defaults to `true`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `schroeder_freq` | number (Hz) | `300` | Fallback Schroeder frequency when no IR or no `room_dimensions`. Below: modal, above: statistical. |
-| `room_dimensions` | object | - | Optional L × W × H in metres. When both this and `ssir_wav_path` are set, the optimizer measures RT60 from the recorded impulse response (Schroeder backward integration) and computes the Schroeder frequency as `2000 · √(RT60 / V)`, overriding the fallback `schroeder_freq` above. |
+| `schroeder_freq` | number (Hz) | `300` | Fallback when no usable IR or no `recording_config.room_dimensions`. Below: modal, above: statistical. |
 | `min_mode_q` | number | `3.0` | Minimum Q to qualify as a room mode |
 | `min_mode_prominence_db` | number | `3.0` | Minimum prominence (dB) for mode detection |
 | `mode_correction_weight` | number | `1.0` | Correction weight for room modes (0.0-1.0) |

@@ -22,18 +22,11 @@ def _magnitude_svg(view, label):
     span = max(hi - lo, 1.0)
     if not math.isfinite(span):
         raise ValueError("magnitude range overflow")
-    x0, xspan = math.log(freq[0]), math.log(freq[-1]) - math.log(freq[0])
-
-    def points(values):
-        return " ".join(f"{40 + 720 * (math.log(f) - x0) / xspan:.2f},{20 + 180 * (hi - y) / span:.2f}"
-                        for f, y in zip(freq, values))
-
-    return (f'<figure><figcaption>{escape(label)}; blue: before, orange: retained prediction after. '
-            f'{freq[0]:.3g}–{freq[-1]:.3g} Hz (log axis); {lo:.3g}–{hi:.3g} dB (shared axis).</figcaption>'
-            '<svg viewBox="0 0 800 220" role="img" aria-label="Retained pre/post magnitude diagnostic">'
-            f'<polyline fill="none" stroke="#2864b4" stroke-width="1.5" points="{points(pre)}"/>'
-            f'<polyline fill="none" stroke="#c56816" stroke-width="1.5" points="{points(post)}"/>'
-            '</svg></figure>')
+    from .wasm_report import axis, series, figure, embedded_figure
+    return embedded_figure(figure(label, axis("Frequency (Hz)", "log"),
+        axis("Magnitude (dB)"), series_list=[
+            series("Before", freq, pre, color="#2864b4"),
+            series("Retained prediction after", freq, post, color="#c56816")]))
 
 
 def waveform_status_html(data, label=""):
@@ -80,12 +73,18 @@ def waveform_status_html(data, label=""):
         if not isinstance(passed, bool) or available != passed:
             state = "Unavailable: recorded status and saved waveform disagree"
         elif passed:
-            state = "Saved predicted view available"
+            measured = (view == "pre_ir" and
+                        (channels[channel].get("t60_octaves") or {}).get("basis") == "measured_room_ir")
+            state = ("Measured room impulse response imported" if measured else
+                     "Calculated impulse response saved — prediction after DSP" if view == "post_ir" else
+                     "Impulse response reconstructed from the input frequency response")
         else:
             state = "Unavailable: " + str(check.get("diagnostic") or "no reason recorded")
         rows.append("<tr>" + "".join(f"<td>{escape(value)}</td>" for value in (channel, view, state)) + "</tr>")
-    return (start + '<p>Recorded prediction diagnostics—not raw captures, verified playback, '
-            'or acoustic acceptance. Phase presence alone does not prove synchronized capture timing.</p>'
+    return (start + '<p>An impulse response shows amplitude over time. Before DSP uses the imported '
+            'room IR when supplied; otherwise it is reconstructed from the input response. '
+            'After DSP is a calculated prediction, not a new microphone measurement. '
+            'Available means the waveform was saved and can be plotted.</p>'
             '<table><thead><tr><th>Channel</th><th>View</th><th>Status / reason</th></tr></thead><tbody>'
             + "".join(rows) + '</tbody></table></section>')
 

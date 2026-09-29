@@ -16,6 +16,7 @@ from scripts.src.acoustic_report import (
     deepest_notch_db,
     early_reflection_level_db,
     early_reflections_html,
+    early_reflection_figures,
     early_late_ratio_db,
     landmarks_table_html,
     level_compensation,
@@ -50,6 +51,7 @@ from scripts.src.report import (
 from scripts.test_figures import two_sub_overview_data
 from scripts.test_capture_views import fixture as capture_verification_fixture
 from scripts.src.payload_binding import ALGORITHM, payload_digest
+from scripts.src.loaders import RoomEqData
 
 
 def _driver_eq_split_data():
@@ -568,7 +570,7 @@ class SummarySectionTests(unittest.TestCase):
         }]}}
         self.assertEqual(operational_summaries_by_channel(data), {})
         html = summary_table_html({"channels": {"L": {}}, **data})
-        self.assertIn("correction_decisions.channel_summaries", html)
+        self.assertIn("Not assessed", html)
 
     def test_level_residual_predicts_from_final_curve(self):
         init_l, init_r = _stereo_curves([1.0, 1.0, 1.0, 1.0], [-1.0, -1.0, -1.0, -1.0])
@@ -631,7 +633,7 @@ class SummarySectionTests(unittest.TestCase):
             html = output.read_text(encoding="utf-8")
         self.assertIn("Recorded final correction decisions", html)
         self.assertLess(html.index("Recorded final correction decisions"),
-                        html.index("<h2>Optimization Summary</h2>"))
+                        html.index("Section 1: Summary"))
         self.assertLess(html.index("Recorded final correction decisions"),
                         html.index('"title": "Combined Overview — Before EQ"'))
         with tempfile.TemporaryDirectory() as directory:
@@ -649,14 +651,15 @@ class SummarySectionTests(unittest.TestCase):
             create_html_report(data, output, None)
             html = output.read_text(encoding="utf-8")
 
-        self.assertIn("<h2>All EQ Filters</h2>", html)
+        self.assertIn("EQ Filters", html)
+        self.assertNotIn("<h2>All EQ Filters</h2>", html)
         self.assertIn("<h2>Crossover Configuration</h2>", html)
         self.assertIn("Not approved for playback", html)
-        self.assertLess(html.index("Why this correction?"), html.index("<h2>Optimization Summary</h2>"))
+        self.assertLess(html.index("Why this correction?"), html.index("Section 1: Summary"))
         self.assertLess(html.index("Why this correction?"), html.index('"title": "Combined Overview — Before EQ"'))
         # Summaries precede the per-channel tabs (first non-null section tab).
         self.assertLess(
-            html.index("<h2>All EQ Filters</h2>"),
+            html.index("<h2>Crossover Configuration</h2>"),
             html.index('"tab": "'),
         )
 
@@ -680,6 +683,77 @@ def report_payload(html):
 
 
 class AcousticReportTests(unittest.TestCase):
+    def test_itu_summary_column_counts_eight_bands_and_requires_volume(self):
+        from scripts.src.acoustic_report import t60_itu_pct, t60_itu_cell
+        bands = [{"centre_hz": hz, "t60_s": 0.25, "fit_range": "T30",
+                  "r2": 0.96, "valid": True, "reason": ""}
+                 for hz in [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]]
+        bands[-1]["t60_s"] = 10.0  # Outside the recommendation's coverage.
+        data = {"metadata": {"effective_config": {"recording_config": {
+                    "room_dimensions": {"length": 5, "width": 4, "height": 5}}}},
+                "channels": {"L": {"t60_octaves": {"basis": "measured_room_ir",
+                            "min_r2": 0.9, "bands": bands}}}}
+        self.assertEqual(t60_itu_pct(data, "L"), 100.0)
+        bands[0]["t60_s"] = 0.01  # No lower bound at 63 Hz.
+        self.assertEqual(t60_itu_pct(data, "L"), 100.0)
+        bands[1]["t60_s"] = 0.50
+        self.assertEqual(t60_itu_pct(data, "L"), 87.5)
+        for band in bands:
+            band["t60_s"] = 1.0
+        self.assertEqual(t60_itu_pct(data, "L"), 0.0)
+        self.assertIn("0/8 octave centers", t60_itu_cell(data, "L"))
+        self.assertIn("T60 within ITU recommendation (%)", summary_table_html(data))
+        bands[2].update(t60_s=None, valid=False, fit_range="None", reason="poor fit")
+        self.assertIsNone(t60_itu_pct(data, "L"))
+        bands[2].update(t60_s=0.25, valid=True, fit_range="T30", reason="")
+        data["metadata"] = {}
+        self.assertIsNone(t60_itu_pct(data, "L"))
+        self.assertIn("Not assessed", t60_itu_cell(data, "L"))
+
+    def test_itu_t60_envelope_uses_volume_and_exact_frequency_breaks(self):
+        from scripts.src.acoustic_report import t60_itu_reference
+        from scripts.src.figures import create_t60_octaves_figure
+        data = {"metadata": {"effective_config": {"recording_config": {
+            "room_dimensions": {"length": 5, "width": 4, "height": 5}}}}}
+        reference = t60_itu_reference(data)
+        self.assertAlmostEqual(reference["tm"], 0.25)
+        self.assertIn("100 m³", reference["source"])
+        plot = create_t60_octaves_figure("Room", [{"centre_hz": 1000, "t60_s": 0.3}],
+                                         itu_reference=reference)["figure"]
+        upper, lower = plot["series"][1:]
+        self.assertEqual(upper["x"], [63, 200, 4000, 4000, 8000])
+        self.assertEqual(lower["x"], [100, 4000, 4000, 8000])
+        for actual, expected in zip(upper["y"], [0.55, 0.30, 0.30, 0.35, 0.35]):
+            self.assertAlmostEqual(actual, expected)
+        for actual, expected in zip(lower["y"], [0.20, 0.20, 0.15, 0.15]):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_itu_t60_missing_volume_uses_only_complete_measured_midbands(self):
+        from scripts.src.acoustic_report import t60_itu_reference, t60_itu_note
+        bands = [{"centre_hz": hz, "t60_s": 0.3 if 200 <= hz <= 4000 else 2.0,
+                  "fit_range": "T30", "r2": 0.96, "valid": True, "reason": ""}
+                 for hz in [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]]
+        data = {"channels": {"L": {"t60_octaves": {
+            "basis": "measured_room_ir", "min_r2": 0.9, "bands": bands}}}}
+        reference = t60_itu_reference(data)
+        self.assertAlmostEqual(reference["tm"], 0.3)
+        self.assertIn("volume unavailable", reference["source"])
+        self.assertIn("relative decay shape only", t60_itu_note(reference))
+        bands[3].update(t60_s=None, valid=False, reason="insufficient decay", fit_range="None")
+        self.assertIsNone(t60_itu_reference(data))
+        self.assertIn("limits unavailable", t60_itu_note(None))
+
+    def test_symmetric_pair_uses_fifty_db_view_without_changing_data(self):
+        from scripts.src.figures import create_symmetric_pair_figure
+        for difference in ([70.0, -200.0], [None, None]):
+            plot = create_symmetric_pair_figure(
+                "L+R", [100.0, 1000.0], [86.0, 87.0], difference)["figure"]
+            self.assertEqual(plot["y"]["max"] - plot["y"]["min"], 50.0)
+            self.assertGreater(plot["y"]["max"], 87.0)
+            self.assertEqual(plot["series"][1]["y"], difference)
+        empty = create_symmetric_pair_figure("L+R", [], [], [])["figure"]
+        self.assertEqual(empty["y"]["max"] - empty["y"]["min"], 50.0)
+
     def test_summary_reflection_level_requires_measured_and_valid_emitted_events(self):
         report = {"basis": "measured_room_ir",
                   "method": "bandlimited_early_reflection_table_v1",
@@ -704,9 +778,20 @@ class AcousticReportTests(unittest.TestCase):
         details = early_reflections_html(channel, "<L>")
         self.assertIn("&lt;L&gt;", details)
         self.assertIn("First dip (Hz)", details)
-        self.assertIn("Final response magnitude", details)
-        self.assertEqual(details.count('<svg '), 3)
+        self.assertNotIn('<svg ', details)
+        plots = early_reflection_figures(channel, "L", tab="L")
+        self.assertEqual(len(plots), 3)
+        self.assertTrue(all(p["kind"] == "figure" and p["tab"] == "L" for p in plots))
+        self.assertEqual(plots[0]["figure"]["x"]["label"], "Time after direct peak (ms)")
+        self.assertEqual(plots[-1]["figure"]["x"]["scale"], "log")
+        self.assertTrue(plots[-1]["figure"]["legend"])
+        self.assertEqual(len(plots[-1]["figure"]["series"]), 3)
         report["post"] = []
+        self.assertIn("No candidates were emitted", early_reflections_html(channel, "L"))
+        self.assertEqual(len(early_reflection_figures(channel, "L")), 2)
+        report["pre"] = []
+        self.assertEqual(len(early_reflection_figures(channel, "L")), 1)
+        self.assertNotIn('<table', early_reflections_html(channel, "L"))
         self.assertEqual(early_reflection_level_db(channel), (-15.0, True))
         self.assertIn("≤ -15.0", summary_table_html({"channels": {"L": channel}}))
         report["basis"] = "reconstructed_transfer_ir"
@@ -753,7 +838,7 @@ class AcousticReportTests(unittest.TestCase):
         self.assertIn("background:#e74c3c", html)
         self.assertIn("1/2 final EQ scope delivered", html)
         # The channel without decided scope stays pending grey, never green.
-        self.assertIn("needs roomeq field: correction_decisions.channel_summaries", html)
+        self.assertIn("Not assessed", html)
         # Malformed and nonfinite entries cannot promote a cell.
         data["correction_decisions"]["channel_summaries"] = [
             {"channel": "L", "operational_response_pct": float("nan"),
@@ -766,10 +851,10 @@ class AcousticReportTests(unittest.TestCase):
         ]
         html = summary_table_html(data)
         self.assertNotIn(">100.0</td>", html)
-        self.assertIn("needs roomeq field: correction_decisions.channel_summaries", html)
+        self.assertIn("Not assessed", html)
         # No ledger at all: every row pending.
         html = summary_table_html({"channels": {"L": {}}})
-        self.assertIn("needs roomeq field: correction_decisions.channel_summaries", html)
+        self.assertIn("Not assessed", html)
 
     def test_summary_operational_response_threshold_boundaries(self):
         for pct, color in [(100.0, "#2ecc71"), (90.1, "#2ecc71"),
@@ -785,6 +870,8 @@ class AcousticReportTests(unittest.TestCase):
             self.assertIn(f">{pct:.1f}</td>", html, f"pct={pct}")
 
     def test_t60_requires_measured_basis_and_preserves_invalid_band_reason(self):
+        from scripts.src.figures import create_t60_octaves_figure
+        from scripts.src.acoustic_report import room_t60_table_html, t60_flatness_window
         centers = [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
         bands = [{"centre_hz": hz, "t60_s": 0.4, "fit_range": "T30",
                   "r2": 0.96, "valid": True, "reason": ""} for hz in centers]
@@ -800,6 +887,18 @@ class AcousticReportTests(unittest.TestCase):
         self.assertAlmostEqual(mean[0]["t60_s"], 0.4)
         self.assertEqual(mean[-1]["speaker_count"], 0)
         self.assertIn("above-nyquist &lt;unsafe&gt;", t60_table_html(channel))
+        data = {"channels": {"L": channel}}
+        self.assertIn("Room mean (s)", room_t60_table_html(data))
+        self.assertIn("L T60 (s)", room_t60_table_html(data))
+        self.assertIsNone(t60_flatness_window(data))
+        plot = create_t60_octaves_figure("L", rows, window=(0.35, 0.45))["figure"]
+        self.assertEqual(len(plot["series"]), 3)
+        steps = plot["series"][0]
+        self.assertEqual(len(steps["x"]), 18)
+        self.assertEqual(steps["x"][1], steps["x"][2])
+        self.assertEqual(steps["y"][:2], [0.4, 0.4])
+        self.assertEqual(steps["y"][-2:], [None, None])
+        self.assertEqual(plot["x"]["max"], 20000)
         channel["t60_octaves"]["basis"] = "reconstructed_transfer_ir"
         self.assertIsNone(t60_rows(channel))
         channel["t60_octaves"]["basis"] = "measured_room_ir"
@@ -816,6 +915,10 @@ class AcousticReportTests(unittest.TestCase):
         # No declared tolerance: the BS.1116 midband default applies, labeled.
         self.assertEqual(t60_flatness_tolerance_s(data), (0.05, False))
         self.assertEqual(t60_flatness_pct(data, "L"), 100.0)
+        from scripts.src.acoustic_report import t60_flatness_window
+        lower, upper = t60_flatness_window(data)
+        self.assertAlmostEqual(lower, 0.35)
+        self.assertAlmostEqual(upper, 0.45)
         self.assertIn('within default ±0.05 s (ITU-R BS.1116-2',
                       summary_table_html(data))
         data["metadata"]["t60_flatness_tolerance_s"] = 0.05
@@ -964,6 +1067,9 @@ class AcousticReportTests(unittest.TestCase):
                     {"name": "R", "measured_arrival_ms": 0.5, "applied_delay_ms": 0.0,
                      "final_arrival_ms": 0.5, "final_offset_from_reference_ms": 0.1},
                 ]}}}
+        data = RoomEqData(data, Path("."))
+        data.symmetric_pairs = {"L+R": {"freq": [100., 1000.],
+            "sum_spl": [86., 87.], "diff_spl": [None, None]}}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "report.html"
             create_html_report(data, output, None)
@@ -971,8 +1077,11 @@ class AcousticReportTests(unittest.TestCase):
         for expected in ("Section 1 — Results summary",
                          "Relative level compensation",
                          "Time of flight",
-                         "Smoothed response",
+                         "Section 2: Details per speaker",
+                         "Section 4 — Symmetric monitors",
                          "Symmetric pair: L+R",
+                         "ITU-R BS.1116-3 upper limit",
+                         "ITU-R BS.1116-3 lower limit",
                          "Unpaired channels (not summed): C",
                          "early vs late band energy",
                          "1–8 kHz early reflections: L",
@@ -982,6 +1091,17 @@ class AcousticReportTests(unittest.TestCase):
                          "L: measured octave-band T60",
                          "Room T60 contributing speakers by octave: 63 Hz: 1"):
             self.assertIn(expected, html)
+        # The flatness cell quotes live inside payload HTML (JSON-escaped on
+        sections = report_payload(html)["sections"]
+        groups = list(dict.fromkeys(s["group"] for s in sections if s.get("group")))
+        self.assertEqual(groups, ["Why this correction?", "Section 1: Summary",
+            "Section 2: Details per speaker", "Section 3: Time of Flight",
+            "Section 4: Symmetric monitors", "Section 5: Time domain analysis", "Section 6: EPA scores"])
+        self.assertNotIn("group", sections[0])
+        self.assertNotIn("Optimization Summary", html)
+        details = [s for s in sections if s.get("group") == groups[2] and s.get("kind") == "figure"]
+        self.assertEqual([s["tab"] for s in details], ["L", "R", "C"])
+        self.assertTrue(all("Frequency landmarks" not in s["figure"]["title"] for s in details))
         # The flatness cell quotes live inside payload HTML (JSON-escaped on
         # disk), so assert against the decoded section instead of raw text.
         summary = next(

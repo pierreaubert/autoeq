@@ -160,6 +160,9 @@ def _apply_measurement_overlay(data: dict, json_path: Path) -> dict:
             index = {}
     channels_index = (index.get("channels") or {}) if isinstance(index, dict) else {}
     deployed_index = (index.get("deployed_source_curves") or {}) if isinstance(index, dict) else {}
+    if isinstance(index, dict) and isinstance(index.get("symmetric_pairs"), dict):
+        if isinstance(data, RoomEqData):
+            data.symmetric_pairs = index["symmetric_pairs"]
 
     for name, channel in (data.get("channels") or {}).items():
         if not isinstance(channel, dict):

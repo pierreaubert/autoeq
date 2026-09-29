@@ -44,6 +44,9 @@ class BundleLoaderTests(unittest.TestCase):
                 "pre_ir": "L__pre_ir.csv",
             }},
             "deployed_source_curves": {"L": "deployed__L.csv"},
+            "symmetric_pairs": {"L+R": {"freq": [100.0, 1000.0],
+                "sum_spl": [86.0, 87.0], "diff_spl": [None, None],
+                "method": "magnitude_sum_log_frequency_interpolation"}},
         }))
         return root / "dsp.json"
 
@@ -56,6 +59,8 @@ class BundleLoaderTests(unittest.TestCase):
             self.assertNotIn("phase", data["channels"]["L"]["final_curve"])
             self.assertEqual(data["channels"]["L"]["pre_ir"]["amplitude"], [1.0, 0.5])
             self.assertEqual(data["deployed_source_curves"]["L"]["spl"], [79.5, 80.5])
+            self.assertEqual(data.symmetric_pairs['L+R']['sum_spl'], [86.0, 87.0])
+            self.assertNotIn('symmetric_pairs', data)
 
     def test_slim_binding_verifies_through_the_overlay(self):
         with tempfile.TemporaryDirectory() as directory:

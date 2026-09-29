@@ -312,9 +312,10 @@ pub struct ChannelWavelet {
     pub valid_band_hz: [f64; 2],
     /// Wavelet cycles; always `3`.
     pub cycles: f64,
-    /// Log-grid density in frequencies per octave; always `6`.
+    /// Log-grid density: `48` in dense measured exports, `6` in legacy reports.
     pub freqs_per_octave: f64,
-    /// Raw frame hop in milliseconds; always `1`.
+    /// Minimum nominal hop in milliseconds; use `times_ms` for exact coordinates.
+    /// Dense exports sample at 0.1 ms through 15 ms and 1 ms thereafter.
     pub hop_ms: f64,
     /// Display range in dB; always `[-30, 0]`.
     pub display_range_db: [f64; 2],

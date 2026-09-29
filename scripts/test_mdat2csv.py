@@ -5,12 +5,69 @@ import csv
 import struct
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 import mdat2csv
 
 
 class Mdat2CsvTests(unittest.TestCase):
+    def test_ir_export_preserves_timing_amplitude_and_config_binding(self):
+        measurement = {
+            'name': 'Left seat',
+            'ir': {'amplitude': (0.0000000123, -0.25, 0.125),
+                   'start_time_s': -0.0012345,
+                   'sample_interval_s': 1 / 48000,
+                   'sample_rate_hz': 48000},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = mdat2csv.export_ir_csv(measurement, directory)
+            with open(path) as stream:
+                rows = list(csv.DictReader(stream))
+            self.assertEqual([float(r['amplitude']) for r in rows],
+                             list(measurement['ir']['amplitude']))
+            self.assertAlmostEqual(float(rows[0]['time_ms']), -1.2345)
+            self.assertAlmostEqual(float(rows[1]['time_ms']) - float(rows[0]['time_ms']),
+                                   1000 / 48000)
+            csv_path = str(Path(directory) / 'Left_seat.csv')
+            config_path = mdat2csv.export_recordings_json(
+                [measurement], [csv_path], directory, ir_paths=[path])
+            self.assertNotIn('measured_impulse_responses', json.loads(Path(config_path).read_text()))
+            mdat2csv.export_recordings_json(
+                [measurement], [csv_path], directory, ir_paths=[path],
+                timing_reference_id='reference-L')
+            config = json.loads(Path(config_path).read_text())
+            self.assertEqual(config['measured_impulse_responses']['Left_seat'], {
+                'path': 'Left_seat__ir.csv', 'sample_rate_hz': 48000,
+                'timing_reference_id': 'reference-L',
+            })
+            Path(path).write_text('preserved')
+            mdat2csv.export_ir_csv(measurement, directory, overwrite=False)
+            self.assertEqual(Path(path).read_text(), 'preserved')
+
+    def test_ir_rejects_missing_derived_and_invalid_data(self):
+        def obj(name, **fields):
+            # Java fields are keyed by descriptors rather than strings.
+            class Field:
+                def __init__(self, name):
+                    self.name = name
+            return SimpleNamespace(classdesc=SimpleNamespace(name=name),
+                                   field_data={name: {Field(k): v for k, v in fields.items()}})
+
+        base = dict(data=[0.1, -0.3], n=2, T=1 / 48000, startTime=-0.5)
+        for change in ({'data': [0., 0.]}, {'data': [float('nan'), 1.]},
+                       {'T': 0}, {'startTime': float('inf')}, {'n': 3},
+                       {'unfilt': [0.1, 0.2]}):
+            sampled = obj('roomeqwizard.SampledData', **(base | change))
+            measurement = obj('roomeqwizard.MeasData', irData=obj('IRData', ir=sampled))
+            with self.subTest(change=change):
+                ir, warning = mdat2csv.extract_ir(measurement)
+                self.assertIsNone(ir)
+                self.assertTrue(warning)
+        ir, warning = mdat2csv.extract_ir(obj('MeasData', irData=obj('IRData', minPhase=True)))
+        self.assertIsNone(ir)
+        self.assertIn('minimum-phase', warning)
+
     def test_no_clobber_preserves_existing_exports_and_creates_missing_csvs(self):
         measurement = {
             'name': 'seat', 'freq': [20., 80.],
@@ -180,6 +237,22 @@ class Mdat2CsvTests(unittest.TestCase):
             measurements[0]['name'],
             'L r3m_ported_48k_FL_260706a_direct Jul 6 -20 dBFS',
         )
+        self.assertEqual(len(measurements), 7)
+        for measurement in measurements:
+            self.assertIsNone(measurement['ir_warning'])
+            ir = measurement['ir']
+            self.assertEqual(len(ir['amplitude']), 131072)
+            self.assertEqual(ir['sample_rate_hz'], 48000)
+        left, right = [m['ir'] for m in measurements[:2]]
+        self.assertAlmostEqual(left['start_time_s'], -0.9999985662931742)
+        self.assertAlmostEqual(right['start_time_s'], -1.0008966158820811)
+        # Compare the exported samples to the fixture's serialized float bytes;
+        # REW's cached interpolated peak is slightly different from the samples.
+        data = path.read_bytes()
+        arrays = mdat2csv.resolve_array_types(mdat2csv.scan_float_arrays(data), data)
+        first_ir = next(a for a in arrays if a[1] == 131072 and a[3] == '[F')
+        self.assertEqual(left['amplitude'],
+                         mdat2csv.read_float_array(data, first_ir[2], first_ir[1]))
 
     def test_html_descriptions_do_not_retain_raw_metadata(self):
         html = b'<BODY>Jul 6<BR>18:00<BR>20 to 20000 Hz<BR>20 to 90 dB SPL</HTML>'

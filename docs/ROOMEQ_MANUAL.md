@@ -1,5 +1,21 @@
 # RoomEQ - Multi-channel Room Equalization Optimizer
 
+The HTML report starts with playback status, followed by collapsible evidence,
+summary, speaker details, timing, symmetric monitors, time-domain analysis,
+and EPA sections. Each section's speaker/group selector is independent.
+Waterfall surfaces support mouse dragging with Rotate enabled and Reset restores
+the initial view. Wavelets show frequency horizontally and early time vertically,
+with a shared full-grid peak reference and a −30…0 dB color scale.
+
+Regenerate the DSP output to obtain dense measured-IR diagnostics: replotting old
+bundles cannot recover discarded samples. New exports retain positive waterfall
+FFT bins and 2 ms frames; wavelets use 48 samples/octave, 0.1 ms early samples
+through 15 ms, then 1 ms samples through 500 ms. `times_ms` is authoritative;
+wavelet `hop_ms` describes the minimum nominal step, not uniform spacing.
+This increases display sampling, not the acoustic resolution of the analysis
+window. Until the dense-wavelet API is published and pinned, `.cargo/config.toml`
+uses sibling `../math-audio` DSP and IIR/FIR crates for development builds.
+
 Python report channel EQ plots and phase-aware replay evaluate serialized
 Kautz and warped topologies. Kautz parameters are linear basis weights with a
 unity dry path, not independent PEQ dB gains. Channel EQ decomposition uses the
@@ -910,6 +926,26 @@ directory. The assets directory holds every run-generated file:
 
 ### HTML report format
 
+The report's waveform availability distinguishes an imported room IR from a reconstructed
+input response and a predicted post-DSP response. Post-DSP level offsets include
+headroom attenuation; the separate balance column compares final monitor levels.
+Landmark plots follow the landmark table, and arrival plots follow the timing
+table. Section 4 uses Rust-exported magnitude sums over overlapping frequency
+support, not phase-coherent acoustic sums. Existing bundles can refresh this
+derived report data without rerunning optimization:
+`cargo run -p roomeq-workflow --example refresh_report_pairs -- path/to/dsp.json`.
+Then regenerate the HTML with `display-roomeq.py` and the intended `-o` path.
+
+`scripts/mdat2csv.py measurements.mdat output_dir` exports
+frequency-response CSVs and supported measured impulse responses as
+`<measurement>__ir.csv` (`time_ms,amplitude`). Install `scripts/requirements.txt`
+for the Java serialization decoder. Native IR amplitudes, sample intervals and
+start times are preserved. Add `--timing-reference-id session-1` to declare a
+shared acquisition timing reference and include the IRs in `recordings.json`
+for room-acoustic analysis. Without that declaration, the IR files are exported
+but not bound into the configuration. Unsupported legacy/derived IR storage is
+reported explicitly.
+
 `scripts/display-roomeq.py room-output.json -o room-report.html` writes a
 self-contained HTML file: the plots render from an embedded versioned JSON
 payload (`autoeq-report-data-v1`, documented in
@@ -943,6 +979,36 @@ stays small. The Python viewer (`scripts/display-roomeq.py`, via
 `scripts/src/loaders.py`) re-injects the external curves from the sibling
 directory automatically, so plots are unchanged. Legacy outputs with
 embedded curves and sidecars next to the JSON keep loading as before.
+
+### Interactive diagnostic plots
+
+Room-average and per-speaker T60 graphs overlay the ITU-R BS.1116-3
+§8.2.3.1 Figure 1 tolerance envelope. Its reference is
+`0.25 * (volume_m3 / 100)^(1/3)` seconds when the saved effective configuration
+contains valid `recording_config.room_dimensions`. Otherwise, the viewer uses
+the measured 250–4000 Hz octave centers as an estimate of the 200 Hz–4 kHz mean,
+averaging only channels with all five valid midband fits. That fallback is
+explicitly labelled as a relative-shape reference, not volume compliance.
+Without either reference no limits are invented. The upper curve starts at
+63 Hz, the lower at 100 Hz, both change tolerance at 4 kHz and stop at 8 kHz.
+The existing fixed-window summary score is separate from this recommendation.
+
+RoomEQ report graphs use d3rs through the shared WASM renderer, including
+capture diagnostics. Waterfalls are filled projected surfaces with frequency,
+time and relative-level axes. Wavelets use logarithmic frequency horizontally,
+time vertically (initially -1 to 15 ms), and a labelled -30 to 0 dB colour scale.
+Zoom, move and reset operate on both grid views; smoothing applies to eligible
+frequency-response line plots, not time traces or diagnostic grids.
+
+The waterfall and decay plot highlight up to two exported resonance candidates,
+ranked by longest fitted decay then highest level. Their colours match the final
+all-speaker table. These are detected candidates, not confirmed geometric room
+modes. Levels retain each grid's own peak reference; they do not compare absolute
+speaker output. No fitted line is invented when the export lacks its intercept.
+
+Rendering cannot recover discarded samples: sparse exported early-time wavelet
+samples or missing low-frequency waterfall bins remain sparse. The wavelet panel
+reports its displayed sample count. Regenerating HTML does not recompute IR data.
 
 ### Reading the playback summary
 
@@ -1814,7 +1880,6 @@ Typical Schroeder frequencies:
 |-----------|------|---------|-------------|
 | `enabled` | boolean | false | Enable Schroeder split |
 | `schroeder_freq` | number | 300 | Schroeder frequency (Hz) |
-| `room_dimensions` | object | - | Optional room dimensions for auto-calculation |
 | `low_freq_config.max_q` | number | 5.0 | Max Q for low-freq filters |
 | `low_freq_config.min_q` | number | 0.5 | Min Q for low-freq filters |
 | `low_freq_config.allow_boost` | boolean | false | Allow boosts (not recommended) |
@@ -1823,16 +1888,18 @@ Typical Schroeder frequencies:
 
 **Auto-Calculate Schroeder from Room Dimensions:**
 
+Declare dimensions once in `recording_config.room_dimensions`; both Schroeder
+split and decomposed correction use that physical room. Optimizer-local copies
+are no longer accepted. See [recording configuration](ROOMEQ_INPUT_FORMAT.md#recording-configuration-recording_config).
+
 ```json
 {
+  "recording_config": {
+    "room_dimensions": { "length": 5.0, "width": 4.0, "height": 2.5 }
+  },
   "optimizer": {
     "schroeder_split": {
-      "enabled": true,
-      "room_dimensions": {
-        "length": 5.0,
-        "width": 4.0,
-        "height": 2.5
-      }
+      "enabled": true
     }
   }
 }

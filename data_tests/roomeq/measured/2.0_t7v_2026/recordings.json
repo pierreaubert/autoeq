@@ -10,6 +10,18 @@
       "name": "R"
     }
   },
+  "measured_impulse_responses": {
+    "L": {
+      "path": "2.0_t7v_20260912_csv/L_Sep_12__ir.csv",
+      "sample_rate_hz": 48000.0,
+      "timing_reference_id": "session-1"
+    },
+    "R": {
+      "path": "2.0_t7v_20260912_csv/R_Sep_12__ir.csv",
+      "sample_rate_hz": 48000.0,
+      "timing_reference_id": "session-1"
+    }
+  },
   "target_curve": "target-7db-downward-tilt.csv",
   "optimizer": {
     "seed": 42,
@@ -26,5 +38,13 @@
     "max_db": 6.0,
     "psychoacoustic": true,
     "asymmetric_loss": true
+  },
+  "recording_config" : {
+    "room_dimensions": {
+      "length": 2.4,
+      "width": 3.8,
+      "height": 2.5
+    },
+    "setup_description": "Untreated room; 2 Adam T7V"
   }
 }

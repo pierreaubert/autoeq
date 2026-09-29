@@ -3126,7 +3126,6 @@ dependencies = [
 [[package]]
 name = "math-dsp"
 version = "0.5.31"
-source = "git+https://github.com/pierreaubert/math-audio#9174ba7edd52de7349a141a9d173ed9d6b63edca"
 dependencies = [
  "clap",
  "hound",
@@ -3146,7 +3145,6 @@ dependencies = [
 [[package]]
 name = "math-iir-fir"
 version = "0.5.24"
-source = "git+https://github.com/pierreaubert/math-audio#9174ba7edd52de7349a141a9d173ed9d6b63edca"
 dependencies = [
  "base64 0.22.1",
  "byteorder",

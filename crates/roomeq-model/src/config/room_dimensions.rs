@@ -13,6 +13,18 @@ pub struct RoomDimensions {
     pub height: f64,
 }
 
+/// Reject obsolete optimizer-local dimension inputs instead of ignoring them.
+pub(super) fn reject_optimizer_room_dimensions<'de, D>(
+    _deserializer: D,
+) -> Result<Option<RoomDimensions>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Err(serde::de::Error::custom(
+        "optimizer-local room_dimensions is no longer supported; move it to recording_config.room_dimensions",
+    ))
+}
+
 impl RoomDimensions {
     /// Calculate the Schroeder frequency from room dimensions using a
     /// default RT60 assumption of [`DEFAULT_LISTENING_ROOM_RT60_S`].

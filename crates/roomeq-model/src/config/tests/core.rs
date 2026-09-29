@@ -19,6 +19,157 @@ fn room_config_default_uses_current_config_version() {
     assert_eq!(RoomConfig::default().version, default_config_version());
 }
 
+#[test]
+fn room_dimensions_have_one_serialized_source_and_resolve_both_modes() {
+    let mut config: RoomConfig = serde_json::from_value(serde_json::json!({
+        "speakers": {},
+        "recording_config": {"room_dimensions": {"length": 5.0, "width": 4.0, "height": 2.5}},
+        "optimizer": {"schroeder_split": {"enabled": true}, "decomposed_correction": {}}
+    }))
+    .unwrap();
+    config.resolve_room_dimensions();
+    for dimensions in [
+        config
+            .optimizer
+            .schroeder_split
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .as_ref()
+            .unwrap(),
+        config
+            .optimizer
+            .decomposed_correction
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .as_ref()
+            .unwrap(),
+    ] {
+        assert_eq!(
+            (dimensions.length, dimensions.width, dimensions.height),
+            (5.0, 4.0, 2.5)
+        );
+        assert!(dimensions.schroeder_frequency().is_finite());
+    }
+    let encoded = serde_json::to_value(&config).unwrap();
+    assert_eq!(
+        encoded["recording_config"]["room_dimensions"]["length"],
+        5.0
+    );
+    for mode in ["schroeder_split", "decomposed_correction"] {
+        assert!(encoded["optimizer"][mode].get("room_dimensions").is_none());
+    }
+    let schema = serde_json::to_value(schemars::schema_for!(RoomConfig)).unwrap();
+    for name in ["SchroederSplitConfig", "DecomposedCorrectionSerdeConfig"] {
+        assert!(
+            schema["$defs"][name]["properties"]
+                .get("room_dimensions")
+                .is_none()
+        );
+    }
+    // Reloading restores canonical state, never an optimizer-local declaration.
+    let mut reloaded: RoomConfig = serde_json::from_value(encoded).unwrap();
+    reloaded.resolve_room_dimensions();
+    assert_eq!(
+        reloaded
+            .optimizer
+            .schroeder_split
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .as_ref()
+            .unwrap()
+            .width,
+        4.0
+    );
+    config
+        .recording_config
+        .as_mut()
+        .unwrap()
+        .room_dimensions
+        .as_mut()
+        .unwrap()
+        .length = 8.0;
+    config.resolve_room_dimensions();
+    assert_eq!(
+        config
+            .optimizer
+            .decomposed_correction
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .as_ref()
+            .unwrap()
+            .length,
+        8.0
+    );
+    config.recording_config = None;
+    config.resolve_room_dimensions();
+    assert!(
+        config
+            .optimizer
+            .schroeder_split
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .is_none()
+    );
+    assert!(
+        config
+            .optimizer
+            .decomposed_correction
+            .as_ref()
+            .unwrap()
+            .room_dimensions
+            .is_none()
+    );
+}
+
+#[test]
+fn optimizer_local_room_dimensions_are_rejected_with_migration_guidance() {
+    for mode in ["schroeder_split", "decomposed_correction"] {
+        let error = serde_json::from_value::<RoomConfig>(serde_json::json!({
+            "speakers": {},
+            "optimizer": {mode: {"room_dimensions": {"length": 5, "width": 4, "height": 3}}}
+        }))
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("recording_config.room_dimensions")
+        );
+    }
+}
+
+#[test]
+fn recording_room_dimensions_require_positive_finite_volume() {
+    for length in [
+        0.0,
+        -1.0,
+        f64::NAN,
+        f64::INFINITY,
+        f64::MAX,
+        f64::MIN_POSITIVE,
+    ] {
+        let mut config = reporting_base_config();
+        config.recording_config = Some(RecordingConfiguration {
+            room_dimensions: Some(crate::RoomDimensions {
+                length,
+                width: length,
+                height: 2.5,
+            }),
+            ..Default::default()
+        });
+        assert!(
+            config
+                .validate_structure()
+                .unwrap_err()
+                .contains("recording_config.room_dimensions")
+        );
+    }
+}
+
 fn reporting_base_config() -> RoomConfig {
     // Smallest structurally valid base: one measured speaker, no system.
     let mut config = RoomConfig::default();

@@ -36,6 +36,45 @@ h2 {
     width: 100%;
     touch-action: manipulation;
 }
+.plot-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.plot-toolbar button, .plot-toolbar select {
+    font: inherit;
+    font-size: 0.88em;
+    min-height: 30px;
+    border: 1px solid #b9c8d8;
+    border-radius: 5px;
+    background: #fff;
+    color: #244f72;
+    padding: 4px 9px;
+}
+.plot-toolbar button {
+    cursor: pointer;
+}
+.plot-toolbar button.active {
+    background: #4a90d9;
+    color: #fff;
+    border-color: #4a90d9;
+}
+.plot-toolbar label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #405365;
+    font-size: 0.88em;
+}
+.plot-container canvas.pan-enabled {
+    cursor: grab;
+    touch-action: none;
+}
+.plot-container canvas.panning {
+    cursor: grabbing;
+}
 .html-section {
     background: white;
     border-radius: 8px;
@@ -86,6 +125,10 @@ th {
     background: #4a90d9;
     color: white;
 }
+.viewbar button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+}
 .render-error {
     background: #fdecea;
     color: #b00020;
@@ -95,6 +138,9 @@ th {
     margin-bottom: 20px;
     white-space: pre-wrap;
 }
+.report-group { margin: 18px 0; border: 1px solid #ccd3dd; border-radius: 8px; background: white; }
+.report-group > summary { cursor: pointer; padding: 18px; font-size: 1.25rem; font-weight: 650; }
+.report-group-body { padding: 0 18px 18px; }
 .tabbar {
     display: flex;
     flex-wrap: wrap;
@@ -261,9 +307,8 @@ if (payload) {
     document.getElementById("report-title").textContent = payload.title || "";
 }
 
-const canvases = []; // {id, section, el, tab}
+const canvases = []; // {id, section, originalSection, el, tab, smoothing, viewport, panEnabled}
 let wasm2d = null;
-let activeTab = null;
 
 function sectionHeight(kind, cssW) {
     if (kind === "sankey") return Math.min(560, Math.max(320, cssW * 0.5));
@@ -287,41 +332,131 @@ function appendSection(host, sec, i) {
         div.className = "html-section";
         div.innerHTML = sec.html;
         host.appendChild(div);
+        for (const placeholder of div.querySelectorAll(".report-figure[data-section]")) {
+            const chart = JSON.parse(placeholder.dataset.section);
+            chart.tab = sec.tab;
+            appendSection(placeholder, chart, canvases.length);
+            placeholder.removeAttribute("data-section");
+        }
         return;
     }
     const wrap = document.createElement("div");
     wrap.className = "plot-container";
+    const toolbar = document.createElement("div");
+    toolbar.className = "plot-toolbar";
+    const zoomOut = document.createElement("button");
+    zoomOut.type = "button";
+    zoomOut.textContent = "− Zoom";
+    zoomOut.title = "Zoom out";
+    const zoomIn = document.createElement("button");
+    zoomIn.type = "button";
+    zoomIn.textContent = "+ Zoom";
+    zoomIn.title = "Zoom in";
+    const reset = document.createElement("button");
+    reset.type = "button";
+    reset.textContent = "Reset";
+    reset.title = "Reset zoom and position";
+    const move = document.createElement("button");
+    move.type = "button";
+    move.textContent = "Move";
+    move.title = "Enable drag-to-pan";
+    if (sec.grid?.surface) {
+        move.textContent = "Rotate";
+        move.title = "Drag to rotate the surface; Reset restores the default camera";
+        move.classList.add("active");
+    }
+    toolbar.append(zoomOut, zoomIn, reset, move);
+    let smoothing = null;
+    if (sec.kind === "figure") {
+        const label = document.createElement("label");
+        label.textContent = "Smoothing";
+        smoothing = document.createElement("select");
+        smoothing.setAttribute("aria-label", "Smoothing");
+        smoothing.disabled = sec.figure.x.scale !== "log";
+        if (smoothing.disabled) smoothing.title = "Octave smoothing applies only to frequency plots";
+        for (const [value, text] of [["none", "None"], ["48", "1/48 octave"], ["24", "1/24 octave"], ["12", "1/12 octave"], ["6", "1/6 octave"]]) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = text;
+            smoothing.appendChild(option);
+        }
+        label.appendChild(smoothing);
+        toolbar.appendChild(label);
+    }
     const canvas = document.createElement("canvas");
-    const id = "sec-" + i;
+    const id = "plot-" + canvases.length;
     canvas.id = id;
+    canvas.setAttribute("aria-label", sec.figure?.title || sec.chart?.title || "Report graph");
+    wrap.appendChild(toolbar);
     wrap.appendChild(canvas);
     host.appendChild(wrap);
-    canvases.push({ id, section: sec, el: canvas, tab: sec.tab || null });
+    const graph = {
+        id,
+        section: structuredClone(sec),
+        originalSection: structuredClone(sec),
+        el: canvas,
+        tab: sec.tab || null,
+        smoothing,
+        viewport: null,
+        panEnabled: Boolean(sec.grid?.surface),
+    };
+    zoomOut.addEventListener("click", () => zoomGraph(graph, 1.5));
+    zoomIn.addEventListener("click", () => zoomGraph(graph, 1 / 1.5));
+    reset.addEventListener("click", () => {
+        graph.viewport = null;
+        if (graph.section.grid?.surface) graph.section.grid.rotation = null;
+        renderOne(graph);
+    });
+    move.addEventListener("click", () => {
+        graph.panEnabled = !graph.panEnabled;
+        move.classList.toggle("active", graph.panEnabled);
+        canvas.classList.toggle("pan-enabled", graph.panEnabled);
+    });
+    if (smoothing) {
+        smoothing.addEventListener("change", () => {
+            graph.section = smoothedSection(graph.originalSection, smoothing.value);
+            renderOne(graph);
+        });
+    }
+    wireGraphPan(graph);
+    canvases.push(graph);
 }
 
-function buildDom() {
-    const root = document.getElementById("report-2d");
-    const sections = payload.sections || [];
+function buildSectionGroup(root, sections) {
     const tabs = [];
     for (const sec of sections) {
         if (sec.tab && !tabs.includes(sec.tab)) tabs.push(sec.tab);
     }
     // Summary (untabbed) sections render first, at the top of the page.
     sections.forEach((sec, i) => {
-        if (!sec.tab) appendSection(root, sec, i);
+        if (!sec.tab && !sec.footer) appendSection(root, sec, i);
     });
-    if (!tabs.length) return;
+    if (!tabs.length) {
+        sections.forEach((sec, i) => { if (sec.footer) appendSection(root, sec, i); });
+        return;
+    }
     // The channel tab bar lives below the summaries, where the per-channel
     // content it switches between starts.
-    activeTab = tabs[0];
+    const activeTab = tabs[0];
     const bar = document.createElement("div");
     bar.className = "tabbar";
     tabs.forEach((name, i) => {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.textContent = name;
+        btn.setAttribute("aria-pressed", String(i === 0));
         if (i === 0) btn.classList.add("active");
-        btn.addEventListener("click", () => activateTab(name));
+        btn.addEventListener("click", () => {
+            for (const [label, page] of Object.entries(pages)) {
+                page.classList.toggle("active", label === name);
+            }
+            for (const button of bar.children) {
+                const selected = button.textContent === name;
+                button.classList.toggle("active", selected);
+                button.setAttribute("aria-pressed", String(selected));
+            }
+            renderVisible();
+        });
         bar.appendChild(btn);
     });
     root.appendChild(bar);
@@ -337,18 +472,186 @@ function buildDom() {
         }
         appendSection(pages[sec.tab], sec, i);
     });
+    sections.forEach((sec, i) => { if (sec.footer) appendSection(root, sec, i); });
+}
+
+function buildDom() {
+    const root = document.getElementById("report-2d");
+    const sections = payload.sections || [];
+    buildSectionGroup(root, sections.filter(s => !s.group));
+    for (const title of new Set(sections.map(s => s.group).filter(Boolean))) {
+        const details = document.createElement("details");
+        details.className = "report-group";
+        details.open = true;
+        const summary = document.createElement("summary");
+        summary.textContent = title;
+        details.appendChild(summary);
+        const body = document.createElement("div");
+        body.className = "report-group-body";
+        details.appendChild(body);
+        root.appendChild(details);
+        buildSectionGroup(body, sections.filter(s => s.group === title));
+        details.addEventListener("toggle", renderVisible);
+    }
 }
 
 function isVisible(c) {
-    return !c.tab || c.tab === activeTab;
+    return c.el.getClientRects().length > 0
+        && !c.el.closest("details:not([open])");
+}
+
+function axisBounds(fig, axis) {
+    const spec = fig[axis];
+    const log = axis === "x" && spec.scale === "log";
+    const valid = v => Number.isFinite(v) && (!log || v > 0);
+    const transform = v => log ? Math.log(v) : v;
+    const y2Active = fig.y2 && fig.series.some(s => s.visible && s.y_axis === 1);
+    let lo = Infinity, hi = -Infinity;
+    for (const series of fig.series) {
+        if (!series.visible) continue;
+        if (axis === "y2" && series.y_axis !== 1) continue;
+        if (axis === "y" && y2Active && series.y_axis === 1) continue;
+        for (const value of axis === "x" ? series.x : series.y) {
+            if (!valid(value)) continue;
+            const v = transform(value);
+            lo = Math.min(lo, v); hi = Math.max(hi, v);
+        }
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) { lo = 0; hi = 1; }
+    if (!(hi > lo)) { lo -= 1; hi += 1; }
+    const hasMin = valid(spec.min), hasMax = valid(spec.max);
+    if (hasMin) lo = transform(spec.min);
+    if (hasMax) hi = transform(spec.max);
+    if (!(hi > lo)) hi = lo + 1;
+    const pad = (hi - lo) * 0.03;
+    if (!hasMin) lo -= pad;
+    if (!hasMax) hi += pad;
+    return log ? [Math.exp(lo), Math.exp(hi)] : [lo, hi];
+}
+
+function figureForRender(c) {
+    const section = structuredClone(c.section);
+    if (!["figure", "grid"].includes(section.kind) || !c.viewport) return section;
+    const fig = section.figure;
+    fig.x.min = c.viewport.x[0]; fig.x.max = c.viewport.x[1];
+    fig.y.min = c.viewport.y[0]; fig.y.max = c.viewport.y[1];
+    if (fig.y2 && c.viewport.y2) {
+        fig.y2.min = c.viewport.y2[0]; fig.y2.max = c.viewport.y2[1];
+    }
+    return section;
+}
+
+function ensureViewport(c) {
+    if (!["figure", "grid"].includes(c.section.kind)) return null;
+    if (!c.viewport) {
+        const fig = c.section.figure;
+        c.viewport = { x: axisBounds(fig, "x"), y: axisBounds(fig, "y") };
+        if (fig.y2) c.viewport.y2 = axisBounds(fig, "y2");
+    }
+    return c.viewport;
+}
+
+function zoomGraph(c, factor, anchorX = 0.5, anchorY = 0.5) {
+    const view = ensureViewport(c);
+    if (!view) return;
+    const fig = c.section.figure;
+    const zoomAxis = (range, anchor, log) => {
+        if (log) {
+            const lo = Math.log(range[0]), hi = Math.log(range[1]);
+            const at = lo + (hi - lo) * anchor;
+            return [Math.exp(at + (lo - at) * factor), Math.exp(at + (hi - at) * factor)];
+        }
+        const at = range[0] + (range[1] - range[0]) * anchor;
+        return [at + (range[0] - at) * factor, at + (range[1] - at) * factor];
+    };
+    view.x = zoomAxis(view.x, anchorX, fig.x.scale === "log");
+    view.y = zoomAxis(view.y, 1 - anchorY, false);
+    if (view.y2) view.y2 = zoomAxis(view.y2, 1 - anchorY, false);
+    renderOne(c);
+}
+
+function wireGraphPan(c) {
+    let start = null;
+    c.el.addEventListener("pointerdown", ev => {
+        if (!c.panEnabled || !["figure", "grid"].includes(c.section.kind)) return;
+        start = { x: ev.clientX, y: ev.clientY, view: structuredClone(ensureViewport(c)),
+                  rotation: c.section.grid?.rotation || [65, -12] };
+        c.el.setPointerCapture(ev.pointerId);
+        c.el.classList.add("panning");
+    });
+    c.el.addEventListener("pointermove", ev => {
+        if (!start) return;
+        const rect = c.el.getBoundingClientRect();
+        const dx = (ev.clientX - start.x) / rect.width;
+        const dy = (ev.clientY - start.y) / rect.height;
+        if (c.section.grid?.surface) {
+            c.section.grid.rotation = [Math.max(10, Math.min(170, start.rotation[0] + dy * 160)),
+                                       start.rotation[1] + dx * 180];
+            if (!c.rotateFrame) c.rotateFrame = requestAnimationFrame(() => {
+                c.rotateFrame = null;
+                renderOne(c);
+            });
+            return;
+        }
+        const fig = c.section.figure;
+        const panAxis = (range, delta, log) => {
+            if (log) {
+                const shift = (Math.log(range[1]) - Math.log(range[0])) * delta;
+                return [Math.exp(Math.log(range[0]) - shift), Math.exp(Math.log(range[1]) - shift)];
+            }
+            const shift = (range[1] - range[0]) * delta;
+            return [range[0] - shift, range[1] - shift];
+        };
+        c.viewport.x = panAxis(start.view.x, dx, fig.x.scale === "log");
+        c.viewport.y = panAxis(start.view.y, -dy, false);
+        if (start.view.y2) c.viewport.y2 = panAxis(start.view.y2, -dy, false);
+        renderOne(c);
+    });
+    const end = () => { start = null; c.el.classList.remove("panning"); };
+    c.el.addEventListener("pointerup", end);
+    c.el.addEventListener("pointercancel", end);
+    c.el.addEventListener("wheel", ev => {
+        if (!["figure", "grid"].includes(c.section.kind)) return;
+        ev.preventDefault();
+        const rect = c.el.getBoundingClientRect();
+        zoomGraph(c, ev.deltaY < 0 ? 1 / 1.2 : 1.2, (ev.clientX - rect.left) / rect.width, (ev.clientY - rect.top) / rect.height);
+    }, { passive: false });
+}
+
+function smoothedSection(section, smoothing) {
+    const out = structuredClone(section);
+    if (out.kind !== "figure" || smoothing === "none" || out.figure.x.scale !== "log") return out;
+    const halfWidth = 0.5 / Number(smoothing);
+    for (const series of out.figure.series) {
+        // Reference lines and candidate stems are markers, not sampled spectra.
+        if (series.x.some((x, i) => !(x > 0) || (i > 0 && x <= series.x[i - 1]))) continue;
+        const source = series.y.slice();
+        let left = 0, right = 0, sum = 0, count = 0;
+        for (let i = 0; i < series.x.length; i++) {
+            const x = series.x[i];
+            if (!(x > 0) || !Number.isFinite(source[i])) continue;
+            const lo = Math.log2(x) - halfWidth, hi = Math.log2(x) + halfWidth;
+            while (left < series.x.length && Math.log2(series.x[left]) < lo) {
+                if (Number.isFinite(source[left])) { sum -= source[left]; count--; }
+                left++;
+            }
+            while (right < series.x.length && Math.log2(series.x[right]) <= hi) {
+                if (Number.isFinite(source[right])) { sum += source[right]; count++; }
+                right++;
+            }
+            series.y[i] = count ? sum / count : source[i];
+        }
+    }
+    return out;
 }
 
 function renderOne(c) {
+    if (!wasm2d || !isVisible(c)) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const cssW = c.el.clientWidth || c.el.parentElement.clientWidth || 800;
     const cssH = sectionHeight(c.section.kind, cssW);
     c.el.style.height = cssW ? cssH + "px" : c.el.style.height;
-    const rc = wasm2d.render_section(c.id, JSON.stringify(c.section), cssW, cssH, dpr);
+    const rc = wasm2d.render_section(c.id, JSON.stringify(figureForRender(c)), cssW, cssH, dpr);
     if (rc !== 0) showError("render_section(" + c.id + ") failed with code " + rc);
 }
 
@@ -359,21 +662,9 @@ function renderVisible() {
     }
 }
 
-function activateTab(name) {
-    activeTab = name;
-    const root = document.getElementById("report-2d");
-    for (const page of root.querySelectorAll(".tabpage")) {
-        page.classList.toggle("active", page.dataset.tab === name);
-    }
-    for (const btn of root.querySelectorAll(".tabbar button")) {
-        btn.classList.toggle("active", btn.textContent === name);
-    }
-    renderVisible();
-}
-
 function wireLegendClicks() {
     for (const c of canvases) {
-        if (c.section.kind !== "figure" && c.section.kind !== "bar") continue;
+        if (!["figure", "bar", "grid"].includes(c.section.kind)) continue;
         c.el.addEventListener("click", (ev) => {
             let rects = [];
             try { rects = JSON.parse(wasm2d.legend_json(c.id)); } catch (e) { return; }
@@ -382,6 +673,9 @@ function wireLegendClicks() {
             for (const g of rects) {
                 if (x >= g.x && x <= g.x + g.w && y >= g.y && y <= g.y + g.h) {
                     wasm2d.toggle_series(c.id, g.series);
+                    if (["figure", "grid"].includes(c.section.kind) && c.section.figure.series[g.series]) {
+                        c.section.figure.series[g.series].visible = !c.section.figure.series[g.series].visible;
+                    }
                     return;
                 }
             }
@@ -412,7 +706,9 @@ async function boot2d() {
 }
 
 let gpuiMounted = false;
+let gpuiUnavailable = false;
 async function mountGpui() {
+    if (gpuiUnavailable) return;
     const root = document.getElementById("report-gpui");
     document.getElementById("report-2d").style.display = "none";
     root.style.display = "";
@@ -428,7 +724,10 @@ async function mountGpui() {
         // and leaves the container empty); fall back to 2D with a note.
         if (!root.querySelector("canvas")) {
             show2d();
-            showError("GPUI viewer found no WebGPU adapter; showing 2D plots instead.");
+            gpuiUnavailable = true;
+            const button = document.getElementById("view-gpui");
+            button.disabled = true;
+            button.title = "WebGPU is unavailable in this browser; use the interactive 2D plots.";
         }
     } catch (e) {
         showError("Could not start the GPUI viewer: " + e);

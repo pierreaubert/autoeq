@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extract frequency response data (freq, SPL, phase) from REW .mdat files.
+Extract frequency responses and measured impulse responses from REW .mdat files.
 
 REW .mdat files use Java serialization format ("REW Measurement Data File V2").
 Each measurement contains float arrays for SPL, phase, and other data, with
@@ -16,6 +16,7 @@ import sys
 import os
 import re
 import math
+import argparse
 from pathlib import Path
 
 
@@ -453,6 +454,61 @@ def identify_spl_array(arrays, data, data_length):
     return raw, spl
 
 
+def _java_fields(instance):
+    """Read named fields, including inherited fields, without Java execution."""
+    return {field.name: value
+            for fields in getattr(instance, 'field_data', {}).values()
+            for field, value in fields.items()}
+
+
+def extract_ir(measurement):
+    """Return stored SampledData samples and their original time grid.
+
+    Unsupported/derived representations are withheld rather than guessed from
+    array sizes. REW stores SampledData times and sample intervals in seconds.
+    """
+    fields = _java_fields(measurement)
+    ir_data = _java_fields(fields.get('irData'))
+    if not ir_data:
+        return None, 'no supported IRData (legacy IRFloat is not decoded)'
+    if ir_data.get('minPhase'):
+        return None, 'minimum-phase reconstruction is not a measured room IR'
+    sampled = ir_data.get('ir')
+    if getattr(getattr(sampled, 'classdesc', None), 'name', None) != 'roomeqwizard.SampledData':
+        return None, 'no supported SampledData impulse response'
+    values = _java_fields(sampled)
+    if values.get('unfilt') is not None or values.get('unsmoothed') is not None:
+        return None, 'filtered/smoothed IR storage requires an unprocessed REW export'
+    samples = values.get('data')
+    interval = values.get('T')
+    start = values.get('startTime')
+    if (samples is None or len(samples) < 2 or len(samples) != values.get('n')
+            or not isinstance(interval, (int, float))
+            or not math.isfinite(interval) or interval <= 0
+            or not isinstance(start, (int, float)) or not math.isfinite(start)
+            or any(not math.isfinite(v) for v in samples)
+            or not any(v != 0 for v in samples)):
+        return None, 'invalid IR samples or time grid'
+    return {'amplitude': tuple(samples), 'start_time_s': start,
+            'sample_interval_s': interval, 'sample_rate_hz': 1.0 / interval}, None
+
+
+def read_serialized_measurements(data):
+    """Decode named IR fields with a Java serialization reader."""
+    try:
+        import javaobj.v2 as javaobj
+    except ImportError as error:
+        raise RuntimeError(
+            'MDAT IR extraction requires javaobj-py3; install scripts/requirements.txt'
+        ) from error
+    objects = javaobj.loads(data)
+    if not isinstance(objects, list):
+        objects = [objects]
+    return [obj for obj in objects
+            if getattr(getattr(obj, 'classdesc', None), 'name', None)
+            == 'roomeqwizard.MeasData']
+
+
 def parse_mdat(filepath):
     """
     Parse an REW .mdat file and extract measurements.
@@ -479,6 +535,9 @@ def parse_mdat(filepath):
         all_params.append(params)
 
     num_measurements = len(all_params)
+    serialized = read_serialized_measurements(data)
+    if len(serialized) != num_measurements:
+        raise ValueError('MDAT measurement count mismatch; cannot safely associate IRs')
 
     # Scan all arrays in the file
     raw_arrays = scan_float_arrays(data)
@@ -549,12 +608,15 @@ def parse_mdat(filepath):
         else:
             name = f"measurement_{meas_idx + 1}"
 
+        ir, ir_warning = extract_ir(serialized[meas_idx])
         measurements.append({
             'name': name,
             'freq': freqs,
             'spl': spl,
             'phase': phase,
             'params': params,
+            'ir': ir,
+            'ir_warning': ir_warning,
             'html': html_descs[meas_idx] if meas_idx < len(html_descs) else None,
         })
 
@@ -644,7 +706,27 @@ def export_csv(measurement, output_dir, *, overwrite=True, source_label=None):
     return filepath
 
 
-def export_recordings_json(measurements, csv_paths, output_dir, *, overwrite=True):
+def export_ir_csv(measurement, output_dir, *, overwrite=True):
+    """Export native IR samples without normalization, windowing or recentering."""
+    ir = measurement.get('ir')
+    if ir is None:
+        return None
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, sanitize_identifier(measurement['name']) + '__ir.csv')
+    try:
+        stream = open(path, 'w' if overwrite else 'x', encoding='utf-8')
+    except FileExistsError:
+        return path
+    with stream:
+        stream.write('time_ms,amplitude\n')
+        for i, amplitude in enumerate(ir['amplitude']):
+            time_ms = (ir['start_time_s'] + i * ir['sample_interval_s']) * 1000.0
+            stream.write(f'{time_ms:.17g},{amplitude:.17g}\n')
+    return path
+
+
+def export_recordings_json(measurements, csv_paths, output_dir, *, overwrite=True,
+                           ir_paths=None, timing_reference_id=None):
     """
     Export a recordings.json file conforming to the roomeq input_schema.json.
     Each measurement becomes a speaker entry referencing its CSV file.
@@ -667,6 +749,16 @@ def export_recordings_json(measurements, csv_paths, output_dir, *, overwrite=Tru
         "version": "2.1.0",
         "speakers": speakers,
     }
+    if ir_paths is not None and timing_reference_id:
+        config['measured_impulse_responses'] = {
+            sanitize_identifier(m['name']): {
+                'path': os.path.relpath(ir_path, output_dir),
+                'sample_rate_hz': m['ir']['sample_rate_hz'],
+                'timing_reference_id': timing_reference_id,
+            }
+            for m, csv_path, ir_path in zip(measurements, csv_paths, ir_paths)
+            if csv_path is not None and ir_path is not None
+        }
 
     json_path = os.path.join(output_dir, "recordings.json")
     try:
@@ -681,24 +773,24 @@ def export_recordings_json(measurements, csv_paths, output_dir, *, overwrite=Tru
 
 
 def main():
-    args = sys.argv[1:]
-    overwrite = '--no-clobber' not in args
-    args = [arg for arg in args if arg != '--no-clobber']
-    if not args:
-        print(f"Usage: {sys.argv[0]} <file.mdat> [output_dir] [--no-clobber]")
-        sys.exit(1)
-
-    mdat_path = args[0]
-    if len(args) > 1:
-        output_dir = args[1]
-    else:
-        output_dir = os.path.splitext(mdat_path)[0] + "_csv"
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('mdat_path')
+    parser.add_argument('output_dir', nargs='?')
+    parser.add_argument('--no-clobber', action='store_true')
+    parser.add_argument('--timing-reference-id', help=(
+        'Declare a common timing reference for these measurements and include '
+        'their IRs in recordings.json; only use for captures sharing that reference'))
+    args = parser.parse_args()
+    overwrite = not args.no_clobber
+    mdat_path = args.mdat_path
+    output_dir = args.output_dir or os.path.splitext(mdat_path)[0] + "_csv"
 
     print(f"Parsing: {mdat_path}")
     measurements = parse_mdat(mdat_path)
 
     print(f"Found {len(measurements)} measurements")
     csv_paths = []
+    ir_paths = []
     for i, m in enumerate(measurements):
         params = m['params']
         has_spl = m['spl'] is not None
@@ -727,8 +819,19 @@ def main():
         else:
             csv_paths.append(None)
             print(f"      -> SKIPPED (no SPL data found; phase alone is not a response curve)")
+        ir_path = export_ir_csv(m, output_dir, overwrite=overwrite)
+        ir_paths.append(ir_path)
+        if ir_path:
+            print(f"      -> {ir_path} ({len(m['ir']['amplitude'])} IR samples)")
+        else:
+            print(f"      -> IR unavailable: {m['ir_warning']}")
 
-    json_path = export_recordings_json(measurements, csv_paths, output_dir, overwrite=overwrite)
+    json_path = export_recordings_json(
+        measurements, csv_paths, output_dir, overwrite=overwrite,
+        ir_paths=ir_paths, timing_reference_id=args.timing_reference_id)
+    if any(ir_paths) and not args.timing_reference_id:
+        print('IR CSVs exported. Supply --timing-reference-id to declare their shared '
+              'reference and include them in recordings.json.')
     print(f"\n  recordings.json -> {json_path}")
 
 

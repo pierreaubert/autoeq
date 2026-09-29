@@ -1,5 +1,53 @@
 # Unreleased
 
+- Organize the Room EQ report into collapsible evidence and six numbered
+  sections, with independent speaker/group selectors. Combine each speaker's
+  before/EQ/after curves, retain landmark and filter details, and separate EPA.
+- Add mouse-controlled d3rs waterfall rotation and retain unpooled positive
+  FFT bins and 2 ms frames in measured-IR exports. Sample wavelets at 48 points
+  per octave and 0.1 ms through the first 15 ms (1 ms thereafter). Development
+  builds use matching sibling math-dsp/math-iir-fir patches until upstream is pinned.
+
+- Add a separate Section 1 T60-within-ITU-recommendation percentage using
+  eight octave centers (63 Hz–8 kHz) and the recorded room volume. Missing
+  dimensions or incomplete band fits remain unassessed, not passing.
+
+- Plot the ITU-R BS.1116-3 frequency-dependent T60 envelope on room and
+  speaker graphs, using recorded room volume where available. Label the
+  measured-midband fallback explicitly; retain tables and octave steps.
+
+- Limit the symmetric-pair plot's initial vertical view to 50 dB, preserving
+  underlying difference data without letting near-zero differences stretch axes.
+
+- Use `recording_config.room_dimensions` as the single RoomEQ room-size input.
+  Resolve it for both correction modes on file load and workflow entry; reject
+  obsolete optimizer-local copies with migration guidance. Validate dimensions
+  and document the recording configuration and migration.
+
+- Render all RoomEQ report graphs with d3rs through WASM, including capture
+  diagnostics. Add filled waterfall surfaces, labelled wavelet heatmaps,
+  shared resonance highlights and an all-speaker resonance summary table.
+
+- Keep a room/speaker octave T60 table next to the room-average plot. Draw
+  octave estimates as steps with the summary's fixed flatness bounds, and add
+  decade-subdivision grids to logarithmic report plots.
+
+- Fix logarithmic report autoranges and zoom initialization with log-space
+  padding. Keep octave T60 tables with interactive graphs below them. Replace
+  unlabelled reflection SVGs with standard axes, clickable legends and plot
+  controls; explain empty candidate lists without drawing empty plots.
+
+- Clarify predicted versus measured report waveforms and distinguish post-DSP
+  level offset from channel balance. Add landmark plots, place arrival plots
+  below their table, and number symmetric monitors as section 4. Rust exports
+  magnitude-domain monitor sums on shared frequency support in the measurement
+  index; the Python report renders those curves without summing mismatched grids.
+
+- `mdat2csv.py` exports stored REW impulse responses as `__ir.csv` files,
+  preserving sample amplitudes and the original time grid. Use
+  `--timing-reference-id` to bind them into `recordings.json`. IR decoding
+  requires `javaobj-py3`; unsupported or derived IR storage is reported explicitly.
+
 - RoomEQ finalization exempts physical subwoofer-only attenuation from the main
   attenuation budget, preserves electrical ceilings, and names constrained outputs.
 - Speed up mixed/FIR finalization waveform and electrical replay with exact FFT-grid FIR

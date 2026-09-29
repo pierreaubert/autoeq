@@ -121,6 +121,9 @@ def level_compensation(channels):
     if not monitor_means:
         return []
     reference = min(monitor_means.values())
+    predicted_means = {name: _predicted_band_mean(channels[name], 500.0, 3000.0)
+                       for name in monitor_means}
+    predicted_reference = predicted_means.get(min(monitor_means, key=monitor_means.get))
     for name, ch in channels.items():
         curve = (ch or {}).get("initial_curve")
         if not curve or not curve.get("freq"):
@@ -139,6 +142,8 @@ def level_compensation(channels):
             "speaker": str(name),
             "comp_db": comp,
             "residual_db": residual,
+            "balance_db": (predicted - predicted_reference
+                           if predicted is not None and predicted_reference is not None else None),
         })
     return rows
 
@@ -275,9 +280,9 @@ def landmarks_table_html(data):
             continue
         lf = marks["lf_extension_hz"]
         lf_str = f"{lf:.0f} Hz" if lf is not None else "&lt; 20 Hz"
-        peak_str = ("; ".join(f"{f:.0f} Hz / {level:+.1f} dB" for f, level in marks["peaks"])
+        peak_str = ("<br>".join(f"{f:.0f} Hz / {level:+.1f} dB" for f, level in marks["peaks"])
                     or "—")
-        notch_str = ("; ".join(f"{f:.0f} Hz / {level:+.1f} dB" for f, level in marks["notches"])
+        notch_str = ("<br>".join(f"{f:.0f} Hz / {level:+.1f} dB" for f, level in marks["notches"])
                      or "—")
         parts.append(
             f"<tr><td>{escape(str(name))}</td><td>{lf_str}</td>"
@@ -465,6 +470,85 @@ def t60_flatness_pct(data, channel_name):
     return 100.0 * inside / len(complete[channel_name])
 
 
+def t60_itu_reference(data):
+    """Reference for BS.1116-3 Figure 1, with explicit volume provenance."""
+    metadata = data.get("metadata") or {}
+    config = metadata.get("effective_config") or {}
+    recording = config.get("recording_config") or {}
+    dims = recording.get("room_dimensions")
+    if isinstance(dims, dict):
+        values = [dims.get(key) for key in ("length", "width", "height")]
+        if all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               and math.isfinite(v) and v > 0 for v in values):
+            volume = math.prod(values)
+            if math.isfinite(volume) and volume > 0:
+                return {"tm": 0.25 * (volume / 100.0) ** (1.0 / 3.0),
+                        "volume_m3": volume,
+                        "source": f"volume recommendation ({volume:g} m³)"}
+    # Octave-band estimate of the specified midband mean. Require all five
+    # centers for each contributing channel, never use the bass/16 kHz bands.
+    means = []
+    for channel in (data.get("channels") or {}).values():
+        rows = t60_rows(channel)
+        if rows is None:
+            continue
+        midband = [r["t60_s"] for r in rows if 200 <= r["centre_hz"] <= 4000]
+        if len(midband) == 5 and all(v is not None for v in midband):
+            means.append(math.fsum(v / 5 for v in midband))
+    if not means:
+        return None
+    return {"tm": math.fsum(v / len(means) for v in means),
+            "source": "measured midband mean; room volume unavailable"}
+
+
+def t60_itu_note(reference):
+    """Explain the recommendation without claiming full listening-room compliance."""
+    source = (f'Tm = {reference["tm"]:.3f} s — {escape(reference["source"])}'
+              if reference else 'limits unavailable: no room volume or complete midband fits')
+    return ('<p class="epa-footer">ITU-R BS.1116-3 §8.2.3.1, Figure 1: '
+            + source + '. Upper limit covers 63 Hz–8 kHz; lower limit starts at '
+            '100 Hz. No extrapolated limits outside that range. A measured-mean '
+            'reference checks relative decay shape only, not the volume-based '
+            'recommendation. The summary’s fixed-window flatness score is a separate metric. '
+            '<a href="https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.1116-3-201502-I!!PDF-E.pdf">'
+            'ITU recommendation</a>.</p>')
+
+
+def t60_flatness_window(data):
+    """Plot the same complete-channel reference and tolerance as the summary."""
+    complete = [rows for channel in (data.get("channels") or {}).values()
+                if (rows := t60_rows(channel)) is not None
+                and all(row["t60_s"] is not None for row in rows)]
+    values = [row["t60_s"] for rows in complete for row in rows]
+    if not values:
+        return None
+    mean = math.fsum(value / len(values) for value in values)
+    tolerance, _ = t60_flatness_tolerance_s(data)
+    return max(0.0, mean - tolerance), mean + tolerance
+
+
+def room_t60_table_html(data):
+    """Keep octave values and speaker coverage next to the room-average graph."""
+    rows = room_t60_rows(data)
+    if not rows:
+        return ""
+    channels = [(name, bands) for name, channel in (data.get("channels") or {}).items()
+                if (bands := t60_rows(channel)) is not None]
+    parts = ['<h3>Octave-band T60 — room and speakers</h3><table class="epa-table">'
+             '<thead><tr><th>Centre (Hz)</th><th>Room mean (s)</th><th>Valid speakers</th>']
+    parts.extend(f'<th>{escape(name)} T60 (s)</th>' for name, _ in channels)
+    parts.append('</tr></thead><tbody>')
+    for i, row in enumerate(rows):
+        value = f'{row["t60_s"]:.3f}' if row["t60_s"] is not None else 'n/a'
+        parts.append(f'<tr><td>{row["centre_hz"]}</td><td>{value}</td><td>{row["speaker_count"]}</td>')
+        for _, bands in channels:
+            value = f'{bands[i]["t60_s"]:.3f}' if bands[i]["t60_s"] is not None else 'n/a'
+            parts.append(f'<td>{value}</td>')
+        parts.append('</tr>')
+    parts.append('</tbody></table>')
+    return ''.join(parts)
+
+
 def t60_table_html(channel_data):
     """Render all nine bands, including reasons for unavailable estimates."""
     rows = t60_rows(channel_data)
@@ -571,32 +655,29 @@ def early_reflection_level_db(channel_data):
 
 
 def early_reflections_html(channel_data, label):
-    """Render emitted reflection candidates without estimating arrivals."""
+    """Describe and tabulate emitted candidates; plots are standard figure sections."""
     report = _validated_early_reflections(channel_data)
     if report is None:
         return ('<p class="epa-footer">1–8 kHz early reflections: pending '
                 'roomeq field early_reflections from a measured room IR.</p>')
     parts = ['<div class="filters-section"><h3>1–8 kHz early reflections: '
              + escape(str(label)) + '</h3>',
-             '<p class="epa-footer">Emitted band-limited candidates within 15 ms '
-             'of each filtered direct peak. Levels are dB relative to that peak; '
-             'the two-path dip and ripple are estimates, not confirmed acoustic '
-             'nulls or audibility verdicts. Reference: '
-             + escape(report["direct_reference"]) + '.</p>']
-    for side, title, color in (("pre", "Before", "#2864b4"),
-                               ("post", "After", "#c56816")):
+             '<p>Candidate search: first 15 ms after the filtered direct peak, '
+             'at or above −15 dB relative to direct sound. Before uses the measured '
+             'room IR; after is predicted through the saved DSP chain, not a new measurement. '
+             'Reference: ' + escape(report["direct_reference"]) + '.</p>',
+             '<p>The exported data contains candidate peaks, not a continuous '
+             '1–8 kHz energy-time curve. Two-path first-dip and ripple values are '
+             'estimates, not confirmed acoustic nulls.</p>']
+    for side, title in (("pre", "Before"), ("post", "Predicted after EQ")):
         events = report[side]
         parts.append(f'<h4>{title} ({len(events)} candidates)</h4>')
-        parts.append(f'<figure><figcaption>{title}: post-direct time (ms) vs '
-                     'level (dB relative to direct). The direct peak is at 0 ms, 0 dB.'
-                     '</figcaption><svg viewBox="0 0 800 230" role="img" '
-                     'aria-label="Band-limited early-reflection levels">'
-                     f'<circle cx="40" cy="20" r="4" fill="{color}"/>')
-        for event in events:
-            x = 40 + 720 * event["time_ms"] / 15.0
-            y = 20 + 190 * (-event["gain_dbfs"]) / 15.0
-            parts.append(f'<circle cx="{x:.2f}" cy="{y:.2f}" r="4" fill="{color}"/>')
-        parts.append('</svg></figure><table class="epa-table"><thead><tr>'
+        if not events:
+            parts.append('<p>No candidates were emitted at or above −15 dB '
+                         'within the 15 ms search window. This does not mean '
+                         'the room has no reflections.</p>')
+            continue
+        parts.append('<table class="epa-table"><thead><tr>'
                      '<th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th>'
                      '<th>Extra path (cm)</th><th>First dip (Hz)</th>'
                      '<th>Comb ripple (dB p-p)</th></tr></thead><tbody>')
@@ -608,50 +689,68 @@ def early_reflections_html(channel_data, label):
                          f'<td>{event["distance_cm"]:.1f}</td>'
                          f'<td>{event["first_dip_hz"]:.1f}</td><td>{ripple_text}</td></tr>')
         parts.append('</tbody></table>')
-    curve = (channel_data or {}).get("final_curve")
-    freqs = curve.get("freq") if isinstance(curve, dict) else None
-    levels = curve.get("spl") if isinstance(curve, dict) else None
-    if (isinstance(freqs, list) and isinstance(levels, list)
-            and 2 <= len(freqs) == len(levels) <= 65_536
-            and all(isinstance(f, (int, float)) and not isinstance(f, bool)
-                    and math.isfinite(f) and f > 0 for f in freqs)
-            and all(isinstance(v, (int, float)) and not isinstance(v, bool)
-                    and math.isfinite(v) for v in levels)
-            and all(a < b for a, b in zip(freqs, freqs[1:]))):
-        low, high = min(levels), max(levels)
-        yspan = max(high - low, 1e-9)
-        xspan = math.log(freqs[-1] / freqs[0])
-        if math.isfinite(yspan) and math.isfinite(xspan) and xspan > 0:
-            points = ' '.join(f'{40 + 720 * math.log(f/freqs[0])/xspan:.2f},'
-                              f'{210 - 185 * (v-low)/yspan:.2f}'
-                              for f, v in zip(freqs, levels))
-            parts.append('<figure><figcaption>Final response magnitude with '
-                         'post-correction two-path first-dip estimates. Vertical '
-                         'lines mark candidate frequencies, not measured nulls.'
-                         '</figcaption><svg viewBox="0 0 800 240" role="img" '
-                         'aria-label="Final frequency response and reflection dip estimates">'
-                         f'<polyline fill="none" stroke="#2864b4" points="{points}"/>')
-            for event in report["post"]:
-                dip = event["first_dip_hz"]
-                if freqs[0] <= dip <= freqs[-1]:
-                    x = 40 + 720 * math.log(dip / freqs[0]) / xspan
-                    right = next(i for i, freq in enumerate(freqs) if freq >= dip)
-                    if right == 0:
-                        level = levels[0]
-                    else:
-                        left = right - 1
-                        fraction = math.log(dip / freqs[left]) / math.log(freqs[right] / freqs[left])
-                        level = levels[left] + fraction * (levels[right] - levels[left])
-                    y = 210 - 185 * (level - low) / yspan
-                    parts.append(f'<line x1="{x:.2f}" y1="210" x2="{x:.2f}" y2="{y:.2f}" '
-                                 'stroke="#c56816" stroke-dasharray="4,3"/>')
-            parts.append('</svg></figure>')
-        else:
-            parts.append('<p>First-dip overlay unavailable: invalid final response range.</p>')
-    else:
-        parts.append('<p>First-dip overlay unavailable: no valid final response curve.</p>')
     parts.append('</div>')
     return ''.join(parts)
+
+
+def early_reflection_figures(channel_data, label, tab=None):
+    """Plot exported candidate stems and frequency responses, without inventing an ETC."""
+    from .wasm_report import axis, series, figure, annotation
+
+    report = _validated_early_reflections(channel_data)
+    if report is None:
+        return []
+    figures = []
+    for side, title, color in (("pre", "Before", "#2864b4"),
+                               ("post", "Predicted after EQ", "#c56816")):
+        events = report[side]
+        if not events:
+            continue
+        xs, ys, labels = [], [], []
+        for number, event in enumerate(events, 1):
+            time, gain = event["time_ms"], event["gain_dbfs"]
+            xs.extend([time, time, time])
+            ys.extend([-40, gain, None])
+            labels.append(annotation(time, gain + 1, str(number)))
+        figures.append(figure(
+            f"{label}: {title} — early-reflection candidates (not a continuous ETC)",
+            axis("Time after direct peak (ms)", "linear", 0, 15),
+            axis("Level relative to direct sound (dB)", "linear", -40, 3),
+            series_list=[
+                series(title, xs, ys, color=color),
+                series("Direct reference", [0, 0], [-40, 0], color="#555555"),
+                series("Detection threshold (−15 dB)", [0, 15], [-15, -15],
+                       color="#888888", dash="dash"),
+            ], annotations=labels, tab=tab))
+    curves = []
+    for key, name, color in (("initial_curve", "Measured before EQ", "#2864b4"),
+                              ("final_curve", "Predicted after EQ", "#c56816")):
+        curve = (channel_data or {}).get(key)
+        if not isinstance(curve, dict):
+            continue
+        freqs, levels = curve.get("freq"), curve.get("spl")
+        if (not isinstance(freqs, list) or not isinstance(levels, list)
+                or not 2 <= len(freqs) == len(levels) <= 65_536
+                or not all(isinstance(f, (int, float)) and not isinstance(f, bool)
+                           and math.isfinite(f) and f > 0 for f in freqs)
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                           and math.isfinite(v) for v in levels)
+                or not all(a < b for a, b in zip(freqs, freqs[1:]))):
+            continue
+        curves.append(series(name, freqs, levels, color=color))
+    if curves:
+        lo = min(min(s["y"]) for s in curves) - 3
+        hi = max(max(s["y"]) for s in curves) + 3
+        for number, event in enumerate(report["post"], 1):
+            dip = event["first_dip_hz"]
+            curves.append(series(f"Candidate {number}: {dip:.1f} Hz (estimated dip)",
+                                 [dip, dip], [lo, hi], color="#888888", dash="dot"))
+        figures.append(figure(
+            f"{label}: response and estimated reflection dips (not measured nulls)",
+            axis("Frequency (Hz)", "log", 20, 20000),
+            axis("SPL (dB)", "linear", lo, hi),
+            series_list=curves, tab=tab))
+    return figures
 
 
 def room_t60_rows(data):
@@ -699,6 +798,42 @@ def early_reflection_level_cell(channel_data):
     return (f'<td style="background:{color}33" '
             f'title="strongest emitted post-correction 1–8 kHz reflection, '
             f'dB relative to direct">{displayed}</td>')
+
+
+def t60_itu_pct(data, channel_name):
+    """Share of eight octave centers within the volume-based ITU envelope."""
+    reference = t60_itu_reference(data)
+    if reference is None or reference.get("volume_m3") is None:
+        return None
+    rows = t60_rows((data.get("channels") or {}).get(channel_name, {}))
+    if rows is None:
+        return None
+    bands = [row for row in rows if 63 <= row["centre_hz"] <= 8000]
+    if len(bands) != 8 or any(row["t60_s"] is None for row in bands):
+        return None
+    tm = reference["tm"]
+    inside = 0
+    for row in bands:
+        hz, value = row["centre_hz"], row["t60_s"]
+        # Figure 1's bass upper line is straight on a logarithmic x axis.
+        upper = tm + (0.30 - 0.25 * math.log(hz / 63) / math.log(200 / 63)
+                      if hz < 200 else 0.05 if hz <= 4000 else 0.10)
+        lower = None if hz < 100 else tm - (0.05 if hz <= 4000 else 0.10)
+        # Inclusive boundaries; absorb only floating-point arithmetic noise.
+        inside += value <= upper + 1e-12 and (lower is None or value >= lower - 1e-12)
+    return 100.0 * inside / 8
+
+
+def t60_itu_cell(data, channel_name):
+    metric = t60_itu_pct(data, channel_name)
+    if metric is None:
+        return ('<td style="background:#eee;color:#666" title="Requires valid '
+                'recording_config.room_dimensions and all eight measured octave '
+                'T60 fits from 63 Hz to 8 kHz">Not assessed</td>')
+    return (f'<td title="{round(metric * 8 / 100)}/8 octave centers within ITU-R '
+            'BS.1116-3 Figure 1 limits around the volume recommendation; '
+            '63 Hz has only an upper bound; 4 kHz uses the midband limits; '
+            f'16 kHz is excluded. Not overall room compliance.">{metric:.1f}</td>')
 
 
 def t60_flatness_cell(data, channel_name):
@@ -810,7 +945,9 @@ def operational_response_cell(summaries_by_channel, name):
     """Section 1 operational-response cell from the emitted ledger share."""
     hit = summaries_by_channel.get(name)
     if hit is None:
-        return pending_cell("correction_decisions.channel_summaries")
+        return ('<td style="background:#eee;color:#666" '
+                'title="No final EQ assessment is present in the saved decision ledger">'
+                'Not assessed</td>')
     pct, decided, delivered = hit
     th = SUMMARY_THRESHOLDS["operational_room_response_pct"]
     color = "#2ecc71" if th["green"](pct) else "#f1c40f" if th["yellow"](pct) else "#e74c3c"
@@ -828,14 +965,16 @@ def summary_table_html(data):
     names = sorted(channels.keys())
     parts = [
         '<div class="filters-section">\n<h3>Section 1 — Results summary</h3>\n',
-        '<p class="epa-footer">Colour thresholds per reviews/feat-report.md. '
-        '"pending" cells name the roomeq field required '
-        '(see reviews/req-roomeq-report.md).</p>\n',
+        '<p class="epa-footer">Acoustic values use the imported room impulse response. '
+        'Operational response is the share of final EQ decisions confirmed as delivered; '
+        '“Not assessed” means the saved ledger has no final EQ assessment. '
+        'Missing acoustic values require a measured room IR and valid analysis.</p>\n',
         '<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>Operational room response (%)</th>"
         "<th>Early reflection level (dB)</th>"
         "<th>Early vs late ratio (dB)</th>"
         "<th>T60 flatness in window (%)</th>"
+        "<th>T60 within ITU recommendation (%)</th>"
         "<th>Deepest notch &lt; 300 Hz (dB)</th>"
         "</tr></thead><tbody>\n",
     ]
@@ -847,6 +986,7 @@ def summary_table_html(data):
             f"{early_reflection_level_cell(channels[name])}"
             f"{early_late_ratio_cell(channels[name])}"
             f"{t60_flatness_cell(data, name)}"
+            f"{t60_itu_cell(data, name)}"
             f"{notch_cell(notch)}</tr>\n"
         )
     parts.append("</tbody></table></div>\n")
@@ -861,18 +1001,21 @@ def level_compensation_html(data):
     parts = [
         '<div class="filters-section">\n<h3>Section 2 — Relative level compensation</h3>\n',
         '<p class="epa-footer">Monitor band 0.5–3 kHz, sub band 30–80 Hz. '
-        "Reference: quietest monitor. Compensation is a proposed attenuation; "
-        "the residual is predicted from the optimizer post-DSP curve, not an "
-        "independent post-calibration measurement.</p>\n",
+        "Reference: quietest monitor before correction. Compensation is proposed attenuation. "
+        "The post-DSP level offset includes EQ, alignment and headroom attenuation; a negative "
+        "value does not by itself indicate channel imbalance. The balance column compares "
+        "against that same monitor after DSP. These are predictions, not verification captures.</p>\n",
         '<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>Level compensation (dB)</th>"
-        "<th>Predicted residual after EQ (dB)</th>"
+        "<th>Post-DSP offset from original reference (dB)</th>"
+        "<th>Post-DSP balance vs reference monitor (dB)</th>"
         "</tr></thead><tbody>\n",
     ]
     for r in rows:
         comp = f"{r['comp_db']:+.1f}" if r["comp_db"] is not None else "n/a"
         res = f"{r['residual_db']:+.1f}" if r["residual_db"] is not None else "n/a"
-        parts.append(f"<tr><td>{escape(r['speaker'])}</td><td>{comp}</td><td>{res}</td></tr>\n")
+        balance = f"{r['balance_db']:+.1f}" if r.get('balance_db') is not None else "n/a"
+        parts.append(f"<tr><td>{escape(r['speaker'])}</td><td>{comp}</td><td>{res}</td><td>{balance}</td></tr>\n")
     parts.append("</tbody></table></div>\n")
     return "".join(parts)
 

@@ -1745,12 +1745,14 @@ def create_symmetric_pair_figure(
                color="rgba(255, 150, 50, 0.9)", width=2.0, dash="dash"),
     ]
     all_spl = list(sum_spl) + list(diff_spl)
-    finite = [v for v in all_spl if math.isfinite(v)]
-    pad = (max(finite) - min(finite)) * 0.1 if finite else 5.0
-    y_range = (min(finite) - pad, max(finite) + pad) if finite else (0.0, 1.0)
+    finite = [v for v in all_spl if v is not None and math.isfinite(v)]
+    # Preserve the upper response with modest headroom, without letting a
+    # near-zero magnitude difference expand the default view by hundreds of dB.
+    ymax = math.ceil((max(finite) + 3.0) / 5.0) * 5.0 if finite else 0.0
+    y_range = (ymax - 50.0, ymax)
     return figure(
         f"Symmetric pair: {label} (magnitude domain; "
-        "complex sum pending roomeq field)",
+        "not a phase-coherent acoustic sum)",
         axis("Frequency (Hz)", "log", 20, 20000),
         axis("SPL (dB)", "linear", y_range[0], y_range[1]),
         series_list=s_list, tab=tab,
@@ -1800,20 +1802,42 @@ def create_t60_octaves_figure(
     label: str,
     rows: list[dict] | None,
     tab=None,
+    window=None,
+    itu_reference=None,
 ) -> dict | None:
     """Section with only valid measured-room octave T60 estimates."""
     if not rows or not any(row["t60_s"] is not None for row in rows):
         return None
-    # None y entries pass through series() as gaps (connectgaps=False before).
+    # Shared geometric boundaries prevent interpolation between octave estimates.
+    centers = [row["centre_hz"] for row in rows]
+    edges = [centers[0] / math.sqrt(2)]
+    edges.extend(math.sqrt(a * b) for a, b in zip(centers, centers[1:]))
+    edges.append(centers[-1] * math.sqrt(2))
+    xs, ys = [], []
+    for i, row in enumerate(rows):
+        xs.extend([edges[i], edges[i + 1]])
+        ys.extend([row["t60_s"], row["t60_s"]])
+    curves = [series("T60 (octave bands)", xs, ys, color="#3089c5", width=2.0)]
+    if itu_reference is not None:
+        tm = itu_reference["tm"]
+        # BS.1116-3 §8.2.3.1 Figure 1. Duplicate 4 kHz vertices preserve
+        # the tolerance step and prevent display smoothing of either limit.
+        curves.extend([
+            series("ITU-R BS.1116-3 upper limit", [63, 200, 4000, 4000, 8000],
+                   [tm + 0.30, tm + 0.05, tm + 0.05, tm + 0.10, tm + 0.10],
+                   color="#60ad42", width=2.0),
+            series("ITU-R BS.1116-3 lower limit", [100, 4000, 4000, 8000],
+                   [tm - 0.05, tm - 0.05, tm - 0.10, tm - 0.10],
+                   color="#60ad42", width=2.0),
+        ])
+    if window is not None:
+        for name, value in zip(("Lower flatness limit", "Upper flatness limit"), window):
+            curves.append(series(f"{name}: {value:.3f} s", [20, 20000], [value, value],
+                                 color="#60ad42", width=2.0))
     return figure(
         f"{label}: measured octave-band T60",
-        axis("Octave centre (Hz)", "log", None, None),
+        axis("Frequency (Hz)", "log", 20, 20000),
         axis("T60 (s)", "linear", 0, None),
-        series_list=[series(
-            "T60",
-            [row["centre_hz"] for row in rows],
-            [row["t60_s"] for row in rows],
-            color="#3089c5", width=2.0,
-        )],
+        series_list=curves,
         tab=tab,
     )

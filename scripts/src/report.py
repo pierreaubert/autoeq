@@ -8,10 +8,16 @@ from .capture_clock_views import capture_clock_qa_html, gated_lr_channel
 from .capture_reflection_views import capture_reflections_html
 from .acoustic_report import (
     early_reflections_html,
+    early_reflection_figures,
     landmarks_table_html,
+    response_landmarks,
+    smooth_curve,
     level_compensation_html,
     pair_sum_difference,
     room_t60_rows,
+    room_t60_table_html,
+    t60_itu_reference,
+    t60_itu_note,
     summary_table_html,
     symmetric_groups,
     t60_rows,
@@ -68,7 +74,7 @@ from .target_overlay import build_target_overlay_curves
 from .correction_explanation import correction_explanation_html
 from .acceptance_views import acceptance_views_html, waveform_status_html
 from .payload_binding import verify_payload_binding
-from .capture_views import capture_views_html, optimization_waterfall_html, optimization_wavelet_html
+from .capture_views import capture_views_html, optimization_waterfall_html, optimization_wavelet_html, resonance_summary_html
 from .loaders import RoomEqData
 from . import wasm_report
 
@@ -1174,117 +1180,69 @@ def create_html_report(
         data = RoomEqData(data, output_json_path.resolve().parent)
     channels_dict = data.get("channels", {})
     metadata = data.get("metadata", {})
-    version = data.get("version", "unknown")
 
     # Sort channels by classical order
     sorted_channel_names = sorted(channels_dict.keys(), key=get_channel_sort_key)
     channels = [(name, channels_dict[name]) for name in sorted_channel_names]
 
-    # Short name for title: parent_dir/filename
-    if output_json_path:
-        short_name = f"{output_json_path.parent.name}/{output_json_path.name}"
-    else:
-        short_name = ""
-    page_title = f"RoomEQ Results - {short_name}" if short_name else "RoomEQ Results"
+    page_title = "Room EQ"
 
     # Build HTML content
     # Sections in document order; the shell renders them and builds the
     # per-channel tab bar from the section `tab` fields.
     sections: list[dict] = []
-
     _emit_html(sections, _playback_status_html(metadata, data=data))
+    status_sections = sections
+    why, overview, speakers, timing, symmetric, time_domain, epa = ([] for _ in range(7))
+    landmark_figures = []
+    sections = why
     _emit_html(sections, correction_explanation_html(data))
     _emit_html(sections, acceptance_views_html(data))
     _emit_html(sections, waveform_status_html(data))
-    _emit_html(sections, summary_table_html(data))
-    _emit_html(sections, landmarks_table_html(data))
+    _emit_html(overview, summary_table_html(data))
+    for name, channel in channels:
+        marks = response_landmarks(channel)
+        curve = smooth_curve(channel.get("initial_curve"), 1 / 3)
+        if marks and curve:
+            annotations = [wasm_report.annotation(f, level, f"{kind}: {f:.0f} Hz")
+                           for kind in ("peaks", "notches") for f, level in marks[kind]]
+            lines = ([wasm_report.vline(marks["lf_extension_hz"], "#777", dash="dash")]
+                     if marks["lf_extension_hz"] is not None else [])
+            _emit_fig(landmark_figures, wasm_report.figure(
+                f"Frequency landmarks — {name} (1/3 octave)",
+                wasm_report.axis("Frequency (Hz)", "log", 20, 20000),
+                wasm_report.axis("Measured level (dB)"),
+                series_list=[wasm_report.series(name, curve["freq"], curve["spl"])],
+                annotations=annotations, vlines=lines, tab=name))
 
-    # Metadata section
-    if metadata:
-        pre_score = metadata.get("pre_score", 0)
-        post_score = metadata.get("post_score", 0)
-        improvement = pre_score - post_score if pre_score and post_score else 0
 
-        epa_pre_avg, epa_post_avg = _epa_summary_pref(metadata)
-        if epa_pre_avg is not None and epa_post_avg is not None:
-            epa_delta = epa_post_avg - epa_pre_avg
-            epa_color = "#2ecc71" if epa_delta >= 0 else "#e74c3c"
-            epa_summary_html = (
-                '                <div class="metadata-item">\n'
-                '                    <span class="metadata-label">EPA Preference (avg):</span>\n'
-                f'                    <span class="metadata-value">{epa_pre_avg:.2f} → {epa_post_avg:.2f} '
-                f'<span style="color:{epa_color};font-weight:600">({epa_delta:+.2f})</span></span>\n'
-                "                </div>\n"
-            )
-        else:
-            epa_summary_html = ""
-
-        _emit_html(sections, 
-            f"""
-        <div class="metadata">
-            <h2>Optimization Summary</h2>
-            <div class="metadata-grid">
-                <div class="metadata-item">
-                    <span class="metadata-label">Version:</span>
-                    <span class="metadata-value">{version}</span>
-                </div>
-                <div class="metadata-item">
-                    <span class="metadata-label">Algorithm:</span>
-                    <span class="metadata-value">{metadata.get('algorithm', 'N/A')}</span>
-                </div>
-                <div class="metadata-item">
-                    <span class="metadata-label">Loss function:</span>
-                    <span class="metadata-value">{metadata.get('loss_type', 'N/A')}</span>
-                </div>
-                <div class="metadata-item">
-                    <span class="metadata-label">Iterations:</span>
-                    <span class="metadata-value">{metadata.get('iterations', 'N/A')}</span>
-                </div>
-                <div class="metadata-item">
-                    <span class="metadata-label">Score Before:</span>
-                    <span class="metadata-value">{pre_score:.2f}</span>
-                </div>
-                <div class="metadata-item">
-                    <span class="metadata-label">Score After:</span>
-                    <span class="metadata-value">{post_score:.2f}</span>
-                </div>
-                <div class="metadata-item">
-                    <span class="metadata-label">Improvement:</span>
-                    <span class="metadata-value improvement">{improvement:.2f}</span>
-                </div>
-{epa_summary_html}                <div class="metadata-item">
-                    <span class="metadata-label">Timestamp:</span>
-                    <span class="metadata-value">{metadata.get('timestamp', 'N/A')}</span>
-                </div>
-            </div>
-        </div>
-"""
-        )
-
-    _emit_html(sections, capture_clock_qa_html(data))
-    _emit_html(sections, capture_reflections_html(data))
+    _emit_html(time_domain, capture_clock_qa_html(data))
+    _emit_html(time_domain, capture_reflections_html(data))
     mixed_phase_html = _mixed_phase_summary_html(metadata, channels_dict)
     if mixed_phase_html:
         _emit_html(sections, mixed_phase_html)
 
     # Combined plot
+    sections = overview
     _emit_fig(sections, create_combined_figure(data, output_json_path))
 
     # Single-screen summaries: the full PEQ listing and the crossover
     # configuration, so nothing requires switching per-channel tabs.
     _emit_html(sections, _gain_plugins_html(data))
-    _emit_html(sections, _all_eq_filters_html(data))
     _emit_html(sections, _crossover_config_html(data))
     _emit_html(sections, level_compensation_html(data))
+    sections = time_domain
     room_decay = room_t60_rows(data)
+    decay_reference = t60_itu_reference(data)
     if room_decay:
-        room_decay_fig = create_t60_octaves_figure("Room mean", room_decay)
+        _emit_html(sections, room_t60_table_html(data))
+        room_decay_fig = create_t60_octaves_figure("Room mean", room_decay, itu_reference=decay_reference)
         if room_decay_fig:
             _emit_fig(sections, room_decay_fig)
             _emit_html(sections,
                 '<p class="epa-footer">Arithmetic mean of valid measured-room T60 '
                 'estimates at each octave. Speaker coverage varies by band; invalid '
-                'fits are excluded.</p>\n'
+                'fits are excluded.</p>\n' + t60_itu_note(decay_reference)
             )
         _emit_html(sections, 
             '<p class="epa-footer">Room T60 contributing speakers by octave: '
@@ -1294,19 +1252,24 @@ def create_html_report(
         )
 
     # Time of flight before/after DSP (feat-report Section 3).
+    sections = timing
     tof_rows = tof_table(metadata)
+    _emit_html(sections, tof_html(metadata))
     tof_before = create_tof_figure(tof_rows, after=False)
     tof_after = create_tof_figure(tof_rows, after=True)
     for fig in (tof_before, tof_after):
         _emit_fig(sections, fig)
-    _emit_html(sections, tof_html(metadata))
 
     # Symmetric-monitor summing, magnitude domain (feat-report Section 2).
+    sections = symmetric
     # The complex pressure sum needs phase data roomeq does not emit yet.
     pair_groups, unpaired = symmetric_groups(channels_dict)
     if pair_groups or unpaired:
         symmetric_head = (
-            '<div class="filters-section"><h3>Section 2 — Symmetric monitors</h3>'
+            '<div class="filters-section"><h3>Section 4 — Symmetric monitors</h3>'
+            '<p>Rust aligns final curves within their shared frequency range. '
+            'The magnitude sum assumes equal phase; it is an upper bound, not a prediction '
+            'of interference from simultaneous playback.</p>'
         )
         if unpaired:
             symmetric_head += (
@@ -1317,23 +1280,28 @@ def create_html_report(
         symmetric_head += '</div>'
         _emit_html(sections, symmetric_head)
     for label, members in pair_groups:
-        combo = pair_sum_difference(
-            (channels_dict[members[0]] or {}).get("final_curve"),
-            (channels_dict[members[1]] or {}).get("final_curve"),
-        )
+        group_start = len(sections)
+        combo = (getattr(data, "symmetric_pairs", None) or {}).get(label)
         if combo is None:
             _emit_html(sections, 
                 '<p>Symmetric pair ' + escape(label)
-                + ': sum unavailable because final curves are missing or use different frequency grids.</p>'
+                + ': no Rust pair export in this output bundle. Regenerate with the updated RoomEQ exporter.</p>', tab=label
             )
             continue
         _emit_fig(sections, create_symmetric_pair_figure(
             label, combo["freq"], combo["sum_spl"], combo["diff_spl"]
         ))
+        for name in members:
+            for landmark in landmark_figures:
+                if landmark.get("tab") == name:
+                    sections.append({**landmark, "tab": label})
+        for section in sections[group_start:]:
+            section["tab"] = label
 
     # Bass-management routing/headroom section. This is driven by the
     # route-level #14 schema, not the deprecated single matrix summary.
     bass_management = metadata.get("bass_management") or {}
+    sections = overview
     if bass_management:
         _emit_html(sections, _bass_management_summary_html(bass_management))
         routing_fig = create_bass_management_routing_figure(data)
@@ -1366,6 +1334,7 @@ def create_html_report(
     tab_entries = display_channel_entries(data)
 
     for i, entry in enumerate(tab_entries):
+        sections = speakers
         channel_name = entry["channel"]
         driver_index = entry["driver"]
         tab_label = entry["label"]
@@ -1455,24 +1424,8 @@ def create_html_report(
             lfe_plus_channel,
         )
         _emit_fig(sections, fig_full)
-
-        # Zoomed plot (20-1200 Hz)
-        fig_zoom = create_zoomed_figure(
-            tab_label, initial_curve, final_curve, tab=tab_label
-        )
-        add_channel_response_overlays(
-            fig_zoom,
-            tab_label,
-            target_view,
-            lfe_plus_channel,
-        )
-        _emit_fig(sections, fig_zoom)
-
-        # Smoothed response overlay (feat-report Section 2, 1 octave).
-        _emit_fig(sections, create_smoothed_figure(
-            tab_label, initial_curve, final_curve, octaves=smoothed_octaves,
-            tab=tab_label,
-        ))
+        _emit_html(sections, landmarks_table_html({"channels": {tab_label: {
+            **channel_data, "initial_curve": initial_curve}}}), tab=tab_label)
 
         # EQ response plot (uses per-pass breakdown when 3-pass labels are present)
         fig_eq = create_multipass_eq_figure(
@@ -1486,9 +1439,13 @@ def create_html_report(
                 sample_rate=float(data.get("sample_rate", 48_000.0)),
                 tab=tab_label,
             )
-        _emit_fig(sections, fig_eq)
+        if fig_eq:
+            fig_full["figure"]["y2"] = wasm_report.axis("EQ gain (dB)")
+            for trace in fig_eq["figure"]["series"]:
+                fig_full["figure"]["series"].append({**trace, "y_axis": 1})
 
         # IR waveform plot
+        sections = time_domain
         _emit_fig(sections, create_ir_figure(
             tab_label,
             ir_pre,
@@ -1499,6 +1456,7 @@ def create_html_report(
         if not is_driver_tab:
             _emit_html(sections, early_reflections_html(channel_data, tab_label),
                        tab=tab_label)
+            _emit_fig(sections, early_reflection_figures(channel_data, tab_label, tab=tab_label))
             early_late = channel_data.get("early_late_curves")
             early_late_fig = create_early_late_figure(
                 tab_label, early_late, tab=tab_label
@@ -1519,9 +1477,11 @@ def create_html_report(
                 )
 
             t60 = t60_rows(channel_data)
-            t60_fig = create_t60_octaves_figure(tab_label, t60, tab=tab_label)
-            _emit_fig(sections, t60_fig)
+            t60_fig = create_t60_octaves_figure(tab_label, t60, tab=tab_label, itu_reference=decay_reference)
             _emit_html(sections, t60_table_html(channel_data), tab=tab_label)
+            _emit_fig(sections, t60_fig)
+            if t60_fig:
+                _emit_html(sections, t60_itu_note(decay_reference), tab=tab_label)
             waterfall_html = optimization_waterfall_html(
                 channel_data.get("waterfall"), channel_data.get("resonance_decays"))
             if waterfall_html:
@@ -1544,12 +1504,14 @@ def create_html_report(
                 )
 
         # EPA psychoacoustic scores (pre/post) for this channel
+        sections = epa
         epa_per_channel = metadata.get("epa_per_channel") or {}
         epa_html = _epa_channel_table_html(epa_per_channel.get(channel_name))
         if epa_html:
             _emit_html(sections, epa_html, tab=tab_label)
 
         # Filter details (grouped by pass when 3-pass labels are present).
+        sections = speakers
         # Driver tabs merge the driver EQ with the shared channel EQ, so
         # they render per-origin inner tabs instead of one flat list.
         has_labeled = any(p["label"] for p in passes)
@@ -1591,6 +1553,7 @@ def create_html_report(
                 _emit_html(sections, shaping_html, tab=tab_label)
 
     if capture_verification is not None:
+        sections = why
         verified, reason, graph_identity = verify_payload_binding(data)
         capture_graph = (capture_verification.get("graph_id")
                          if isinstance(capture_verification, dict) else None)
@@ -1610,6 +1573,29 @@ def create_html_report(
             _emit_html(sections, capture_views_html(capture_verification))
 
     # Assemble the self-contained HTML+WASM report.
+    time_domain.insert(0, wasm_report.html_section(
+        '<p>Arrival timing and applied delays are in Section 3: Time of Flight. '
+        'The diagnostics below describe the measured room impulse responses.</p>'))
+    epa.insert(0, wasm_report.html_section(
+        '<p>EPA scores are model-based psychoacoustic estimates before and after DSP. '
+        'They are not listening-test results or proof of improved audibility. '
+        'Compare each metric using its stated direction and units.</p>'))
+    modes = resonance_summary_html(data)
+    if modes:
+        time_domain.append({"kind": "html", "html": modes, "tab": None, "footer": True})
+    sections = list(status_sections)
+    for title, contents in (
+        ("Why this correction?", why),
+        ("Section 1: Summary", overview),
+        ("Section 2: Details per speaker", speakers),
+        ("Section 3: Time of Flight", timing),
+        ("Section 4: Symmetric monitors", symmetric),
+        ("Section 5: Time domain analysis", time_domain),
+        ("Section 6: EPA scores", epa),
+    ):
+        if not contents:
+            contents.append(wasm_report.html_section("<p>No data available in this output.</p>"))
+        sections.extend({**section, "group": title} for section in contents)
     payload = wasm_report.payload(page_title, sections)
     wasm_report.write_report(output_path, page_title, payload)
 

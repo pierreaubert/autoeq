@@ -4,3 +4,4 @@ plotly
 scipy
 jupyterlab
 pyright
+javaobj-py3==0.6.1

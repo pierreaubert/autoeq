@@ -116,7 +116,7 @@ class CaptureViewsTests(unittest.TestCase):
         html = capture_views_html(report)
         self.assertIn("Captured IR three-cycle wavelet", html)
         self.assertIn("&lt;wavelet scope&gt;", html)
-        self.assertIn("rgb(", html)
+        self.assertIn('&quot;zmin&quot;: -30', html)
         views["wavelet"]["post"]["mags_db"][0][0] = -3.0
         self.assertIn("binding changed", capture_views_html(report))
         bind()
@@ -148,7 +148,7 @@ class CaptureViewsTests(unittest.TestCase):
         html = capture_views_html(report)
         self.assertIn("Captured IR waterfall and resonance decay", html)
         self.assertIn("&lt;capture scope&gt;", html)
-        self.assertIn("own-grid relative level", html)
+        self.assertIn("full-grid peak reference", html)
         self.assertIn("0.35", html)
         views["waterfall"]["pre"]["grid"]["mags_db"][0][0] = -20.0
         self.assertIn("binding changed", capture_views_html(report))
@@ -312,7 +312,7 @@ class CaptureViewsTests(unittest.TestCase):
         self.assertIn("Normalized decay 500 Hz", html)
         self.assertIn("not passive-room RT", html)
         self.assertIn("&lt;noise limited&gt;", html)
-        self.assertEqual(html.count("<svg "), 4)
+        self.assertEqual(html.count('class="report-figure"'), 4)
         views["decay"]["bands"][0]["post_db"][0] = -3
         self.assertIn("binding changed", capture_views_html(report))
         views["decay"]["method"] = "unsupported"
@@ -333,7 +333,7 @@ class CaptureViewsTests(unittest.TestCase):
         }
         comparison["capture_views_binding"]["sha256"] = payload_digest(views, "candidate")
         html = capture_views_html(report)
-        self.assertEqual(html.count("<svg "), 6)
+        self.assertEqual(html.count('class="report-figure"'), 6)
         self.assertIn("same baseline-band peak", html)
         self.assertIn("&lt;filter spreading&gt;", html)
         views["etc"]["method"] = "periodic-mask"
@@ -342,7 +342,7 @@ class CaptureViewsTests(unittest.TestCase):
 
     def test_bound_pair_is_escaped_and_not_promoted(self):
         html = capture_views_html(fixture())
-        self.assertEqual(html.count("<svg "), 2)
+        self.assertEqual(html.count('class="report-figure"'), 2)
         self.assertIn("synthetic_capture_pair", html)
         self.assertIn("&lt;source&gt;", html)
         self.assertIn("&lt;clock&gt;", html)
@@ -410,6 +410,33 @@ def optimization_wavelet_fixture():
 
 
 class OptimizationTimeFrequencyTests(unittest.TestCase):
+    def test_shared_renderer_grid_orientation_and_resonance_ranking(self):
+        import re
+        import json
+        from html import unescape
+        from scripts.src.capture_views import worst_resonances, resonance_summary_html
+        def charts(html):
+            return [json.loads(unescape(s)) for s in re.findall(r'data-section="([^"]+)"', html)]
+        source = optimization_wavelet_fixture()
+        wavelet = charts(optimization_wavelet_html(source))[0]
+        self.assertFalse(wavelet["grid"]["surface"])
+        self.assertEqual(wavelet["figure"]["x"]["label"], "Frequency (Hz)")
+        self.assertEqual(wavelet["figure"]["y"]["max"], 15)
+        self.assertEqual(wavelet["grid"]["z"][1], [0, -2])
+        waterfall, decays = optimization_waterfall_fixture()
+        decays["decays"] += [{"freq_hz": 300, "level_db": -9, "decay_time_s": 1.2},
+                             {"freq_hz": 400, "level_db": -1, "decay_time_s": None}]
+        self.assertEqual([r["freq_hz"] for r in worst_resonances(decays["decays"])], [300, 200])
+        surface, traces = charts(optimization_waterfall_html(waterfall, decays))
+        self.assertTrue(surface["grid"]["surface"])
+        self.assertEqual(len(surface["grid"]["highlights"]), 2)
+        self.assertEqual(len(traces["figure"]["series"]), 2)
+        self.assertEqual(surface["figure"]["series"][0]["color"], traces["figure"]["series"][0]["color"])
+        summary = resonance_summary_html({"channels": {"L": {"waterfall": waterfall, "resonance_decays": decays}, "R": {}}})
+        self.assertIn("Mode 3", summary)
+        self.assertIn("Unavailable", summary)
+        self.assertIn("fit unavailable", summary)
+
     def test_waterfall_renders_wireframe_and_decay_table(self):
         waterfall, decays = optimization_waterfall_fixture()
         html = optimization_waterfall_html(waterfall, decays)
@@ -417,7 +444,7 @@ class OptimizationTimeFrequencyTests(unittest.TestCase):
         self.assertIn("&lt;waterfall scope&gt;", html)
         self.assertIn("200", html)
         self.assertIn("0.5", html)
-        self.assertIn("<svg ", html)
+        self.assertIn('class="report-figure"', html)
 
     def test_waterfall_contract_violation_stays_pending(self):
         waterfall, decays = optimization_waterfall_fixture()
@@ -441,12 +468,12 @@ class OptimizationTimeFrequencyTests(unittest.TestCase):
         decays["decays"] = []
         html = optimization_waterfall_html(waterfall, decays)
         self.assertIn("Measured room IR waterfall and resonance decay", html)
-        self.assertIn("<svg ", html)
+        self.assertIn('class="report-figure"', html)
 
     def test_wavelet_renders_heatmap(self):
         html = optimization_wavelet_html(optimization_wavelet_fixture())
         self.assertIn("Measured room IR three-cycle wavelet", html)
-        self.assertIn("<svg ", html)
+        self.assertIn('class="report-figure"', html)
 
     def test_wavelet_contract_violation_stays_pending(self):
         self.assertEqual("", optimization_wavelet_html(None))

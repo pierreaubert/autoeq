@@ -14,8 +14,13 @@ pub struct SchroederSplitConfig {
     /// Schroeder frequency in Hz
     #[serde(default = "default_schroeder_freq")]
     pub schroeder_freq: f64,
-    /// Room dimensions for auto-calculation (optional)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Runtime dimensions derived exclusively from `recording_config.room_dimensions`.
+    #[serde(
+        default,
+        skip_serializing,
+        deserialize_with = "super::room_dimensions::reject_optimizer_room_dimensions"
+    )]
+    #[schemars(skip)]
     pub room_dimensions: Option<RoomDimensions>,
     /// Low frequency filter configuration (below Schroeder)
     #[serde(default)]

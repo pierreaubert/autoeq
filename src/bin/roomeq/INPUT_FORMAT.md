@@ -1,5 +1,30 @@
 # RoomEQ Input Format
 
+## Recording configuration and room dimensions
+
+The optional root `recording_config` object describes the room and capture
+session. Its `room_dimensions` object requires finite positive `length`, `width`,
+and `height` in meters, with finite positive volume. Example:
+
+```json
+{
+  "recording_config": {
+    "room_dimensions": { "length": 5.0, "width": 4.0, "height": 2.5 },
+    "setup_description": "Main listening position",
+    "recording_sample_rate": 48000,
+    "channel_names": ["L", "R"]
+  }
+}
+```
+
+Schroeder split and decomposed correction both use these dimensions. Move legacy
+`optimizer.schroeder_split.room_dimensions` and
+`optimizer.decomposed_correction.room_dimensions` here; nested copies are rejected.
+Supplying dimensions does not enable those modes. Without dimensions, existing
+Schroeder frequency fallbacks remain unchanged. See the
+[full recording configuration reference](../../../docs/ROOMEQ_INPUT_FORMAT.md#recording-configuration-recording_config)
+for device, signal, calibration and timing evidence fields.
+
 Report consumers evaluate serialized `kautz_filter` and `warped_biquad`
 topologies rather than treating them as PEQs. Kautz section `gain` (and the
 legacy single-section `db_gain`) is a **linear weight**; zero weights retain
@@ -1110,6 +1135,16 @@ Enable the prototype by adding a `rir_prototype` block inside the speaker's
 - Time-domain / IR averaging is not supported in this iteration.
 
 ## Measured room impulse responses
+
+`python3 scripts/mdat2csv.py measurements.mdat output_dir --timing-reference-id session-1`
+exports supported REW `IRData/SampledData` impulses as `<measurement>__ir.csv`
+and adds their declarations to `recordings.json`. Install
+`scripts/requirements.txt` first. The reference ID is an operator declaration:
+use it only when the captures share that timing reference. Without the option,
+IR CSVs are still exported, but are not added to the generated configuration.
+Native amplitudes and start times are retained without normalization or
+recentering. Legacy IRFloat, minimum-phase reconstruction and filtered/smoothed
+storage requiring interpretation are reported as unavailable rather than guessed.
 
 Channels can declare a measured room IR backing the R1–R5 acoustic report
 fields (early reflections, early/late curves, octave T60, waterfall with

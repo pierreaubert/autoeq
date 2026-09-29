@@ -24,6 +24,7 @@ use autoeq_report_wasm::draw::{
     Ctx, DrawMeta, LegendEntry, TextAlign, draw_bar, draw_figure, draw_sankey,
 };
 use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
+use autoeq_report_wasm::grid::draw_grid;
 
 /// Retained per-canvas document for legend toggles.
 struct Retained {
@@ -214,7 +215,7 @@ pub fn toggle_series(canvas_id: &str, idx: usize) -> i32 {
     let step = state().lock().map(|map| {
         map.get(canvas_id).map(|r| {
             let is_bar = matches!(r.section, Section::Bar { .. });
-            let is_fig = matches!(r.section, Section::Figure { .. });
+            let is_fig = matches!(r.section, Section::Figure { .. } | Section::Grid { .. });
             (is_fig, is_bar, r.w, r.h, r.dpr)
         })
     });
@@ -228,7 +229,7 @@ pub fn toggle_series(canvas_id: &str, idx: usize) -> i32 {
                 .map(|mut map| {
                     map.get_mut(canvas_id)
                         .and_then(|r| match &mut r.section {
-                            Section::Figure { figure: f, .. } => f.series.get_mut(idx).map(|s| {
+                            Section::Figure { figure: f, .. } | Section::Grid { figure: f, .. } => f.series.get_mut(idx).map(|s| {
                                 s.visible = !s.visible;
                             }),
                             _ => None,
@@ -331,6 +332,7 @@ fn rerender(canvas_id: &str, w: f64, h: f64, dpr: f64) -> i32 {
         return 0;
     };
     let meta = match &section {
+        Section::Grid { figure, grid, .. } => draw_grid(&mut backend, figure, grid, w, h),
         Section::Figure { figure: f, .. } => draw_figure(&mut backend, f, w, h),
         Section::Bar { chart: b, .. } => draw_bar(&mut backend, b, w, h, &bars),
         Section::Sankey { chart: s, .. } => {
@@ -349,6 +351,7 @@ fn rerender(canvas_id: &str, w: f64, h: f64, dpr: f64) -> i32 {
 
 fn draw_section(backend: &mut CanvasCtx, section: &Section, w: f64, h: f64) -> DrawMeta {
     match section {
+        Section::Grid { figure, grid, .. } => draw_grid(backend, figure, grid, w, h),
         Section::Figure { figure: f, .. } => draw_figure(backend, f, w, h),
         Section::Bar { chart: b, .. } => draw_bar(backend, b, w, h, &[]),
         Section::Sankey { chart: s, .. } => {

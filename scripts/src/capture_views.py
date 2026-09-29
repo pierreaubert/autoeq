@@ -6,6 +6,7 @@ import math
 from pathlib import Path
 
 from .payload_binding import ALGORITHM, payload_digest
+from .wasm_report import axis, series, figure, embedded_figure, grid_figure
 
 
 def _trace_svg(view, prefix, units="raw sample units", label=None):
@@ -24,15 +25,9 @@ def _trace_svg(view, prefix, units="raw sample units", label=None):
     if not math.isfinite(span):
         raise ValueError("trace range overflow")
 
-    def points(values):
-        return " ".join(f"{40 + 720 * t / times[-1]:.3f},{20 + 180 * (hi - v) / span:.3f}"
-                        for t, v in zip(times, values))
-
-    return (f'<figure><figcaption>{escape(label or prefix.upper())}: {escape(units)}; blue baseline, orange candidate; '
-            f'0–{times[-1]:.4g} ms; shared amplitude range {lo:.4g}–{hi:.4g}.</figcaption>'
-            '<svg viewBox="0 0 800 220" role="img" aria-label="Matched capture traces">'
-            f'<polyline fill="none" stroke="#2864b4" points="{points(before)}"/>'
-            f'<polyline fill="none" stroke="#c56816" points="{points(after)}"/></svg></figure>')
+    return embedded_figure(figure(label or prefix.upper(), axis("Time (ms)", vmin=0, vmax=times[-1]),
+        axis(units), series_list=[series("Baseline", times, before, color="#2864b4"),
+                                 series("Candidate", times, after, color="#c56816")]))
 
 
 def _noise_html(noise, graph):
@@ -63,21 +58,9 @@ def _noise_html(noise, graph):
     levels = [10 * (math.log10(p) - math.log10((20e-6) ** 2)) if p > 0 else None for p in powers]
     positive = [level for level in levels if level is not None]
     if positive:
-        lo, hi = min(positive), max(positive)
-        xspan, yspan = max(math.log(freqs[-1] / freqs[0]), 1e-12), max(hi - lo, 1e-12)
-        parts.append('<figure><figcaption>One-sided pressure PSD: dB re (20 µPa)²/Hz; '
-                     f'{freqs[0]:.4g}–{freqs[-1]:.4g} Hz, logarithmic frequency; '
-                     f'{lo:.4g}–{hi:.4g} dB. Zero-power bins have no finite level.</figcaption>'
-                     '<svg viewBox="0 0 800 220" role="img" aria-label="Calibrated ambient pressure PSD">')
-        points = []
-        for frequency, level in zip(freqs + [freqs[-1]], levels + [None]):
-            if level is None:
-                if points:
-                    parts.append('<polyline fill="none" stroke="#2864b4" points="' + ' '.join(points) + '"/>')
-                    points = []
-            else:
-                points.append(f'{40 + 720 * math.log(frequency / freqs[0]) / xspan:.3f},{20 + 180 * (hi - level) / yspan:.3f}')
-        parts.append('</svg></figure>')
+        parts.append(embedded_figure(figure("Calibrated ambient pressure PSD",
+            axis("Frequency (Hz)", "log"), axis("dB re (20 µPa)²/Hz"),
+            series_list=[series("Pressure PSD", freqs, levels, color="#2864b4")])))
     else:
         parts.append('<p>No finite noise SPL: all estimated supported powers are zero. This is not proof of a noiseless room.</p>')
     centers, db = spectrum["freqs"], spectrum["noise_spl_db"]
@@ -132,26 +115,19 @@ def _octave_t60_html(view):
     parts = ['<h3>Capture IR octave T60 diagnostic</h3>',
              '<p>' + escape(view["scope"]) + '</p>',
              f'<p>Declared supported band: {band[0]:g}–{band[1]:g} Hz; '
-             f'minimum fit R²: {threshold:g}. No invalid or EDT-only band is plotted.</p>']
+             f'minimum fit R²: {threshold:g}. No invalid or EDT-only band is plotted; '
+             'gaps are unavailable fits.</p>']
     values = [row["t60_s"] for key in ("pre", "post") for row in view[key] if row["valid"]]
     if values:
-        top = max(values) * 1.1
-        span = math.log(centers[-1] / centers[0])
-        parts.append('<figure><figcaption>Octave T60 (s): blue baseline, orange candidate; '
-                     'gaps are unavailable fits.</figcaption><svg viewBox="0 0 800 240" '
-                     'role="img" aria-label="Captured octave T60">')
-        for key, color in (("pre", "#2864b4"), ("post", "#c56816")):
-            segment = []
-            for center, row in zip(centers + [centers[-1]], view[key] + [{"valid": False}]):
-                if row["valid"]:
-                    x = 40 + 720 * math.log(center / centers[0]) / span
-                    y = 220 - 190 * row["t60_s"] / top
-                    segment.append(f"{x:.3f},{y:.3f}")
-                elif segment:
-                    parts.append(f'<polyline fill="none" stroke="{color}" points="'
-                                 + ' '.join(segment) + '"/>')
-                    segment = []
-        parts.append('</svg></figure>')
+        from .figures import create_t60_octaves_figure
+        plot = create_t60_octaves_figure("Baseline", view["pre"])
+        other = create_t60_octaves_figure("Candidate", view["post"])
+        if plot and other:
+            other["figure"]["series"][0].update(name="Candidate", color="#c56816")
+            plot["figure"]["series"][0]["name"] = "Baseline"
+            plot["figure"]["series"].extend(other["figure"]["series"])
+        if plot or other:
+            parts.append(embedded_figure(plot or other))
     parts.append('<table><caption>Per-band T30/T20 estimates from matched IR captures</caption>'
                  '<tr><th>Hz</th><th>Baseline T60 (s)</th><th>Candidate T60 (s)</th>'
                  '<th>Baseline fit</th><th>Candidate fit</th></tr>')
@@ -190,26 +166,17 @@ def _room_mean_t60_html(groups):
         values = [value for side in ("pre", "post") for value, _ in averages[side]
                   if value is not None]
         if values:
-            top = max(values)
-            span = math.log(centers[-1] / centers[0])
-            parts.append('<figure><figcaption>Source mean octave T60 (s): blue baseline, '
-                         'orange candidate; missing fits leave gaps.</figcaption>'
-                         '<svg viewBox="0 0 800 240" role="img" '
-                         'aria-label="Capture room mean octave T60">')
+            from .figures import create_t60_octaves_figure
+            plot = None
             for side, color in (("pre", "#2864b4"), ("post", "#c56816")):
-                segment = []
-                for center, (value, _) in zip(centers + [centers[-1]],
-                                               averages[side] + [(None, 0)]):
-                    if value is None:
-                        if segment:
-                            parts.append(f'<polyline fill="none" stroke="{color}" points="'
-                                         + ' '.join(segment) + '"/>')
-                            segment = []
-                    else:
-                        x = 40 + 720 * math.log(center / centers[0]) / span
-                        y = 220 - 190 * value / top
-                        segment.append(f'{x:.3f},{y:.3f}')
-            parts.append('</svg></figure>')
+                rows = [{"centre_hz": c, "t60_s": v} for c, (v, _) in zip(centers, averages[side])]
+                candidate = create_t60_octaves_figure("Capture room mean", rows)
+                if candidate:
+                    candidate["figure"]["series"][0].update(name=side, color=color)
+                    if plot is None: plot = candidate
+                    else: plot["figure"]["series"].extend(candidate["figure"]["series"])
+            if plot:
+                parts.append(embedded_figure(plot))
         parts.append('<table><caption>Accepted source fits; n is the number of contributing '
                      'sources</caption><tr><th>Hz</th><th>Baseline mean (s)</th>'
                      '<th>Baseline n</th><th>Candidate mean (s)</th><th>Candidate n</th></tr>')
@@ -261,15 +228,14 @@ def _early_reflections_html(view):
             last_time = time
         parts.append(f'<h4>{label} ({len(events)} candidates)</h4>')
         if events:
-            max_gain = max(0.0, *(event["gain_dbfs"] for event in events))
-            parts.append(f'<figure><figcaption>{label}: post-direct time (ms) vs level (dB '
-                         'relative to direct).</figcaption><svg viewBox="0 0 800 220" '
-                         'role="img" aria-label="Band-limited early reflection levels">')
+            xs, ys = [], []
             for event in events:
-                x = 40 + 720 * event["time_ms"] / 15.0
-                y = 20 + 180 * (max_gain - event["gain_dbfs"]) / (max_gain + 15.0)
-                parts.append(f'<circle cx="{x:.3f}" cy="{y:.3f}" r="4" fill="{color}"/>')
-            parts.append('</svg></figure>')
+                xs.extend([event["time_ms"]] * 3)
+                ys.extend([-40, event["gain_dbfs"], None])
+            parts.append(embedded_figure(figure(label + ": early-reflection candidates",
+                axis("Time after direct peak (ms)", vmin=0, vmax=15),
+                axis("Level relative to direct (dB)", vmin=-40, vmax=3),
+                series_list=[series(label, xs, ys, color=color)])))
         parts.append('<table><tr><th>Reflection</th><th>Gain (dB re direct)</th>'
                      '<th>Time (ms)</th><th>Extra path (cm)</th>'
                      '<th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr>')
@@ -328,18 +294,12 @@ def _early_late_html(view):
                     or any(not finite(value) or not -120.01 <= value <= 0.01
                            for value in values)):
                 raise ValueError("invalid capture early/late levels")
-        parts.append(f'<h4>{label}</h4><p>Direct sample: {record["direct_sample"]}.</p>'
-                     '<figure><figcaption>Full (black), early (blue), late (orange): '
-                     'third-octave energy dB relative to this capture’s full peak band; '
-                     'log frequency.</figcaption><svg viewBox="0 0 800 230" '
-                     'role="img" aria-label="Captured early and late band energies">')
-        span = math.log(freq[-1] / freq[0])
-        for curve, color in zip(curves, ("#202020", "#2864b4", "#c56816")):
-            points = ' '.join(f'{40 + 720 * math.log(f / freq[0]) / span:.3f},'
-                              f'{20 + 180 * -level / 120:.3f}'
-                              for f, level in zip(freq, curve["spl"]))
-            parts.append(f'<polyline fill="none" stroke="{color}" points="{points}"/>')
-        parts.append('</svg></figure>')
+        parts.append(f'<h4>{label}</h4><p>Direct sample: {record["direct_sample"]}.</p>')
+        parts.append(embedded_figure(figure(label + ": early vs late energy",
+            axis("Frequency (Hz)", "log"), axis("Level vs full peak band (dB)"),
+            series_list=[series(name, freq, curve["spl"], color=color)
+                         for name, curve, color in zip(("Full", "Early", "Late"), curves,
+                                                      ("#202020", "#2864b4", "#c56816"))])))
         centers = [(f, e, l) for f, e, l in zip(freq, curves[1]["spl"], curves[2]["spl"])
                    if 1_000 <= f <= 8_000]
         if freq[0] <= 1_000 and freq[-1] >= 8_000 and len(centers) >= 2:
@@ -352,89 +312,102 @@ def _early_late_html(view):
     return ''.join(parts)
 
 
-def _waterfall_wireframe_figure(times, freqs, rows, color, caption, aria_label):
-    """Shared oblique STFT wireframe for one validated waterfall grid."""
-    log_span = math.log(freqs[-1] / freqs[0])
-    time_span = times[-1] - times[0]
-    def point(ti, fi):
-        x = math.log(freqs[fi] / freqs[0]) / log_span
-        depth = (times[ti] - times[0]) / time_span
-        level = max(-100.0, min(0.0, rows[ti][fi]))
-        return f'{55 + 610*x + 105*depth:.2f},{340 - 240*(level+100)/100 - 95*depth:.2f}'
-    time_indices = sorted(set([0, len(times)-1] + list(range(0, len(times), max(1, len(times)//16)))))
-    freq_indices = sorted(set([0, len(freqs)-1] + list(range(0, len(freqs), max(1, len(freqs)//24)))))
-    parts = [f'<figure><figcaption>{caption}</figcaption>'
-             f'<svg viewBox="0 0 800 420" role="img" aria-label="{aria_label}">']
-    for ti in reversed(time_indices):
-        pts = ' '.join(point(ti, fi) for fi in freq_indices)
-        parts.append(f'<polyline fill="none" stroke="{color}" stroke-opacity="0.65" '
-                     f'stroke-width="1" points="{pts}"/>')
-    for fi in freq_indices:
-        pts = ' '.join(point(ti, fi) for ti in time_indices)
-        parts.append(f'<polyline fill="none" stroke="{color}" stroke-opacity="0.4" '
-                     f'stroke-width="1" points="{pts}"/>')
-    parts.append(f'<text x="55" y="390">{freqs[0]:.3g} Hz</text>'
-                 f'<text x="650" y="390">{freqs[-1]:.3g} Hz</text>'
-                 f'<text x="55" y="412">{times[0]:.3g}–{times[-1]:.3g} ms; −100–0 dB</text>'
-                 '</svg></figure>')
+def resonance_color(freq):
+    """Stable frequency colour shared by surfaces, decay curves and mode tables."""
+    import colorsys
+    ratio = max(0, min(1, math.log(max(freq, 10) / 10) / math.log(30)))
+    rgb = colorsys.hsv_to_rgb(0.5 + ratio / 3, 0.65, 0.8)
+    return "#" + "".join(f"{round(v * 255):02x}" for v in rgb)
+
+
+def worst_resonances(resonances):
+    """Longest fitted decays first, then strongest 60 ms peak; at most two."""
+    return sorted(resonances, key=lambda r: (
+        r["decay_time_s"] is not None, r["decay_time_s"] or 0, r["level_db"]),
+        reverse=True)[:2]
+
+
+def resonance_summary_html(data):
+    """All exported pre-correction resonance candidates, grouped by speaker."""
+    entries = []
+    for name, channel in (data.get("channels") or {}).items():
+        waterfall, decays = channel.get("waterfall"), channel.get("resonance_decays")
+        if not optimization_waterfall_html(waterfall, decays):
+            entries.append((name, None))
+        else:
+            entries.append((name, decays["decays"]))
+    if not any(modes is not None for _, modes in entries):
+        return ""
+    count = max(1, max(len(modes or []) for _, modes in entries))
+    parts = ['<h2>Room resonance summary — all speakers</h2><p>Pre-correction detections. '
+             'Each cell gives frequency, 60 ms level relative to that speaker’s full-grid peak, '
+             'and fitted decay time. Colours identify frequency, not severity. These candidates '
+             'are not a geometric identification of room modes.</p><table><tr><th>Speaker</th>']
+    parts.extend(f'<th>Mode {i + 1}</th>' for i in range(count))
+    parts.append('</tr>')
+    for name, modes in entries:
+        parts.append(f'<tr><th>{escape(name)}</th>')
+        if not modes:
+            message = 'Unavailable' if modes is None else 'No candidates detected'
+            parts.append(f'<td colspan="{count}">{message}</td>')
+        else:
+            for mode in sorted(modes, key=lambda r: r["freq_hz"]):
+                decay = f'{mode["decay_time_s"]:.3f} s' if mode["decay_time_s"] is not None else 'fit unavailable'
+                color = resonance_color(mode["freq_hz"])
+                parts.append(f'<td style="background:{color}33;border-top:4px solid {color}">'
+                             f'{mode["freq_hz"]:.1f} Hz<br>{mode["level_db"]:.2f} dB<br>{decay}</td>')
+            parts.extend('<td>—</td>' for _ in range(count-len(modes)))
+        parts.append('</tr>')
+    parts.append('</table>')
     return ''.join(parts)
 
 
+def _waterfall_wireframe_figure(times, freqs, rows, color, caption, aria_label, resonances=()):
+    """Use a filled d3rs surface, retaining the function name for existing callers."""
+    highlights = [(min(range(len(freqs)), key=lambda i: abs(freqs[i]-r["freq_hz"])),
+                   f'{r["freq_hz"]:.1f} Hz', resonance_color(r["freq_hz"]))
+                  for r in worst_resonances(resonances)]
+    return embedded_figure(grid_figure(aria_label, freqs, times, rows,
+                                      surface=True, highlights=highlights))
+
+
 def _resonance_table_figures(resonances, freqs, times, rows, label, color):
-    """Shared 60 ms peak table plus per-resonance decay traces."""
-    time_span = times[-1] - times[0]
+    """Keep all detections in the table; plot the two longest fitted decays."""
     parts = ['<table><caption>Detected 60 ms peaks and fitted 20–200 ms decay</caption>'
              '<tr><th>Frequency (Hz)</th><th>Level (dB re own grid peak)</th>'
              '<th>Fitted decay (s)</th></tr>']
-    traces = []
-    for resonance in resonances:
-        freq = resonance["freq_hz"]
-        decay = resonance["decay_time_s"]
-        decay_text = f'{decay:.3g}' if decay is not None else 'unavailable'
-        parts.append(f'<tr><td>{freq:.3g}</td><td>{resonance["level_db"]:.2f}</td>'
-                     f'<td>{decay_text}</td></tr>')
-        closest = min(range(len(freqs)), key=lambda fi: abs(freqs[fi] - freq))
-        points = ' '.join(f'{50 + 700*(t-times[0])/time_span:.2f},'
-                          f'{195 - 170*(rows[ti][closest]+100)/100:.2f}'
-                          for ti, t in enumerate(times))
-        traces.append(f'<figure><figcaption>{label} {freq:.3g} Hz bin: time (ms) '
-                     'vs own-grid relative level (dB). This trace shows the sampled '
-                     'decay; the table reports the fitted value.</figcaption>'
-                     '<svg viewBox="0 0 800 220" role="img" aria-label="Resonance decay trace">'
-                     f'<polyline fill="none" stroke="{color}" points="{points}"/>'
-                     '</svg></figure>')
+    for r in resonances:
+        decay = f'{r["decay_time_s"]:.3g}' if r["decay_time_s"] is not None else 'unavailable'
+        parts.append(f'<tr><td>{r["freq_hz"]:.3g}</td><td>{r["level_db"]:.2f}</td><td>{decay}</td></tr>')
     parts.append('</table>')
-    parts.extend(traces)
+    curves = []
+    for r in worst_resonances(resonances):
+        closest = min(range(len(freqs)), key=lambda i: abs(freqs[i]-r["freq_hz"]))
+        name = f'{r["freq_hz"]:.1f} Hz'
+        if r["decay_time_s"] is not None:
+            name += f' — T60 {r["decay_time_s"]:.3f} s'
+        curves.append(series(name, times, [row[closest] for row in rows],
+                             color=resonance_color(r["freq_hz"])))
+    if curves:
+        parts.append('<p>Highlighted: up to two longest fitted decays, then strongest 60 ms '
+                     'peak. Curves retain the full-grid peak reference; no fitted intercept '
+                     'is exported, so no extrapolated fit line is invented.</p>')
+        parts.append(embedded_figure(figure(label + ": decay of highlighted resonances",
+            axis("Time from broadband peak (ms)", vmin=0, vmax=500),
+            axis("Level relative to full grid peak (dB)", vmin=-60, vmax=0),
+            series_list=curves)))
     return ''.join(parts)
 
 
 def _wavelet_heatmap_figure(freqs, times, rows, caption, aria_label):
-    """Shared blue-to-red three-cycle wavelet heatmap for one validated grid."""
-    log_f = [math.log(freq / freqs[0]) for freq in freqs]
-    fspan = log_f[-1]
-    tspan = times[-1] - times[0]
-    parts = [f'<figure><figcaption>{caption}</figcaption>'
-             f'<svg viewBox="0 0 800 350" role="img" aria-label="{aria_label}">']
-    for fi, row in enumerate(rows):
-        low_f = 0.0 if fi == 0 else (log_f[fi-1] + log_f[fi]) / 2
-        high_f = fspan if fi + 1 == len(freqs) else (log_f[fi] + log_f[fi+1]) / 2
-        fy0 = 20 + 290 * (1 - low_f / fspan)
-        fy1 = 20 + 290 * (1 - high_f / fspan)
-        for ti, db in enumerate(row):
-            low_t = times[0] if ti == 0 else (times[ti-1] + times[ti]) / 2
-            high_t = times[-1] if ti + 1 == len(times) else (times[ti] + times[ti+1]) / 2
-            x0 = 50 + 700 * (low_t - times[0]) / tspan
-            x1 = 50 + 700 * (high_t - times[0]) / tspan
-            ratio = max(0.0, min(1.0, (db + 30.0) / 30.0))
-            red = round(30 + 210 * ratio)
-            blue = round(220 - 190 * ratio)
-            parts.append(f'<rect x="{x0:.2f}" y="{fy1:.2f}" '
-                         f'width="{max(x1-x0, 0.2):.2f}" height="{max(fy0-fy1, 0.2):.2f}" '
-                         f'fill="rgb({red},45,{blue})"/>')
-    parts.append(f'<text x="50" y="340">{times[0]:.3g}–{times[-1]:.3g} ms</text>'
-                 f'<text x="590" y="340">{freqs[0]:.3g}–{freqs[-1]:.3g} Hz</text>'
-                 '</svg></figure>')
-    return ''.join(parts)
+    """Frequency runs horizontally, time vertically; show the early 15 ms."""
+    # Stored CWT rows are frequency-major; renderer grids are time-major.
+    section = grid_figure(aria_label, freqs, times, [list(row) for row in zip(*rows)])
+    early_count = sum(-1 <= t <= 15 for t in times)
+    return (f'<p>Three-cycle wavelet; first 15 ms ({early_count} exported time samples). '
+            'Log-frequency x-axis, time y-axis. '
+            'Colours retain the full-grid peak reference. Display cells reflect the '
+            'exported sampling; zoom cannot restore omitted samples.</p>' + embedded_figure(section))
 
 
 def _waterfall_html(view):
@@ -489,7 +462,7 @@ def _waterfall_html(view):
             times, freqs, rows, color,
             f'{label} waterfall: log frequency (Hz), time from broadband absolute '
             'peak (ms), relative STFT level (dB). Oblique grid is a visual projection.',
-            'Captured IR waterfall'))
+            'Captured IR waterfall', resonances))
         parts.append(_resonance_table_figures(resonances, freqs, times, rows, label, color))
     return ''.join(parts)
 
@@ -548,7 +521,7 @@ def _optimization_grid(times, freqs, rows, mag_floor_db):
     """Shared single-grid checks: bounded, strictly increasing axes, own-peak levels."""
     if not all(isinstance(item, list) for item in (times, freqs, rows)):
         return False
-    if (not 2 <= len(times) <= 100 or not 2 <= len(freqs) <= 64
+    if (not 2 <= len(times) <= 800 or not 2 <= len(freqs) <= 2049
             or any(not _optimization_number(v) for v in times + freqs)
             or any(a >= b for a, b in zip(times, times[1:]))
             or any(a >= b for a, b in zip(freqs, freqs[1:]))
@@ -611,7 +584,7 @@ def optimization_waterfall_html(waterfall, decays):
         times, freqs, rows, "#2864b4",
         'Pre-correction waterfall: log frequency (Hz), time from broadband absolute '
         'peak (ms), relative STFT level (dB). Oblique grid is a visual projection.',
-        'Measured room IR waterfall'))
+        'Measured room IR waterfall', resonances))
     parts.append(_resonance_table_figures(resonances, freqs, times, rows,
                                           "Pre-correction", "#2864b4"))
     return ''.join(parts)
@@ -628,14 +601,14 @@ def optimization_wavelet_html(wavelet):
     if (wavelet.get("basis") != "measured_room_ir"
             or wavelet.get("method") != "complex_morlet_three_cycle_v1"
             or wavelet.get("reference") != "full_grid_peak"
-            or wavelet.get("cycles") != 3.0 or wavelet.get("freqs_per_octave") != 6.0
-            or wavelet.get("hop_ms") != 1.0 or wavelet.get("display_range_db") != [-30.0, 0.0]
+            or wavelet.get("cycles") != 3.0 or wavelet.get("freqs_per_octave") not in (6.0, 48.0)
+            or wavelet.get("hop_ms") not in (0.1, 1.0) or wavelet.get("display_range_db") != [-30.0, 0.0]
             or not _optimization_band(wavelet.get("valid_band_hz"))):
         return ""
     band = wavelet.get("valid_band_hz")
     freqs, times, rows = (wavelet.get(key) for key in ("freqs_hz", "times_ms", "mags_db"))
     if (not isinstance(freqs, list) or not isinstance(times, list) or not isinstance(rows, list)
-            or not 2 <= len(freqs) <= 64 or not 2 <= len(times) <= 100
+            or not 2 <= len(freqs) <= 2049 or not 2 <= len(times) <= 800
             or len(rows) != len(freqs)
             or not all(isinstance(row, list) and len(row) == len(times) for row in rows)
             or any(not _optimization_number(v) for v in freqs + times)
@@ -649,6 +622,9 @@ def optimization_wavelet_html(wavelet):
     return ('<h3>Measured room IR three-cycle wavelet</h3>'
             '<p>Blue = −30 dB, red = 0 dB relative to the channel\u2019s own full '
             'wavelet-grid peak. Colors do not compare absolute output levels.</p>'
+            '<p>Frequency runs left to right; time runs upward. Dense exports use '
+            '0.1 ms early-time sampling through 15 ms and 1 ms later sampling; '
+            'the recorded time coordinates remain authoritative.</p>'
             + _wavelet_heatmap_figure(
                 freqs, times, rows,
                 'Pre-correction: time relative to broadband absolute peak (ms), log '

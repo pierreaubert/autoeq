@@ -1723,20 +1723,9 @@
           "format": "double",
           "type": "number"
         },
-        "room_dimensions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RoomDimensions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Room dimensions (L × W × H in metres). When present together with\na measured impulse response, enables a measurement-driven\nSchroeder frequency via `RoomDimensions::schroeder_frequency_with_rt60`\nusing the RT60 measured from the IR. When absent, the optimizer\nfalls back to the `schroeder_freq` field above."
-        },
         "schroeder_freq": {
           "default": 300.0,
-          "description": "Schroeder frequency (Hz). Below: modal, above: statistical.\n\nWhen `room_dimensions` is also provided AND an impulse response is\navailable, this value is overridden at run time by a\nmeasurement-driven Schroeder frequency: the optimizer measures\nRT60 from the IR via Schroeder backward integration and plugs it\ninto `f_S ≈ 2000 · √(RT60 / V)` with V from `room_dimensions`. In\nthat case this field is used only as the fallback if the RT60 fit\nfails.",
+          "description": "Schroeder frequency (Hz). Below: modal, above: statistical.\n\nWhen `recording_config.room_dimensions` is provided AND an impulse response is\navailable, this value is overridden at run time by a\nmeasurement-driven Schroeder frequency: the optimizer measures\nRT60 from the IR via Schroeder backward integration and plugs it\ninto `f_S ≈ 2000 · √(RT60 / V)` with V from the recording dimensions. In\nthat case this field is used only as the fallback if the RT60 fit\nfails.",
           "format": "double",
           "type": "number"
         },
@@ -5234,17 +5223,6 @@
             "min_q": 0.5
           },
           "description": "Low frequency filter configuration (below Schroeder)"
-        },
-        "room_dimensions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RoomDimensions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Room dimensions for auto-calculation (optional)"
         },
         "schroeder_freq": {
           "default": 300.0,

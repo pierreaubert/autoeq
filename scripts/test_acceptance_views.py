@@ -1,6 +1,9 @@
 """Fast rendering controls; actual production payloads are tested through Rust."""
 
 import unittest
+import json
+import re
+from html import unescape
 
 from scripts.src.acceptance_views import _magnitude_svg, acceptance_views_html
 
@@ -21,8 +24,11 @@ class AcceptanceViewsTests(unittest.TestCase):
     def test_shared_axes_preserve_level_difference(self):
         view = {"freqs": [100.0, 1000.0], "pre_db": [0.0, 0.0], "post_db": [6.0, 6.0]}
         html = _magnitude_svg(view, "<magnitude>")
-        self.assertIn("40.00,200.00 760.00,200.00", html)
-        self.assertIn("40.00,20.00 760.00,20.00", html)
+        chart = json.loads(unescape(re.search(r'data-section="([^"]+)"', html)[1]))
+        self.assertEqual(chart["figure"]["series"][0]["y"], [0, 0])
+        self.assertEqual(chart["figure"]["series"][1]["y"], [6, 6])
+        self.assertEqual(chart["figure"]["x"]["scale"], "log")
+        self.assertNotIn("<svg", html)
         self.assertIn("&lt;magnitude&gt;", html)
 
     def test_malformed_traces_fail_without_silent_truncation(self):

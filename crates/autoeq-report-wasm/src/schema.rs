@@ -39,6 +39,13 @@ impl ReportPayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Section {
+    /// Sampled heatmap or projected surface with shared figure controls.
+    Grid {
+        figure: Figure,
+        grid: GridData,
+        #[serde(default)]
+        tab: Option<String>,
+    },
     /// Raw HTML (tables, summaries, filter lists — already renderer-free).
     Html {
         html: String,
@@ -63,6 +70,29 @@ pub enum Section {
         #[serde(default)]
         tab: Option<String>,
     },
+}
+
+/// Renderer-independent time-frequency grid; rows follow the y/time axis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridData {
+    /// Positive frequency coordinates in Hz.
+    pub x: Vec<f64>,
+    /// Time coordinates in milliseconds.
+    pub y: Vec<f64>,
+    /// Levels indexed as `[time][frequency]`.
+    pub z: Vec<Vec<f64>>,
+    /// Surface when true, otherwise a heatmap.
+    pub surface: bool,
+    /// Display floor in dB; values are clipped, not renormalized.
+    pub zmin: f64,
+    /// Display ceiling in dB.
+    pub zmax: f64,
+    /// Frequency indexes for highlighted decays, matching figure series order.
+    #[serde(default)]
+    pub highlights: Vec<usize>,
+    /// Optional surface elevation and azimuth in degrees; display-only camera state.
+    #[serde(default)]
+    pub rotation: Option<[f64; 2]>,
 }
 
 /// X-axis scale for a [`Figure`].
@@ -315,30 +345,30 @@ mod tests {
         });
         payload.sections.push(Section::Figure {
             figure: Figure {
-            title: "f".to_string(),
-            x: AxisSpec {
-                label: "Frequency (Hz)".to_string(),
-                scale: XScale::Log,
-                min: Some(20.0),
-                max: Some(20000.0),
-            },
-            y: AxisSpec {
-                label: "SPL (dB)".to_string(),
-                scale: XScale::Linear,
-                min: None,
-                max: None,
-            },
-            y2: None,
-            series: vec![Series {
-                name: "Input".to_string(),
-                x: vec![20.0, 20000.0],
-                y: vec![Some(0.0), Some(1.0)],
-                color: None,
-                width: 2.0,
-                dash: DashOption::Dash,
-                visible: true,
-                y_axis: 0,
-            }],
+                title: "f".to_string(),
+                x: AxisSpec {
+                    label: "Frequency (Hz)".to_string(),
+                    scale: XScale::Log,
+                    min: Some(20.0),
+                    max: Some(20000.0),
+                },
+                y: AxisSpec {
+                    label: "SPL (dB)".to_string(),
+                    scale: XScale::Linear,
+                    min: None,
+                    max: None,
+                },
+                y2: None,
+                series: vec![Series {
+                    name: "Input".to_string(),
+                    x: vec![20.0, 20000.0],
+                    y: vec![Some(0.0), Some(1.0)],
+                    color: None,
+                    width: 2.0,
+                    dash: DashOption::Dash,
+                    visible: true,
+                    y_axis: 0,
+                }],
                 hlines: vec![],
                 vlines: vec![],
                 xranges: vec![],

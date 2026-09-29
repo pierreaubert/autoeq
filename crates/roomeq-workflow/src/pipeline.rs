@@ -88,8 +88,11 @@ impl<'a> RoomPipeline<'a> {
         artifact_store: &dyn ArtifactStore,
         observer: Option<Box<dyn PipelineObserver>>,
     ) -> Result<RoomOptimizationResult> {
+        // Programmatic callers need the same canonical resolution as file loads.
+        let mut config = self.request.config.clone();
+        config.resolve_room_dimensions();
         let engine_request = EngineRequest {
-            config: self.request.config,
+            config: &config,
             sample_rate: self.request.sample_rate,
             probe_arrival_overrides: self.request.probe_arrival_overrides,
         };

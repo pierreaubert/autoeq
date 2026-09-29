@@ -9,6 +9,7 @@
 
 pub mod assemble;
 pub mod draw;
+pub mod grid;
 pub mod schema;
 
 pub use schema::*;

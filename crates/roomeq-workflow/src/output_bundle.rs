@@ -276,6 +276,7 @@ pub fn extract_measurements_to_assets(
     output: &mut DspGraph,
     assets_dir: &Path,
 ) -> ExtractedMeasurementFiles {
+    let symmetric_pairs = crate::symmetric_report::pairs(output);
     let mut extracted = ExtractedMeasurementFiles::default();
     let mut channel_index = serde_json::Map::new();
     let mut deployed_index = serde_json::Map::new();
@@ -414,6 +415,7 @@ pub fn extract_measurements_to_assets(
     extracted.files.sort();
     if !channel_index.is_empty() || !deployed_index.is_empty() {
         let mut root = serde_json::Map::new();
+        root.insert("symmetric_pairs".to_owned(), symmetric_pairs);
         root.insert(
             "channels".to_string(),
             serde_json::Value::Object(channel_index),

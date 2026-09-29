@@ -9,5 +9,17 @@
       "path": "R_Sep_12.csv",
       "name": "R Sep 12"
     }
+  },
+  "measured_impulse_responses": {
+    "L_Sep_12": {
+      "path": "L_Sep_12__ir.csv",
+      "sample_rate_hz": 48000.0,
+      "timing_reference_id": "session-1"
+    },
+    "R_Sep_12": {
+      "path": "R_Sep_12__ir.csv",
+      "sample_rate_hz": 48000.0,
+      "timing_reference_id": "session-1"
+    }
   }
 }

@@ -1,5 +1,9 @@
 # Unreleased
 
+- Use one Room EQ report layout with automatic WebGPU surface acceleration
+  and a Canvas fallback. Both use the same d3rs/WASM geometry, axes, legends,
+  and rotation controls. Remove the separate GPUI statistics-view toggle.
+
 - Organize the Room EQ report into collapsible evidence and six numbered
   sections, with independent speaker/group selectors. Combine each speaker's
   before/EQ/after curves, retain landmark and filter details, and separate EPA.

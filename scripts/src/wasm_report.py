@@ -166,6 +166,11 @@ def load_assets(dist_dir=None, template_path=None):
         ("wasm_gpui", "reportgpui.wasm", False),
         ("glue_gpui", "reportgpui.js", True),
     ):
+        # Older custom templates may still embed the legacy GPUI explorer.
+        # The shared report no longer needs that separate application bundle.
+        if key.endswith("gpui") and "{{" + key.upper() + "_B64}}" not in template:
+            assets[key] = ""
+            continue
         raw = (dist / filename).read_bytes()
         assets[key] = base64.b64encode(raw).decode("ascii")
     return template, assets

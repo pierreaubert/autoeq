@@ -24,6 +24,10 @@ pub enum TextAlign {
 
 /// Minimal 2D drawing surface (Canvas 2D semantics, CSS pixel units).
 pub trait Ctx {
+    /// Fill ordered triangles, optionally using an accelerated backend.
+    fn triangles(&mut self, triangles: &[PaintTriangle]) {
+        paint_triangles(self, triangles);
+    }
     /// Set the fill color (any CSS color string).
     fn set_fill(&mut self, css: &str);
     /// Set the stroke color.
@@ -56,6 +60,29 @@ pub trait Ctx {
     fn fill_text_rotated(&mut self, text: &str, x: f64, y: f64, angle_deg: f64, align: TextAlign);
     /// Measure text width in px with the current font.
     fn text_width(&mut self, text: &str) -> f64;
+}
+
+/// A projected d3rs triangle with an opaque RGB fill.
+#[derive(Debug, Clone)]
+pub struct PaintTriangle {
+    /// Vertex positions in CSS pixels, in painter order.
+    pub points: [(f64, f64); 3],
+    /// Red, green, and blue bytes shared by all three vertices.
+    pub color: [u8; 3],
+}
+
+/// Draw triangles with the portable path-based backend.
+pub fn paint_triangles(ctx: &mut (impl Ctx + ?Sized), triangles: &[PaintTriangle]) {
+    for triangle in triangles {
+        let [r, g, b] = triangle.color;
+        ctx.set_fill(&format!("#{r:02x}{g:02x}{b:02x}"));
+        ctx.begin_path();
+        ctx.move_to(triangle.points[0].0, triangle.points[0].1);
+        ctx.line_to(triangle.points[1].0, triangle.points[1].1);
+        ctx.line_to(triangle.points[2].0, triangle.points[2].1);
+        ctx.close_path();
+        ctx.fill();
+    }
 }
 
 /// Clickable legend swatch geometry (canvas px), one per series.
@@ -268,11 +295,7 @@ where
             }
         }
     }
-    if lo <= hi {
-        Some((lo, hi))
-    } else {
-        None
-    }
+    if lo <= hi { Some((lo, hi)) } else { None }
 }
 
 /// Data extent over optional y samples (`None` entries are gaps, skipped).
@@ -294,11 +317,7 @@ where
             }
         }
     }
-    if lo <= hi {
-        Some((lo, hi))
-    } else {
-        None
-    }
+    if lo <= hi { Some((lo, hi)) } else { None }
 }
 
 /// True for series mapped to the secondary y axis (when one is active).
@@ -307,7 +326,11 @@ fn on_y2(s: &Series) -> bool {
 }
 
 /// Padded domain honoring explicit min/max overrides.
-fn domain(auto: Option<(f64, f64)>, explicit_min: Option<f64>, explicit_max: Option<f64>) -> (f64, f64) {
+fn domain(
+    auto: Option<(f64, f64)>,
+    explicit_min: Option<f64>,
+    explicit_max: Option<f64>,
+) -> (f64, f64) {
     let (mut lo, mut hi) = auto.unwrap_or((0.0, 1.0));
     if !matches!(lo.partial_cmp(&hi), Some(std::cmp::Ordering::Less)) {
         let c = if lo == 0.0 { 0.0 } else { lo };
@@ -453,11 +476,7 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
     let y2_dom = if y2_active {
         let spec = fig.y2.as_ref();
         let auto = extent_opt(&fig.series, &visible, |s| {
-            if on_y2(s) {
-                Some(&s.y[..])
-            } else {
-                None
-            }
+            if on_y2(s) { Some(&s.y[..]) } else { None }
         });
         Some(domain(
             auto,
@@ -480,7 +499,11 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
                 .range(plot_x, plot_x + plot_w),
         )
     } else {
-        XMap::Linear(LinearScale::new().domain(x_lo, x_hi).range(plot_x, plot_x + plot_w))
+        XMap::Linear(
+            LinearScale::new()
+                .domain(x_lo, x_hi)
+                .range(plot_x, plot_x + plot_w),
+        )
     };
     let x_of = |x: f64| -> f64 {
         match &xmap {
@@ -726,7 +749,9 @@ pub(crate) fn draw_axis_layout(
     ctx.set_fill(INK);
     ctx.set_font(FONT);
     for t in layout.all_ticks() {
-        let Some(label) = t.label.as_ref() else { continue };
+        let Some(label) = t.label.as_ref() else {
+            continue;
+        };
         if label.is_empty() {
             continue;
         }
@@ -740,7 +765,12 @@ pub(crate) fn draw_axis_layout(
             ctx.fill_text(label, cross + p.x as f64, t.position + 4.0, TextAlign::Left);
         } else {
             // Nudge up half a line for optical centering on the tick.
-            ctx.fill_text(label, cross + p.x as f64, t.position + 4.0, TextAlign::Right);
+            ctx.fill_text(
+                label,
+                cross + p.x as f64,
+                t.position + 4.0,
+                TextAlign::Right,
+            );
         }
     }
     // Axis title.
@@ -767,7 +797,13 @@ pub(crate) fn draw_axis_layout(
 }
 
 /// Draw one grouped bar chart; returns legend geometry.
-pub fn draw_bar(ctx: &mut impl Ctx, chart: &BarChart, w: f64, h: f64, visible: &[bool]) -> DrawMeta {
+pub fn draw_bar(
+    ctx: &mut impl Ctx,
+    chart: &BarChart,
+    w: f64,
+    h: f64,
+    visible: &[bool],
+) -> DrawMeta {
     ctx.set_fill("#ffffff");
     ctx.fill_rect(0.0, 0.0, w, h);
 
@@ -885,7 +921,11 @@ pub fn draw_bar(ctx: &mut impl Ctx, chart: &BarChart, w: f64, h: f64, visible: &
             let bx = cx - total / 2.0 + gi as f64 * bar_w;
             let top = y_of(v.max(y_lo).min(y_hi));
             let base = y_of(0.0f64.max(y_lo).min(y_hi));
-            let (y0, hh) = if top <= base { (top, base - top) } else { (base, top - base) };
+            let (y0, hh) = if top <= base {
+                (top, base - top)
+            } else {
+                (base, top - base)
+            };
             ctx.set_fill(&color);
             ctx.fill_rect(bx + 1.0, y0, (bar_w - 2.0).max(1.0), hh.max(1.0));
         }
@@ -1006,10 +1046,7 @@ pub fn draw_sankey(ctx: &mut impl Ctx, chart: &SankeyChart, w: f64, h: f64) {
         ctx.set_fill(INK);
         let name = truncate_label(&node.id, ctx, 150.0);
         // Rightmost layer labels go left of the node.
-        let is_sink = layout
-            .links
-            .iter()
-            .all(|l| l.target != node.index);
+        let is_sink = layout.links.iter().all(|l| l.target != node.index);
         let dest_right = layout.nodes.iter().any(|o| o.x0 > node.x0 + 1.0);
         if dest_right && !is_sink {
             ctx.fill_text(&name, nx + nw + 5.0, ny + nh / 2.0 + 4.0, TextAlign::Left);
@@ -1053,7 +1090,11 @@ mod tests {
         assert_eq!(ticks.last(), Some(&10000.0));
         assert_eq!(fmt_log_grid(10000.0), "10k");
         assert!(fmt_log_grid(90.0).is_empty());
-        assert!(log_grid_ticks(300.0, 600.0).iter().all(|v| *v >= 300.0 && *v < 600.0));
+        assert!(
+            log_grid_ticks(300.0, 600.0)
+                .iter()
+                .all(|v| *v >= 300.0 && *v < 600.0)
+        );
     }
 
     #[test]
@@ -1118,7 +1159,9 @@ mod tests {
             self.ops.borrow_mut().push(format!("L{x:.1},{y:.1}"));
         }
         fn bezier_to(&mut self, a: f64, b: f64, c: f64, d: f64, x: f64, y: f64) {
-            self.ops.borrow_mut().push(format!("C{a:.1},{b:.1},{c:.1},{d:.1},{x:.1},{y:.1}"));
+            self.ops
+                .borrow_mut()
+                .push(format!("C{a:.1},{b:.1},{c:.1},{d:.1},{x:.1},{y:.1}"));
         }
         fn close_path(&mut self) {
             self.ops.borrow_mut().push("close".to_string());
@@ -1149,9 +1192,18 @@ mod tests {
         fig.y.min = Some(0.0);
         fig.y.max = Some(15.0);
         let mut grid = crate::schema::GridData {
-            x: vec![20.0, 1000.0, 20000.0], y: vec![0.0, 5.0, 15.0],
-            z: vec![vec![0.0, -10.0, -20.0], vec![-5.0, -15.0, -25.0], vec![-10.0, -20.0, -30.0]],
-            surface: false, zmin: -30.0, zmax: 0.0, highlights: vec![1], rotation: None,
+            x: vec![20.0, 1000.0, 20000.0],
+            y: vec![0.0, 5.0, 15.0],
+            z: vec![
+                vec![0.0, -10.0, -20.0],
+                vec![-5.0, -15.0, -25.0],
+                vec![-10.0, -20.0, -30.0],
+            ],
+            surface: false,
+            zmin: -30.0,
+            zmax: 0.0,
+            highlights: vec![1],
+            rotation: None,
         };
         for surface in [false, true] {
             grid.surface = surface;
@@ -1171,7 +1223,12 @@ mod tests {
         grid.z[0].pop();
         let mut ctx = Rec::default();
         crate::grid::draw_grid(&mut ctx, &fig, &grid, 900.0, 500.0);
-        assert!(ctx.texts.borrow().iter().any(|t| t.0.contains("invalid time-frequency grid")));
+        assert!(
+            ctx.texts
+                .borrow()
+                .iter()
+                .any(|t| t.0.contains("invalid time-frequency grid"))
+        );
     }
 
     fn demo_figure() -> Figure {
@@ -1260,7 +1317,10 @@ mod tests {
         let d = s.scale(20000.0);
         assert!((a - 0.0).abs() < 1e-9);
         assert!((d - 300.0).abs() < 1e-9);
-        assert!((b - a - 100.0).abs() < 1.0, "decades are evenly spaced: {a} {b}");
+        assert!(
+            (b - a - 100.0).abs() < 1.0,
+            "decades are evenly spaced: {a} {b}"
+        );
         assert!((c - b - 100.0).abs() < 1.0);
     }
 
@@ -1310,7 +1370,13 @@ mod tests {
             legend: true,
             hlines: vec![],
         };
-        for visible in [&[][..], &[true][..], &[false][..], &[false, false][..], &[true, false][..]] {
+        for visible in [
+            &[][..],
+            &[true][..],
+            &[false][..],
+            &[false, false][..],
+            &[true, false][..],
+        ] {
             let mut ctx = Rec::default();
             let meta = draw_bar(&mut ctx, &chart, 900.0, 420.0, visible);
             assert_eq!(meta.legend.len(), 2);
@@ -1380,7 +1446,10 @@ mod tests {
         let meta = draw_figure(&mut ctx, &fig, 900.0, 500.0);
         assert_eq!(meta.legend.len(), 3);
         let texts: Vec<String> = ctx.texts.borrow().iter().map(|t| t.0.clone()).collect();
-        assert!(texts.iter().any(|t| t == "DI (dB)"), "right axis title drawn");
+        assert!(
+            texts.iter().any(|t| t == "DI (dB)"),
+            "right axis title drawn"
+        );
         assert!(texts.iter().any(|t| t == "SPDI"), "y2 series in legend");
         // Legend sits past the y2 label column.
         for e in &meta.legend {

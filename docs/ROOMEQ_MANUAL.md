@@ -951,10 +951,14 @@ self-contained HTML file: the plots render from an embedded versioned JSON
 payload (`autoeq-report-data-v1`, documented in
 `crates/autoeq-report-wasm/SCHEMA.md`) with a WebAssembly 2D canvas renderer,
 so the file needs no network access and no Plotly install. The title line
-carries the 2D-plots / GPUI-view toggle at its end; the toggle always shows
-and both views render the same payload (the GPUI viewer is an interactive
-section explorer; single-threaded, needs no COOP/COEP serving). Without a
-WebGPU adapter the GPUI view shows a note and falls back to the 2D plots.
+carries a renderer status at its end. WebGPU is selected automatically when
+an adapter and device are available; dense waterfall triangles are batched on
+the GPU. The report layout, d3rs/WASM geometry, axes, legends, colors, and
+rotation controls are shared with the Canvas fallback. There is no separate
+GPUI view. Missing adapters, initialization failures, or device loss fall back
+without changing the report content. Append `?renderer=canvas` to a served
+report URL to compare the portable backend for diagnostics. Surface projection
+and depth sorting still run in WASM; rasterization is GPU-accelerated.
 Per-channel sections open under shell tabs placed below the summary
 sections; legends toggle series by click. The combined overview is three
 stacked panels sharing the frequency axis — Before EQ (all channels plus

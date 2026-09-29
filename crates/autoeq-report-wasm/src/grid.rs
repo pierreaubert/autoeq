@@ -9,7 +9,8 @@ use d3rs::scale::{LinearScale, LogScale, Scale};
 use d3rs::surface::{OrthographicProjection, Projection, SurfaceData, SurfaceMesh, SurfacePoint3D};
 
 use crate::draw::{
-    Ctx, DrawMeta, LegendEntry, TextAlign, draw_axis_layout, fmt_log_grid, fmt_num, log_grid_ticks,
+    Ctx, DrawMeta, LegendEntry, PaintTriangle, TextAlign, draw_axis_layout, fmt_log_grid, fmt_num,
+    log_grid_ticks,
 };
 use crate::schema::{Figure, GridData};
 
@@ -223,18 +224,23 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
             .collect();
         let mut mesh = SurfaceMesh::from_surface_data(&SurfaceData::from_grid(points));
         mesh.depth_sort(&projection);
-        for triangle in &mesh.triangles {
-            let points: Vec<_> = triangle
-                .vertices
-                .iter()
-                .map(|p| {
-                    let q = projection.project_point(p);
+        let triangles: Vec<_> = mesh
+            .triangles
+            .iter()
+            .map(|triangle| {
+                let points = triangle.vertices.map(|p| {
+                    let q = projection.project_point(&p);
                     (q.x, q.y)
-                })
-                .collect();
-            ctx.set_fill(&level_color(zs.scale(triangle.avg_t)));
-            path(ctx, &points, true);
-        }
+                });
+                let css = level_color(zs.scale(triangle.avg_t));
+                let rgb = u32::from_str_radix(css.trim_start_matches('#'), 16).unwrap_or(0);
+                PaintTriangle {
+                    points,
+                    color: [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8],
+                }
+            })
+            .collect();
+        ctx.triangles(&triangles);
         for (i, &f) in grid.highlights.iter().enumerate() {
             let Some(series) = fig.series.get(i).filter(|s| s.visible) else {
                 continue;

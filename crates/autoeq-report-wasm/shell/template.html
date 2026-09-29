@@ -238,13 +238,9 @@ th {
 <div class="container">
 <div class="header-row">
 <h1 id="report-title"></h1>
-<div class="viewbar" id="viewbar" style="display:none">
-<button id="view-2d" class="active" type="button">2D plots</button>
-<button id="view-gpui" type="button">GPUI view (WebGPU)</button>
-</div>
+<span id="renderer-status" role="status" style="font-size:12px;color:#666">Renderer: initializing</span>
 </div>
 <div id="report-2d"></div>
-<div id="report-gpui" style="display:none"></div>
 <div id="report-errors"></div>
 </div>
 <script id="report-payload" type="application/json">{{PAYLOAD_JSON}}</script>
@@ -253,8 +249,6 @@ th {
 const SCHEMA = "autoeq-report-data-v1";
 const WASM_2D_B64 = "{{WASM_2D_B64}}";
 const GLUE_2D_B64 = "{{GLUE_2D_B64}}";
-const WASM_GPUI_B64 = "{{WASM_GPUI_B64}}";
-const GLUE_GPUI_B64 = "{{GLUE_GPUI_B64}}";
 
 function b64ToBytes(b64) {
     const bin = atob(b64);
@@ -651,6 +645,7 @@ function renderOne(c) {
     const cssW = c.el.clientWidth || c.el.parentElement.clientWidth || 800;
     const cssH = sectionHeight(c.section.kind, cssW);
     c.el.style.height = cssW ? cssH + "px" : c.el.style.height;
+    c.el.dataset.renderer = "canvas";
     const rc = wasm2d.render_section(c.id, JSON.stringify(figureForRender(c)), cssW, cssH, dpr);
     if (rc !== 0) showError("render_section(" + c.id + ") failed with code " + rc);
 }
@@ -705,48 +700,110 @@ async function boot2d() {
     wireLegendClicks();
 }
 
-let gpuiMounted = false;
-let gpuiUnavailable = false;
-async function mountGpui() {
-    if (gpuiUnavailable) return;
-    const root = document.getElementById("report-gpui");
-    document.getElementById("report-2d").style.display = "none";
-    root.style.display = "";
-    document.getElementById("view-2d").classList.remove("active");
-    document.getElementById("view-gpui").classList.add("active");
-    if (gpuiMounted) return;
-    gpuiMounted = true;
+// One report and one d3rs/WASM geometry path. WebGPU only changes rasterization.
+async function bootGpu() {
+    const status = document.getElementById("renderer-status");
+    let device, buffer, attachment, context;
+    const fallback = reason => {
+        window.__reportTriangles = undefined;
+        status.textContent = "Renderer: Canvas fallback";
+        status.title = reason;
+        if (buffer) buffer.destroy();
+        if (attachment) attachment.destroy();
+        if (context) context.unconfigure();
+        if (device) device.destroy();
+    };
     try {
-        const mod = await loadBundle(WASM_GPUI_B64, GLUE_GPUI_B64);
-        if (mod.mount_report) await mod.mount_report("report-gpui");
-        else showError("GPUI bundle has no mount_report entry point.");
-        // The viewer resolves even when no WebGPU adapter exists (it logs
-        // and leaves the container empty); fall back to 2D with a note.
-        if (!root.querySelector("canvas")) {
-            show2d();
-            gpuiUnavailable = true;
-            const button = document.getElementById("view-gpui");
-            button.disabled = true;
-            button.title = "WebGPU is unavailable in this browser; use the interactive 2D plots.";
+        // Explicit diagnostic override; normal reports always select automatically.
+        if (new URLSearchParams(location.search).get("renderer") === "canvas") {
+            fallback("Canvas renderer requested by the diagnostic URL option."); return;
         }
-    } catch (e) {
-        showError("Could not start the GPUI viewer: " + e);
-    }
+        if (!navigator.gpu) { fallback("WebGPU API is not exposed in this browser context."); return; }
+        const adapter = await navigator.gpu.requestAdapter();
+        if (!adapter) { fallback("No WebGPU adapter is available."); return; }
+        device = await adapter.requestDevice();
+        const canvas = document.createElement("canvas");
+        context = canvas.getContext("webgpu");
+        if (!context) throw new Error("WebGPU canvas context unavailable");
+        const format = navigator.gpu.getPreferredCanvasFormat();
+        context.configure({device, format, alphaMode: "premultiplied"});
+        const shader = device.createShaderModule({code: `
+struct Vertex { @builtin(position) position: vec4f, @location(0) color: vec4f };
+@vertex fn vs(@location(0) position: vec2f, @location(1) color: vec4f) -> Vertex {
+    var out: Vertex; out.position = vec4f(position, 0.0, 1.0); out.color = color; return out;
 }
-function show2d() {
-    document.getElementById("report-gpui").style.display = "none";
-    document.getElementById("report-2d").style.display = "";
-    document.getElementById("view-gpui").classList.remove("active");
-    document.getElementById("view-2d").classList.add("active");
+@fragment fn fs(in: Vertex) -> @location(0) vec4f { return in.color; }
+`});
+        const pipeline = await device.createRenderPipelineAsync({
+            layout: "auto",
+            vertex: {module: shader, entryPoint: "vs", buffers: [{arrayStride: 24, attributes: [
+                {shaderLocation: 0, offset: 0, format: "float32x2"},
+                {shaderLocation: 1, offset: 8, format: "float32x4"}]}]},
+            fragment: {module: shader, entryPoint: "fs", targets: [{format}]},
+            primitive: {topology: "triangle-list"}, multisample: {count: 4},
+        });
+        let capacity = 0;
+        let failed = false;
+        const fail = reason => {
+            if (failed) return;
+            failed = true;
+            console.warn("Report WebGPU fallback:", reason);
+            fallback(String(reason));
+            requestAnimationFrame(renderVisible);
+        };
+        device.lost.then(info => { if (info.reason !== "destroyed") fail(info.message); });
+        device.addEventListener("uncapturederror", event => fail(event.error.message));
+        window.__reportTriangles = (ctx, vertices) => {
+            try {
+                if (!vertices.length) return true;
+                const width = ctx.canvas.width, height = ctx.canvas.height;
+                if (width > device.limits.maxTextureDimension2D || height > device.limits.maxTextureDimension2D)
+                    throw new Error("Plot exceeds GPU texture dimensions");
+                if (canvas.width !== width || canvas.height !== height || !attachment) {
+                    canvas.width = width; canvas.height = height;
+                    if (attachment) attachment.destroy();
+                    attachment = device.createTexture({size: [width, height], sampleCount: 4,
+                        format, usage: GPUTextureUsage.RENDER_ATTACHMENT});
+                }
+                // Preserve the current CSS-pixel transform and d3rs painter order.
+                const m = ctx.getTransform();
+                for (let i = 0; i < vertices.length; i += 6) {
+                    const x = vertices[i], y = vertices[i + 1];
+                    vertices[i] = 2 * (m.a * x + m.c * y + m.e) / width - 1;
+                    vertices[i + 1] = 1 - 2 * (m.b * x + m.d * y + m.f) / height;
+                }
+                if (vertices.byteLength > capacity) {
+                    if (buffer) buffer.destroy();
+                    capacity = vertices.byteLength;
+                    buffer = device.createBuffer({size: capacity, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST});
+                }
+                device.queue.writeBuffer(buffer, 0, vertices);
+                const encoder = device.createCommandEncoder();
+                const pass = encoder.beginRenderPass({colorAttachments: [{
+                    view: attachment.createView(), resolveTarget: context.getCurrentTexture().createView(),
+                    clearValue: [0, 0, 0, 0], loadOp: "clear", storeOp: "discard"}]});
+                pass.setPipeline(pipeline); pass.setVertexBuffer(0, buffer);
+                pass.draw(vertices.length / 6); pass.end();
+                device.queue.submit([encoder.finish()]);
+                // Canvas compositing preserves axes behind and highlights in front.
+                ctx.save(); ctx.resetTransform();
+                try { ctx.drawImage(canvas, 0, 0); } finally { ctx.restore(); }
+                ctx.canvas.dataset.renderer = "webgpu";
+                return true;
+            } catch (error) { fail(error); return false; }
+        };
+        status.textContent = "Renderer: WebGPU";
+        status.title = "d3rs/WASM geometry; GPU-accelerated surfaces; shared axes and controls.";
+    } catch (error) {
+        console.warn("Report WebGPU initialization failed:", error);
+        fallback(String(error));
+    }
 }
 
 if (payload) {
-    // The 2D/GPUI toggle always sits at the end of the title line. Without
-    // a WebGPU adapter the GPUI viewer falls back to 2D with a note.
-    document.getElementById("viewbar").style.display = "";
-    document.getElementById("view-gpui").addEventListener("click", mountGpui);
-    document.getElementById("view-2d").addEventListener("click", show2d);
+    // Render immediately, then upgrade surfaces when the adapter is ready.
     boot2d();
+    bootGpu().then(() => { if (wasm2d) renderVisible(); });
 }
 </script>
 </body>

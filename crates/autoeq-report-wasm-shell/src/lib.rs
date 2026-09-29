@@ -21,10 +21,11 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use autoeq_report_wasm::draw::{
-    Ctx, DrawMeta, LegendEntry, TextAlign, draw_bar, draw_figure, draw_sankey,
+    Ctx, DrawMeta, LegendEntry, PaintTriangle, TextAlign, draw_bar, draw_figure, draw_sankey,
+    paint_triangles,
 };
-use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
 use autoeq_report_wasm::grid::draw_grid;
+use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
 
 /// Retained per-canvas document for legend toggles.
 struct Retained {
@@ -59,6 +60,38 @@ impl CanvasCtx {
 }
 
 impl Ctx for CanvasCtx {
+    fn triangles(&mut self, triangles: &[PaintTriangle]) {
+        // The shell installs this synchronous compositor only after GPU setup.
+        // Keep d3rs projection, colors, and painter order identical in both paths.
+        let hook = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("__reportTriangles"))
+            .ok()
+            .and_then(|value| value.dyn_into::<js_sys::Function>().ok());
+        if let Some(hook) = hook {
+            let mut vertices = Vec::with_capacity(triangles.len() * 18);
+            for triangle in triangles {
+                for &(x, y) in &triangle.points {
+                    vertices.extend_from_slice(&[
+                        x as f32,
+                        y as f32,
+                        triangle.color[0] as f32 / 255.0,
+                        triangle.color[1] as f32 / 255.0,
+                        triangle.color[2] as f32 / 255.0,
+                        1.0,
+                    ]);
+                }
+            }
+            let data = js_sys::Float32Array::from(vertices.as_slice());
+            if hook
+                .call2(&JsValue::NULL, self.ctx.as_ref(), data.as_ref())
+                .ok()
+                .and_then(|value| value.as_bool())
+                == Some(true)
+            {
+                return;
+            }
+        }
+        paint_triangles(self, triangles);
+    }
     fn set_fill(&mut self, css: &str) {
         self.ctx.set_fill_style_str(css);
     }
@@ -229,9 +262,11 @@ pub fn toggle_series(canvas_id: &str, idx: usize) -> i32 {
                 .map(|mut map| {
                     map.get_mut(canvas_id)
                         .and_then(|r| match &mut r.section {
-                            Section::Figure { figure: f, .. } | Section::Grid { figure: f, .. } => f.series.get_mut(idx).map(|s| {
-                                s.visible = !s.visible;
-                            }),
+                            Section::Figure { figure: f, .. } | Section::Grid { figure: f, .. } => {
+                                f.series.get_mut(idx).map(|s| {
+                                    s.visible = !s.visible;
+                                })
+                            }
                             _ => None,
                         })
                         .is_some()

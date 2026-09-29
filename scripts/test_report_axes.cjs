@@ -52,3 +52,22 @@ assert(second.children[1].className.includes('active'));
 assert(!second.children[2].className.includes('active'));
 assert.equal(first.children[0].children[1].attrs['aria-pressed'], 'true');
 console.log('Independent speaker selectors passed');
+
+// Rotation is the same interaction for both rasterizers: only d3rs camera state changes.
+const panSource = template.slice(template.indexOf('function wireGraphPan('), template.indexOf('function smoothedSection('));
+let frame;
+const pan = vm.runInNewContext(panSource + '; wireGraphPan', {
+    structuredClone, ensureViewport: () => ({x:[20,20000],y:[0,500]}),
+    requestAnimationFrame: fn => {frame = fn; return 1;}, renderOne: () => {},
+});
+const handlers = {};
+const graph = {panEnabled:true, section:{kind:'grid',grid:{surface:true}},
+    el:{addEventListener:(name,fn)=>{handlers[name]=fn;},setPointerCapture(){},
+        getBoundingClientRect:()=>({width:1000,height:500}),classList:{add(){},remove(){}}}};
+pan(graph);
+handlers.pointerdown({clientX:100,clientY:100,pointerId:1});
+handlers.pointermove({clientX:200,clientY:150});
+assert.deepEqual(Array.from(graph.section.grid.rotation), [81,6]);
+assert.equal(typeof frame, 'function'); frame();
+handlers.pointerup();
+console.log('Shared surface rotation controls passed');

@@ -4,8 +4,9 @@
 //! JSON payload plus WASM modules that create the plots client-side.
 //! The default 2D renderer draws on Canvas 2D with geometry from
 //! gpui-toolkit's `d3rs` (scales, axis layout, sankey layout, color schemes)
-//! and needs no WebGPU. A full-GPUI enhanced view (sibling crate
-//! `autoeq-report-gpui`) takes over when the shell detects WebGPU.
+//! and needs no WebGPU. When an adapter is available, the shell accelerates
+//! projected surface triangles with WebGPU in the same plots. Layout, axes,
+//! colors, and interaction remain shared with the Canvas fallback.
 
 pub mod assemble;
 pub mod draw;

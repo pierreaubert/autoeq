@@ -2169,6 +2169,88 @@ mod processing_mode_tests {
         assert_eq!(config.processing_mode, ProcessingMode::LowLatency);
     }
 
+    /// Tilt stage fits a treble slope with the trailing high shelf.
+    #[test]
+    fn tilt_stage_fits_treble_slope_with_trailing_high_shelf() {
+        use math_audio_iir_fir::{Biquad, BiquadFilterType};
+
+        // Flat bass with a +6 dB treble shelf above 2 kHz against a flat target.
+        let mut curve = make_simple_room_curve();
+        curve.spl.fill(0.0);
+        curve.spl += &Biquad::new(BiquadFilterType::Highshelf, 2000.0, 48000.0, 1.0, 6.0)
+            .np_log_result(&curve.freq);
+        let config = OptimizerConfig {
+            algorithm: "autoeq:de".to_string(),
+            strategy: "lshade".to_string(),
+            num_filters: 0,
+            max_iter: 100,
+            population: 12,
+            seed: Some(7),
+            parallel_threads: Some(1),
+            min_freq: 20.0,
+            max_freq: 20000.0,
+            min_q: 0.5,
+            max_q: 6.0,
+            min_db: -12.0,
+            max_db: 8.0,
+            refine: false,
+            psychoacoustic: false,
+            tilt_stage: Some(roomeq_model::TiltStageConfig::default()),
+            filter_audibility: Some(roomeq_model::FilterAudibilityConfig {
+                elimination_loudness_delta_sones: 1e6,
+                ..Default::default()
+            }),
+            ..OptimizerConfig::default()
+        };
+        let result = optimize_channel_eq_inner(
+            &curve,
+            &config,
+            None,
+            48000.0,
+            Some(0.0),
+            None,
+            None,
+            &RealOptimizerBackend::new(),
+        )
+        .unwrap();
+
+        // HS cuts the shelf; the LS may prune away when it optimizes near zero.
+        let hs = result
+            .filters
+            .iter()
+            .find(|f| f.filter_type == BiquadFilterType::Highshelf)
+            .expect("tilt stage emits a high shelf");
+        assert!(
+            hs.db_gain < -3.0,
+            "HS should cut the +6 dB treble shelf: {hs:?}"
+        );
+        for ls in result
+            .filters
+            .iter()
+            .filter(|f| f.filter_type == BiquadFilterType::Lowshelf)
+        {
+            assert!(ls.db_gain.abs() < 2.0, "flat bass needs no LS tilt: {ls:?}");
+        }
+        // Corrected treble follows the flat target.
+        let mut corrected = curve.spl.clone();
+        for filter in &result.filters {
+            corrected += &filter.np_log_result(&curve.freq);
+        }
+        let mut sum = 0.0;
+        let mut count = 0;
+        for (value, freq) in corrected.iter().zip(curve.freq.iter()) {
+            if *freq >= 4000.0 {
+                sum += value.abs();
+                count += 1;
+            }
+        }
+        let treble_mean = sum / f64::from(count);
+        assert!(
+            treble_mean < 1.5,
+            "corrected treble should hug the target, mean |err| = {treble_mean}"
+        );
+    }
+
     /// Test LowLatency mode produces valid IIR filters
     #[test]
     fn test_optimize_channel_eq_lowlatency() {

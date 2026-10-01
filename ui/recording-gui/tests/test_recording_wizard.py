@@ -178,6 +178,42 @@ class WizardAppTests(unittest.TestCase):
             self.assertEqual(stepper["steps"],
                              [label for _, label in mo.STEPS])
 
+    def test_audio_meters_have_valid_channels(self):
+        # The host rejects meters with zero channels or mismatched
+        # levels/peaks/channel_names at init ("invalid channels"); the Node
+        # constructors do not validate, so pin the contract here.
+        app, _, _ = self._app()
+        meters = []
+
+        def collect(node):
+            if isinstance(node, dict):
+                if node.get("kind") in ("audio_level_meter",
+                                         "audio_horizontal_meter"):
+                    meters.append(node)
+                for value in node.values():
+                    collect(value)
+            elif isinstance(node, list):
+                for value in node:
+                    collect(value)
+
+        collect(app.to_spec())
+        self.assertTrue(meters, "expected at least one audio meter")
+        for meter in meters:
+            levels = meter.get("levels") or []
+            peaks = meter.get("peaks") or []
+            names = meter.get("channel_names") or []
+            self.assertTrue(1 <= len(levels) <= 128, meter.get("id"))
+            self.assertEqual(len(peaks), len(levels), meter.get("id"))
+            self.assertEqual(len(names), len(levels), meter.get("id"))
+
+    def test_miniapp_shell_enables_themes(self):
+        app, _, _ = self._app()
+        miniapp = app.to_spec()["miniapp"]
+        self.assertEqual(miniapp["title"], "Recording wizard")
+        self.assertEqual(miniapp["app_name"], "Recording wizard")
+        self.assertTrue(miniapp["with_theme"])
+        self.assertEqual(miniapp["initial_theme"], "dark")
+
     def test_config_select_options_carry_devices(self):
         app, _, _ = self._app()
         dumped = json.dumps(app.to_spec())

@@ -955,6 +955,96 @@ mod optimizer_rule_tests {
     }
 
     #[test]
+    fn rule_tilt_stage_default_is_silent() {
+        let result = run_rule(rule_tilt_stage, &default_config());
+        assert!(result.is_valid);
+        assert!(result.warnings.is_empty());
+    }
+
+    #[test]
+    fn rule_tilt_stage_enabled_with_auto_bands_is_silent() {
+        let mut config = default_config();
+        config.tilt_stage = Some(crate::TiltStageConfig::default());
+        let result = run_rule(rule_tilt_stage, &config);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn rule_tilt_stage_disabled_ignores_bands() {
+        let mut config = default_config();
+        config.tilt_stage = Some(crate::TiltStageConfig {
+            enabled: false,
+            ls_band_hz: Some([500.0, 100.0]),
+            hs_band_hz: Some([f64::NAN, 0.0]),
+        });
+        let result = run_rule(rule_tilt_stage, &config);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
+    fn rule_tilt_stage_rejects_non_pk_base() {
+        let mut config = default_config();
+        config.peq_model = "free".to_string();
+        config.tilt_stage = Some(crate::TiltStageConfig::default());
+        let result = run_rule(rule_tilt_stage, &config);
+        assert!(
+            result.errors.iter().any(|e| e.contains("peq_model 'pk'")),
+            "errors: {:?}",
+            result.errors
+        );
+    }
+
+    #[test]
+    fn rule_tilt_stage_rejects_malformed_bands() {
+        for band in [
+            [500.0, 100.0],
+            [0.0, 100.0],
+            [-20.0, 100.0],
+            [f64::NAN, 100.0],
+            [100.0, f64::INFINITY],
+        ] {
+            let mut config = default_config();
+            config.tilt_stage = Some(crate::TiltStageConfig {
+                ls_band_hz: Some(band),
+                ..Default::default()
+            });
+            let result = run_rule(rule_tilt_stage, &config);
+            assert!(
+                result.errors.iter().any(|e| e.contains("ls_band_hz")),
+                "band {band:?} should error: {:?}",
+                result.errors
+            );
+        }
+    }
+
+    #[test]
+    fn rule_tilt_stage_rejects_bands_outside_correction_band() {
+        // Default correction band is [20, 1600].
+        let mut config = default_config();
+        config.tilt_stage = Some(crate::TiltStageConfig {
+            hs_band_hz: Some([5000.0, 20000.0]),
+            ..Default::default()
+        });
+        let result = run_rule(rule_tilt_stage, &config);
+        assert!(
+            result
+                .errors
+                .iter()
+                .any(|e| e.contains("outside the correction band")),
+            "errors: {:?}",
+            result.errors
+        );
+
+        // Partial overlap is clamped, not rejected.
+        config.tilt_stage = Some(crate::TiltStageConfig {
+            hs_band_hz: Some([1000.0, 5000.0]),
+            ..Default::default()
+        });
+        let result = run_rule(rule_tilt_stage, &config);
+        assert!(result.errors.is_empty());
+    }
+
+    #[test]
     fn rule_num_filters_zero_warns() {
         let mut config = default_config();
         config.num_filters = 0;

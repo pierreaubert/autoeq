@@ -60,9 +60,9 @@ mod sub_optimizer_config;
 mod supporting_source_config;
 mod supporting_source_group;
 mod target_response_config;
-mod tilt_stage_config;
 #[cfg(test)]
 mod tests;
+mod tilt_stage_config;
 mod types;
 mod user_preference;
 mod validation;

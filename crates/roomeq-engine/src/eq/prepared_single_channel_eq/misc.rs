@@ -703,12 +703,15 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
 
     let mut acceptance_target = target_curve;
     acceptance_target.spl += mean_spl;
+    // The template carries the tilt-mapped layout (if any); decode, clamps,
+    // and roundtrips below must use the mapped model, not the base parse.
+    let mapped_model = args_template.peq_model;
     Ok(PreparedSingleChannelEq {
         input_normalization,
         acceptance_target,
         objective_data,
         args_template,
-        peq_model,
+        peq_model: mapped_model,
         sample_rate,
     })
 }
@@ -734,10 +737,13 @@ pub(in super::super) fn run_optimization_pass(
     Box<dyn Error>,
 > {
     let mut optim_params = prep.args_template.clone();
-    optim_params.num_filters = num_filters;
+    // The pass count is the BASE count; a tilt-mapped template (marked by
+    // resolved hinge bands) optimizes the pair on top of every pass.
+    let tilt_extra = usize::from(optim_params.tilt_bands_hz.is_some()) * 2;
+    optim_params.num_filters = num_filters + tilt_extra;
     optim_params.maxeval = max_iter;
 
-    if num_filters == 0 {
+    if optim_params.num_filters == 0 {
         let loss = autoeq_optim::optim::compute_fitness_penalties_ref(&[], &prep.objective_data);
         if !loss.is_finite() {
             return Err("identity EQ objective is not finite".into());
@@ -749,8 +755,8 @@ pub(in super::super) fn run_optimization_pass(
 
     // Log per-filter frequency bounds for diagnostics
     {
-        let ppf = autoeq_core::param_utils::params_per_filter(prep.peq_model);
-        for i in 0..num_filters {
+        let ppf = autoeq_core::param_utils::params_per_filter(optim_params.peq_model);
+        for i in 0..optim_params.num_filters {
             let freq_idx = i * ppf;
             let f_low = 10.0_f64.powf(lower_bounds[freq_idx]);
             let f_high = 10.0_f64.powf(upper_bounds[freq_idx]);

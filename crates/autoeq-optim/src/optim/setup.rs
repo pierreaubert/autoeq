@@ -225,12 +225,8 @@ pub fn setup_drivers_bounds_fixed_freqs(
 fn tilt_hinge_bands(params: &crate::OptimParams) -> ([f64; 2], [f64; 2]) {
     let mid = (params.min_freq * params.max_freq).sqrt();
     let bands = params.tilt_bands_hz;
-    let ls = bands
-        .and_then(|b| b.ls)
-        .unwrap_or([params.min_freq, mid]);
-    let hs = bands
-        .and_then(|b| b.hs)
-        .unwrap_or([mid, params.max_freq]);
+    let ls = bands.and_then(|b| b.ls).unwrap_or([params.min_freq, mid]);
+    let hs = bands.and_then(|b| b.hs).unwrap_or([mid, params.max_freq]);
     (ls, hs)
 }
 

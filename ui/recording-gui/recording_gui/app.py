@@ -27,6 +27,7 @@ from gpui_toolkit import (  # noqa: E402
     ui,
 )
 from gpui_toolkit import audio as tk_audio  # noqa: E402
+from gpui_toolkit.miniapp import MiniAppConfig  # noqa: E402
 
 from .backend import CaptureBackend, TakeRequest  # noqa: E402
 from .model import (  # noqa: E402
@@ -187,7 +188,7 @@ def _spl_section(model: WizardModel) -> ui.Node:
                 gap=12.0,
             ),
             tk_audio.level_meter(
-                id="spl-meter", levels=(), peaks=(),
+                id="spl-meter", levels=(0.0,), peaks=(0.0,),
                 channel_names=["Mic"],
             ),
             ui.text(
@@ -876,6 +877,14 @@ def build_app(
         model=model,
         backend=backend,
         eval_curves=dict(curves),
+        miniapp=MiniAppConfig(
+            title="Recording wizard",
+            app_name="Recording wizard",
+            width=_APP_WIDTH,
+            height=_APP_HEIGHT,
+            with_theme=True,
+            initial_theme="dark",
+        ),
     )
     app.resources = tuple(resources)
     return app

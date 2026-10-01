@@ -1725,6 +1725,19 @@ selection is enabled by `min_filter_improvement`, it remains enabled for
 interactive and QA runs with progress callbacks, including Hybrid's IIR stage.
 A stop request cancels the adaptive run rather than advancing to another pass.
 
+### Tilt stage
+
+`optimizer.tilt_stage` appends an optimizer-driven low-shelf plus high-shelf
+pair at the end of the DSP chain to fit broadband bass/treble tilt that peak
+filters express poorly. The pair extends `num_filters` by two instead of
+replacing peak slots, so enabling tilt never moves the main filters' bounds;
+every adaptive pass optimizes its peak count plus the pair. Both shelves use
+the existing shelf limits (+/-`max_db` gain, pinned Q) and flow through the
+same HF guard, audibility veto, and headroom stages as every other filter.
+`ls_band_hz` / `hs_band_hz` optionally pin the hinge bands; each defaults to
+its geometric half of the correction band. The stage requires
+`peq_model: "pk"`; other bases are rejected during validation.
+
 ### Algorithms
 
 Hybrid spatial FIR searches retain the caller's progress/stop callback after

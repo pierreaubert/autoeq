@@ -1,5 +1,11 @@
 # Unreleased
 
+- Add an optimizer tilt stage: `optimizer.tilt_stage` appends an
+  optimizer-driven low-shelf plus high-shelf pair at the end of the DSP
+  chain (new `pk-ls-hs` layout) to fit broadband bass/treble tilt. The pair
+  extends `num_filters` by two, uses the existing shelf limits, and requires
+  `peq_model: "pk"`. Hinge bands default to geometric halves of the
+  correction band and can be pinned per shelf.
 - Fix the +/− Zoom toolbar on the DSP signal-flow Sankey (and bar charts):
   cards without a data viewport now magnify geometrically (0.5–4x crisp
   re-render with card scrolling) instead of ignoring the click, and the

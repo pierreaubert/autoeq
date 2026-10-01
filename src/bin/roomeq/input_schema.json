@@ -2435,7 +2435,7 @@
           "type": "integer"
         },
         "tol": {
-          "default": 1e-08,
+          "default": 1e-8,
           "description": "DE convergence tolerance.",
           "format": "double",
           "type": "number"
@@ -3396,7 +3396,7 @@
           "description": "Asymmetric loss weights. `None` preserves the built-in default."
         },
         "atolerance": {
-          "default": 1e-05,
+          "default": 0.00001,
           "description": "Optimization convergence tolerance (absolute)",
           "format": "double",
           "type": "number"
@@ -3951,8 +3951,19 @@
           ],
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
+        "tilt_stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TiltStageConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Trailing LS plus HS tilt pair appended after the main filters."
+        },
         "tolerance": {
-          "default": 1e-05,
+          "default": 0.00001,
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
@@ -6066,6 +6077,44 @@
         }
       ]
     },
+    "TiltStageConfig": {
+      "additionalProperties": false,
+      "description": "Appends an optimizer-driven LS plus HS tilt pair at the DSP chain end.\n\nThe pair extends `num_filters` by two instead of replacing peak slots, so\nenabling tilt never moves the main filters' bounds. Both shelves use the\nexisting shelf limits (+/-`max_db` gain, pinned Q) and flow through the\nsame HF guard, audibility veto, and headroom stages as every other filter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable the trailing tilt pair.",
+          "type": "boolean"
+        },
+        "hs_band_hz": {
+          "description": "HS hinge band `[lo, hi]` in Hz (`None` selects the upper geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "ls_band_hz": {
+          "description": "LS hinge band `[lo, hi]` in Hz (`None` selects the lower geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "UpperBandAcousticBound": {
       "additionalProperties": false,
       "description": "Calibrated upper bound on an unmeasured acoustic transfer, before DSP.\nAn explicit declaration is a flat cap, not a fitted extrapolation. The\nsubwoofer stopband inference may instead record a measured rolloff, in\nwhich case `max_spl_db` is the bound level at `band_hz[0]` and the bound\ndeclines at `rolloff_db_per_oct` above it.",
@@ -6221,7 +6270,7 @@
       "default": {
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
-        "atolerance": 1e-05,
+        "atolerance": 0.00001,
         "elimination_threshold": 0.005,
         "finalization": {
           "default_input_peak": 1.0,
@@ -6253,7 +6302,7 @@
         "refine": true,
         "smooth_n": 2,
         "strategy": "lshade",
-        "tolerance": 1e-05
+        "tolerance": 0.00001
       },
       "description": "Optimizer configuration"
     },

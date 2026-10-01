@@ -139,6 +139,12 @@ applied. Bass retains its configured global cap; a stricter global cap still
 wins. These are engineering constraints, not audibility thresholds or evidence
 of valid direct-sound capture.
 
+`optimizer.tilt_stage` appends an optimizer-driven LS plus HS pair at the end
+of the DSP chain (`{"enabled": true}` with optional `ls_band_hz` /
+`hs_band_hz` hinge bands in Hz, each defaulting to its geometric half of the
+correction band). The pair adds two filters beyond `num_filters`, uses the
+existing shelf limits, and requires `peq_model: "pk"`.
+
 ## Processing mode names
 
 The preset names FIR, MIXED, and MIXED-PHASE are not interchangeable:

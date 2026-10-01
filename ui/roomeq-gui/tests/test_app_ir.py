@@ -60,6 +60,14 @@ class AppIrTests(unittest.TestCase):
         self.assertEqual(resources[dataset_id]["row_count"], 3)
         self.assertIn(dataset_id, json.dumps(charts[0]))
 
+    def test_miniapp_shell_enables_themes(self):
+        app = RoomEqGuiApp(SCHEMA, {}, RoomEqCommand(None))
+        miniapp = app.ir()["miniapp"]
+        self.assertEqual(miniapp["title"], "RoomEQ")
+        self.assertEqual(miniapp["app_name"], "RoomEQ")
+        self.assertTrue(miniapp["with_theme"])
+        self.assertEqual(miniapp["initial_theme"], "dark")
+
     def test_no_result_renders_empty_state(self):
         app = RoomEqGuiApp(SCHEMA, {}, RoomEqCommand(None))
         dumped = json.dumps(app.ir())

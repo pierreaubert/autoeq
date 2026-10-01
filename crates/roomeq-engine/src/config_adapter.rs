@@ -283,6 +283,47 @@ mod tests {
     }
 
     #[test]
+    fn optimizer_adapter_maps_tilt_stage_to_trailing_pair() {
+        let config = OptimizerConfig {
+            num_filters: 3,
+            tilt_stage: Some(roomeq_model::TiltStageConfig {
+                ls_band_hz: Some([20.0, 500.0]),
+                hs_band_hz: None,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let params = config.to_optim_params(48_000.0);
+        assert_eq!(params.peq_model, PeqModel::PkLsHs);
+        assert_eq!(params.num_filters, 5);
+        let bands = params.tilt_bands_hz.expect("tilt bands pass through");
+        assert_eq!(bands.ls, Some([20.0, 500.0]));
+        assert_eq!(bands.hs, None);
+    }
+
+    #[test]
+    fn optimizer_adapter_leaves_layout_without_tilt_stage() {
+        let config = OptimizerConfig {
+            num_filters: 3,
+            ..Default::default()
+        };
+        let params = config.to_optim_params(48_000.0);
+        assert_eq!(params.peq_model, PeqModel::Pk);
+        assert_eq!(params.num_filters, 3);
+        assert!(params.tilt_bands_hz.is_none());
+
+        let mut disabled = config.clone();
+        disabled.tilt_stage = Some(roomeq_model::TiltStageConfig {
+            enabled: false,
+            ..Default::default()
+        });
+        let params = disabled.to_optim_params(48_000.0);
+        assert_eq!(params.peq_model, PeqModel::Pk);
+        assert_eq!(params.num_filters, 3);
+        assert!(params.tilt_bands_hz.is_none());
+    }
+
+    #[test]
     fn optimizer_adapter_uses_required_sample_rate() {
         let config = OptimizerConfig::default();
         for sample_rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {

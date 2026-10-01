@@ -32,3 +32,26 @@ impl Default for TiltStageConfig {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tilt_stage_serde_roundtrip() {
+        let cfg: TiltStageConfig =
+            serde_json::from_value(serde_json::json!({"ls_band_hz": [20.0, 500.0]})).unwrap();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.ls_band_hz, Some([20.0, 500.0]));
+        assert_eq!(cfg.hs_band_hz, None);
+        let back = serde_json::to_value(cfg).unwrap();
+        assert_eq!(back["ls_band_hz"], serde_json::json!([20.0, 500.0]));
+        assert!(back.get("hs_band_hz").is_none());
+    }
+
+    #[test]
+    fn tilt_stage_empty_object_enables_auto_bands() {
+        let cfg: TiltStageConfig = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(cfg, TiltStageConfig::default());
+    }
+}

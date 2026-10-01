@@ -78,7 +78,10 @@ fn psycho_fast_a02_calibrated_doubling_and_proxy_monotonicity() {
     let (freqs70, spl70) = flat_shape(70.0);
     let total50 = total_loudness(&specific_loudness(&freqs50, &spl50, 50.0));
     let total70 = total_loudness(&specific_loudness(&freqs70, &spl70, 70.0));
-    assert!(total70 > total50, "{total70} sone must exceed {total50} sone");
+    assert!(
+        total70 > total50,
+        "{total70} sone must exceed {total50} sone"
+    );
 }
 
 /// E01: the proxy keeps its defining 1 kHz/40 phon anchor and approximate
@@ -121,8 +124,16 @@ fn psycho_fast_d01_common_delay_preserves_temporal_metrics() {
             <= 1e-9
     );
     for (name, a, b) in [
-        ("pre_peak", base.pre_ringing_peak_db, moved.pre_ringing_peak_db),
-        ("post_peak", base.post_ringing_peak_db, moved.post_ringing_peak_db),
+        (
+            "pre_peak",
+            base.pre_ringing_peak_db,
+            moved.pre_ringing_peak_db,
+        ),
+        (
+            "post_peak",
+            base.post_ringing_peak_db,
+            moved.post_ringing_peak_db,
+        ),
         (
             "pre_audible",
             base.pre_ringing_audible_db,
@@ -149,8 +160,7 @@ fn psycho_fast_d02_masking_windows_are_milliseconds() {
     let mut audible = Vec::new();
     for sample_rate in [44_100.0, 48_000.0, 96_000.0] {
         let ir = precursor_ir(sample_rate, 0.005, 0.05);
-        let metrics =
-            temporal_ir_masking_metrics(&ir, sample_rate, &config).expect("valid IR");
+        let metrics = temporal_ir_masking_metrics(&ir, sample_rate, &config).expect("valid IR");
         audible.push(metrics.pre_ringing_audible_db);
     }
     for (a, b) in [(audible[0], audible[1]), (audible[1], audible[2])] {
@@ -186,7 +196,11 @@ fn psycho_fast_d03_gain_halving_preserves_normalized_shape() {
     let half: Vec<f64> = ir.iter().map(|sample| sample * 0.5).collect();
     let scaled = temporal_ir_masking_metrics(&half, sample_rate, &config).expect("valid IR");
     for (name, a, b) in [
-        ("pre_peak", full.pre_ringing_peak_db, scaled.pre_ringing_peak_db),
+        (
+            "pre_peak",
+            full.pre_ringing_peak_db,
+            scaled.pre_ringing_peak_db,
+        ),
         (
             "post_peak",
             full.post_ringing_peak_db,
@@ -204,7 +218,10 @@ fn psycho_fast_d03_gain_halving_preserves_normalized_shape() {
         ),
         ("penalty", full.penalty, scaled.penalty),
     ] {
-        assert!((a - b).abs() <= 1e-12, "{name} changed under pure gain: {a} -> {b}");
+        assert!(
+            (a - b).abs() <= 1e-12,
+            "{name} changed under pure gain: {a} -> {b}"
+        );
     }
     let energy = |signal: &[f64]| signal.iter().map(|sample| sample * sample).sum::<f64>();
     let ratio = energy(&half) / energy(&ir);

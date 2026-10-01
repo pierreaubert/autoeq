@@ -1,0 +1,253 @@
+# Mirror of .github/workflows/ci.yml for Gitea Actions.
+# Keep the job/step bodies in sync; only the header below is Gitea-specific.
+# Requires on the Gitea host: an Actions runner with the `ubuntu-latest` label
+# (plus a self-hosted `macos-15` runner for the macOS job), `actions/*` fetched
+# from github.com, and cache + artifact storage enabled (Gitea >= 1.22).
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  check-and-test:
+    name: Check, Clippy and Unit Tests
+    runs-on: ubuntu-latest
+    outputs:
+      crate-test-packages: ${{ steps.crate-test-matrix.outputs.packages }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Check crate-partition architecture
+        run: |
+          python3 -m unittest scripts/test_check_crate_partition.py
+          python3 scripts/check_crate_partition.py --baseline-ref "${{ github.event.pull_request.base.sha }}"
+
+      - name: cargo check
+        run: cargo check --workspace --all-targets --all-features
+
+      - name: Check RoomEQ schema baselines
+        run: python3 scripts/check_roomeq_schema_baselines.py
+      - name: Test RoomEQ GPUI client
+        run: |
+          python3 -m pip install 'jsonschema>=4.25,<5'
+          PYTHONPATH=python/roomeq-gui python3 -m unittest discover python/roomeq-gui/tests
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: Packaged file-list gate (root crate)
+        run: |
+          cargo test -p autoeq --test packaging_excludes
+          leaked=$(cargo package -p autoeq --list --allow-dirty | grep -E '^(data_tests/|data_generated/|scripts/)|\.mdat$|~$' || true)
+          if [ -n "$leaked" ]; then echo "leaked files in published package:"; echo "$leaked"; exit 1; fi
+
+      - name: Prepare crate test matrix
+        id: crate-test-matrix
+        run: echo "packages=$(python3 scripts/run_crate_test_matrix.py --list-json)" >> "$GITHUB_OUTPUT"
+
+  crate-unit-tests:
+    name: Unit Tests (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    needs: check-and-test
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.check-and-test.outputs.crate-test-packages) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ matrix.package }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run focused crate tests
+        run: python3 scripts/run_crate_test_matrix.py --package "${{ matrix.package }}" --release
+
+  qa-roomeq-ci:
+    name: RoomEQ CI QA Gate
+    runs-on: ubuntu-latest
+    needs: crate-unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Just
+        uses: extractions/setup-just@v4
+
+      - name: Strict RoomEQ config and registry lint
+        run: cargo test -p roomeq-qa strictly_deserialize --lib
+      - name: Install exact-test discovery
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Escaped-defect ownership and exact regressions
+        run: just qa-roomeq-escaped-defects
+      - name: Pairwise parameter execution and exit contracts
+        run: just qa-roomeq-parameters-pr
+      - name: Upload parameter-matrix evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-parameter-matrix
+          path: |
+            target/qa/roomeq-parameter-matrix.json
+            target/qa/roomeq-seed-distributions.jsonl
+      - name: Upload escaped-defect evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-escaped-defect-regressions
+          path: target/qa/escaped-defects/
+
+      - name: Run deterministic RoomEQ correctness contracts
+        run: just qa-roomeq-contract-pr
+
+      - name: Run RoomEQ CI QA
+        run: just qa-roomeq-ci
+
+  qa-roomeq-escaped-mutations:
+    name: RoomEQ Escaped-Defect Mutations
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v4
+      - uses: taiki-e/install-action@cargo-nextest
+      - uses: taiki-e/install-action@cargo-mutants
+      - name: Verify ownership and mutation-runner failure contracts
+        run: python3 -m unittest scripts.test_escaped_defect_ownership scripts.test_run_escaped_defect_mutations
+      - name: Registered escaped-defect mutations
+        run: just qa-roomeq-escaped-defect-mutants
+      - name: Upload mutation execution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-escaped-defect-mutations
+          path: target/qa/escaped-defects/
+
+  qa-roomeq-camilladsp:
+    name: RoomEQ Required CamillaDSP Contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: extractions/setup-just@v4
+      - name: Verify required-backend launcher failure contracts
+        run: python3 scripts/test_camilladsp_backend_contracts.py
+      - name: Install Linux audio build dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpulse-dev libjack-jackd2-dev
+      - name: Install verified CamillaDSP revision
+        run: cargo install --locked --git https://github.com/HEnquist/camilladsp.git --rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 CamillaDSP
+      - name: Execute required PCM backend contracts
+        run: just qa-roomeq-camilladsp-backend
+      - name: Replay all selected parameter-matrix outputs through CamillaDSP
+        run: just qa-roomeq-matrix-backend
+      - name: Upload actual backend evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-camilladsp-backend
+          path: |
+            target/qa/camilladsp-backend-contracts.*
+            target/qa/roomeq-matrix-backend.*
+            target/qa/roomeq-parameter-matrix.json
+            target/qa/roomeq-parameter-bundles/
+
+  qa-roomeq-macos:
+    name: RoomEQ macOS Acoustic Baseline
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-roomeq-acoustic-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Validate native macOS acoustic baseline and held-out gates
+        run: cargo run --release --features qa --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.json
+
+  coverage-gate:
+    name: Library Unit-Test Coverage Gate (90 %)
+    runs-on: ubuntu-latest
+    needs: crate-unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Install Just
+        uses: extractions/setup-just@v4
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-coverage-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run coverage gate
+        run: just qa-roomeq-coverage-gate

@@ -1,0 +1,68 @@
+# Mirror of .github/workflows/roomeq-acoustic-quality.yml for Gitea Actions.
+# Keep the job/step bodies in sync; only the header above is Gitea-specific.
+# Requires on the Gitea host: an Actions runner with the `ubuntu-latest`
+# label, `actions/*` fetched from github.com, and cache + artifact storage
+# enabled (Gitea >= 1.22).
+name: RoomEQ acoustic quality
+
+on:
+  pull_request:
+    paths:
+      - "crates/roomeq-*/**"
+      - "crates/autoeq-core/**"
+      - "crates/autoeq-measurements/**"
+      - "crates/autoeq-optim/**"
+      - "src/roomeq/**"
+      - "data_tests/roomeq/**"
+      - "utils/mdat2csv.py"
+      - "tests/test_mdat2csv.py"
+      - "Justfile"
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: roomeq-acoustic-quality-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  acoustic-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: extractions/setup-just@v4
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@cargo-mutants
+      - name: REW MDAT converter contracts
+        run: just qa-roomeq-mdat
+      - name: PR acoustic gates and reports
+        if: github.event_name == 'pull_request'
+        run: just qa-roomeq-acoustic-report data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json
+      - name: Nightly acoustic gates and reports
+        if: github.event_name != 'pull_request'
+        run: |
+          mkdir -p target/qa
+          cargo run --release --features qa --bin roomeq-qa-acoustic -- \
+            --tier nightly \
+            --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json \
+            --output target/qa/roomeq-acoustic.json \
+            --markdown-output target/qa/roomeq-acoustic.md \
+            --history target/qa/roomeq-acoustic-history.ndjson \
+            --max-runtime-ms 900000 \
+            --max-peak-rss-kib 4194304
+      - name: RoomEQ subsystem coverage floors
+        run: just qa-roomeq-subsystem-coverage
+      - name: Deterministic RoomEQ mutation smoke
+        run: just qa-roomeq-mutation-smoke
+      - name: Upload acoustic trend artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-acoustic-quality
+          path: target/qa/

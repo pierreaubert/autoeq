@@ -11,6 +11,8 @@ and commit actions with ``payload.value`` (demo_app pattern).
 """
 from __future__ import annotations
 
+import os
+import sys
 from dataclasses import dataclass, field
 
 from ._toolkit import ensure_toolkit  # noqa: E402
@@ -845,8 +847,21 @@ class WizardApp(App):
                 model, "output_dir", v or None), "config-status",
                 "output_dir")
         else:
-            context.error(event.id, "unknown_action",
-                          f"unknown action: {action}")
+            # The host also delivers synthesized events the app never
+            # declared (dropdown open/focus, shell chrome). They carry no
+            # app action, so acknowledge and ignore them instead of
+            # surfacing a user-facing error; log to stderr for debugging.
+            print(f"recording-gui: ignoring unhandled action {action!r} "
+                  f"(node {event.node_id}, event {event.event})",
+                  file=sys.stderr)
+            context.acknowledge(event)
+
+    def run(self) -> None:
+        # The native host otherwise prefers its own repository venv. A
+        # console-script installation lives in this interpreter's
+        # site-packages, so ensure the supervised child uses the same one.
+        os.environ.setdefault("GPUI_PYTHON", sys.executable)
+        super().run()
 
 
 def build_app(

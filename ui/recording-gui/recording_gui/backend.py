@@ -11,6 +11,7 @@ import json
 import math
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -264,8 +265,8 @@ def resolve_backend(
     """Build the backend for ``fake`` / ``cli`` / ``auto``.
 
     Returns (backend, demo_mode). ``auto`` uses the CLI when the binary
-    resolves, else the fake backend in demo mode. ``cli`` raises when the
-    binary is missing instead of silently demoing.
+    resolves, else the fake backend in demo mode (with a stderr warning).
+    ``cli`` raises when the binary is missing instead of silently demoing.
     """
     if mode == "fake":
         return (FakeCaptureBackend(), True)
@@ -280,6 +281,9 @@ def resolve_backend(
         return (CliCaptureBackend(resolved), False)
     if mode == "auto":
         if resolved is None:
+            print("warning: sotf-capture binary not found; using fake "
+                  "devices (demo mode). Pass --bin or --backend fake to "
+                  "silence this warning.", file=sys.stderr)
             return (FakeCaptureBackend(), True)
         return (CliCaptureBackend(resolved), False)
     raise ValueError(f"unknown backend mode: {mode!r}")

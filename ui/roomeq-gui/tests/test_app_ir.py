@@ -68,6 +68,18 @@ class AppIrTests(unittest.TestCase):
         self.assertTrue(miniapp["with_theme"])
         self.assertEqual(miniapp["initial_theme"], "dark")
 
+    def test_session_child_argv_rebuild(self):
+        from roomeq_gui.__main__ import (
+            _SESSION_ARGS_ENV, _session_child_argv)
+        env = {_SESSION_ARGS_ENV: json.dumps({
+            "roomeq": "/tmp/roomeq", "config": "/tmp/room.json",
+            "result": None})}
+        self.assertEqual(
+            _session_child_argv(env),
+            ["--roomeq", "/tmp/roomeq", "--config", "/tmp/room.json"])
+        self.assertIsNone(_session_child_argv({}))
+        self.assertIsNone(_session_child_argv({_SESSION_ARGS_ENV: "{bogus"}))
+
     def test_no_result_renders_empty_state(self):
         app = RoomEqGuiApp(SCHEMA, {}, RoomEqCommand(None))
         dumped = json.dumps(app.ir())

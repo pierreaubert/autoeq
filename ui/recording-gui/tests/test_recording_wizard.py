@@ -1,6 +1,9 @@
 """Tests for the recording wizard (backends + model + app IR)."""
 
+import contextlib
+import io
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -214,6 +217,66 @@ class WizardAppTests(unittest.TestCase):
         self.assertTrue(miniapp["with_theme"])
         self.assertEqual(miniapp["initial_theme"], "dark")
 
+    def test_session_child_argv_rebuild(self):
+        from recording_gui.__main__ import (
+            _SESSION_ARGS_ENV, _session_child_argv)
+        env = {_SESSION_ARGS_ENV: json.dumps({
+            "backend": "cli", "bin": "/tmp/sotf-capture",
+            "channels": "L,R", "output_dir": "/tmp/takes",
+            "curves": ["/tmp/a.csv", "/tmp/b.csv"]})}
+        self.assertEqual(
+            _session_child_argv(env),
+            ["--backend", "cli", "--bin", "/tmp/sotf-capture",
+             "--channels", "L,R", "--output-dir", "/tmp/takes",
+             "--curves", "/tmp/a.csv", "/tmp/b.csv"])
+        self.assertIsNone(_session_child_argv({}))
+        self.assertIsNone(_session_child_argv({_SESSION_ARGS_ENV: "{bogus"}))
+        self.assertIsNone(_session_child_argv({_SESSION_ARGS_ENV: "[1]"}))
+
+    def test_parent_forwards_and_child_restores_cli(self):
+        # The host relaunches [python, script] with no args for the
+        # supervised session; the child must restore the parent's CLI.
+        from recording_gui.__main__ import _SESSION_ARGS_ENV, main
+        saved = {key: os.environ.get(key) for key in
+                 (_SESSION_ARGS_ENV, "GPUI_TOOLKIT_SESSION",
+                  "GPUI_TOOLKIT_DUMP_IR")}
+        self.addCleanup(lambda: [
+            os.environ.pop(key, None) if value is None
+            else os.environ.__setitem__(key, value)
+            for key, value in saved.items()])
+
+        def dump(argv):
+            buffer = io.StringIO()
+            with contextlib.redirect_stdout(buffer):
+                self.assertEqual(main(argv), 0)
+            return json.loads(buffer.getvalue())
+
+        def take_labels(spec):
+            found = []
+
+            def collect(node):
+                if isinstance(node, dict):
+                    if node.get("id") == "capture-takes":
+                        found.extend(row[0] for row in node["rows"])
+                    for value in node.values():
+                        collect(value)
+                elif isinstance(node, list):
+                    for value in node:
+                        collect(value)
+
+            collect(spec)
+            return found
+
+        os.environ["GPUI_TOOLKIT_DUMP_IR"] = "1"
+        os.environ.pop("GPUI_TOOLKIT_SESSION", None)
+        parent = dump(["--backend", "fake", "--channels", "L,R,C"])
+        self.assertEqual(take_labels(parent), ["L", "R", "C"])
+        # Parent exported its resolved config for the session child.
+        self.assertIn(_SESSION_ARGS_ENV, os.environ)
+        os.environ["GPUI_TOOLKIT_SESSION"] = "1"
+        child = dump(None)
+        self.assertEqual(take_labels(child), ["L", "R", "C"])
+
     def test_config_select_options_carry_devices(self):
         app, _, _ = self._app()
         dumped = json.dumps(app.to_spec())
@@ -292,8 +355,14 @@ class WizardAppTests(unittest.TestCase):
         app.on_action(make_event("wizard_output_device",
                                  "Fake Speakers"), ctx)
         self.assertEqual(model.output_name, "Fake Speakers")
+        errors_before = len(ctx.errors)
         app.on_action(make_event("bogus_action"), ctx)
-        self.assertEqual(ctx.errors[-1][0], "unknown_action")
+        # Undeclared host-synthesized events are acknowledged and ignored,
+        # never surfaced as user-facing errors.
+        self.assertEqual(len(ctx.errors), errors_before)
+        self.assertIn("e1", ctx.acknowledged)
+        app.on_action(make_event(""), ctx)
+        self.assertEqual(len(ctx.errors), errors_before)
 
     def test_evaluating_charts_from_preloaded_curves(self):
         from recording_gui.app import build_app

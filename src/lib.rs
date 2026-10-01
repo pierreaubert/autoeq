@@ -66,7 +66,7 @@ pub use optim::params as optim_params;
 // Re-export commonly used items
 pub use cli::*;
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
-pub use optim::params::{OptimParams, PeqModel};
+pub use optim::params::{OptimParams, PeqModel, TiltBandsHz};
 pub use optim::*;
 pub use plot::*;
 pub use read::*;

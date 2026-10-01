@@ -218,6 +218,22 @@ pub fn setup_drivers_bounds_fixed_freqs(
     (lower_bounds, upper_bounds)
 }
 
+/// Resolve the `(LS, HS)` hinge bands (Hz) for the `PkLsHs` tilt pair.
+///
+/// Explicit bands win; each missing band falls back to its geometric half of
+/// the correction band. Callers clamp the result into the band.
+fn tilt_hinge_bands(params: &crate::OptimParams) -> ([f64; 2], [f64; 2]) {
+    let mid = (params.min_freq * params.max_freq).sqrt();
+    let bands = params.tilt_bands_hz;
+    let ls = bands
+        .and_then(|b| b.ls)
+        .unwrap_or([params.min_freq, mid]);
+    let hs = bands
+        .and_then(|b| b.hs)
+        .unwrap_or([mid, params.max_freq]);
+    (ls, hs)
+}
+
 /// Build optimization parameter bounds for the optimizer.
 pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
     use crate::PeqModel;
@@ -235,9 +251,21 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
         -3.0 * params.max_db
     };
     let q_lower = params.min_q.max(0.1);
-    let range = (params.max_freq.log10() - params.min_freq.log10()) / (params.num_filters as f64);
+    // PkLsHs reserves the trailing groups for the tilt pair; the progressive
+    // PK banding only spans the leading groups so enabling tilt never moves
+    // the main filters' bounds.
+    let n_tilt = match model {
+        PeqModel::PkLsHs => params.num_filters.min(2),
+        _ => 0,
+    };
+    let n_main = params.num_filters - n_tilt;
+    let range = if n_main > 0 {
+        (params.max_freq.log10() - params.min_freq.log10()) / (n_main as f64)
+    } else {
+        params.max_freq.log10() - params.min_freq.log10()
+    };
 
-    for i in 0..params.num_filters {
+    for i in 0..n_main {
         // Center frequency for this filter in log space
         let f_center = params.min_freq.log10() + (i as f64) * range;
 
@@ -289,7 +317,8 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
             | PeqModel::HpPk
             | PeqModel::HpPkLp
             | PeqModel::LsPk
-            | PeqModel::LsPkHs => {
+            | PeqModel::LsPkHs
+            | PeqModel::PkLsHs => {
                 // Fixed filter types: [freq, Q, gain]
                 lower_bounds.extend_from_slice(&[f_low_adjusted, q_lower, gain_lower]);
                 upper_bounds.extend_from_slice(&[f_high_adjusted, q_upper, params.max_db]);
@@ -371,6 +400,22 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
         }
     }
 
+    // Trailing tilt pair for PkLsHs: fixed LS/HS triplets with free hinges.
+    // Gains follow the shelf convention (+/-max_db); Q is pinned because the
+    // DSP core's RBJ shelves do not use it. The clamp loop below keeps explicit
+    // hinge bands inside the correction band.
+    if n_tilt > 0 {
+        let shelf_q = 1.0_f64.clamp(params.min_q, params.max_q);
+        let (ls_band, hs_band) = tilt_hinge_bands(params);
+        // The degenerate single-group layout keeps only the treble shelf.
+        if n_tilt == 2 {
+            lower_bounds.extend_from_slice(&[ls_band[0].log10(), shelf_q, -params.max_db]);
+            upper_bounds.extend_from_slice(&[ls_band[1].log10(), shelf_q, params.max_db]);
+        }
+        lower_bounds.extend_from_slice(&[hs_band[0].log10(), shelf_q, -params.max_db]);
+        upper_bounds.extend_from_slice(&[hs_band[1].log10(), shelf_q, params.max_db]);
+    }
+
     // Model-specific fixed HP/LP/shelf anchors must not escape the measured
     // optimization band. Clamp both ends before repairing any collapsed range
     // so every candidate remains meaningful for the available data.
@@ -417,6 +462,9 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
                 PeqModel::LsPkHs if i == 0 => "LS",
                 PeqModel::LsPkHs if i == params.num_filters - 1 => "HS",
                 PeqModel::LsPkHs => "PK",
+                PeqModel::PkLsHs if params.num_filters >= 2 && i == params.num_filters - 2 => "LS",
+                PeqModel::PkLsHs if i == params.num_filters - 1 => "HS",
+                PeqModel::PkLsHs => "PK",
                 PeqModel::FreePkFree if i == 0 || i == params.num_filters - 1 => "??",
                 PeqModel::FreePkFree => "PK",
                 PeqModel::Free => "??",

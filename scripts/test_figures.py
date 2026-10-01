@@ -38,8 +38,11 @@ class EarlyLateFigureTests(unittest.TestCase):
                 {"centre_hz": 125, "t60_s": None},
                 {"centre_hz": 250, "t60_s": 0.4}]
         section = create_t60_octaves_figure("L", rows)
-        # None passes through as a gap (renderer breaks the line there).
-        self.assertEqual(section_series(section)[0]["y"], [0.5, None, 0.4])
+        # Band-constant steps: the None pair passes through as a gap
+        # (renderer breaks the line there), leaving the invalid octave
+        # unconnected to either neighbor.
+        self.assertEqual(section_series(section)[0]["y"],
+                         [0.5, 0.5, None, None, 0.4, 0.4])
         self.assertIsNone(create_t60_octaves_figure("L", rows[1:2]))
 
     def test_shared_reference_is_required_for_energy_contribution_plot(self):
@@ -63,6 +66,26 @@ class EarlyLateFigureTests(unittest.TestCase):
         self.assertIsNone(create_early_late_figure("L", report))
         report["split_ms"] = 20.0
         report["late"]["freq"] = [101.0, 126.0, 161.0]
+        self.assertIsNone(create_early_late_figure("L", report))
+
+    def test_full_below_a_part_refuses_foreign_energy_data(self):
+        freq = [100.0, 125.0, 160.0]
+        report = {
+            "method": "incoherent_band_energy",
+            "reference": "full_peak_band",
+            "smoothing": "third_octave", "split_ms": 20.0,
+            "full": {"freq": freq, "spl": [0.0, -2.0, -4.0]},
+            "early": {"freq": freq, "spl": [-1.0, -3.0, -5.0]},
+            "late": {"freq": freq, "spl": [-7.0, -9.0, -11.0]},
+        }
+        section = create_early_late_figure("L", report)
+        widths = [s["width"] for s in section_series(section)]
+        self.assertEqual(widths, [2.5, 2.0, 2.0])
+        # Late poking above Full is impossible for an incoherent sum.
+        report["late"]["spl"] = [-7.0, -1.0, -11.0]
+        self.assertIsNone(create_early_late_figure("L", report))
+        report["late"]["spl"] = [-7.0, -9.0, -11.0]
+        report["early"]["spl"] = [-1.0, -3.0, -3.9]
         self.assertIsNone(create_early_late_figure("L", report))
 
 

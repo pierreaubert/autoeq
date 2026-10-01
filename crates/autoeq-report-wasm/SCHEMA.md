@@ -12,20 +12,40 @@ human-readable contract.
 
 ## Top level
 
-The HTML shell accepts optional `group` titles on sections, grouping them into
-collapsible panels in first-occurrence order. `tab` selectors are independent
-inside each group; ungrouped sections remain above them. A `footer: true`
-section follows its group's tab pages. These are shell layout hints, ignored
-by the Rust chart renderer. Grid `rotation: [elevation, azimuth]` is optional
+The HTML shell accepts optional `bucket` names on sections, rendering one
+centered tab per bucket (`DSP analysis`, `Acoustics analysis`,
+`Psychoacoustic report`, in that canonical order); unbucketed sections stay
+visible above the tabs. Inside a bucket with more than one `subhead`, the
+subheads render as tabs sharing the channel-tab styling; a lone subhead
+renders directly with no tab bar. `tab` selectors are independent inside
+each subhead page; untabbed sections render first. A
+`footer: true` section follows its subhead's tab pages, and `flat: true` on
+an `html` section skips the shell card chrome for self-framed content.
+Optional `group` titles are the legacy equivalent of buckets, grouping
+sections into collapsible panels in first-occurrence order; producers should
+emit `bucket`/`subhead` instead. These are shell layout hints, ignored by
+the Rust chart renderer. Grid `rotation: [elevation, azimuth]` is optional
 display-only d3rs camera state in degrees; Reset restores `[65, -12]`.
 
 ```json
 {
   "schema": "autoeq-report-data-v1",
   "title": "page title",
-  "sections": [ ... ]
+  "sections": [ ... ],
+  "provenance": {
+    "roomeq_version": "0.5.74",
+    "data_timestamp": "2026-10-01T11:00:00Z",
+    "generated_at": "2026-10-01T11:05:00Z"
+  }
 }
 ```
+
+`provenance` is optional and additive (omitted payloads render as before).
+When present, the shell shows one header line above the renderer status —
+`RoomEQ <roomeq_version>`, `Data <data_timestamp>`, `Report <generated_at>`
+for whichever fields are set — using text assignment, so values are never
+interpreted as HTML. `data_timestamp` is the DSP emission moment
+(`metadata.timestamp`); `generated_at` is the HTML render moment.
 
 The shell refuses to render when `schema` does not match
 `autoeq-report-wasm-shell::schema_version()`.
@@ -56,9 +76,13 @@ entire attribute value, not interpolate raw JSON into HTML.
 Carries `figure` axis/title/legend metadata and `grid` data:
 `x` (positive increasing frequencies), `y` (increasing times in ms),
 `z` (finite rectangular values indexed `[time][frequency]`), `surface`
-(true for a filled projected surface, false for a heatmap), and `zmin`/`zmax`
+(true for a projected surface view, false for a heatmap), and `zmin`/`zmax`
 (fixed colour/display range). Optional `highlights` contains frequency-column
 indices; matching `figure.series` entries provide names, colours and visibility.
+Surface views accept `colormap` (turbo, viridis, plasma, inferno, magma,
+rainbow; unknown names fall back to turbo), `show_surface` (fill visibility,
+default off) and `show_contours` (time-slice contours, default on), so the
+default surface is an REW-style contour wireframe with ridge highlights.
 
 Both axes require at least two values. Arrays are limited to 4096 per axis and
 one million cells. Invalid grids render an explicit unavailable message.
@@ -107,6 +131,9 @@ Cartesian line chart. `x.scale` is `log` or `linear`; `y` is always linear.
   as primary. Reference lines and annotations always use the primary axis.
 - `hlines` entries may carry an optional `label`, drawn at the right plot
   edge (e.g. a headroom limit). Bar charts accept `hlines` too.
+- A primary-y label of exactly `SPL (dB)` selects the audio SPL grid:
+  labelled majors on an adaptive 1/2/5 stride plus a minor horizontal
+  gridline every integer dB. Other labels keep the default ~6 ticks.
 
 ### `bar`
 
@@ -149,6 +176,11 @@ Flow diagram (bass-management routing).
 
 `source`/`target` index into `nodes`. Non-positive or dangling links are
 dropped. Layout comes from the `d3rs` Sankey implementation.
+Optional `chart.node_boxes: true` draws fixed-height plugin boxes connected by
+arrows instead of quantity-width bands. It defaults to `false`. The HTML shell
+accepts section-level `min_width` in CSS pixels for horizontally scrollable
+signal-flow diagrams and `min_height` for parallel-channel spacing (both capped
+at 6000 pixels). These affect canvas size, not the graph's processing topology.
 
 ## Versioning
 

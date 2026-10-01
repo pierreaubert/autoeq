@@ -1,5 +1,27 @@
 {
   "version": "3.0.0",
+  "measured_impulse_responses": {
+    "L": {
+      "path": "measured_ir/Left_speaker__ir.csv",
+      "sample_rate_hz": 48000
+    },
+    "R": {
+      "path": "measured_ir/Right_speaker__ir.csv",
+      "sample_rate_hz": 48000
+    },
+    "sub_left": {
+      "path": "measured_ir/left_sub_better_placement__ir.csv",
+      "sample_rate_hz": 3000,
+      "output_channel": "Sub1",
+      "driver": "Sub1"
+    },
+    "sub_right": {
+      "path": "measured_ir/right_sub_better_placement__ir.csv",
+      "sample_rate_hz": 3000,
+      "output_channel": "Sub1",
+      "driver": "Sub2"
+    }
+  },
   "system": {
     "model": "stereo",
     "speakers": {

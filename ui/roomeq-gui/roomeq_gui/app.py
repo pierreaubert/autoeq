@@ -9,7 +9,7 @@ from .commands import RoomEqCommand
 from .document import RoomEqDocument
 from .review import ResultReview
 from .schema import SchemaEditor
-from gpui_toolkit import App, Event, SessionContext, section, ui, charts
+from gpui_toolkit import App, Event, SessionContext, StateError, StateStore, data, section, ui, charts
 from gpui_toolkit.miniapp import MiniAppConfig
 
 class RoomEqGuiApp(App):
@@ -23,11 +23,10 @@ class RoomEqGuiApp(App):
         self.import_error: str | None = None
         self.preferences: dict[str, Any] = {"recent_configs": [], "recent_results": [], "selected_binary": str(command.binary) if command.binary else None, "review": {"smoothing": "1/6 octave", "auto_scale": False, "trend": False}}
         try:
-            from gpui_toolkit import StateStore
             stored = StateStore("org.autoeq.roomeq-gui").load(version=1, default={})
             if isinstance(stored.state, dict): self.preferences.update(stored.state)
             self._state_store = StateStore("org.autoeq.roomeq-gui")
-        except (ImportError, OSError, ValueError, TypeError): self._state_store = None
+        except (OSError, ValueError, TypeError, StateError): self._state_store = None
         super().__init__(
             title="RoomEQ",
             sidebar_title="RoomEQ",
@@ -41,6 +40,7 @@ class RoomEqGuiApp(App):
                 initial_theme="dark",
             ),
         )
+        self.resources = tuple(self._chart_resources)
     def save_preferences(self) -> None:
         """Only navigation/review preferences are persisted; document JSON is never stored here."""
         if self._state_store: self._state_store.save(self.preferences, version=1)
@@ -49,6 +49,7 @@ class RoomEqGuiApp(App):
         self.preferences[key] = values[:10]
     def _refresh(self, context: SessionContext) -> None:
         self.sections = self._sections()
+        self.resources = tuple(self._chart_resources)
         context.snapshot(self.to_spec())
     def on_action(self, event: Event, context: SessionContext) -> None:
         payload = event.payload or {}
@@ -109,10 +110,26 @@ class RoomEqGuiApp(App):
             elif schema.get("type") == "array": controls.append(ui.list_editor(id=field.node_id, label=field.label, rows=[], add_action="array-add", remove_action="array-remove"))
             else: controls.append(ui.text_input(id=field.node_id, label=field.label, value="" if value is None else str(value), action="edit-field", validation=validation))
         review = self.review(); review_nodes = []
+        chart_resources = []
         if review:
             review_nodes.append(ui.table(id="review-metrics", headers=["Metric", "Value"], rows=[[key, value] for key, value in review.overview().items() if not isinstance(value, (dict, list))]))
-            for series in review.curves()[:8]: review_nodes.append(charts.line("chart" + series.id.replace("/", "-"), series.x, series.y, title=series.label, x_label="Hz", y_label="dB"))
+            for series in review.curves()[:8]:
+                chart_id = "chart" + series.id.replace("/", "-")
+                dataset = data.Dataset.from_mapping(
+                    {"frequency": list(series.x), "level": list(series.y),
+                     "series": [series.label or "curve"] * len(series.x),
+                     "color": ["#38bdf8"] * len(series.x)},
+                    id="ds-" + chart_id,
+                )
+                chart_resources.append(dataset)
+                review_nodes.append(
+                    charts.line(chart_id).data(dataset)
+                    .x("frequency").y("level").series("series").color("color")
+                    .title(series.label or chart_id)
+                    .x_log().x_label("Hz").y_label("dB")
+                )
         else: review_nodes.append(ui.empty_state("No result loaded", description="Open a DspChainOutput or run optimization to review it."))
+        self._chart_resources = chart_resources
         workflow_children = [
             ui.stepper(id="workflow-stepper", steps=["Configure", "Validate", "Optimize", "Review"], active=self.step, action="step"),
             ui.hstack([ui.button("Import…", id="import-config", action="open-import-dialog"), ui.button("Save", id="save", action="save"), ui.button("Validate", id="validate", action="validate")]),

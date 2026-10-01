@@ -215,6 +215,10 @@ class CaptureViewsTests(unittest.TestCase):
         views["early_late_curves"]["reference"] = "late_peak"
         bind()
         self.assertIn("invalid capture early/late analysis contract", capture_views_html(report))
+        views["early_late_curves"]["reference"] = "full_peak_band"
+        views["early_late_curves"]["post"]["late"]["spl"][0] = 0.005
+        bind()
+        self.assertIn("incoherent energy sum violated", capture_views_html(report))
 
     def test_octave_t60_keeps_invalid_bands_and_capture_binding(self):
         report = fixture()

@@ -703,7 +703,7 @@ fn roadmap_correction_capture_calibrated_noise_reaches_report_without_baseline()
     let html = fixture.dir.path().join("noise.html");
     let rendered = Command::new(root.join("venv/bin/python"))
         .env("PYTHONDONTWRITEBYTECODE", "1")
-        .arg(root.join("scripts/display-roomeq.py"))
+        .arg(root.join("ui/display-roomeq"))
         .arg("--capture-verification")
         .arg(&fixture.report)
         .arg("-o")
@@ -874,7 +874,7 @@ fn roadmap_correction_capture_matched_ir_step_views() {
     let html = fixture.dir.path().join("captures.html");
     let rendered = Command::new(root.join("venv/bin/python"))
         .env("PYTHONDONTWRITEBYTECODE", "1")
-        .arg(root.join("scripts/display-roomeq.py"))
+        .arg(root.join("ui/display-roomeq"))
         .arg("--capture-verification")
         .arg(&fixture.report)
         .arg("-o")
@@ -986,7 +986,7 @@ fn roadmap_correction_capture_matched_etc_reaches_report() {
     let html = fixture.dir.path().join("etc.html");
     let rendered = Command::new(root.join("venv/bin/python"))
         .env("PYTHONDONTWRITEBYTECODE", "1")
-        .arg(root.join("scripts/display-roomeq.py"))
+        .arg(root.join("ui/display-roomeq"))
         .arg("--capture-verification")
         .arg(&fixture.report)
         .arg("-o")
@@ -1089,7 +1089,7 @@ fn roadmap_correction_capture_matched_decay_reaches_report() {
     let html = fixture.dir.path().join("decay.html");
     let rendered = Command::new(root.join("venv/bin/python"))
         .env("PYTHONDONTWRITEBYTECODE", "1")
-        .arg(root.join("scripts/display-roomeq.py"))
+        .arg(root.join("ui/display-roomeq"))
         .arg("--capture-verification")
         .arg(&fixture.report)
         .arg("-o")

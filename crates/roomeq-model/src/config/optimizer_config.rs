@@ -31,6 +31,7 @@ use super::excursion_protection_config::ExcursionProtectionConfig;
 use super::filter_audibility_config::FilterAudibilityConfig;
 use super::group_delay_optimization_config::GroupDelayOptimizationConfig;
 use super::high_frequency_correction_config::HighFrequencyCorrectionConfig;
+use super::tilt_stage_config::TiltStageConfig;
 use super::mixed_mode_config::MixedModeConfig;
 use super::multi_measurement_config::MultiMeasurementConfig;
 use super::multi_seat_config::MultiSeatConfig;
@@ -244,6 +245,9 @@ pub struct OptimizerConfig {
     /// Safeguards for high-frequency correction above the conservative range.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub high_frequency_correction: Option<HighFrequencyCorrectionConfig>,
+    /// Trailing LS plus HS tilt pair appended after the main filters.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tilt_stage: Option<TiltStageConfig>,
     /// Direct/early/late correction-energy report settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub early_late_correction: Option<EarlyLateCorrectionConfig>,
@@ -388,6 +392,7 @@ impl Default for OptimizerConfig {
             filter_audibility: None,
             pruning_budget: None,
             high_frequency_correction: None,
+            tilt_stage: None,
             early_late_correction: None,
             validation_bundle: None,
             tolerance: default_tolerance(),

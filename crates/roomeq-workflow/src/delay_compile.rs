@@ -767,6 +767,7 @@ mod tests {
                     .iter()
                     .enumerate()
                     .map(|(index, (name, delay))| roomeq_model::DriverDspChain {
+                        measured_acoustics: None,
                         name: name.to_string(),
                         index,
                         plugins: vec![delay_plugin(*delay)],
@@ -854,6 +855,7 @@ mod tests {
         ]);
         // R main advance on a second R driver.
         channels.get_mut("R").unwrap().drivers = Some(vec![roomeq_model::DriverDspChain {
+            measured_acoustics: None,
             name: "R-main".to_string(),
             index: 0,
             plugins: vec![delay_plugin(-17.051)],
@@ -1050,6 +1052,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(index, (name, plugins))| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: name.to_string(),
                     index,
                     plugins: plugins.clone(),

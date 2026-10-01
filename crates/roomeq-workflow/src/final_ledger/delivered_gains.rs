@@ -130,6 +130,7 @@ mod tests {
         chain.plugins = vec![gain(-2.0, "final_channel_level_alignment")];
         chain.drivers = Some(vec![
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "woofer".into(),
                 index: 0,
                 plugins: vec![gain(-3.0, "final_electrical_headroom")],
@@ -137,6 +138,7 @@ mod tests {
                 measured_band_hz: None,
             },
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "tweeter".into(),
                 index: 1,
                 plugins: vec![gain(-1.0, "ordinary_gain")],

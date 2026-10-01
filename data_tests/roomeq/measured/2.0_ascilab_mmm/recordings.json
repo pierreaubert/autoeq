@@ -1,0 +1,13 @@
+{
+  "version": "3.0.0",
+  "speakers": {
+    "L": {
+      "path": "L_C8C-BX8C-P2_MMM_No_E.csv",
+      "name": "L"
+    },
+    "R": {
+      "path": "R_C8C-BX8C-P2_MMM_No_E.csv",
+      "name": "R"
+    }
+  }
+}

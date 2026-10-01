@@ -779,6 +779,7 @@ mod tests {
         chain.plugins = vec![roomeq_engine::output::create_gain_plugin(6.0)];
         chain.drivers = Some(vec![
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "woofer".into(),
                 index: 0,
                 plugins: vec![roomeq_engine::output::create_gain_plugin(3.0)],
@@ -786,6 +787,7 @@ mod tests {
                 measured_band_hz: None,
             },
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "tweeter".into(),
                 index: 1,
                 plugins: vec![roomeq_engine::output::create_gain_plugin_with_invert(
@@ -974,6 +976,7 @@ mod tests {
         gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
         fixture.channels.get_mut("subs").unwrap().drivers =
             Some(vec![roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: String::from("Sub1"),
                 index: 0,
                 plugins: vec![gain],
@@ -1136,6 +1139,7 @@ mod tests {
         let fixture = crate::test_fixtures::single_channel_room_result("left");
         let mut chain = fixture.channels["left"].clone();
         chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+            measured_acoustics: None,
             name: "woofer".into(),
             index: 0,
             plugins: Vec::new(),

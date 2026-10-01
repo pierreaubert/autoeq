@@ -68,6 +68,46 @@ class BundleLoaderTests(unittest.TestCase):
             valid, reason, _ = verify_payload_binding(data)
             self.assertTrue(valid, reason)
 
+    def test_absent_deployed_key_is_left_untouched_without_index(self):
+        # Rust omits `deployed_source_curves` when empty; the loader must
+        # not invent the key or verification hashes different bytes.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            slim = {
+                "version": "1",
+                "channels": {"L": {"channel": "L", "plugins": []}},
+            }
+            _bind_slim(slim)
+            path = root / "nodeployed.json"
+            path.write_text(json.dumps(slim))
+            data = load_roomeq_json(path)
+            self.assertNotIn("deployed_source_curves", data)
+            valid, reason, _ = verify_payload_binding(data)
+            self.assertTrue(valid, reason)
+
+    def test_absent_deployed_key_verifies_through_full_extraction(self):
+        # Fully extracted slim output: the key was emptied out of the saved
+        # bytes, so stripping the overlay must drop it again for hashing.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            slim = {
+                "version": "1",
+                "channels": {"L": {"channel": "L", "plugins": []}},
+            }
+            _bind_slim(slim)
+            (root / "dsp.json").write_text(json.dumps(slim))
+            assets = root / "dsp_files"
+            assets.mkdir()
+            (assets / "deployed__L.csv").write_text("freq,spl\n100,79.5\n1000,80.5\n")
+            (assets / "measurements_index.json").write_text(json.dumps({
+                "channels": {},
+                "deployed_source_curves": {"L": "deployed__L.csv"},
+            }))
+            data = load_roomeq_json(root / "dsp.json")
+            self.assertEqual(data["deployed_source_curves"]["L"]["spl"], [79.5, 80.5])
+            valid, reason, _ = verify_payload_binding(data)
+            self.assertTrue(valid, reason)
+
     def test_legacy_embedded_output_loads_without_overlay(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

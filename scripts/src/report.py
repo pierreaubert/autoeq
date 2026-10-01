@@ -1,7 +1,9 @@
 """HTML report generation for roomeq visualization."""
 
 from html import escape
+import datetime
 import math
+import re
 from pathlib import Path
 
 from .capture_clock_views import capture_clock_qa_html, gated_lr_channel
@@ -23,7 +25,6 @@ from .acoustic_report import (
     t60_rows,
     t60_table_html,
     tof_html,
-    tof_table,
 )
 from .figures import (
     create_channel_figure,
@@ -36,7 +37,6 @@ from .figures import (
     create_symmetric_pair_figure,
     create_early_late_figure,
     create_t60_octaves_figure,
-    create_tof_figure,
     create_combined_figure,
     create_bass_management_routing_figure,
     create_bass_management_headroom_figure,
@@ -69,20 +69,28 @@ from .dsp import (
     per_driver_effective_eq,
     split_driver_eq_plugins,
     sum_driver_initial_curves,
+    symmetric_complex_sum,
 )
-from .target_overlay import build_target_overlay_curves
+from .target_overlay import (
+    TARGET_LEVEL_MATCH_BAND_HZ,
+    build_target_overlay_curves,
+    global_target_offset_for_pair,
+    shift_target_to_reference_band_mean,
+)
 from .correction_explanation import correction_explanation_html
 from .acceptance_views import acceptance_views_html, waveform_status_html
 from .payload_binding import verify_payload_binding
 from .capture_views import capture_views_html, optimization_waterfall_html, optimization_wavelet_html, resonance_summary_html
 from .loaders import RoomEqData
 from . import wasm_report
+from .signal_flow import signal_flow_sections
 
 
-def _emit_html(sections: list[dict], html: str | None, tab: str | None = None) -> None:
+def _emit_html(sections: list[dict], html: str | None, tab: str | None = None,
+             flat: bool = False) -> None:
     """Append an HTML fragment as a raw-HTML section (skips empties)."""
     if html:
-        sections.append(wasm_report.html_section(html, tab=tab))
+        sections.append(wasm_report.html_section(html, tab=tab, flat=flat))
 
 
 def _emit_fig(sections: list[dict], fig: dict | list | None) -> None:
@@ -1114,22 +1122,144 @@ def _bass_management_sub_outputs_table_html(report: dict) -> str:
     )
 
 
+# Verdict severities shared by the three playback-status boxes.
+_STATUS_OK = "#2ecc71"
+_STATUS_WARN = "#f1c40f"
+_STATUS_BAD = "#e74c3c"
+
+# Top-level report buckets rendered as centered shell tabs. DSP analysis
+# carries the correction rationale and the signal flow; Acoustics analysis
+# carries every measured-room section; the psychoacoustic bucket is EPA only.
+BUCKET_DSP = "DSP analysis"
+BUCKET_ACOUSTICS = "Acoustics analysis"
+BUCKET_PSYCHOACOUSTIC = "Psychoacoustic report"
+
+
+def _workspace_roomeq_version() -> str | None:
+    """Version of the `roomeq` binary built from this checkout.
+
+    The report viewer ships in the same workspace, so
+    `[workspace.package] version` in the root `Cargo.toml` is the
+    report-generator version. DSP outputs predate producer stamping and
+    carry no tool version; see `_roomeq_version`.
+    """
+    try:
+        text = (wasm_report.REPO_ROOT / "Cargo.toml").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    package = text.split("[workspace.package]", 1)
+    if len(package) != 2:
+        return None
+    match = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"',
+                      package[1].split("[", 1)[0])
+    if not match:
+        return None
+    return match.group(1).strip() or None
+
+
+def _roomeq_version(data: dict) -> str | None:
+    """RoomEQ version for the header: stamped producer version if present.
+
+    Falls back to this checkout's workspace version, which is exact when
+    the report is rendered from the same checkout that produced the DSP.
+    """
+    metadata = data.get("metadata") or {}
+    for key in ("producer_version", "roomeq_version", "tool_version"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    value = data.get("roomeq_version")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return _workspace_roomeq_version()
+
+
+def _report_provenance(datasets: list[tuple[str, dict]]) -> dict:
+    """Header provenance: RoomEQ version, DSP data date, report render date."""
+    versions, stamps = [], []
+    for _, data in datasets:
+        version = _roomeq_version(data)
+        if version and version not in versions:
+            versions.append(version)
+        stamp = (data.get("metadata") or {}).get("timestamp")
+        if isinstance(stamp, str) and stamp.strip() and stamp not in stamps:
+            stamps.append(stamp.strip())
+    provenance: dict = {}
+    if versions:
+        provenance["roomeq_version"] = " / ".join(versions)
+    if stamps:
+        provenance["data_timestamp"] = " / ".join(stamps)
+    provenance["generated_at"] = (
+        datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return provenance
+
+
+def _status_box_html(title: str, color: str, paragraphs: list[str]) -> str:
+    """One verdict box; titles and paragraphs are escaped HTML."""
+    return (f'<section class="playback-status-box" role="note" '
+            f'style="flex:1;min-width:260px;border:2px solid {color};padding:16px">'
+            f'<h2>{escape(title)}</h2>'
+            + "".join(f"<p>{escape(detail)}</p>" for detail in paragraphs)
+            + "</section>\n")
+
+
 def _playback_status_html(metadata: dict, label: str = "", *, data: dict | None = None) -> str:
-    """Expose saved DSP eligibility and conditional input assumptions."""
+    """Three-box verdict: recorded eligibility, payload binding, playback approval.
+
+    Each box carries its own severity so a stale payload no longer hides a
+    recorded acceptance (or vice versa): eligibility reports the recorded
+    acceptance verdict, binding reports whether the delivered bytes still
+    match the decision ledger, and playback combines both into the final
+    go/no-go plus its conditional input assumptions.
+    """
     acceptance = metadata.get("correction_acceptance") or {}
     outcome = acceptance.get("outcome")
-    approved = outcome == "unchanged" or (
+    eligible = outcome == "unchanged" or (
         outcome == "accepted" and acceptance.get("accepted") is True
         and acceptance.get("decision") == "accepted"
     )
     verified, binding_reason, _ = verify_payload_binding(data or {})
-    approved = approved and verified
-    title = "Saved DSP playback eligibility: " + str(outcome or "unverified")
-    if label:
-        title = label + " — " + title
-    details = [binding_reason]
+    approved = eligible and verified
+    prefix = f"{label} — " if label else ""
+
+    # Box 1: what RoomEQ recorded about this graph (green only on a clean,
+    # self-consistent acceptance; yellow when there is no usable verdict).
+    eligibility_title = prefix + "Saved DSP playback eligibility: " + str(outcome or "unverified")
+    violations = [str(item) for item in acceptance.get("violations", [])
+                  if isinstance(item, str) and item.strip()]
+    if eligible and outcome in ("accepted", "unchanged"):
+        eligibility_color = _STATUS_OK
+        eligibility = [f"Recorded verdict: {outcome}."]
+    elif outcome in ("accepted", "unchanged"):
+        eligibility_color = _STATUS_BAD
+        eligibility = ["Recorded verdict is contradictory: outcome "
+                       f"'{outcome}' without matching accepted/decision flags."]
+    elif outcome == "rejected":
+        eligibility_color = _STATUS_BAD
+        eligibility = ["Recorded verdict: rejected."]
+    elif outcome is None:
+        eligibility_color = _STATUS_WARN
+        eligibility = ["No recorded acceptance verdict (legacy or unverified output)."]
+    else:
+        eligibility_color = _STATUS_WARN
+        eligibility = [f"Recorded verdict: {outcome} — no playback approval."]
+    if violations:
+        eligibility.append("Recorded violations: " + "; ".join(violations) + ".")
+
+    # Box 2: whether the delivered bytes still match the recorded decisions.
+    binding_title = prefix + ("Delivered payload: verified" if verified
+                              else "Delivered payload: not verified")
+    binding_color = _STATUS_OK if verified else _STATUS_WARN
+
+    # Box 3: the final go/no-go with its conditional input assumptions.
+    playback_title = prefix + "Playback approval"
+    playback: list[str] = []
     if not approved:
-        details.append("Not approved for playback. These curves are diagnostic only.")
+        playback.append("Not approved for playback. These curves are diagnostic only.")
+    else:
+        playback.append("Approved for playback under the declared contract.")
+        playback.append("Recorded validation is evidence for the saved graph and its declared playback contract, "
+                       "not an independent replay by this report.")
     policy = ((metadata.get("effective_config") or {}).get("optimizer") or {}).get("finalization") or {}
     peaks = {"default": policy.get("default_input_peak", 1.0),
              **(policy.get("input_peak_limits") or {})}
@@ -1138,24 +1268,26 @@ def _playback_status_html(metadata: dict, label: str = "", *, data: dict | None 
     if reduced:
         values = ", ".join(f"{name}: {20 * math.log10(peak):.2f} dBFS"
                            for name, peak in sorted(reduced.items()))
-        details.append("Conditional on enforced input-peak ceilings (" + values + "). "
+        playback.append("Conditional on enforced input-peak ceilings (" + values + "). "
                        "This report does not enforce them; full-scale input safety is not established.")
-    if approved:
-        details.append("Recorded validation is evidence for the saved graph and its declared playback contract, "
-                       "not an independent replay by this report.")
     limited = [check["id"].split(":", 1)[1]
                for stage in metadata.get("stage_outcomes", [])
                for check in stage.get("checks", [])
                if check.get("id", "").startswith("runtime_limiter_physical_output:")]
     if limited:
-        details.append("Runtime limiter required on physical outputs: " + ", ".join(limited) + ". "
+        playback.append("Runtime limiter required on physical outputs: " + ", ".join(limited) + ". "
                        "Response curves describe small-signal playback below limiting. Loud bass peaks "
                        "may be reduced dynamically. Protection is sample-peak, not a true-peak or "
                        "loudspeaker-excursion guarantee. Do not bypass the limiter or add downstream gain.")
-    color = "#e74c3c" if not approved else ("#f1c40f" if reduced or limited else "#2ecc71")
-    return (f'<section class="playback-status" role="note" style="border:2px solid {color};padding:16px;margin:16px 0">'
-            f'<h2>{escape(title)}</h2>'
-            + "".join(f"<p>{escape(detail)}</p>" for detail in details) + "</section>\n")
+    playback_color = _STATUS_BAD if not approved else (
+        _STATUS_WARN if reduced or limited else _STATUS_OK)
+
+    return ('<section class="playback-status" role="group" aria-label="Playback verdict" '
+            'style="display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;border:0;padding:0">'
+            + _status_box_html(eligibility_title, eligibility_color, eligibility)
+            + _status_box_html(binding_title, binding_color, [binding_reason])
+            + _status_box_html(playback_title, playback_color, playback)
+            + "</section>\n")
 
 
 def create_html_report(
@@ -1191,7 +1323,7 @@ def create_html_report(
     # Sections in document order; the shell renders them and builds the
     # per-channel tab bar from the section `tab` fields.
     sections: list[dict] = []
-    _emit_html(sections, _playback_status_html(metadata, data=data))
+    _emit_html(sections, _playback_status_html(metadata, data=data), flat=True)
     status_sections = sections
     why, overview, speakers, timing, symmetric, time_domain, epa = ([] for _ in range(7))
     landmark_figures = []
@@ -1230,7 +1362,6 @@ def create_html_report(
     # configuration, so nothing requires switching per-channel tabs.
     _emit_html(sections, _gain_plugins_html(data))
     _emit_html(sections, _crossover_config_html(data))
-    _emit_html(sections, level_compensation_html(data))
     sections = time_domain
     room_decay = room_t60_rows(data)
     decay_reference = t60_itu_reference(data)
@@ -1251,25 +1382,24 @@ def create_html_report(
             + '</p>\n'
         )
 
-    # Time of flight before/after DSP (feat-report Section 3).
+    # Time of flight (feat-report Section 3): table only. The before/after
+    # bar charts were removed; the table carries both arrival columns.
     sections = timing
-    tof_rows = tof_table(metadata)
     _emit_html(sections, tof_html(metadata))
-    tof_before = create_tof_figure(tof_rows, after=False)
-    tof_after = create_tof_figure(tof_rows, after=True)
-    for fig in (tof_before, tof_after):
-        _emit_fig(sections, fig)
 
     # Symmetric-monitor summing, magnitude domain (feat-report Section 2).
     sections = symmetric
     # The complex pressure sum needs phase data roomeq does not emit yet.
     pair_groups, unpaired = symmetric_groups(channels_dict)
     if pair_groups or unpaired:
+        # Bare paragraphs: the group summary already titles this section and
+        # the shell wraps html sections in its own card.
         symmetric_head = (
-            '<div class="filters-section"><h3>Section 4 — Symmetric monitors</h3>'
             '<p>Rust aligns final curves within their shared frequency range. '
-            'The magnitude sum assumes equal phase; it is an upper bound, not a prediction '
-            'of interference from simultaneous playback.</p>'
+            'The absolute sum assumes equal phase; it is an upper bound, not a prediction '
+            'of interference from simultaneous playback. The complex sum is the coherent '
+            'pressure sum from measured phase; the sum difference between them is the '
+            'cancellation loss.</p>'
         )
         if unpaired:
             symmetric_head += (
@@ -1277,20 +1407,33 @@ def create_html_report(
                 + ", ".join(escape(name) for name in unpaired)
                 + '</p>'
             )
-        symmetric_head += '</div>'
         _emit_html(sections, symmetric_head)
     for label, members in pair_groups:
         group_start = len(sections)
         combo = (getattr(data, "symmetric_pairs", None) or {}).get(label)
         if combo is None:
-            _emit_html(sections, 
+            _emit_html(sections,
                 '<p>Symmetric pair ' + escape(label)
                 + ': no Rust pair export in this output bundle. Regenerate with the updated RoomEQ exporter.</p>', tab=label
             )
             continue
+        abs_freq = list(combo["freq"])
+        complex_spl = symmetric_complex_sum(
+            (channels_dict.get(members[0]) or {}).get("final_curve"),
+            (channels_dict.get(members[1]) or {}).get("final_curve"),
+            abs_freq,
+        )
         _emit_fig(sections, create_symmetric_pair_figure(
-            label, combo["freq"], combo["sum_spl"], combo["diff_spl"]
+            label, abs_freq, list(combo["sum_spl"]), complex_spl
         ))
+        if complex_spl is None:
+            _emit_html(sections,
+                '<p class="epa-footer">Symmetric pair ' + escape(label)
+                + ': complex sum unavailable without finite measured phase on both '
+                + escape(members[0]) + ' and ' + escape(members[1])
+                + ' final curves; showing the absolute (magnitude) sum only.</p>',
+                tab=label,
+            )
         for name in members:
             for landmark in landmark_figures:
                 if landmark.get("tab") == name:
@@ -1371,15 +1514,17 @@ def create_html_report(
             )
             target_view = None
             lfe_plus_channel = None
-            ir_pre = driver.get("pre_ir")
+            acoustic_data = driver.get("measured_acoustics") or {}
+            ir_pre = acoustic_data.get("pre_ir") or driver.get("pre_ir")
             ir_post = driver.get("post_ir")
             caption_html = (
-                f'<p class="epa-footer">Physical sub output of {escape(channel_name)}: '
-                "its measurement through this sub's own DSP chain "
-                "(shared EQ + per-sub gain/crossover/route). The EQ plot below "
-                "shows this total per-sub shaping.</p>\n"
+                f'<p class="epa-footer">Physical driver output of {escape(channel_name)}: '
+                "its measurement through this driver's own DSP chain "
+                "(shared EQ + driver gain/crossover/route). The EQ plot below "
+                "shows this total driver shaping.</p>\n"
             )
         else:
+            acoustic_data = channel_data
             initial_curve = channel_data.get("initial_curve")
             if channel_data.get("drivers"):
                 # A multi-driver aggregate initial is level-relative optimizer
@@ -1440,12 +1585,24 @@ def create_html_report(
                 tab=tab_label,
             )
         if fig_eq:
-            fig_full["figure"]["y2"] = wasm_report.axis("EQ gain (dB)")
+            fig_full["figure"]["y2"] = wasm_report.axis("EQ gain (dB)", "linear", -25.0, 25.0)
             for trace in fig_eq["figure"]["series"]:
                 fig_full["figure"]["series"].append({**trace, "y_axis": 1})
 
         # IR waveform plot
         sections = time_domain
+        if is_driver_tab and acoustic_data:
+            rate = acoustic_data.get("sample_rate_hz")
+            _emit_html(sections,
+                f'<p>Independent measured driver IR: {escape(tab_label)}; '
+                f'native sample rate {escape(str(rate))} Hz. This is not the summed '
+                'parent-speaker response. No measured post-DSP capture is implied.</p>',
+                tab=tab_label)
+            if isinstance(rate, (int, float)) and rate <= 16000:
+                _emit_html(sections,
+                    '<p>1–8 kHz reflection analysis is unavailable at this native '
+                    'sample rate. T60 bands beyond Nyquist are marked unavailable.</p>',
+                    tab=tab_label)
         _emit_fig(sections, create_ir_figure(
             tab_label,
             ir_pre,
@@ -1453,11 +1610,11 @@ def create_html_report(
             tab=tab_label,
         ))
 
-        if not is_driver_tab:
-            _emit_html(sections, early_reflections_html(channel_data, tab_label),
+        if not is_driver_tab or acoustic_data:
+            _emit_html(sections, early_reflections_html(acoustic_data, tab_label),
                        tab=tab_label)
-            _emit_fig(sections, early_reflection_figures(channel_data, tab_label, tab=tab_label))
-            early_late = channel_data.get("early_late_curves")
+            _emit_fig(sections, early_reflection_figures(acoustic_data, tab_label, tab=tab_label))
+            early_late = acoustic_data.get("early_late_curves")
             early_late_fig = create_early_late_figure(
                 tab_label, early_late, tab=tab_label
             )
@@ -1476,14 +1633,18 @@ def create_html_report(
                     tab=tab_label,
                 )
 
-            t60 = t60_rows(channel_data)
-            t60_fig = create_t60_octaves_figure(tab_label, t60, tab=tab_label, itu_reference=decay_reference)
-            _emit_html(sections, t60_table_html(channel_data), tab=tab_label)
-            _emit_fig(sections, t60_fig)
-            if t60_fig:
-                _emit_html(sections, t60_itu_note(decay_reference), tab=tab_label)
+            # Channel tabs reuse the room-level T60 block above (its table
+            # already carries per-speaker columns). Only driver tabs keep
+            # their own T60: driver measured-acoustics fits exist nowhere else.
+            if is_driver_tab:
+                t60 = t60_rows(acoustic_data)
+                t60_fig = create_t60_octaves_figure(tab_label, t60, tab=tab_label, itu_reference=decay_reference)
+                _emit_html(sections, t60_table_html(acoustic_data), tab=tab_label)
+                _emit_fig(sections, t60_fig)
+                if t60_fig:
+                    _emit_html(sections, t60_itu_note(decay_reference), tab=tab_label)
             waterfall_html = optimization_waterfall_html(
-                channel_data.get("waterfall"), channel_data.get("resonance_decays"))
+                acoustic_data.get("waterfall"), acoustic_data.get("resonance_decays"))
             if waterfall_html:
                 _emit_html(sections, waterfall_html, tab=tab_label)
             else:
@@ -1493,7 +1654,7 @@ def create_html_report(
                     'room impulse response.</p>\n',
                     tab=tab_label,
                 )
-            wavelet_html = optimization_wavelet_html(channel_data.get("wavelet"))
+            wavelet_html = optimization_wavelet_html(acoustic_data.get("wavelet"))
             if wavelet_html:
                 _emit_html(sections, wavelet_html, tab=tab_label)
             else:
@@ -1583,20 +1744,29 @@ def create_html_report(
     modes = resonance_summary_html(data)
     if modes:
         time_domain.append({"kind": "html", "html": modes, "tab": None, "footer": True})
+    # The relative-level table details per-speaker levels, so it leads the
+    # Details tab even though it is computed from the whole output.
+    _relative_levels = level_compensation_html(data)
+    if _relative_levels:
+        speakers.insert(0, wasm_report.html_section(_relative_levels))
+
     sections = list(status_sections)
-    for title, contents in (
-        ("Why this correction?", why),
-        ("Section 1: Summary", overview),
-        ("Section 2: Details per speaker", speakers),
-        ("Section 3: Time of Flight", timing),
-        ("Section 4: Symmetric monitors", symmetric),
-        ("Section 5: Time domain analysis", time_domain),
-        ("Section 6: EPA scores", epa),
+    for bucket, subhead, contents in (
+        (BUCKET_DSP, "Why this correction?", why),
+        (BUCKET_ACOUSTICS, "Summary", overview),
+        (BUCKET_ACOUSTICS, "Details per speaker", speakers),
+        (BUCKET_ACOUSTICS, "Time of Flight", timing),
+        (BUCKET_ACOUSTICS, "Symmetric monitors", symmetric),
+        (BUCKET_ACOUSTICS, "Time domain analysis", time_domain),
+        (BUCKET_PSYCHOACOUSTIC, "Section 6: EPA scores", epa),
+        (BUCKET_DSP, "DSP signal flow", signal_flow_sections(data)),
     ):
         if not contents:
             contents.append(wasm_report.html_section("<p>No data available in this output.</p>"))
-        sections.extend({**section, "group": title} for section in contents)
-    payload = wasm_report.payload(page_title, sections)
+        sections.extend({**section, "bucket": bucket, "subhead": subhead}
+                        for section in contents)
+    payload = wasm_report.payload(page_title, sections,
+                                  _report_provenance([("", data)]))
     wasm_report.write_report(output_path, page_title, payload)
 
     print(f"HTML report written to: {output_path}")
@@ -1653,7 +1823,8 @@ def create_comparison_html_report(
     sections: list[dict] = []
 
     for mode_name, data in mode_datasets:
-        _emit_html(sections, _playback_status_html(data.get("metadata") or {}, mode_name, data=data))
+        _emit_html(sections, _playback_status_html(data.get("metadata") or {}, mode_name, data=data),
+                   flat=True)
         _emit_html(sections, capture_clock_qa_html(data))
         _emit_html(sections, capture_reflections_html(data))
         _emit_html(sections, correction_explanation_html(data, mode_name))
@@ -1766,6 +1937,31 @@ def create_comparison_html_report(
     # Score bar chart (passes loss_types so the chart can label/warn correctly)
     _emit_fig(sections, create_score_comparison_figure(mode_scores, loss_types))
 
+    # Global design-target level anchor. Serialized absolute targets carry
+    # the design shape but not the measured level, so match the main (L/R)
+    # target shape to the measured per-channel mean of the L/R pair over
+    # 100 Hz - 10 kHz once. The single offset applies to every channel tab,
+    # preserving designed inter-channel target differences. Without an L/R
+    # pair there is no anchor and targets render as serialized.
+    _match_lo, _match_hi = TARGET_LEVEL_MATCH_BAND_HZ
+    global_target_offset: float | None = None
+    main_target_shape: dict | None = None
+    for _, anchor_data in mode_datasets:
+        anchor_channels = comparison_channels[id(anchor_data)]
+        anchor_l = anchor_channels.get("L") or {}
+        anchor_r = anchor_channels.get("R") or {}
+        ref_l = anchor_l.get("final_curve") or anchor_l.get("initial_curve")
+        ref_r = anchor_r.get("final_curve") or anchor_r.get("initial_curve")
+        anchor_shape = anchor_l.get("target_curve") or anchor_r.get("target_curve")
+        offset = global_target_offset_for_pair(
+            ref_l, ref_r, anchor_shape, _match_lo, _match_hi
+        )
+        if offset is None:
+            continue
+        global_target_offset = offset
+        main_target_shape = anchor_shape
+        break
+
     # --- Per-channel tabs ---
     # Per-channel sections in shell tabs (tab bar built by the shell).
     for i, ch_name in enumerate(sorted_channels):
@@ -1818,19 +2014,48 @@ def create_comparison_html_report(
         # Shared design target: first mode carrying a serialized absolute
         # target wins (compared modes normally share one fixture target).
         # No fallback flat line — it would misstate the design slope.
+        # The synthetic L+R channel carries no target of its own, so it
+        # reuses the main (L/R) target shape interpolated onto its grid.
+        # Every tab's target is then shifted by the global L+R level anchor
+        # so the drawn target mean matches the measured midband level.
         comparison_target = None
-        for _, ch_data in mode_data:
-            candidate = (ch_data or {}).get("target_curve")
-            if (
-                isinstance(candidate, dict)
-                and candidate.get("freq")
-                and candidate.get("spl")
-            ):
-                comparison_target = {
-                    "freq": list(candidate["freq"]),
-                    "spl": list(candidate["spl"]),
-                }
-                break
+        if is_lr and main_target_shape is not None:
+            lr_grid = None
+            for _, ch_data in mode_data:
+                lr_grid = (ch_data or {}).get("final_curve") or (ch_data or {}).get(
+                    "initial_curve"
+                )
+                if lr_grid:
+                    break
+            if lr_grid is not None:
+                comparison_target = shift_target_to_reference_band_mean(
+                    main_target_shape, lr_grid, _match_lo, _match_hi
+                )
+        else:
+            for _, ch_data in mode_data:
+                candidate = (ch_data or {}).get("target_curve")
+                if (
+                    isinstance(candidate, dict)
+                    and candidate.get("freq")
+                    and candidate.get("spl")
+                ):
+                    comparison_target = {
+                        "freq": list(candidate["freq"]),
+                        "spl": list(candidate["spl"]),
+                    }
+                    break
+        if (
+            comparison_target is not None
+            and not is_lr
+            and global_target_offset is not None
+        ):
+            comparison_target = {
+                "freq": list(comparison_target["freq"]),
+                "spl": [
+                    level + global_target_offset
+                    for level in comparison_target["spl"]
+                ],
+            }
 
         # 1. Overlay plot (full range) + Zoomed (bass)
         _emit_fig(sections, create_comparison_overlay_figure(
@@ -1874,7 +2099,8 @@ def create_comparison_html_report(
         if epa_html:
             _emit_html(sections, epa_html, tab=ch_name)
 
-    payload = wasm_report.payload(page_title, sections)
+    payload = wasm_report.payload(page_title, sections,
+                                  _report_provenance(mode_datasets))
     wasm_report.write_report(output_path, page_title, payload)
 
     print(f"Comparison report written to: {output_path}")

@@ -13,6 +13,12 @@
 use anyhow::Result;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use roomeq_model::{Curve, ProcessingMode};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    mpsc::channel,
+};
+use std::thread;
 use roomeq_synthetic::{
     generate_flat_curve, generate_harman_tilt_curve, generate_multisub_scenario, generate_scenario,
     generate_speaker_rolloff_curve,
@@ -31,6 +37,8 @@ mod run;
 mod types;
 
 use crate::parameter_matrix::generate_pr_matrix;
+use crate::quality::misc::default_parallel_jobs;
+use channel_layout::ChannelLayout;
 use channel_layout::sub_topos_for_layout;
 use consts::ALL_DIFFICULTIES;
 use consts::ALL_LAYOUTS;
@@ -53,7 +61,9 @@ use run::run_multisub_test;
 use run::run_single_test;
 use types::DifficultyLevel;
 use types::MultiSubDifficulty;
+use types::MultiSubTopology;
 use types::QaOutcome;
+use types::SubTopology;
 use types::TestResult;
 
 fn multichannel_mode_supported(
@@ -784,8 +794,12 @@ mod outcome_tests {
             "error": "structural baseline exceeds declared attenuation budget",
             "replay_bundle": bundle,
         });
-        super::record_parameter_failure(&path, &bundle, 2, &[], &mut failures, failure.clone())
-            .unwrap();
+        let super::ParameterRowOutcome::Failed(saved) =
+            super::parameter_row_failed(&bundle, failure.clone()).unwrap()
+        else {
+            panic!("expected a failure outcome");
+        };
+        failures.push(saved);
         let saved: serde_json::Value =
             serde_json::from_slice(&std::fs::read(bundle.join("failure.json")).unwrap()).unwrap();
         assert_eq!(saved, failure);
@@ -871,23 +885,14 @@ fn create_parameter_matrix_bundle(
 
 // A processing refusal is a failed row, not permission to skip the remaining
 // matrix. Artifact failures still abort: an unrecorded run is not QA evidence.
-fn record_parameter_failure(
-    artifact: &std::path::Path,
+// Runs on row workers: only the row-local bundle is touched here, while the
+// main thread owns the shared progress artifact.
+fn parameter_row_failed(
     bundle: &std::path::Path,
-    expected_rows: usize,
-    records: &[serde_json::Value],
-    failures: &mut Vec<serde_json::Value>,
     failure: serde_json::Value,
-) -> Result<()> {
+) -> Result<ParameterRowOutcome> {
     write_parameter_matrix_artifact(&bundle.join("failure.json"), &failure)?;
-    failures.push(failure);
-    write_parameter_matrix_artifact(
-        artifact,
-        &serde_json::json!({
-            "status": "running", "expected_rows": expected_rows,
-            "completed_rows": records, "failed_rows": failures,
-        }),
-    )
+    Ok(ParameterRowOutcome::Failed(failure))
 }
 
 fn finish_parameter_matrix(
@@ -1048,9 +1053,9 @@ mod refusal_contract_tests {
     }
 }
 
-pub fn run_parameter_matrix() -> Result<QaRunOutcome> {
-    let refusals = run_parameter_cases(true)?;
-    let processing = run_parameter_cases(false)?;
+pub fn run_parameter_matrix(jobs: usize) -> Result<QaRunOutcome> {
+    let refusals = run_parameter_cases(true, jobs)?;
+    let processing = run_parameter_cases(false, jobs)?;
     Ok(if refusals.has_failures() || processing.has_failures() {
         QaRunOutcome::Failed
     } else {
@@ -1087,7 +1092,452 @@ fn structural_refusal_requirements(error: &str) -> Option<Vec<f64>> {
         .collect()
 }
 
-fn run_parameter_cases(refusals_only: bool) -> Result<QaRunOutcome> {
+/// Run work items on a bounded pool, collecting indexed outputs.
+///
+/// Mirrors `coverage::run_parallel`: a fixed set of workers pulls item
+/// indexes from an atomic counter, so uneven items (seconds vs minutes
+/// of optimization) cannot strand a statically partitioned worker.
+/// Outputs carry their input index so callers restore deterministic
+/// order. Each output flags whether it failed; when `fail_fast` is set,
+/// the first failed output stops further pulls, while in-flight items
+/// still complete. A panicked worker aborts the run instead of silently
+/// dropping rows.
+///
+/// # Errors
+///
+/// Returns an error if a worker thread panics.
+fn run_parallel_indexed<T, R>(
+    items: Vec<T>,
+    jobs: usize,
+    fail_fast: bool,
+    execute: impl Fn(&T) -> (R, bool) + Send + Sync + 'static,
+) -> Result<Vec<(usize, R)>>
+where
+    T: Send + Sync + 'static,
+    R: Send + 'static,
+{
+    if items.is_empty() {
+        return Ok(Vec::new());
+    }
+    let worker_count = jobs.max(1).min(items.len());
+    let items = Arc::new(items);
+    let next = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
+    let execute = Arc::new(execute);
+    let (tx, rx) = channel::<(usize, R)>();
+    let mut handles = Vec::with_capacity(worker_count);
+    for _ in 0..worker_count {
+        let items = Arc::clone(&items);
+        let next = Arc::clone(&next);
+        let stop = Arc::clone(&stop);
+        let tx = tx.clone();
+        let execute = Arc::clone(&execute);
+        handles.push(thread::spawn(move || loop {
+            if fail_fast && stop.load(Ordering::Relaxed) {
+                break;
+            }
+            let index = next.fetch_add(1, Ordering::Relaxed);
+            let Some(item) = items.get(index) else {
+                break;
+            };
+            let (output, failed) = execute(item);
+            if fail_fast && failed {
+                stop.store(true, Ordering::Relaxed);
+            }
+            if tx.send((index, output)).is_err() {
+                break;
+            }
+        }));
+    }
+    drop(tx);
+    let mut outputs = Vec::new();
+    while let Ok(output) = rx.recv() {
+        outputs.push(output);
+    }
+    for handle in handles {
+        handle
+            .join()
+            .map_err(|_| anyhow::anyhow!("synthetic worker thread panicked"))?;
+    }
+    Ok(outputs)
+}
+
+/// Tally one finished matrix test, preserving the serial failure printout.
+fn record_result(
+    result: TestResult,
+    passed: &mut usize,
+    failed: &mut usize,
+    all_results: &mut Vec<TestResult>,
+) {
+    if result.passed {
+        *passed += 1;
+    } else {
+        *failed += 1;
+        println!(
+            "  FAIL: {} -- {} (epa={})",
+            result.name,
+            result.reason,
+            fmt_epa(result.epa_preference)
+        );
+    }
+    all_results.push(result);
+}
+
+fn flag_group_output(results: Vec<TestResult>) -> (Vec<TestResult>, bool) {
+    let failed = results.iter().any(|result| !result.passed);
+    (results, failed)
+}
+
+/// One single-speaker group: every combo for a difficulty/target/mode.
+///
+/// Combos within a group run serially because later combos reuse the
+/// baseline combo's post score; groups are independent of each other.
+struct SingleGroupWork {
+    difficulty: DifficultyLevel,
+    target_name: String,
+    target: Curve,
+    speaker_rolloff: Curve,
+    mode: ProcessingMode,
+    combos: Vec<Vec<&'static str>>,
+}
+
+fn run_single_group(work: &SingleGroupWork) -> Vec<TestResult> {
+    let modes_biquad: Vec<Biquad> = work
+        .difficulty
+        .modes
+        .iter()
+        .map(|&(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
+        .collect();
+    let kautz_modes_biquad: Vec<Biquad> = work
+        .difficulty
+        .modes
+        .iter()
+        .copied()
+        .chain(KAUTZ_REFERENCE_MODES.iter().copied())
+        .map(|(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
+        .collect();
+    // Combine target shape with speaker rolloff so that broadband/excursion
+    // options see a realistic low-frequency limit in the measurement.
+    let speaker_base = Curve {
+        freq: work.target.freq.clone(),
+        spl: &work.target.spl + &work.speaker_rolloff.spl,
+        phase: None,
+        ..Default::default()
+    };
+    let scenario = generate_scenario(
+        &format!("{}/{}", work.difficulty.name, work.target_name),
+        &speaker_base,
+        &modes_biquad,
+        work.difficulty.noise_rms * 0.3,
+        work.difficulty.noise_rms * 0.7,
+        SEED,
+        SAMPLE_RATE,
+    );
+    let kautz_scenario = generate_scenario(
+        &format!("{}/{}-kautz", work.difficulty.name, work.target_name),
+        &speaker_base,
+        &kautz_modes_biquad,
+        work.difficulty.noise_rms * 0.3,
+        work.difficulty.noise_rms * 0.7,
+        SEED,
+        SAMPLE_RATE,
+    );
+    let degraded = if work.mode == ProcessingMode::KautzModal {
+        &kautz_scenario.degraded_curve
+    } else {
+        &scenario.degraded_curve
+    };
+    let mut baseline_post_score = None;
+    let mut results = Vec::with_capacity(work.combos.len());
+    for combo in &work.combos {
+        let result = run_single_test(
+            degraded,
+            work.mode.clone(),
+            &work.target_name,
+            combo,
+            &work.difficulty,
+            baseline_post_score,
+        );
+        if combo.is_empty() {
+            baseline_post_score = Some(result.post_score);
+        }
+        results.push(result);
+    }
+    results
+}
+
+/// One multi-sub group: every combo for a difficulty/topology pair.
+struct MultiSubGroupWork {
+    difficulty: MultiSubDifficulty,
+    topology: MultiSubTopology,
+    combos: Vec<Vec<&'static str>>,
+}
+
+fn run_multisub_group(work: &MultiSubGroupWork) -> Vec<TestResult> {
+    let shared_biquads: Vec<Biquad> = work
+        .difficulty
+        .shared_modes
+        .iter()
+        .map(|&(f, q, g)| Biquad::new(BiquadFilterType::Peak, f, SAMPLE_RATE, q, g))
+        .collect();
+    let per_sub_biquads: Vec<Vec<Biquad>> = work
+        .difficulty
+        .per_sub_modes
+        .iter()
+        .map(|modes| {
+            modes
+                .iter()
+                .map(|&(f, q, g)| Biquad::new(BiquadFilterType::Peak, f, SAMPLE_RATE, q, g))
+                .collect()
+        })
+        .collect();
+    let scenario = generate_multisub_scenario(
+        &format!("multisub/{}", work.difficulty.name),
+        work.difficulty.n_subs,
+        &shared_biquads,
+        &per_sub_biquads,
+        work.difficulty.delays_ms,
+        work.difficulty.noise_rms,
+        SEED,
+        SAMPLE_RATE,
+    );
+    work.combos
+        .iter()
+        .map(|combo| {
+            run_multisub_test(
+                &scenario.sub_curves,
+                &work.topology,
+                combo,
+                &work.difficulty,
+            )
+        })
+        .collect()
+}
+
+/// One multichannel topology test; items are fully independent.
+struct MultichannelWork {
+    layout: ChannelLayout,
+    sub_topo: Option<SubTopology>,
+    difficulty: DifficultyLevel,
+    base_curve: Curve,
+    mode: ProcessingMode,
+}
+
+fn run_multichannel_item(work: &MultichannelWork) -> Vec<TestResult> {
+    vec![run_multichannel_test(
+        &work.layout,
+        work.sub_topo.as_ref(),
+        &work.difficulty,
+        &work.base_curve,
+        work.mode.clone(),
+        SAMPLE_RATE,
+    )]
+}
+
+/// Outcome of one parameter-matrix row.
+///
+/// Row workers own their bundle directory but never touch the shared
+/// progress artifact; the main thread records outcomes serially.
+enum ParameterRowOutcome {
+    Completed(serde_json::Value),
+    Failed(serde_json::Value),
+}
+
+/// Execute one parameter-matrix row: configure, optimize, and persist
+/// the row-local bundle. Returns the record for the shared artifact.
+///
+/// # Errors
+///
+/// Returns an error for fatal row failures (safety-assumption drift,
+/// unserializable payloads, bundle writes): the caller aborts the run,
+/// as an unrecorded run is not QA evidence.
+fn run_parameter_row(
+    index: usize,
+    row: crate::parameter_matrix::ParameterRow,
+    refusals_only: bool,
+) -> Result<ParameterRowOutcome> {
+    let scenario = if refusals_only {
+        "full_scale_safety_refusal"
+    } else {
+        "reduced_level_processing"
+    };
+    let sample_rate = [44_100.0, 48_000.0, 96_000.0][row.sample_rate as usize];
+    let point_count = [100, 200, 400][row.grid_size as usize];
+    let mode = match row.mode {
+        0 => ProcessingMode::LowLatency,
+        1 => ProcessingMode::PhaseLinear,
+        _ => ProcessingMode::Hybrid,
+    };
+    let mode_name = format!("{mode:?}");
+    let curve = generate_flat_curve(
+        20.0,
+        (sample_rate / 2.0 - 100.0_f64).max(1_000.0_f64),
+        point_count,
+    );
+    let mut config = build::build_parameter_config(&curve, &row, mode, sample_rate);
+    config.optimizer.num_filters = [3, 7, 11][row.filter_count as usize];
+    config.optimizer.max_freq = (sample_rate / 2.0 - 100.0_f64).min(config.optimizer.max_freq);
+    config.optimizer.max_iter = 120;
+    config.optimizer.seed = Some(SEED + index as u64);
+    // Explicit synthetic stimulus bound, not a relaxed safety budget or
+    // rescaling of the acoustic measurements. Keep the full-scale cases.
+    config.optimizer.finalization.default_input_peak = if refusals_only { 1.0 } else { 0.1 };
+    anyhow::ensure!(
+        config.optimizer.finalization.max_attenuation_db == 12.0
+            && config.optimizer.finalization.output_ceiling_dbfs == 0.0
+            && config.optimizer.finalization.input_peak_limits.is_empty(),
+        "parameter matrix safety assumptions changed"
+    );
+    // Preserve the selected rerun's sidecars for independent backend replay.
+    // Unique directories prevent a later run from overwriting old evidence.
+    let bundle = create_parameter_matrix_bundle(
+        std::path::Path::new("target/qa/roomeq-parameter-bundles"),
+        index,
+    )?;
+    write_parameter_matrix_artifact(
+        &bundle.join("request.json"),
+        &serde_json::json!({
+            "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
+            "input_scenario": scenario,
+            "inputs": parameter_matrix_request(&config)?,
+        }),
+    )?;
+    let attempt = crate::optimize_room(&config, sample_rate, Some(&bundle));
+    if refusals_only {
+        let diagnostic = match attempt {
+            Ok(_) => "unexpected successful output for full-scale refusal case".to_string(),
+            Err(error) => format!("{error:#}"),
+        };
+        if let Some(required) = structural_refusal_requirements(&diagnostic) {
+            let record = serde_json::json!({
+                "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
+                "input_scenario": scenario, "outcome_scope": "expected_safety_refusal",
+                "assertion_status": "passed", "processing_status": "refused",
+                "finalization": config.optimizer.finalization,
+                "required_attenuation_db_by_seed": required, "error": diagnostic,
+                "replay_bundle": {"directory": bundle, "request": "request.json", "refusal": "refusal.json"},
+            });
+            write_parameter_matrix_artifact(&bundle.join("refusal.json"), &record)?;
+            return Ok(ParameterRowOutcome::Completed(record));
+        }
+        return parameter_row_failed(
+            &bundle,
+            serde_json::json!({"row": index, "stage": "expected_safety_refusal",
+                "input_scenario": scenario, "error": diagnostic, "replay_bundle": bundle}),
+        );
+    }
+    let result = match attempt {
+        Ok(result) => result,
+        Err(error) => {
+            return parameter_row_failed(
+                &bundle,
+                serde_json::json!({
+                    "status": "failed", "stage": "optimization",
+                    "row": index, "requested_axes": row, "replay_bundle": bundle,
+                    "sample_rate_hz": sample_rate, "optimizer": config.optimizer,
+                    "error": format!("{error:#}"),
+                }),
+            );
+        }
+    };
+    if !result.combined_post_score.is_finite() {
+        return parameter_row_failed(
+            &bundle,
+            serde_json::json!({
+                "status": "failed", "stage": "finite_output",
+                "row": index, "requested_axes": row, "replay_bundle": bundle,
+                "sample_rate_hz": sample_rate, "optimizer": config.optimizer,
+                "error": "non-finite post score",
+                "non_finite_post_score": result.combined_post_score.to_string(),
+            }),
+        );
+    }
+    write_parameter_matrix_artifact(
+        &bundle.join("selected-output.json"),
+        &result.to_dsp_chain_output(),
+    )?;
+    let crossover_execution = match parameter_crossover_execution(
+        row.topology as usize,
+        row.crossover as usize,
+        row.phase as usize,
+        &serde_json::to_value(&result.metadata.bass_management)?,
+    ) {
+        Ok(status) => status,
+        Err(error) => {
+            return parameter_row_failed(
+                &bundle,
+                serde_json::json!({
+                    "status": "failed", "stage": "crossover_execution", "row": index,
+                    "requested_axes": row, "replay_bundle": bundle,
+                    "sample_rate_hz": sample_rate, "error": format!("{error:#}"),
+                }),
+            );
+        }
+    };
+    Ok(ParameterRowOutcome::Completed(serde_json::json!({
+        "row": index,
+        "input_scenario": scenario,
+        "replay_bundle": {
+            "directory": bundle,
+            "request": "request.json",
+            "selected_output": "selected-output.json",
+            "scope": "selected_rerun_dsp_and_sidecars_not_backend_certification",
+        },
+        "requested_axes": row,
+        "crossover_execution": crossover_execution,
+        "unexecuted_axes": if crossover_execution == "unsupported_missing_phase" {
+            vec!["crossover"]
+        } else { Vec::<&str>::new() },
+        "not_applicable_axes": if crossover_execution == "not_applicable" {
+            vec!["crossover"]
+        } else { Vec::<&str>::new() },
+        "outcome_scope": "finite_output_smoke",
+        "effective_config": {
+            "optimizer": config.optimizer,
+            "system": config.system,
+            "crossovers": config.crossovers,
+            "speaker_names": ({
+                let mut names: Vec<_> = config.speakers.keys().collect();
+                names.sort();
+                names
+            }),
+                "measurement_source": "analytic_parameter_fixture",
+            "measurement_profile": "4db_log_gaussian_300hz_sigma_0.7",
+                "measurements": config.speakers.iter().filter_map(|(name, speaker)| {
+                    build::parameter_fixture_curve(speaker).map(|curve| {
+                        (name.clone(), serde_json::json!({
+                            "band_hz": [curve.freq[0], curve.freq[curve.freq.len()-1]],
+                            "grid_points": curve.freq.len(), "has_phase": curve.phase.is_some(),
+                        }))
+                    })
+                }).collect::<std::collections::BTreeMap<_, _>>(),
+        },
+        "sample_rate_hz": sample_rate,
+        "delivered_biquad_sample_rates_hz": result.channel_results.iter().map(|(name, channel)|
+            (name.clone(), channel.biquads.iter().map(|filter| filter.srate).collect::<Vec<_>>())
+        ).collect::<std::collections::BTreeMap<_, _>>(),
+        "requested_grid_points": point_count,
+        "mode": mode_name,
+        "filter_count": config.optimizer.num_filters,
+        "requested_fir_duration_ms": ([5, 10, 20][row.fir_duration as usize]),
+        "fir_duration_applicable": config.optimizer.processing_mode != ProcessingMode::LowLatency,
+        "delivered_fir_taps": result.channel_results.iter().map(|(name, channel)|
+            (name.clone(), channel.fir_coeffs.as_ref().map(Vec::len))
+        ).collect::<std::collections::BTreeMap<_, _>>(),
+        "pre_score": result.combined_pre_score,
+        "post_score": result.combined_post_score,
+        "stage_outcomes": result.metadata.stage_outcomes,
+        "selected_acceptance": result.metadata.correction_acceptance,
+        "selected_channel_scores": result.channel_results.iter().map(|(name, channel)| {
+            (name.clone(), serde_json::json!({"pre": channel.pre_score, "post": channel.post_score}))
+        }).collect::<std::collections::BTreeMap<_, _>>(),
+        "home_cinema_layout": result.metadata.home_cinema_layout,
+        "bass_management": result.metadata.bass_management,
+        "seed_distribution": result.metadata.qa_seed_distribution,
+    })))
+}
+
+fn run_parameter_cases(refusals_only: bool, jobs: usize) -> Result<QaRunOutcome> {
     let rows: Vec<_> = generate_pr_matrix()
         .into_iter()
         .enumerate()
@@ -1115,222 +1565,60 @@ fn run_parameter_cases(refusals_only: bool) -> Result<QaRunOutcome> {
     let mut passed = 0usize;
     let mut records = Vec::with_capacity(rows.len());
     let mut failures = Vec::new();
-    for &(index, ref row) in &rows {
-        let sample_rate = [44_100.0, 48_000.0, 96_000.0][row.sample_rate as usize];
-        let point_count = [100, 200, 400][row.grid_size as usize];
-        let mode = match row.mode {
-            0 => ProcessingMode::LowLatency,
-            1 => ProcessingMode::PhaseLinear,
-            _ => ProcessingMode::Hybrid,
-        };
-        let mode_name = format!("{mode:?}");
-        let curve = generate_flat_curve(
-            20.0,
-            (sample_rate / 2.0 - 100.0_f64).max(1_000.0_f64),
-            point_count,
-        );
-        let mut config = build::build_parameter_config(&curve, row, mode, sample_rate);
-        config.optimizer.num_filters = [3, 7, 11][row.filter_count as usize];
-        config.optimizer.max_freq = (sample_rate / 2.0 - 100.0_f64).min(config.optimizer.max_freq);
-        config.optimizer.max_iter = 120;
-        config.optimizer.seed = Some(SEED + index as u64);
-        // Explicit synthetic stimulus bound, not a relaxed safety budget or
-        // rescaling of the acoustic measurements. Keep the full-scale cases.
-        config.optimizer.finalization.default_input_peak = if refusals_only { 1.0 } else { 0.1 };
-        anyhow::ensure!(
-            config.optimizer.finalization.max_attenuation_db == 12.0
-                && config.optimizer.finalization.output_ceiling_dbfs == 0.0
-                && config.optimizer.finalization.input_peak_limits.is_empty(),
-            "parameter matrix safety assumptions changed"
-        );
-        // Preserve the selected rerun's sidecars for independent backend replay.
-        // Unique directories prevent a later run from overwriting old evidence.
-        let bundle = create_parameter_matrix_bundle(
-            std::path::Path::new("target/qa/roomeq-parameter-bundles"),
-            index,
-        )?;
-        write_parameter_matrix_artifact(
-            &bundle.join("request.json"),
-            &serde_json::json!({
-                "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
-                "input_scenario": scenario,
-                "inputs": parameter_matrix_request(&config)?,
-            }),
-        )?;
-        let attempt = crate::optimize_room(&config, sample_rate, Some(&bundle));
-        if refusals_only {
-            let diagnostic = match attempt {
-                Ok(_) => "unexpected successful output for full-scale refusal case".to_string(),
-                Err(error) => format!("{error:#}"),
-            };
-            if let Some(required) = structural_refusal_requirements(&diagnostic) {
-                let record = serde_json::json!({
-                    "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
-                    "input_scenario": scenario, "outcome_scope": "expected_safety_refusal",
-                    "assertion_status": "passed", "processing_status": "refused",
-                    "finalization": config.optimizer.finalization,
-                    "required_attenuation_db_by_seed": required, "error": diagnostic,
-                    "replay_bundle": {"directory": bundle, "request": "request.json", "refusal": "refusal.json"},
-                });
-                write_parameter_matrix_artifact(&bundle.join("refusal.json"), &record)?;
+    let expected_rows = rows.len();
+    println!(
+        "parameter matrix {scenario}: running {expected_rows} rows on {jobs} job(s) (override with --jobs N)"
+    );
+    // Rows are independent (unique bundle per row, fixed seed per index);
+    // only the progress artifact is shared, and the main thread owns it.
+    // A fatal row error stops launching further rows; in-flight rows drain.
+    let mut outputs = run_parallel_indexed(
+        rows,
+        jobs,
+        true,
+        move |item: &(usize, crate::parameter_matrix::ParameterRow)| {
+            let (index, row) = *item;
+            match run_parameter_row(index, row, refusals_only) {
+                Ok(outcome) => (Ok(outcome), false),
+                Err(error) => (Err(error), true),
+            }
+        },
+    )?;
+    outputs.sort_by_key(|(index, _)| *index);
+    for (index, output) in outputs {
+        match output? {
+            ParameterRowOutcome::Completed(record) => {
                 records.push(record);
                 passed += 1;
-            } else {
-                record_parameter_failure(
-                    artifact,
-                    &bundle,
-                    rows.len(),
-                    &records,
-                    &mut failures,
-                    serde_json::json!({"row": index, "stage": "expected_safety_refusal",
-                        "input_scenario": scenario, "error": diagnostic, "replay_bundle": bundle}),
-                )?;
             }
-            continue;
+            ParameterRowOutcome::Failed(failure) => {
+                if !refusals_only {
+                    eprintln!(
+                        "parameter matrix row {index} failed: {}",
+                        failure
+                            .get("error")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("unknown error")
+                    );
+                }
+                failures.push(failure);
+            }
         }
-        let result = match attempt {
-            Ok(result) => result,
-            Err(error) => {
-                record_parameter_failure(
-                    artifact,
-                    &bundle,
-                    rows.len(),
-                    &records,
-                    &mut failures,
-                    serde_json::json!({
-                        "status": "failed", "stage": "optimization",
-                        "row": index, "requested_axes": row, "replay_bundle": bundle,
-                        "sample_rate_hz": sample_rate, "optimizer": config.optimizer,
-                        "error": format!("{error:#}"),
-                    }),
-                )?;
-                eprintln!("parameter matrix row {index} failed: {error:#}");
-                continue;
-            }
-        };
-        if !result.combined_post_score.is_finite() {
-            record_parameter_failure(
-                artifact,
-                &bundle,
-                rows.len(),
-                &records,
-                &mut failures,
-                serde_json::json!({
-                    "status": "failed", "stage": "finite_output",
-                    "row": index, "requested_axes": row, "replay_bundle": bundle,
-                    "sample_rate_hz": sample_rate, "optimizer": config.optimizer,
-                    "error": "non-finite post score",
-                    "non_finite_post_score": result.combined_post_score.to_string(),
-                }),
-            )?;
-            eprintln!("parameter matrix row {index} failed: non-finite post score");
-            continue;
-        }
-        write_parameter_matrix_artifact(
-            &bundle.join("selected-output.json"),
-            &result.to_dsp_chain_output(),
-        )?;
-        let crossover_execution = match parameter_crossover_execution(
-            row.topology as usize,
-            row.crossover as usize,
-            row.phase as usize,
-            &serde_json::to_value(&result.metadata.bass_management)?,
-        ) {
-            Ok(status) => status,
-            Err(error) => {
-                record_parameter_failure(
-                    artifact,
-                    &bundle,
-                    rows.len(),
-                    &records,
-                    &mut failures,
-                    serde_json::json!({
-                        "status": "failed", "stage": "crossover_execution", "row": index,
-                        "requested_axes": row, "replay_bundle": bundle,
-                        "sample_rate_hz": sample_rate, "error": format!("{error:#}"),
-                    }),
-                )?;
-                eprintln!("parameter matrix row {index} failed: {error:#}");
-                continue;
-            }
-        };
-        records.push(serde_json::json!({
-            "row": index,
-            "input_scenario": scenario,
-            "replay_bundle": {
-                "directory": bundle,
-                "request": "request.json",
-                "selected_output": "selected-output.json",
-                "scope": "selected_rerun_dsp_and_sidecars_not_backend_certification",
-            },
-            "requested_axes": row,
-            "crossover_execution": crossover_execution,
-            "unexecuted_axes": if crossover_execution == "unsupported_missing_phase" {
-                vec!["crossover"]
-            } else { Vec::<&str>::new() },
-            "not_applicable_axes": if crossover_execution == "not_applicable" {
-                vec!["crossover"]
-            } else { Vec::<&str>::new() },
-            "outcome_scope": "finite_output_smoke",
-            "effective_config": {
-                "optimizer": config.optimizer,
-                "system": config.system,
-                "crossovers": config.crossovers,
-                "speaker_names": ({
-                    let mut names: Vec<_> = config.speakers.keys().collect();
-                    names.sort();
-                    names
-                }),
-                    "measurement_source": "analytic_parameter_fixture",
-                "measurement_profile": "4db_log_gaussian_300hz_sigma_0.7",
-                    "measurements": config.speakers.iter().filter_map(|(name, speaker)| {
-                        build::parameter_fixture_curve(speaker).map(|curve| {
-                            (name.clone(), serde_json::json!({
-                                "band_hz": [curve.freq[0], curve.freq[curve.freq.len()-1]],
-                                "grid_points": curve.freq.len(), "has_phase": curve.phase.is_some(),
-                            }))
-                        })
-                    }).collect::<std::collections::BTreeMap<_, _>>(),
-            },
-            "sample_rate_hz": sample_rate,
-            "delivered_biquad_sample_rates_hz": result.channel_results.iter().map(|(name, channel)|
-                (name.clone(), channel.biquads.iter().map(|filter| filter.srate).collect::<Vec<_>>())
-            ).collect::<std::collections::BTreeMap<_, _>>(),
-            "requested_grid_points": point_count,
-            "mode": mode_name,
-            "filter_count": config.optimizer.num_filters,
-            "requested_fir_duration_ms": ([5, 10, 20][row.fir_duration as usize]),
-            "fir_duration_applicable": config.optimizer.processing_mode != ProcessingMode::LowLatency,
-            "delivered_fir_taps": result.channel_results.iter().map(|(name, channel)|
-                (name.clone(), channel.fir_coeffs.as_ref().map(Vec::len))
-            ).collect::<std::collections::BTreeMap<_, _>>(),
-            "pre_score": result.combined_pre_score,
-            "post_score": result.combined_post_score,
-            "stage_outcomes": result.metadata.stage_outcomes,
-            "selected_acceptance": result.metadata.correction_acceptance,
-            "selected_channel_scores": result.channel_results.iter().map(|(name, channel)| {
-                (name.clone(), serde_json::json!({"pre": channel.pre_score, "post": channel.post_score}))
-            }).collect::<std::collections::BTreeMap<_, _>>(),
-            "home_cinema_layout": result.metadata.home_cinema_layout,
-            "bass_management": result.metadata.bass_management,
-            "seed_distribution": result.metadata.qa_seed_distribution,
-        }));
         write_parameter_matrix_artifact(
             artifact,
             &serde_json::json!({
-                "status": "running", "expected_rows": rows.len(),
+                "status": "running", "expected_rows": expected_rows,
                 "completed_rows": records, "failed_rows": failures,
             }),
         )?;
-        passed += 1;
     }
     if let Some(parent) = artifact.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let outcome = finish_parameter_matrix(artifact, rows.len(), &records, &failures)?;
+    let outcome = finish_parameter_matrix(artifact, expected_rows, &records, &failures)?;
     println!(
         "parameter matrix {scenario}: {passed}/{} {} rows passed; {} failed (full axis execution is not yet established)",
-        rows.len(),
+        expected_rows,
         if refusals_only {
             "safety-refusal"
         } else {
@@ -1366,14 +1654,23 @@ pub fn run() -> Result<bool> {
     let multiseat_guards_only = args.iter().any(|a| a == "--multiseat-guards-only");
     let full_matrix = args.iter().any(|a| a == "--full-matrix");
     let pr_matrix = args.iter().any(|a| a == "--pr");
+    // Each row runs a full optimization with inner rayon evaluators, so the
+    // outer pool defaults to half the CPUs (shared with roomeq-qa-quality);
+    // `--jobs 1` restores fully serial execution.
+    let jobs: usize = args
+        .windows(2)
+        .find(|w| w[0] == "--jobs")
+        .and_then(|w| w[1].parse().ok())
+        .unwrap_or_else(default_parallel_jobs)
+        .max(1);
     if args.iter().any(|a| a == "--parameter-matrix") {
-        return run_parameter_matrix().map(QaRunOutcome::has_failures);
+        return run_parameter_matrix(jobs).map(QaRunOutcome::has_failures);
     }
     if args.iter().any(|a| a == "--parameter-matrix-refusals") {
-        return run_parameter_cases(true).map(QaRunOutcome::has_failures);
+        return run_parameter_cases(true, jobs).map(QaRunOutcome::has_failures);
     }
     if args.iter().any(|a| a == "--parameter-matrix-reduced-level") {
-        return run_parameter_cases(false).map(QaRunOutcome::has_failures);
+        return run_parameter_cases(false, jobs).map(QaRunOutcome::has_failures);
     }
     if args.iter().any(|a| a == "--stimuli") {
         return run_stimuli(
@@ -1414,7 +1711,7 @@ pub fn run() -> Result<bool> {
         println!();
         println!("Usage:");
         println!(
-            "  roomeq-qa-synthetic [--list] [--pr] [--difficulty NAME] [--mode NAME] [--layout NAME] [--sub-topology NAME] [--full-matrix] [--multiseat-guards-only]"
+            "  roomeq-qa-synthetic [--jobs N] [--list] [--pr] [--difficulty NAME] [--mode NAME] [--layout NAME] [--sub-topology NAME] [--full-matrix] [--multiseat-guards-only]"
         );
         println!();
         println!("Options:");
@@ -1430,6 +1727,9 @@ pub fn run() -> Result<bool> {
             "  --full-matrix            Include WarpedIir/KautzModal and every multichannel processing mode"
         );
         println!("  --pr                     Run the bounded pull-request audibility matrix");
+        println!(
+            "  --jobs N                 Number of matrix rows to run concurrently (default: half the CPUs)"
+        );
         println!(
             "  --parameter-matrix       Run full-scale refusal and reduced-level processing cases"
         );
@@ -1698,93 +1998,41 @@ pub fn run() -> Result<bool> {
         "RoomEQ Synthetic QA -- {} tests ({} single + {} multi-sub + {} multi-seat guards + {} multi-channel)",
         total, single_total, ms_total, multiseat_guard_total, mc_total
     );
+    println!("Matrix execution: {jobs} job(s) (override with --jobs N; --jobs 1 is serial)");
     println!("============================================================");
 
     let start = Instant::now();
     let mut all_results = Vec::new();
-    let mut passed = 0;
-    let mut failed = 0;
+    let mut passed = 0usize;
+    let mut failed = 0usize;
 
+    // Single-speaker groups run concurrently; combos within a group stay
+    // serial because later combos reuse the baseline combo's post score.
+    let mut single_items = Vec::with_capacity(single_total);
     for difficulty in &difficulties {
-        // Build room modes from difficulty config
-        let modes_biquad: Vec<Biquad> = difficulty
-            .modes
-            .iter()
-            .map(|&(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
-            .collect();
-        let kautz_modes_biquad: Vec<Biquad> = difficulty
-            .modes
-            .iter()
-            .copied()
-            .chain(KAUTZ_REFERENCE_MODES.iter().copied())
-            .map(|(freq, q, gain)| Biquad::new(BiquadFilterType::Peak, freq, SAMPLE_RATE, q, gain))
-            .collect();
-
         for &(target_name, target) in &targets {
-            // Combine target shape with speaker rolloff so that broadband/excursion
-            // options see a realistic low-frequency limit in the measurement.
-            let speaker_base = Curve {
-                freq: target.freq.clone(),
-                spl: &target.spl + &speaker_rolloff.spl,
-                phase: None,
-                ..Default::default()
-            };
-            let scenario = generate_scenario(
-                &format!("{}/{}", difficulty.name, target_name),
-                &speaker_base,
-                &modes_biquad,
-                difficulty.noise_rms * 0.3,
-                difficulty.noise_rms * 0.7,
-                SEED,
-                SAMPLE_RATE,
-            );
-            let kautz_scenario = generate_scenario(
-                &format!("{}/{}-kautz", difficulty.name, target_name),
-                &speaker_base,
-                &kautz_modes_biquad,
-                difficulty.noise_rms * 0.3,
-                difficulty.noise_rms * 0.7,
-                SEED,
-                SAMPLE_RATE,
-            );
-
             for mode in &modes {
-                let degraded = if *mode == ProcessingMode::KautzModal {
-                    &kautz_scenario.degraded_curve
-                } else {
-                    &scenario.degraded_curve
-                };
-                let mut baseline_post_score = None;
-                for combo in &option_combos {
-                    let result = run_single_test(
-                        degraded,
-                        mode.clone(),
-                        target_name,
-                        combo,
-                        difficulty,
-                        baseline_post_score,
-                    );
-                    if combo.is_empty() {
-                        baseline_post_score = Some(result.post_score);
-                    }
-
-                    if result.passed {
-                        passed += 1;
-                    } else {
-                        failed += 1;
-                        println!(
-                            "  FAIL: {} -- {} (epa={})",
-                            result.name,
-                            result.reason,
-                            fmt_epa(result.epa_preference)
-                        );
-                        if fail_fast {
-                            return Ok(true);
-                        }
-                    }
-
-                    all_results.push(result);
-                }
+                single_items.push(SingleGroupWork {
+                    difficulty: **difficulty,
+                    target_name: target_name.to_string(),
+                    target: target.clone(),
+                    speaker_rolloff: speaker_rolloff.clone(),
+                    mode: mode.clone(),
+                    combos: option_combos.clone(),
+                });
+            }
+        }
+    }
+    let mut single_outputs = run_parallel_indexed(single_items, jobs, fail_fast, |work| {
+        flag_group_output(run_single_group(work))
+    })?;
+    single_outputs.sort_by_key(|(index, _)| *index);
+    for (_, results) in single_outputs {
+        for result in results {
+            let failed_now = !result.passed;
+            record_result(result, &mut passed, &mut failed, &mut all_results);
+            if fail_fast && failed_now {
+                return Ok(true);
             }
         }
     }
@@ -1792,55 +2040,28 @@ pub fn run() -> Result<bool> {
     // ====================================================================
     // Multi-sub tests
     // ====================================================================
+    // Multi-sub groups (difficulty/topology) run concurrently; each group
+    // rebuilds its analytic scenario from owned inputs on the worker.
+    let mut ms_items = Vec::with_capacity(ms_total);
     for ms_diff in &ms_difficulties {
-        let shared_biquads: Vec<Biquad> = ms_diff
-            .shared_modes
-            .iter()
-            .map(|&(f, q, g)| Biquad::new(BiquadFilterType::Peak, f, SAMPLE_RATE, q, g))
-            .collect();
-
-        let per_sub_biquads: Vec<Vec<Biquad>> = ms_diff
-            .per_sub_modes
-            .iter()
-            .map(|modes| {
-                modes
-                    .iter()
-                    .map(|&(f, q, g)| Biquad::new(BiquadFilterType::Peak, f, SAMPLE_RATE, q, g))
-                    .collect()
-            })
-            .collect();
-
-        let scenario = generate_multisub_scenario(
-            &format!("multisub/{}", ms_diff.name),
-            ms_diff.n_subs,
-            &shared_biquads,
-            &per_sub_biquads,
-            ms_diff.delays_ms,
-            ms_diff.noise_rms,
-            SEED,
-            SAMPLE_RATE,
-        );
-
         for topo in MS_TOPOLOGIES {
-            for combo in &ms_option_combos {
-                let result = run_multisub_test(&scenario.sub_curves, topo, combo, ms_diff);
-
-                if result.passed {
-                    passed += 1;
-                } else {
-                    failed += 1;
-                    println!(
-                        "  FAIL: {} -- {} (epa={})",
-                        result.name,
-                        result.reason,
-                        fmt_epa(result.epa_preference)
-                    );
-                    if fail_fast {
-                        return Ok(true);
-                    }
-                }
-
-                all_results.push(result);
+            ms_items.push(MultiSubGroupWork {
+                difficulty: (*ms_diff).clone(),
+                topology: *topo,
+                combos: ms_option_combos.clone(),
+            });
+        }
+    }
+    let mut ms_outputs = run_parallel_indexed(ms_items, jobs, fail_fast, |work| {
+        flag_group_output(run_multisub_group(work))
+    })?;
+    ms_outputs.sort_by_key(|(index, _)| *index);
+    for (_, results) in ms_outputs {
+        for result in results {
+            let failed_now = !result.passed;
+            record_result(result, &mut passed, &mut failed, &mut all_results);
+            if fail_fast && failed_now {
+                return Ok(true);
             }
         }
     }
@@ -1866,6 +2087,10 @@ pub fn run() -> Result<bool> {
     // ====================================================================
     let base_fullrange = generate_speaker_rolloff_curve(20.0, 20000.0, 200, 80.0, -6.0);
 
+    // Multichannel items are fully independent; item order matches the
+    // serial nesting (layout/topology/difficulty/mode) so summaries stay
+    // deterministic after the indexed outputs are restored to matrix order.
+    let mut mc_items = Vec::with_capacity(mc_total);
     for layout in layouts {
         let topos: Vec<_> = sub_topos_for_layout(layout)
             .iter()
@@ -1890,29 +2115,13 @@ pub fn run() -> Result<bool> {
                     .iter()
                     .filter(|mode| multichannel_mode_supported(layout, mode))
                 {
-                    let result = run_multichannel_test(
-                        layout,
-                        None,
-                        difficulty,
-                        &base_fullrange,
-                        mode.clone(),
-                        SAMPLE_RATE,
-                    );
-                    if result.passed {
-                        passed += 1;
-                    } else {
-                        failed += 1;
-                        println!(
-                            "  FAIL: {} -- {} (epa={})",
-                            result.name,
-                            result.reason,
-                            fmt_epa(result.epa_preference)
-                        );
-                        if fail_fast {
-                            return Ok(true);
-                        }
-                    }
-                    all_results.push(result);
+                    mc_items.push(MultichannelWork {
+                        layout: *layout,
+                        sub_topo: None,
+                        difficulty: **difficulty,
+                        base_curve: base_fullrange.clone(),
+                        mode: mode.clone(),
+                    });
                 }
             }
         } else {
@@ -1923,31 +2132,28 @@ pub fn run() -> Result<bool> {
                         .iter()
                         .filter(|mode| multichannel_mode_supported(layout, mode))
                     {
-                        let result = run_multichannel_test(
-                            layout,
-                            Some(sub_topo),
-                            difficulty,
-                            &base_fullrange,
-                            mode.clone(),
-                            SAMPLE_RATE,
-                        );
-                        if result.passed {
-                            passed += 1;
-                        } else {
-                            failed += 1;
-                            println!(
-                                "  FAIL: {} -- {} (epa={})",
-                                result.name,
-                                result.reason,
-                                fmt_epa(result.epa_preference)
-                            );
-                            if fail_fast {
-                                return Ok(true);
-                            }
-                        }
-                        all_results.push(result);
+                        mc_items.push(MultichannelWork {
+                            layout: *layout,
+                            sub_topo: Some(*sub_topo),
+                            difficulty: **difficulty,
+                            base_curve: base_fullrange.clone(),
+                            mode: mode.clone(),
+                        });
                     }
                 }
+            }
+        }
+    }
+    let mut mc_outputs = run_parallel_indexed(mc_items, jobs, fail_fast, |work| {
+        flag_group_output(run_multichannel_item(work))
+    })?;
+    mc_outputs.sort_by_key(|(index, _)| *index);
+    for (_, results) in mc_outputs {
+        for result in results {
+            let failed_now = !result.passed;
+            record_result(result, &mut passed, &mut failed, &mut all_results);
+            if fail_fast && failed_now {
+                return Ok(true);
             }
         }
     }

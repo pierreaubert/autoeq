@@ -18,6 +18,12 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct MeasuredIrSource {
+    /// Delivered channel; defaults to the declaration's map key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_channel: Option<String>,
+    /// Exact delivered driver name; omit for a whole-channel capture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub driver: Option<String>,
     /// IR file path, resolved against the configuration directory.
     /// CSV with a `time_ms,amplitude` header.
     pub path: PathBuf,
@@ -26,8 +32,8 @@ pub struct MeasuredIrSource {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample_rate_hz: Option<f64>,
     /// Shared clock identity across simultaneously captured channels.
-    /// Required on every entry when more than one channel declares a
-    /// measured IR, so no cross-channel analysis can silently mix clocks.
+    /// Optional for independent diagnostics. Absence never establishes
+    /// eligibility for coherent sums or cross-channel timing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timing_reference_id: Option<String>,
 }
@@ -42,10 +48,10 @@ impl MeasuredIrSource {
     /// rate, or a blank timing reference.
     pub fn validate(&self) -> Result<(), String> {
         if let Some(rate) = self.sample_rate_hz
-            && (!rate.is_finite() || rate < 8_000.0 || rate > 192_000.0)
+            && (!rate.is_finite() || rate < 1_000.0 || rate > 192_000.0)
         {
             return Err(format!(
-                "measured IR sample rate must be within 8–192 kHz, got {rate}"
+                "measured IR sample rate must be within 1–192 kHz, got {rate}"
             ));
         }
         if let Some(timing) = &self.timing_reference_id
@@ -55,6 +61,11 @@ impl MeasuredIrSource {
                 "measured IR timing reference must be a real clock identity, not a placeholder",
             ));
         }
+        for target in [&self.output_channel, &self.driver].into_iter().flatten() {
+            if target.trim().is_empty() {
+                return Err("measured IR output channel and driver must not be blank".into());
+            }
+        }
         Ok(())
     }
 }
@@ -63,34 +74,22 @@ impl MeasuredIrSource {
 ///
 /// # Errors
 ///
-/// Returns a reason for an invalid entry, or when several channels declare
-/// IRs without a shared timing reference on every entry.
+/// Returns a reason for an invalid entry or duplicate delivered target.
+/// This validates independent diagnostics, not coherent timing eligibility.
 pub fn validate_measured_ir_map(map: &BTreeMap<String, MeasuredIrSource>) -> Result<(), String> {
     for (channel, source) in map {
         source
             .validate()
             .map_err(|reason| format!("channel '{channel}': {reason}"))?;
     }
-    if map.len() > 1 {
-        let reference = map
-            .values()
-            .map(|source| source.timing_reference_id.clone())
-            .collect::<Vec<_>>();
-        let shared = reference.iter().all(|id| {
-            id.as_deref().is_some_and(|id| {
-                !id.trim().is_empty() && !id.trim().eq_ignore_ascii_case("unknown")
-            })
-        });
-        if !shared {
-            return Err(String::from(
-                "channels declaring measured IRs must share one timing_reference_id on every entry",
-            ));
-        }
-        let first = reference[0].clone();
-        if reference.iter().any(|id| *id != first) {
-            return Err(String::from(
-                "channels declaring measured IRs must share one timing_reference_id on every entry",
-            ));
+    let mut targets = std::collections::BTreeSet::new();
+    for (key, source) in map {
+        let target = (
+            source.output_channel.as_deref().unwrap_or(key),
+            source.driver.as_deref(),
+        );
+        if !targets.insert(target) {
+            return Err(format!("duplicate measured IR target for '{key}'"));
         }
     }
     Ok(())
@@ -102,6 +101,8 @@ mod tests {
 
     fn source(rate: Option<f64>, timing: Option<&str>) -> MeasuredIrSource {
         MeasuredIrSource {
+            output_channel: None,
+            driver: None,
             path: PathBuf::from("left__ir.csv"),
             sample_rate_hz: rate,
             timing_reference_id: timing.map(str::to_string),
@@ -118,7 +119,8 @@ mod tests {
         assert!(source(Some(48_000.0), None).validate().is_ok());
         assert!(source(Some(0.0), None).validate().is_err());
         assert!(source(Some(f64::NAN), None).validate().is_err());
-        assert!(source(Some(7_999.0), None).validate().is_err());
+        assert!(source(Some(3_000.0), None).validate().is_ok());
+        assert!(source(Some(999.0), None).validate().is_err());
     }
 
     #[test]
@@ -135,7 +137,16 @@ mod tests {
     }
 
     #[test]
-    fn multi_channel_requires_shared_timing() {
+    fn duplicate_driver_target_rejected() {
+        let mut sub = source(Some(3_000.0), None);
+        sub.output_channel = Some("Sub1".into());
+        sub.driver = Some("Sub2".into());
+        let map = BTreeMap::from([("first".into(), sub.clone()), ("second".into(), sub)]);
+        assert!(validate_measured_ir_map(&map).is_err());
+    }
+
+    #[test]
+    fn independent_captures_do_not_require_shared_timing() {
         let map = BTreeMap::from([
             ("L".to_string(), source(None, Some("clk-1"))),
             ("R".to_string(), source(None, Some("clk-1"))),
@@ -145,11 +156,11 @@ mod tests {
             ("L".to_string(), source(None, Some("clk-1"))),
             ("R".to_string(), source(None, None)),
         ]);
-        assert!(validate_measured_ir_map(&map).is_err());
+        assert!(validate_measured_ir_map(&map).is_ok());
         let map = BTreeMap::from([
             ("L".to_string(), source(None, Some("clk-1"))),
             ("R".to_string(), source(None, Some("clk-2"))),
         ]);
-        assert!(validate_measured_ir_map(&map).is_err());
+        assert!(validate_measured_ir_map(&map).is_ok());
     }
 }

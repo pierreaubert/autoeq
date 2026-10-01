@@ -25,6 +25,15 @@ export function render_section(canvas_id: string, section_json: string, w: numbe
 export function schema_version(): string;
 
 /**
+ * Map a rubber-band pixel rectangle to data domains for box zoom.
+ *
+ * `x0/y0/x1/y1` are canvas CSS px (origin top-left). Returns
+ * `{"x":[lo,hi],"y":[lo,hi]}` in data units, or `""` when the canvas is
+ * unknown, never rendered a figure, or the selection is degenerate.
+ */
+export function selection_domain_json(canvas_id: string, x0: number, y0: number, x1: number, y1: number): string;
+
+/**
  * Flip one series' visibility and re-render. Returns 1 when re-rendered,
  * 0 when the canvas or series is unknown, -99 on an internal panic
  * (see [`last_error`]).
@@ -39,6 +48,7 @@ export interface InitOutput {
     readonly legend_json: (a: number, b: number) => [number, number];
     readonly render_section: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => number;
     readonly schema_version: () => [number, number];
+    readonly selection_domain_json: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly toggle_series: (a: number, b: number, c: number) => number;
     readonly __wbindgen_exn_store: (a: number) => void;
     readonly __externref_table_alloc: () => number;

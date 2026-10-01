@@ -1,0 +1,839 @@
+#!/usr/bin/env python3
+"""
+Extract frequency responses and measured impulse responses from REW .mdat files.
+
+REW .mdat files use Java serialization format ("REW Measurement Data File V2").
+Each measurement contains float arrays for SPL, phase, and other data, with
+an IR (impulse response) array as a landmark in the middle of each measurement's
+serialized data.
+
+Usage:
+    python3 mdat2csv.py <file.mdat> [output_dir]
+"""
+
+import struct
+import sys
+import os
+import re
+import math
+import argparse
+from pathlib import Path
+
+
+def read_big_endian(data, offset, fmt):
+    """Read big-endian value at offset."""
+    size = struct.calcsize(fmt)
+    return struct.unpack(fmt, data[offset:offset + size])[0]
+
+
+def find_all(data, pattern):
+    """Find all occurrences of a byte pattern in data."""
+    positions = []
+    start = 0
+    while True:
+        pos = data.find(pattern, start)
+        if pos == -1:
+            break
+        positions.append(pos)
+        start = pos + 1
+    return positions
+
+
+def scan_float_arrays(data):
+    """
+    Scan the binary data for all Java-serialized float arrays ([F).
+    Returns list of (offset, length, data_start, elem_type) tuples.
+    """
+    arrays = []
+    i = 0
+    while i < len(data) - 23:
+        if data[i] != 0x75:  # TC_ARRAY
+            i += 1
+            continue
+
+        if data[i + 1] == 0x72:  # TC_CLASSDESC (new class definition)
+            name_len = struct.unpack('>H', data[i + 2:i + 4])[0]
+            if name_len > 20 or i + 4 + name_len > len(data):
+                i += 1
+                continue
+            name = data[i + 4:i + 4 + name_len]
+            if name not in (b'[F', b'[D', b'[I'):
+                i += 1
+                continue
+            # Skip: TC_ARRAY(1) + TC_CLASSDESC(1) + name_len(2) + name + UID(8) + flags(1) + nfields(2) + TC_ENDBLOCKDATA(1) + TC_NULL(1)
+            header_size = 1 + 1 + 2 + name_len + 8 + 1 + 2 + 1 + 1
+            arr_len = struct.unpack('>I', data[i + header_size:i + header_size + 4])[0]
+            arr_data = i + header_size + 4
+            elem_type = name.decode()
+            elem_size = {'[F': 4, '[D': 8, '[I': 4}[elem_type]
+            arrays.append((i, arr_len, arr_data, elem_type))
+            i = arr_data + arr_len * elem_size
+
+        elif data[i + 1] == 0x71:  # TC_REFERENCE (back-reference to existing class)
+            handle = struct.unpack('>I', data[i + 2:i + 6])[0]
+            arr_len = struct.unpack('>I', data[i + 6:i + 10])[0]
+            arr_data = i + 10
+            # We need to figure out element type from handle
+            # This is set per-file; we'll resolve it later
+            arrays.append((i, arr_len, arr_data, f'ref:0x{handle:x}'))
+            i += 10  # We'll advance past data when we resolve the type
+
+        else:
+            i += 1
+            continue
+
+    return arrays
+
+
+def resolve_array_types(arrays, data):
+    """Resolve reference types for arrays and compute data end positions."""
+    # Find which handles map to which types
+    handle_to_type = {}
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if not elem_type.startswith('ref:'):
+            # This is a new class definition; the handle is assigned sequentially
+            # We don't track handles here, but we can infer from the ref arrays
+            pass
+
+    # For [F] arrays defined with TC_CLASSDESC, the subsequent TC_REFERENCE arrays
+    # with the same handle point to the same type.
+    # Find the first [F] definition and note what handle refs use
+    float_handle = None
+    int_handle = None
+    double_handle = None
+
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if elem_type == '[F' and float_handle is None:
+            # The next ref arrays will reference this class
+            # Find refs that appear after this and try to read as floats
+            float_handle = 'pending'
+        elif elem_type.startswith('ref:') and float_handle == 'pending':
+            h = int(elem_type.split(':')[1], 16)
+            float_handle = h
+            break
+
+    # Also find [I] and [D] handles
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if elem_type == '[I':
+            for o2, l2, d2, t2 in arrays:
+                if t2.startswith('ref:') and o2 > offset:
+                    h = int(t2.split(':')[1], 16)
+                    int_handle = h
+                    break
+            break
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if elem_type == '[D':
+            for o2, l2, d2, t2 in arrays:
+                if t2.startswith('ref:') and o2 > offset:
+                    h = int(t2.split(':')[1], 16)
+                    double_handle = h
+                    break
+            break
+
+    # Now resolve all ref types
+    resolved = []
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if elem_type.startswith('ref:'):
+            h = int(elem_type.split(':')[1], 16)
+            if h == float_handle:
+                resolved.append((offset, arr_len, arr_data, '[F'))
+            elif h == int_handle:
+                resolved.append((offset, arr_len, arr_data, '[I'))
+            elif h == double_handle:
+                resolved.append((offset, arr_len, arr_data, '[D'))
+            else:
+                resolved.append((offset, arr_len, arr_data, elem_type))
+        else:
+            resolved.append((offset, arr_len, arr_data, elem_type))
+
+    return resolved
+
+
+def read_float_array(data, arr_data, arr_len):
+    """Read a float array from binary data."""
+    return struct.unpack(f'>{arr_len}f', data[arr_data:arr_data + arr_len * 4])
+
+
+def read_double_array(data, arr_data, arr_len):
+    """Read a double array from binary data."""
+    return struct.unpack(f'>{arr_len}d', data[arr_data:arr_data + arr_len * 8])
+
+
+def parse_measdata_class(data):
+    """
+    Find and parse the MeasData class descriptor.
+    Returns (primitive_fields, object_fields, class_desc_end) where each field
+    is (type_code, name).
+    """
+    cd_pos = data.find(b'roomeqwizard.MeasData')
+    if cd_pos == -1:
+        raise ValueError("MeasData class descriptor not found")
+
+    start = cd_pos - 3  # TC_CLASSDESC(72) + 2-byte name length
+    name_len = struct.unpack('>H', data[start + 1:start + 3])[0]
+    nfields = struct.unpack('>H', data[start + 3 + name_len + 9:start + 3 + name_len + 11])[0]
+
+    pos = start + 3 + name_len + 11
+    prim_fields = []
+    obj_fields = []
+
+    for _ in range(nfields):
+        type_code = chr(data[pos])
+        pos += 1
+        fname_len = struct.unpack('>H', data[pos:pos + 2])[0]
+        pos += 2
+        fname = data[pos:pos + fname_len].decode()
+        pos += fname_len
+
+        if type_code in ('L', '['):
+            if data[pos] == 0x74:  # TC_STRING
+                cname_len = struct.unpack('>H', data[pos + 1:pos + 3])[0]
+                pos += 3 + cname_len
+            elif data[pos] == 0x71:  # TC_REFERENCE
+                pos += 5
+            else:
+                pos += 1
+
+        if type_code in ('D', 'I', 'F', 'Z', 'J', 'S', 'B', 'C'):
+            prim_fields.append((type_code, fname))
+        else:
+            obj_fields.append((type_code, fname))
+
+    # Skip TC_ENDBLOCKDATA(78) + TC_NULL(70) for super class
+    pos += 2
+    return prim_fields, obj_fields, pos
+
+
+TYPE_SIZES = {'D': 8, 'I': 4, 'F': 4, 'Z': 1, 'J': 8, 'S': 2, 'B': 1, 'C': 2}
+TYPE_FMTS = {'D': '>d', 'I': '>i', 'F': '>f', 'Z': '>?', 'J': '>q', 'S': '>h', 'B': '>b', 'C': '>H'}
+
+
+def read_primitive_fields(data, offset, prim_fields):
+    """Read all primitive fields starting at offset. Returns dict of field values."""
+    values = {}
+    pos = offset
+    for type_code, name in prim_fields:
+        sz = TYPE_SIZES[type_code]
+        values[name] = struct.unpack(TYPE_FMTS[type_code], data[pos:pos + sz])[0]
+        pos += sz
+    return values, pos
+
+
+def compute_frequencies(params):
+    """Compute frequency axis from measurement parameters."""
+    n = params['dataLength']
+    start = params['startFreq']
+    if params['isLogSpaced']:
+        step = params['logStep']
+        return [start * (step ** i) for i in range(n)]
+    else:
+        step = params['freqStep']
+        return [start + step * i for i in range(n)]
+
+
+def find_measurement_primitives(data, class_desc_end, prim_fields):
+    """
+    Find all MeasData instances' primitive field blocks.
+    The first instance starts right at class_desc_end.
+    Subsequent instances start after TC_OBJECT(73) + TC_REFERENCE(71) + handle(4 bytes).
+    """
+    prim_size = sum(TYPE_SIZES[tc] for tc, _ in prim_fields)
+
+    # First instance
+    instances = [class_desc_end]
+
+    # For subsequent instances, search for a pattern:
+    # We look for the dataLength field (int = specific value) preceded by
+    # the right amount of primitive data.
+    # Read first instance to get expected values
+    first_params, _ = read_primitive_fields(data, class_desc_end, prim_fields)
+    sample_rate = first_params['sampleRate']
+
+    # Calculate the offset of dataLength within primitive fields
+    dl_offset = 0
+    for tc, name in prim_fields:
+        if name == 'dataLength':
+            break
+        dl_offset += TYPE_SIZES[tc]
+
+    # Search for subsequent instances:
+    # Pattern: 73 71 <4-byte handle> then primitive data starting with
+    # known values (first few doubles likely 0.0)
+    # The dataLength field at dl_offset should match
+    search_start = class_desc_end + prim_size
+    while search_start < len(data) - prim_size - 6:
+        # Look for TC_OBJECT(73) + TC_REFERENCE(71) + 4-byte handle
+        pos = data.find(b'\x73\x71', search_start)
+        if pos == -1:
+            break
+        # Check if the data at pos+6 (after 73 71 xx xx xx xx) looks like
+        # primitive fields with a matching dataLength
+        prim_start = pos + 6
+        if prim_start + prim_size > len(data):
+            break
+        candidate_dl = struct.unpack('>i', data[prim_start + dl_offset:prim_start + dl_offset + 4])[0]
+        if 0 < candidate_dl <= len(data) // 4:
+            # Additional validation: check sampleRate
+            sr_offset = 0
+            for tc, name in prim_fields:
+                if name == 'sampleRate':
+                    break
+                sr_offset += TYPE_SIZES[tc]
+            candidate_sr = struct.unpack('>i', data[prim_start + sr_offset:prim_start + sr_offset + 4])[0]
+            if candidate_sr == sample_rate:
+                instances.append(prim_start)
+        search_start = pos + 2
+
+    return instances
+
+
+def find_html_descriptions(data):
+    """Find HTML thumbnail descriptions for measurement metadata."""
+    descriptions = []
+    for m in re.finditer(b'<BODY>(.*?)</HTML>', data, re.DOTALL):
+        content = m.group(1).decode('utf-8', errors='replace')
+        parts = content.split('<BR>')
+        desc = {
+            'date': parts[0] if len(parts) > 0 else '',
+            'time': parts[1] if len(parts) > 1 else '',
+            'freq_range': parts[2] if len(parts) > 2 else '',
+            'spl_range': parts[3] if len(parts) > 3 else '',
+        }
+        descriptions.append(desc)
+    return descriptions
+
+
+def _measurement_label(metadata):
+    """Return only the public label from a potentially private REW note."""
+    for line in metadata.splitlines():
+        label = ' '.join(line.split())
+        if label and len(label) <= 100:
+            return label
+    return None
+
+
+def _measurement_title(metadata):
+    """Return a serialized REW measurement title, if it looks like one."""
+    if "\n" in metadata or "\r" in metadata:
+        return None
+
+    label = _measurement_label(metadata)
+    lowered = label.lower()
+    if (
+        not label
+        or "/" in label
+        or "\\" in label
+        or ":" in label
+        or "calibration" in lowered
+        or lowered.endswith((".txt", ".csv", ".wav"))
+    ):
+        return None
+    if not any("_" in token for token in label.split()):
+        return None
+
+    return label
+
+
+def find_measurement_names(data, ir_arrays, measurement_ends):
+    """
+    Recover REW measurement titles without retaining embedded REW notes.
+
+    REW serializes the measurement title separately from a longer notes string.
+    Prefer shortDesc immediately before the serialized signal level, then
+    identifier-like titles and finally the first line of measurement notes.
+    """
+    names = []
+    element_sizes = {'[F': 4, '[D': 8, '[I': 4}
+    for index, ir_array in enumerate(ir_arrays):
+        if ir_array is None:
+            names.append(None)
+            continue
+        _, arr_len, arr_data, elem_type = ir_array
+        ir_end = arr_data + arr_len * element_sizes[elem_type]
+        measurement_end = measurement_ends[index]
+        search_area = data[ir_end:measurement_end]
+        candidates = []
+        title_candidates = []
+        short_descriptions = []
+        pos = 0
+        while pos < len(search_area) - 3:
+            if search_area[pos] == 0x74:  # TC_STRING
+                slen = struct.unpack('>H', search_area[pos + 1:pos + 3])[0]
+                if 1 <= slen <= 4096 and pos + 3 + slen <= len(search_area):
+                    try:
+                        s = search_area[pos + 3:pos + 3 + slen].decode('utf-8')
+                        # MeasData stores shortDesc directly before sigGenLevelSt.
+                        # This identifies ordinary titles (including spaces and dates)
+                        # without mistaking notes or enum constants for curve names.
+                        next_pos = pos + 3 + slen
+                        if (next_pos + 3 <= len(search_area)
+                                and search_area[next_pos] == 0x74):
+                            level_len = struct.unpack_from('>H', search_area, next_pos + 1)[0]
+                            level_end = next_pos + 3 + level_len
+                            if level_end <= len(search_area):
+                                level = search_area[next_pos + 3:level_end]
+                                if (re.fullmatch(rb'[+-]?(?:\d+(?:\.\d*)?|\.\d+) dBFS', level)
+                                        and s.strip() and '\n' not in s and '\r' not in s):
+                                    short_descriptions.append(s)
+                        # Skip Java class/type strings
+                        if not any(x in s for x in ['java', 'javax', 'roomeq', 'swing', 'awt',
+                                                      'HERMITE', 'TUKEY', 'HANN', 'PERCENT',
+                                                      'Ljava', '64-bit', '32-bit']):
+                            label = _measurement_label(s)
+                            if label and not label.startswith(('[', 'L[')):
+                                candidates.append((len(s), label))
+                                title = _measurement_title(s)
+                                if title:
+                                    title_candidates.append(title)
+                    except UnicodeDecodeError:
+                        pass
+            # Advance one byte even after a plausible token. Serialized array
+            # payloads can contain false TC_STRING bytes; jumping by their
+            # apparent length could skip the real metadata token.
+            pos += 1
+        names.append(
+            short_descriptions[0] if short_descriptions else
+            title_candidates[0] if title_candidates else
+            max(candidates, default=(0, None))[1]
+        )
+
+    return names
+
+
+def identify_phase_array(arrays, data, data_length):
+    """
+    Identify the wrapped phase array: min near -180, max near +180, correct length.
+    """
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if elem_type != '[F' or arr_len != data_length:
+            continue
+        vals = read_float_array(data, arr_data, arr_len)
+        vmin, vmax = min(vals), max(vals)
+        if vmin < -150 and vmax > 150 and vmax < 200 and vmin > -200:
+            return vals
+    return None
+
+
+def identify_spl_array(arrays, data, data_length):
+    """
+    Identify SPL arrays among the candidates.
+    Returns (rawValues, splValues) - splValues may be None if only one SPL array found.
+    """
+    spl_candidates = []
+    for offset, arr_len, arr_data, elem_type in arrays:
+        if elem_type != '[F' or arr_len != data_length:
+            continue
+        vals = read_float_array(data, arr_data, arr_len)
+        if not all(math.isfinite(value) for value in vals):
+            continue
+        vmin, vmax = min(vals), max(vals)
+        vmean = sum(vals) / len(vals)
+        # Valid REW SPL curves can fall below 0 dB at the measurement-band
+        # edges, especially for subwoofers and limited-band surrounds. Phase
+        # arrays remain excluded by their near-zero mean and ±180 degree range.
+        if 20 < vmean < 140 and vmin > -200 and vmax < 200:
+            variance = sum((v - vmean) ** 2 for v in vals) / len(vals)
+            std = variance ** 0.5
+            if std > 1.5:
+                spl_candidates.append((offset, vals, vmean, std, vmin, vmax))
+
+    if not spl_candidates:
+        return None, None
+
+    # Sort by offset (field order: rawValues at field 85, splValues at field 109)
+    spl_candidates.sort(key=lambda x: x[0])
+
+    if len(spl_candidates) == 1:
+        return spl_candidates[0][1], None
+
+    # rawValues is first, splValues is second (if present and distinct)
+    raw = spl_candidates[0][1]
+    # splValues should be similar to rawValues but possibly offset by calibration
+    # It's the second SPL-range array in field order
+    spl = spl_candidates[1][1] if len(spl_candidates) > 1 else None
+    return raw, spl
+
+
+def _java_fields(instance):
+    """Read named fields, including inherited fields, without Java execution."""
+    return {field.name: value
+            for fields in getattr(instance, 'field_data', {}).values()
+            for field, value in fields.items()}
+
+
+def extract_ir(measurement):
+    """Return stored SampledData samples and their original time grid.
+
+    Unsupported/derived representations are withheld rather than guessed from
+    array sizes. REW stores SampledData times and sample intervals in seconds.
+    """
+    fields = _java_fields(measurement)
+    ir_data = _java_fields(fields.get('irData'))
+    if not ir_data:
+        return None, 'no supported IRData (legacy IRFloat is not decoded)'
+    if ir_data.get('minPhase'):
+        return None, 'minimum-phase reconstruction is not a measured room IR'
+    sampled = ir_data.get('ir')
+    if getattr(getattr(sampled, 'classdesc', None), 'name', None) != 'roomeqwizard.SampledData':
+        return None, 'no supported SampledData impulse response'
+    values = _java_fields(sampled)
+    if values.get('unfilt') is not None or values.get('unsmoothed') is not None:
+        return None, 'filtered/smoothed IR storage requires an unprocessed REW export'
+    samples = values.get('data')
+    interval = values.get('T')
+    start = values.get('startTime')
+    if (samples is None or len(samples) < 2 or len(samples) != values.get('n')
+            or not isinstance(interval, (int, float))
+            or not math.isfinite(interval) or interval <= 0
+            or not isinstance(start, (int, float)) or not math.isfinite(start)
+            or any(not math.isfinite(v) for v in samples)
+            or not any(v != 0 for v in samples)):
+        return None, 'invalid IR samples or time grid'
+    return {'amplitude': tuple(samples), 'start_time_s': start,
+            'sample_interval_s': interval, 'sample_rate_hz': 1.0 / interval}, None
+
+
+def read_serialized_measurements(data):
+    """Decode named IR fields with a Java serialization reader."""
+    try:
+        import javaobj.v2 as javaobj
+    except ImportError as error:
+        raise RuntimeError(
+            'MDAT IR extraction requires javaobj-py3; install scripts/requirements.txt'
+        ) from error
+    objects = javaobj.loads(data)
+    if not isinstance(objects, list):
+        objects = [objects]
+    return [obj for obj in objects
+            if getattr(getattr(obj, 'classdesc', None), 'name', None)
+            == 'roomeqwizard.MeasData']
+
+
+def parse_mdat(filepath):
+    """
+    Parse an REW .mdat file and extract measurements.
+    Returns list of measurement dicts with 'freq', 'spl', 'phase', 'name', 'params'.
+    """
+    with open(filepath, 'rb') as f:
+        data = f.read()
+
+    # Verify header
+    header_str = data.find(b'REW Measurement Data File')
+    if header_str == -1:
+        raise ValueError("Not a valid REW .mdat file")
+
+    # Parse MeasData class descriptor
+    prim_fields, obj_fields, class_desc_end = parse_measdata_class(data)
+
+    # Find all MeasData instances' primitive fields
+    prim_starts = find_measurement_primitives(data, class_desc_end, prim_fields)
+
+    # Parse primitive fields for each measurement
+    all_params = []
+    for ps in prim_starts:
+        params, _ = read_primitive_fields(data, ps, prim_fields)
+        all_params.append(params)
+
+    num_measurements = len(all_params)
+    serialized = read_serialized_measurements(data)
+    if len(serialized) != num_measurements:
+        raise ValueError('MDAT measurement count mismatch; cannot safely associate IRs')
+
+    # Scan all arrays in the file
+    raw_arrays = scan_float_arrays(data)
+    arrays = resolve_array_types(raw_arrays, data)
+
+    # Locate the largest power-of-two float array within each measurement.
+    # Measurements may have different IR lengths and frequency grids.
+    measurement_ends = prim_starts[1:] + [len(data)]
+    ir_arrays = []
+    for start, end in zip(prim_starts, measurement_ends):
+        candidates = [
+            (o, l, d, t) for o, l, d, t in arrays
+            if t == '[F' and l >= 512 and l & (l - 1) == 0
+            and start < o and d + l * 4 <= end
+        ]
+        ir_arrays.append(max(candidates, key=lambda candidate: candidate[1], default=None))
+
+    # Get HTML descriptions for naming
+    html_descs = find_html_descriptions(data)
+    embedded_names = find_measurement_names(data, ir_arrays, measurement_ends)
+
+    prim_size = sum(TYPE_SIZES[tc] for tc, _ in prim_fields)
+    measurements = []
+    for meas_idx in range(num_measurements):
+        params = all_params[meas_idx]
+        data_length = params['dataLength']
+        freqs = compute_frequencies(params)
+
+        meas_start = prim_starts[meas_idx]
+        if meas_idx + 1 < len(prim_starts):
+            meas_end = prim_starts[meas_idx + 1]
+        else:
+            meas_end = len(data)
+        prim_end = meas_start + prim_size
+
+        # If we have IR landmarks, prefer post-IR arrays (where phase/SPL live)
+        if ir_arrays[meas_idx] is not None:
+            _, ir_length, ir_data_start, _ = ir_arrays[meas_idx]
+            ir_data_end = ir_data_start + ir_length * 4
+            # Post-IR: between IR end and next measurement's primitive start
+            post_ir = [(o, l, d, t) for o, l, d, t in arrays
+                       if o > ir_data_end and o < meas_end]
+            phase = identify_phase_array(post_ir, data, data_length)
+            raw_spl, cal_spl = identify_spl_array(post_ir, data, data_length)
+        else:
+            phase = None
+            raw_spl = None
+            cal_spl = None
+
+        # Fallback: search all arrays within this measurement's range
+        if phase is None or raw_spl is None:
+            all_meas = [(o, l, d, t) for o, l, d, t in arrays
+                        if o > prim_end and o < meas_end]
+            if phase is None:
+                phase = identify_phase_array(all_meas, data, data_length)
+            if raw_spl is None:
+                raw_spl, cal_spl = identify_spl_array(all_meas, data, data_length)
+
+        # Use calibrated SPL if available, otherwise raw
+        spl = cal_spl if cal_spl is not None else raw_spl
+
+        # Build measurement name
+        if meas_idx < len(embedded_names) and embedded_names[meas_idx]:
+            name = embedded_names[meas_idx]
+        elif meas_idx < len(html_descs):
+            desc = html_descs[meas_idx]
+            name = f"measurement_{meas_idx + 1}_{desc['date']}_{desc['time']}"
+        else:
+            name = f"measurement_{meas_idx + 1}"
+
+        ir, ir_warning = extract_ir(serialized[meas_idx])
+        measurements.append({
+            'name': name,
+            'freq': freqs,
+            'spl': spl,
+            'phase': phase,
+            'params': params,
+            'ir': ir,
+            'ir_warning': ir_warning,
+            'html': html_descs[meas_idx] if meas_idx < len(html_descs) else None,
+        })
+
+    return measurements
+
+
+def sanitize_filename(name, max_len=100):
+    """Make a string safe for use as a filename."""
+    name = re.sub(r'[^\w\-. ]', '_', name)
+    name = re.sub(r'_+', '_', name).strip('_')
+    if len(name) > max_len:
+        name = name[:max_len]
+    return name
+
+
+def sanitize_identifier(name, max_len=100):
+    """Create a stable underscore-separated filename or JSON object key."""
+    identifier = sanitize_filename(name, max_len=max_len).replace(' ', '_')
+    return re.sub(r'_+', '_', identifier).strip('_')
+
+
+def header_block(measurement, source_label=None):
+    """Build `#` provenance lines so facts survive the .mdat conversion.
+
+    Keys reuse the REW text-export vocabulary (`Measurement:`, `Dated:`,
+    `Frequency Step:`) plus `Converted from:` so the same header parser
+    reads both original exports and converted CSVs. Only recovered facts
+    are emitted; nothing is invented (microphone, timing reference, and
+    smoothing are not recovered from the .mdat and stay absent).
+    """
+    lines = [f"# Measurement: {measurement['name']}"]
+    html = measurement.get('html') or {}
+    dated = ' '.join(part for part in (html.get('date'), html.get('time')) if part).strip()
+    if dated:
+        lines.append(f"# Dated: {dated}")
+    params = measurement.get('params') or {}
+    ppo = params.get('ppo') or 0
+    if ppo:
+        lines.append(f"# Frequency Step: {ppo:g} ppo")
+    if source_label:
+        lines.append(f"# Converted from: {source_label} via mdat2csv.py")
+    return lines
+
+
+def export_csv(measurement, output_dir, *, overwrite=True, source_label=None):
+    """Export a single measurement to CSV.
+
+    A `#` header block precedes the column header; curve loaders skip
+    `#` lines, and the REW header parser transcribes them as provenance.
+    """
+    freqs = measurement['freq']
+    spl = measurement['spl']
+    phase = measurement['phase']
+    # Validate before opening the destination: a failed import must not leave
+    # a plausible partial curve or overwrite an existing valid export.
+    if not freqs or any(not math.isfinite(f) or f <= 0 for f in freqs):
+        raise ValueError("CSV export requires finite positive frequencies")
+    if any(b <= a for a, b in zip(freqs, freqs[1:])):
+        raise ValueError("CSV export requires strictly increasing frequencies")
+    if spl is None:
+        raise ValueError("CSV export requires an SPL curve")
+    for label, values in [('SPL', spl), ('phase', phase)]:
+        if values is not None and (
+            len(values) != len(freqs)
+            or any(not math.isfinite(value) for value in values)
+        ):
+            raise ValueError(f"Invalid {label} array: expected finite values on the frequency grid")
+    os.makedirs(output_dir, exist_ok=True)
+    name = sanitize_identifier(measurement['name'])
+    filepath = os.path.join(output_dir, f"{name}.csv")
+
+
+    try:
+        stream = open(filepath, 'w' if overwrite else 'x')
+    except FileExistsError:
+        return filepath
+    with stream as f:
+        for line in header_block(measurement, source_label):
+            f.write(line + "\n")
+        f.write("freq_hz,spl_db,phase_deg\n")
+        for i in range(len(freqs)):
+            freq = freqs[i]
+            s = f"{spl[i]:.6f}" if spl is not None else ""
+            p = f"{phase[i]:.6f}" if phase is not None else ""
+            f.write(f"{freq:.6f},{s},{p}\n")
+
+    return filepath
+
+
+def export_ir_csv(measurement, output_dir, *, overwrite=True):
+    """Export native IR samples without normalization, windowing or recentering."""
+    ir = measurement.get('ir')
+    if ir is None:
+        return None
+    os.makedirs(output_dir, exist_ok=True)
+    path = os.path.join(output_dir, sanitize_identifier(measurement['name']) + '__ir.csv')
+    try:
+        stream = open(path, 'w' if overwrite else 'x', encoding='utf-8')
+    except FileExistsError:
+        return path
+    with stream:
+        stream.write('time_ms,amplitude\n')
+        for i, amplitude in enumerate(ir['amplitude']):
+            time_ms = (ir['start_time_s'] + i * ir['sample_interval_s']) * 1000.0
+            stream.write(f'{time_ms:.17g},{amplitude:.17g}\n')
+    return path
+
+
+def export_recordings_json(measurements, csv_paths, output_dir, *, overwrite=True,
+                           ir_paths=None, timing_reference_id=None):
+    """
+    Export a recordings.json file conforming to the roomeq input_schema.json.
+    Each measurement becomes a speaker entry referencing its CSV file.
+    """
+    import json
+
+    speakers = {}
+    for m, csv_path in zip(measurements, csv_paths):
+        if csv_path is None:
+            continue
+        # Use relative path from recordings.json location
+        rel_path = os.path.relpath(csv_path, output_dir)
+        key = sanitize_identifier(m['name'])
+        speakers[key] = {
+            "path": rel_path,
+            "name": m['name'],
+        }
+
+    config = {
+        "version": "2.1.0",
+        "speakers": speakers,
+    }
+    if ir_paths is not None and timing_reference_id:
+        config['measured_impulse_responses'] = {
+            sanitize_identifier(m['name']): {
+                'path': os.path.relpath(ir_path, output_dir),
+                'sample_rate_hz': m['ir']['sample_rate_hz'],
+                'timing_reference_id': timing_reference_id,
+            }
+            for m, csv_path, ir_path in zip(measurements, csv_paths, ir_paths)
+            if csv_path is not None and ir_path is not None
+        }
+
+    json_path = os.path.join(output_dir, "recordings.json")
+    try:
+        stream = open(json_path, 'w' if overwrite else 'x')
+    except FileExistsError:
+        return json_path
+    with stream as f:
+        json.dump(config, f, indent=2)
+        f.write('\n')
+
+    return json_path
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('mdat_path')
+    parser.add_argument('output_dir', nargs='?')
+    parser.add_argument('--no-clobber', action='store_true')
+    parser.add_argument('--timing-reference-id', help=(
+        'Declare a common timing reference for these measurements and include '
+        'their IRs in recordings.json; only use for captures sharing that reference'))
+    args = parser.parse_args()
+    overwrite = not args.no_clobber
+    mdat_path = args.mdat_path
+    output_dir = args.output_dir or os.path.splitext(mdat_path)[0] + "_csv"
+
+    print(f"Parsing: {mdat_path}")
+    measurements = parse_mdat(mdat_path)
+
+    print(f"Found {len(measurements)} measurements")
+    csv_paths = []
+    ir_paths = []
+    for i, m in enumerate(measurements):
+        params = m['params']
+        has_spl = m['spl'] is not None
+        has_phase = m['phase'] is not None
+        html = m['html']
+        spl_range = ""
+        if has_spl:
+            spl_range = f" SPL=[{min(m['spl']):.1f}..{max(m['spl']):.1f}]"
+        phase_range = ""
+        if has_phase:
+            phase_range = f" Phase=[{min(m['phase']):.1f}..{max(m['phase']):.1f}]"
+        html_info = ""
+        if html:
+            html_info = f" ({html['spl_range'].strip()})"
+
+        print(f"  [{i + 1}] {params['dataLength']} pts, "
+              f"{params['startFreq']:.1f}-{params['endFreq']:.0f} Hz, "
+              f"{'SPL:yes' if has_spl else 'SPL:NO'}{spl_range}{html_info}, "
+              f"{'Phase:yes' if has_phase else 'Phase:NO'}{phase_range}")
+
+        if has_spl:
+            filepath = export_csv(m, output_dir, overwrite=overwrite,
+                                   source_label=os.path.basename(mdat_path))
+            csv_paths.append(filepath)
+            print(f"      -> {filepath}")
+        else:
+            csv_paths.append(None)
+            print(f"      -> SKIPPED (no SPL data found; phase alone is not a response curve)")
+        ir_path = export_ir_csv(m, output_dir, overwrite=overwrite)
+        ir_paths.append(ir_path)
+        if ir_path:
+            print(f"      -> {ir_path} ({len(m['ir']['amplitude'])} IR samples)")
+        else:
+            print(f"      -> IR unavailable: {m['ir_warning']}")
+
+    json_path = export_recordings_json(
+        measurements, csv_paths, output_dir, overwrite=overwrite,
+        ir_paths=ir_paths, timing_reference_id=args.timing_reference_id)
+    if any(ir_paths) and not args.timing_reference_id:
+        print('IR CSVs exported. Supply --timing-reference-id to declare their shared '
+              'reference and include them in recordings.json.')
+    print(f"\n  recordings.json -> {json_path}")
+
+
+if __name__ == '__main__':
+    main()

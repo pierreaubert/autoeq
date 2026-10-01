@@ -2674,6 +2674,20 @@
       "additionalProperties": false,
       "description": "One measured room impulse response backing a channel's acoustic report.",
       "properties": {
+        "driver": {
+          "description": "Exact delivered driver name; omit for a whole-channel capture.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_channel": {
+          "description": "Delivered channel; defaults to the declaration's map key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "description": "IR file path, resolved against the configuration directory.\nCSV with a `time_ms,amplitude` header.",
           "type": "string"
@@ -2687,7 +2701,7 @@
           ]
         },
         "timing_reference_id": {
-          "description": "Shared clock identity across simultaneously captured channels.\nRequired on every entry when more than one channel declares a\nmeasured IR, so no cross-channel analysis can silently mix clocks.",
+          "description": "Shared clock identity across simultaneously captured channels.\nOptional for independent diagnostics. Absence never establishes\neligibility for coherent sums or cross-channel timing.",
           "type": [
             "string",
             "null"

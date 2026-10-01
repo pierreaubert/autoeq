@@ -11,9 +11,36 @@ pub trait OptimizerConfigExt {
     fn to_optim_params(&self, sample_rate: f64) -> OptimParams;
 }
 
+/// Maps a base Pk layout plus an enabled tilt stage to the PkLsHs layout.
+///
+/// Takes base values (not already-mapped ones), so repeated application stays
+/// idempotent. Non-Pk bases are left untouched: validation rejects them before
+/// optimization, and silently reinterpreting another layout here would hide
+/// the misconfiguration.
+pub(crate) fn apply_tilt_stage(
+    base: PeqModel,
+    base_num_filters: usize,
+    tilt: Option<roomeq_model::TiltStageConfig>,
+) -> (PeqModel, usize, Option<autoeq_optim::TiltBandsHz>) {
+    let Some(tilt) = tilt.filter(|tilt| tilt.enabled) else {
+        return (base, base_num_filters, None);
+    };
+    if base != PeqModel::Pk {
+        debug_assert!(false, "tilt_stage requires peq_model pk");
+        return (base, base_num_filters, None);
+    }
+    let bands = autoeq_optim::TiltBandsHz {
+        ls: tilt.ls_band_hz,
+        hs: tilt.hs_band_hz,
+    };
+    (PeqModel::PkLsHs, base_num_filters + 2, Some(bands))
+}
+
 impl OptimizerConfigExt for OptimizerConfig {
     fn to_optim_params(&self, sample_rate: f64) -> OptimParams {
-        let peq_model = self.peq_model.parse::<PeqModel>().unwrap_or(PeqModel::Pk);
+        let base_model = self.peq_model.parse::<PeqModel>().unwrap_or(PeqModel::Pk);
+        let (peq_model, num_filters, tilt_bands_hz) =
+            apply_tilt_stage(base_model, self.num_filters, self.tilt_stage);
         let loss = match self.loss_type.as_str() {
             "flat" if self.asymmetric_loss => LossType::SpeakerFlatAsymmetric,
             "flat" => LossType::SpeakerFlat,
@@ -85,9 +112,10 @@ impl OptimizerConfigExt for OptimizerConfig {
 
         let [active_min_freq, active_max_freq] = self.active_correction_band();
         OptimParams {
-            num_filters: self.num_filters,
+            num_filters,
             peq_model,
             sample_rate,
+            tilt_bands_hz,
             min_freq: active_min_freq,
             max_freq: active_max_freq,
             min_q: self.min_q,

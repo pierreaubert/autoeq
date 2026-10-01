@@ -166,10 +166,10 @@ def create_zoomed_figure(
     final_curve: dict | None,
     min_freq: float = 20.0,
     max_freq: float = 1200.0,
-    y_range: float = 10.0,
+    y_range: float = 25.0,
     tab=None,
 ):
-    """Build a zoomed channel section (20-1200Hz, centered y-axis)."""
+    """Build a zoomed channel section (20-1200Hz, 50 dB centered y-axis)."""
     # Compute average SPL for centering (use final curve if available, else initial)
     ref_curve = final_curve if final_curve else initial_curve
     avg_spl = (
@@ -1274,10 +1274,10 @@ def create_comparison_zoomed_figure(
     mode_data: list[tuple[str, dict]],
     min_freq: float = 20.0,
     max_freq: float = 500.0,
-    y_half_range: float = 12.0,
+    y_half_range: float = 25.0,
     tab=None,
 ):
-    """Zoomed overlay of final curves (bass region) from multiple modes."""
+    """Zoomed overlay of final curves (bass region, 50 dB span like all SPL plots)."""
     series_list = []
 
     initial_curve = None
@@ -1730,32 +1730,72 @@ def create_tof_figure(
     )
 
 
+def _finite_or_gap(values: list) -> list:
+    """Replace non-finite samples with gaps (the renderer breaks the line)."""
+    return [
+        v if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) else None
+        for v in values
+    ]
+
+
 def create_symmetric_pair_figure(
     label: str,
     freq: list[float],
-    sum_spl: list[float],
-    diff_spl: list[float],
+    abs_spl: list[float],
+    complex_spl: list[float] | None = None,
     tab=None,
 ) -> dict:
-    """Symmetric-pair magnitude sum + difference (feat-report 2d, viewer part)."""
+    """Symmetric-pair absolute sum, complex sum and their difference.
+
+    The absolute sum adds magnitudes (equal-phase upper bound). The complex
+    sum is the coherent pressure sum from measured phase; their difference
+    (absolute minus complex, always >= 0 dB by the triangle inequality) is
+    the cancellation loss and reads on the secondary axis, whose display
+    ceiling is 40 dB (deeper nulls pin to the top edge rather than
+    stretching the axis). Without a complex sum the figure shows the
+    absolute sum alone.
+    """
+    abs_clean = _finite_or_gap(abs_spl)
+    has_complex = (
+        complex_spl is not None
+        and len(freq) > 0
+        and len(complex_spl) == len(freq)
+        and len(abs_spl) == len(freq)
+    )
     s_list = [
-        series(f"{label} magnitude sum", freq, sum_spl,
+        series(f"{label} absolute sum", freq, abs_clean,
                color="rgba(74, 144, 217, 0.9)", width=2.0),
-        series(f"{label} |magnitude difference|", freq, diff_spl,
-               color="rgba(255, 150, 50, 0.9)", width=2.0, dash="dash"),
     ]
-    all_spl = list(sum_spl) + list(diff_spl)
-    finite = [v for v in all_spl if v is not None and math.isfinite(v)]
-    # Preserve the upper response with modest headroom, without letting a
-    # near-zero magnitude difference expand the default view by hundreds of dB.
+    y2 = None
+    sum_traces = [abs_clean]
+    if has_complex:
+        assert complex_spl is not None
+        cx_clean = _finite_or_gap(complex_spl)
+        diff = []
+        for a, c in zip(abs_clean, cx_clean):
+            if a is None or c is None:
+                diff.append(None)
+            else:
+                # Display ceiling: total cancellations pin to the top edge.
+                diff.append(min(a - c, 40.0))
+        s_list.append(series(f"{label} complex sum", freq, cx_clean,
+                             color="rgba(46, 160, 67, 0.9)", width=2.0))
+        s_list.append(series(f"{label} sum difference", freq, diff,
+                             color="rgba(214, 69, 65, 0.9)", width=2.0,
+                             dash="dash", y_axis=1))
+        y2 = axis("Sum difference (dB)", "linear", None, 40.0)
+        sum_traces.append(cx_clean)
+        subtitle = "absolute and complex sums with their difference"
+    else:
+        subtitle = "absolute sum only; complex sum needs measured phase"
+    finite = [v for trace in sum_traces for v in trace if v is not None]
     ymax = math.ceil((max(finite) + 3.0) / 5.0) * 5.0 if finite else 0.0
     y_range = (ymax - 50.0, ymax)
     return figure(
-        f"Symmetric pair: {label} (magnitude domain; "
-        "not a phase-coherent acoustic sum)",
+        f"Symmetric pair: {label} ({subtitle})",
         axis("Frequency (Hz)", "log", 20, 20000),
         axis("SPL (dB)", "linear", y_range[0], y_range[1]),
-        series_list=s_list, tab=tab,
+        series_list=s_list, y2=y2, tab=tab,
     )
 
 
@@ -1785,11 +1825,20 @@ def create_early_late_figure(
                 or len(spl) != len(frequency)
                 or not all(isinstance(v, (int, float)) and math.isfinite(v) for v in spl)):
             return None
+    # Fail closed on foreign data: Full is the incoherent Early+Late energy
+    # sum on a shared reference, so it can never sit below either part. The
+    # exporter constructs this exactly; the epsilon only absorbs JSON dust.
+    full, early, late = (curve["spl"] for curve in curves)
+    if any(f + 1e-6 < e or f + 1e-6 < l for f, e, l in zip(full, early, late)):
+        return None
     s_list = []
-    for name, curve, color in zip(("Full", "Early", "Late"), curves,
-                                  ("#333333", "#3089c5", "#e38836")):
+    # Full keeps a slight halo: it is the physical envelope, so it should
+    # stay readable where the parts converge onto it.
+    for name, curve, color, width in zip(("Full", "Early", "Late"), curves,
+                                         ("#333333", "#3089c5", "#e38836"),
+                                         (2.5, 2.0, 2.0)):
         s_list.append(series(name, frequency, curve["spl"],
-                             color=color, width=2.0))
+                             color=color, width=width))
     return figure(
         f"{label}: early vs late band energy (20 ms split)",
         axis("Frequency (Hz)", "log", 20, 20000),

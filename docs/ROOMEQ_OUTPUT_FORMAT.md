@@ -315,7 +315,7 @@ time-domain ringing.
 | `residual_excess_phase_max_deg` | number | Maximum residual excess phase after delay removal. |
 | `residual_excess_phase_rms_deg` | number | RMS residual excess phase after delay removal. |
 
-The Python report generator (`scripts/display-roomeq.py`) displays this report
+The Python report generator (`ui/display-roomeq`) displays this report
 alongside per-channel main-impulse timing, pre/post-ringing peaks, audible
 ringing energy, and temporal-masking penalty.
 

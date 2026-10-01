@@ -25,11 +25,54 @@ h2 {
     margin-top: 30px;
 }
 .plot-container {
+    position: relative;
     background: white;
     border-radius: 8px;
     padding: 12px;
-    margin-bottom: 20px;
+    max-width: 800px;
+    margin: 0 auto 20px;
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+.freq-presets {
+    position: absolute;
+    right: 16px;
+    bottom: 70px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 5;
+}
+.db-presets {
+    position: absolute;
+    left: 16px;
+    top: 56px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 5;
+}
+.freq-presets button, .db-presets button {
+    font: inherit;
+    /* gpui-toolkit ButtonSetSize::Xs: text_xs (0.75rem = 12px), 6px x / 2px y. */
+    font-size: 12px;
+    padding: 2px 6px;
+    border: 1px solid #b9c8d8;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.92);
+    color: #244f72;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.freq-presets button:hover, .db-presets button:hover {
+    background: #e8f1fa;
+}
+.rubber-band {
+    position: absolute;
+    display: none;
+    border: 1px solid #4a90d9;
+    background: rgba(74,144,217,0.15);
+    z-index: 4;
+    pointer-events: none;
 }
 .plot-container canvas {
     display: block;
@@ -83,6 +126,72 @@ h2 {
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
     overflow-x: auto;
 }
+/* Single-card rule: `.html-section` is the only card. Producer grouping
+   wrappers render flat inside it, and `flat` sections (self-framed
+   verdicts) skip the card entirely. */
+.html-section.flat {
+    background: none;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: none;
+    overflow-x: visible;
+}
+.html-section .filters-section,
+.html-section .plot-container {
+    background: none;
+    box-shadow: none;
+    border-radius: 0;
+    padding: 0;
+    margin: 0 0 12px;
+}
+.html-section .filters-section:last-child,
+.html-section .plot-container:last-child {
+    margin-bottom: 0;
+}
+/* Table wrappers carry no canvas and fill the card; embedded figures keep
+   the graph cap and stay centered. */
+.html-section .plot-container:not(:has(canvas)) {
+    max-width: none;
+}
+.html-section .plot-container:has(canvas) {
+    margin-left: auto;
+    margin-right: auto;
+}
+.bucket-bar {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    margin: 4px 0 20px;
+}
+.bucket-bar button {
+    font: inherit;
+    font-size: 1.1em;
+    font-weight: 600;
+    padding: 10px 30px;
+    border: 1px solid #ccc;
+    border-radius: 8px 8px 0 0;
+    background: #e8e8e8;
+    color: #333;
+    cursor: pointer;
+}
+.bucket-bar button.active {
+    background: white;
+    color: #2a6496;
+    border-color: #4a90d9;
+    border-bottom: 2px solid #4a90d9;
+}
+.bucket-page {
+    display: none;
+}
+.bucket-page.active {
+    display: block;
+}
+.subpage {
+    display: none;
+}
+.subpage.active {
+    display: block;
+}
 table {
     border-collapse: collapse;
     margin: 10px 0;
@@ -104,6 +213,20 @@ th {
 .header-row h1 {
     flex: 1;
     margin: 0;
+}
+.header-meta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex-shrink: 0;
+}
+#report-provenance {
+    font-size: 12px;
+    color: #666;
+}
+#report-provenance:empty {
+    display: none;
 }
 .viewbar {
     display: flex;
@@ -141,13 +264,13 @@ th {
 .report-group { margin: 18px 0; border: 1px solid #ccd3dd; border-radius: 8px; background: white; }
 .report-group > summary { cursor: pointer; padding: 18px; font-size: 1.25rem; font-weight: 650; }
 .report-group-body { padding: 0 18px 18px; }
-.tabbar {
+.tabbar, .subhead-bar {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     margin-bottom: 16px;
 }
-.tabbar button {
+.tabbar button, .subhead-bar button {
     font: inherit;
     font-size: 0.9em;
     padding: 6px 14px;
@@ -157,11 +280,14 @@ th {
     color: #333;
     cursor: pointer;
 }
-.tabbar button.active {
+.tabbar button.active, .subhead-bar button.active {
     background: white;
     color: #2a6496;
     border-color: #4a90d9;
     border-bottom: 2px solid #4a90d9;
+}
+.subhead-bar button {
+    font-weight: 600;
 }
 .tabpage {
     display: none;
@@ -238,7 +364,10 @@ th {
 <div class="container">
 <div class="header-row">
 <h1 id="report-title"></h1>
+<div class="header-meta">
+<div id="report-provenance" role="note"></div>
 <span id="renderer-status" role="status" style="font-size:12px;color:#666">Renderer: initializing</span>
+</div>
 </div>
 <div id="report-2d"></div>
 <div id="report-errors"></div>
@@ -299,6 +428,13 @@ if (payload && payload.schema !== SCHEMA) {
 if (payload) {
     document.title = payload.title || document.title;
     document.getElementById("report-title").textContent = payload.title || "";
+    const provenance = payload.provenance || {};
+    const parts = [];
+    if (provenance.roomeq_version) parts.push("RoomEQ " + provenance.roomeq_version);
+    if (provenance.data_timestamp) parts.push("Data " + provenance.data_timestamp);
+    if (provenance.generated_at) parts.push("Report " + provenance.generated_at);
+    // Text assignment: provenance values are never interpreted as HTML.
+    document.getElementById("report-provenance").textContent = parts.join(" · ");
 }
 
 const canvases = []; // {id, section, originalSection, el, tab, smoothing, viewport, panEnabled}
@@ -323,7 +459,7 @@ window.openEqTab = function (evt, panelId) {
 function appendSection(host, sec, i) {
     if (sec.kind === "html") {
         const div = document.createElement("div");
-        div.className = "html-section";
+        div.className = "html-section" + (sec.flat ? " flat" : "");
         div.innerHTML = sec.html;
         host.appendChild(div);
         for (const placeholder of div.querySelectorAll(".report-figure[data-section]")) {
@@ -353,7 +489,7 @@ function appendSection(host, sec, i) {
     const move = document.createElement("button");
     move.type = "button";
     move.textContent = "Move";
-    move.title = "Enable drag-to-pan";
+    move.title = "Enable drag-to-pan (Shift-drag or right-drag pans without it)";
     if (sec.grid?.surface) {
         move.textContent = "Rotate";
         move.title = "Drag to rotate the surface; Reset restores the default camera";
@@ -361,6 +497,7 @@ function appendSection(host, sec, i) {
     }
     toolbar.append(zoomOut, zoomIn, reset, move);
     let smoothing = null;
+    // Viewer smoothing re-smooths the shipped (1/6-octave) curves in place.
     if (sec.kind === "figure") {
         const label = document.createElement("label");
         label.textContent = "Smoothing";
@@ -368,7 +505,7 @@ function appendSection(host, sec, i) {
         smoothing.setAttribute("aria-label", "Smoothing");
         smoothing.disabled = sec.figure.x.scale !== "log";
         if (smoothing.disabled) smoothing.title = "Octave smoothing applies only to frequency plots";
-        for (const [value, text] of [["none", "None"], ["48", "1/48 octave"], ["24", "1/24 octave"], ["12", "1/12 octave"], ["6", "1/6 octave"]]) {
+        for (const [value, text] of [["none", "None"], ["48", "1/48 octave"], ["24", "1/24 octave"], ["12", "1/12 octave"], ["6", "1/6 octave"], ["3", "1/3 octave"], ["2", "1/2 octave"], ["1", "1/1 octave"], ["var", "Var"], ["psycho", "Psychoacoustic"], ["erb", "ERB"]]) {
             const option = document.createElement("option");
             option.value = value;
             option.textContent = text;
@@ -377,7 +514,42 @@ function appendSection(host, sec, i) {
         label.appendChild(smoothing);
         toolbar.appendChild(label);
     }
+    // Surface views (waterfalls) default to REW-style contours; the filled
+    // surface and its colormap are opt-in per figure.
+    let surfaceControls = null;
+    if (sec.grid?.surface) {
+        const label = document.createElement("label");
+        label.textContent = "Colormap";
+        const cmap = document.createElement("select");
+        cmap.setAttribute("aria-label", "Surface colormap");
+        for (const [value, text] of [["turbo", "Turbo"], ["viridis", "Viridis"],
+                ["plasma", "Plasma"], ["inferno", "Inferno"], ["magma", "Magma"],
+                ["rainbow", "Rainbow"]]) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = text;
+            cmap.appendChild(option);
+        }
+        if ([...cmap.options].some(o => o.value === sec.grid.colormap)) {
+            cmap.value = sec.grid.colormap;
+        }
+        label.appendChild(cmap);
+        const surfaceBtn = document.createElement("button");
+        surfaceBtn.type = "button";
+        surfaceBtn.textContent = "Surface";
+        surfaceBtn.title = "Show or hide the filled surface";
+        const contourBtn = document.createElement("button");
+        contourBtn.type = "button";
+        contourBtn.textContent = "Contours";
+        contourBtn.title = "Show or hide the time-slice contours";
+        toolbar.append(label, surfaceBtn, contourBtn);
+        surfaceControls = { cmap, surfaceBtn, contourBtn };
+    }
     const canvas = document.createElement("canvas");
+    if (Number.isFinite(sec.min_width) && sec.min_width > 0) {
+        wrap.style.overflowX = "auto";
+        canvas.style.minWidth = Math.min(sec.min_width, 6000) + "px";
+    }
     const id = "plot-" + canvases.length;
     canvas.id = id;
     canvas.setAttribute("aria-label", sec.figure?.title || sec.chart?.title || "Report graph");
@@ -393,12 +565,25 @@ function appendSection(host, sec, i) {
         smoothing,
         viewport: null,
         panEnabled: Boolean(sec.grid?.surface),
+        geomZoom: 1,
     };
-    zoomOut.addEventListener("click", () => zoomGraph(graph, 1.5));
-    zoomIn.addEventListener("click", () => zoomGraph(graph, 1 / 1.5));
+    // Sankey and bar cards have no data viewport: +/− Zoom magnifies the
+    // whole card instead, and the (viewport-only) Move toggle is hidden.
+    const viewportZoom = ["figure", "grid"].includes(sec.kind);
+    if (!viewportZoom) move.style.display = "none";
+    zoomOut.addEventListener("click", () => viewportZoom ? zoomGraph(graph, 1.5) : geomZoom(graph, 1 / 1.25));
+    zoomIn.addEventListener("click", () => viewportZoom ? zoomGraph(graph, 1 / 1.5) : geomZoom(graph, 1.25));
     reset.addEventListener("click", () => {
         graph.viewport = null;
+        graph.geomZoom = 1;
         if (graph.section.grid?.surface) graph.section.grid.rotation = null;
+        if (surfaceControls && graph.originalSection.grid) {
+            const src = graph.originalSection.grid;
+            graph.section.grid.colormap = src.colormap;
+            graph.section.grid.show_surface = src.show_surface;
+            graph.section.grid.show_contours = src.show_contours;
+            syncSurfaceControls(graph, surfaceControls);
+        }
         renderOne(graph);
     });
     move.addEventListener("click", () => {
@@ -412,8 +597,95 @@ function appendSection(host, sec, i) {
             renderOne(graph);
         });
     }
+    if (surfaceControls) {
+        const { cmap, surfaceBtn, contourBtn } = surfaceControls;
+        cmap.addEventListener("change", () => {
+            graph.section.grid.colormap = cmap.value;
+            renderOne(graph);
+        });
+        surfaceBtn.addEventListener("click", () => {
+            graph.section.grid.show_surface = !graph.section.grid.show_surface;
+            syncSurfaceControls(graph, surfaceControls);
+            renderOne(graph);
+        });
+        contourBtn.addEventListener("click", () => {
+            graph.section.grid.show_contours = graph.section.grid.show_contours === false;
+            syncSurfaceControls(graph, surfaceControls);
+            renderOne(graph);
+        });
+        syncSurfaceControls(graph, surfaceControls);
+    }
     wireGraphPan(graph);
+    if (hasFreqPresets(sec)) {
+        const presets = document.createElement("div");
+        presets.className = "freq-presets";
+        // Spectrogram cards reserve a taller bottom axis zone than figures.
+        if (sec.kind === "grid") presets.style.bottom = "90px";
+        for (const [text, lo, hi] of [["20–200", 20, 200], ["20–20k", 20, 20000]]) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = text;
+            btn.title = "Zoom the frequency axis to " + lo + "–" + hi + " Hz";
+            btn.setAttribute("aria-label", "Zoom frequency to " + lo + " to " + hi + " hertz");
+            btn.addEventListener("click", () => setFreqPreset(graph, lo, hi));
+            presets.appendChild(btn);
+        }
+        wrap.appendChild(presets);
+        // Vertical-span presets only where the y axis reads dB (SPL
+        // figures); spectrogram time axes have no dB span.
+        if (sec.kind === "figure") {
+            const db = document.createElement("div");
+            db.className = "db-presets";
+            for (const span of [20, 50]) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.textContent = span + "dB";
+                btn.title = "Set the vertical span to " + span + " dB around the current center";
+                btn.setAttribute("aria-label", "Set vertical span to " + span + " decibels");
+                btn.addEventListener("click", () => setDbSpan(graph, span));
+                db.appendChild(btn);
+            }
+            wrap.appendChild(db);
+        }
+    }
     canvases.push(graph);
+}
+
+function hasFreqPresets(sec) {
+    if (sec.kind === "grid") return sec.figure?.x?.label === "Frequency (Hz)";
+    return sec.kind === "figure"
+        && sec.figure.x.scale === "log"
+        && sec.figure.x.label === "Frequency (Hz)"
+        && sec.figure.y.label === "SPL (dB)";
+}
+
+function setFreqPreset(c, lo, hi) {
+    const view = ensureViewport(c);
+    if (!view) return;
+    view.x = [lo, hi];
+    renderOne(c);
+}
+
+function setDbSpan(c, spanDb) {
+    const view = ensureViewport(c);
+    if (!view) return;
+    const mid = (view.y[0] + view.y[1]) / 2;
+    view.y = [mid - spanDb / 2, mid + spanDb / 2];
+    renderOne(c);
+}
+
+// Missing keys mean an older export: contours on, surface fill off.
+function syncSurfaceControls(c, controls) {
+    const grid = c.section.grid || {};
+    const showSurface = Boolean(grid.show_surface);
+    const showContours = grid.show_contours !== false;
+    if ([...controls.cmap.options].some(o => o.value === grid.colormap)) {
+        controls.cmap.value = grid.colormap;
+    }
+    controls.surfaceBtn.classList.toggle("active", showSurface);
+    controls.surfaceBtn.setAttribute("aria-pressed", String(showSurface));
+    controls.contourBtn.classList.toggle("active", showContours);
+    controls.contourBtn.setAttribute("aria-pressed", String(showContours));
 }
 
 function buildSectionGroup(root, sections) {
@@ -469,9 +741,109 @@ function buildSectionGroup(root, sections) {
     sections.forEach((sec, i) => { if (sec.footer) appendSection(root, sec, i); });
 }
 
+// Top-level report buckets in canonical order; unknown buckets follow in
+// first-occurrence order. Inside a bucket, `subhead` titles render as tabs
+// (one tab bar per bucket); a lone subhead renders directly with no bar.
+const BUCKET_ORDER = ["DSP analysis", "Acoustics analysis", "Psychoacoustic report"];
+
+function buildBucketPage(page, sections) {
+    const subheads = [];
+    for (const sec of sections) {
+        const sub = sec.subhead || "";
+        if (!subheads.includes(sub)) subheads.push(sub);
+    }
+    const named = subheads.filter(Boolean);
+    if (named.length < 2) {
+        buildSectionGroup(page, sections);
+        return;
+    }
+    const bar = document.createElement("div");
+    bar.className = "subhead-bar";
+    bar.setAttribute("role", "tablist");
+    const pages = {};
+    named.forEach((name, i) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = name;
+        btn.setAttribute("role", "tab");
+        btn.setAttribute("aria-selected", String(i === 0));
+        if (i === 0) btn.classList.add("active");
+        btn.addEventListener("click", () => {
+            for (const [label, subpage] of Object.entries(pages)) {
+                subpage.classList.toggle("active", label === name);
+            }
+            for (const button of bar.children) {
+                const selected = button.textContent === name;
+                button.classList.toggle("active", selected);
+                button.setAttribute("aria-selected", String(selected));
+            }
+            renderVisible();
+        });
+        bar.appendChild(btn);
+    });
+    page.appendChild(bar);
+    // Sections without a subhead join the first page; every tab stays reachable.
+    const untagged = sections.filter(s => !(s.subhead || ""));
+    named.forEach((name, i) => {
+        const subpage = document.createElement("div");
+        subpage.className = "subpage" + (i === 0 ? " active" : "");
+        subpage.dataset.subhead = name;
+        page.appendChild(subpage);
+        pages[name] = subpage;
+        const own = sections.filter(s => (s.subhead || "") === name);
+        buildSectionGroup(subpage, i === 0 ? untagged.concat(own) : own);
+    });
+}
+
 function buildDom() {
     const root = document.getElementById("report-2d");
     const sections = payload.sections || [];
+    const buckets = [];
+    for (const sec of sections) {
+        if (sec.bucket && !buckets.includes(sec.bucket)) buckets.push(sec.bucket);
+    }
+    if (buckets.length) {
+        buckets.sort((a, b) => {
+            const ia = BUCKET_ORDER.indexOf(a), ib = BUCKET_ORDER.indexOf(b);
+            return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        });
+        // Unbucketed verdict sections stay visible above the bucket tabs.
+        buildSectionGroup(root, sections.filter(s => !s.bucket));
+        const bar = document.createElement("div");
+        bar.className = "bucket-bar";
+        bar.setAttribute("role", "tablist");
+        const pages = {};
+        buckets.forEach((name, i) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.textContent = name;
+            btn.setAttribute("role", "tab");
+            btn.setAttribute("aria-selected", String(i === 0));
+            if (i === 0) btn.classList.add("active");
+            btn.addEventListener("click", () => {
+                for (const [label, page] of Object.entries(pages)) {
+                    page.classList.toggle("active", label === name);
+                }
+                for (const button of bar.children) {
+                    const selected = button.textContent === name;
+                    button.classList.toggle("active", selected);
+                    button.setAttribute("aria-selected", String(selected));
+                }
+                renderVisible();
+            });
+            bar.appendChild(btn);
+        });
+        root.appendChild(bar);
+        buckets.forEach((name, i) => {
+            const page = document.createElement("div");
+            page.className = "bucket-page" + (i === 0 ? " active" : "");
+            page.dataset.bucket = name;
+            root.appendChild(page);
+            pages[name] = page;
+            buildBucketPage(page, sections.filter(s => s.bucket === name));
+        });
+        return;
+    }
     buildSectionGroup(root, sections.filter(s => !s.group));
     for (const title of new Set(sections.map(s => s.group).filter(Boolean))) {
         const details = document.createElement("details");
@@ -564,17 +936,75 @@ function zoomGraph(c, factor, anchorX = 0.5, anchorY = 0.5) {
     renderOne(c);
 }
 
+// Geometric zoom for cards without a data viewport (sankey, bar): scale the
+// canvas CSS size around the fit size and re-render, so output stays crisp.
+// The card scrolls once the canvas outgrows it. Range 0.5–4x.
+function geomZoom(c, factor) {
+    c.geomZoom = Math.min(4, Math.max(0.5, (c.geomZoom || 1) * factor));
+    if (Math.abs(c.geomZoom - 1) < 0.01) c.geomZoom = 1;
+    renderOne(c);
+}
+
 function wireGraphPan(c) {
     let start = null;
+    let band = null;
+    const rubberBand = () => {
+        if (!band) {
+            band = document.createElement("div");
+            band.className = "rubber-band";
+            c.el.parentElement.appendChild(band);
+        }
+        return band;
+    };
+    const canvasPos = ev => {
+        const rect = c.el.getBoundingClientRect();
+        const wrap = c.el.parentElement.getBoundingClientRect();
+        return {
+            x: ev.clientX - rect.left, y: ev.clientY - rect.top,
+            ox: ev.clientX - wrap.left, oy: ev.clientY - wrap.top,
+        };
+    };
     c.el.addEventListener("pointerdown", ev => {
-        if (!c.panEnabled || !["figure", "grid"].includes(c.section.kind)) return;
-        start = { x: ev.clientX, y: ev.clientY, view: structuredClone(ensureViewport(c)),
-                  rotation: c.section.grid?.rotation || [65, -12] };
+        if (!["figure", "grid"].includes(c.section.kind)) return;
+        if (c.section.grid?.surface) {
+            if (!c.panEnabled) return;
+            start = { mode: "rotate", x: ev.clientX, y: ev.clientY,
+                      view: structuredClone(ensureViewport(c)),
+                      rotation: c.section.grid?.rotation || [65, -12] };
+            c.el.setPointerCapture(ev.pointerId);
+            c.el.classList.add("panning");
+            return;
+        }
+        // Plain left-drag crops a zoom box on figures; Shift/right/middle
+        // drag (or the Move toggle, the touch path) pans instead.
+        const panDrag = c.panEnabled || ev.shiftKey || ev.button !== 0;
+        if (!panDrag && c.section.kind === "figure") {
+            const p = canvasPos(ev);
+            start = { mode: "zoom", x0: p.x, y0: p.y, ox0: p.ox, oy0: p.oy,
+                      x1: p.x, y1: p.y };
+            c.el.setPointerCapture(ev.pointerId);
+            c.el.style.cursor = "crosshair";
+            return;
+        }
+        if (!panDrag) return;
+        start = { mode: "pan", x: ev.clientX, y: ev.clientY,
+                  view: structuredClone(ensureViewport(c)) };
         c.el.setPointerCapture(ev.pointerId);
         c.el.classList.add("panning");
     });
     c.el.addEventListener("pointermove", ev => {
         if (!start) return;
+        if (start.mode === "zoom") {
+            const p = canvasPos(ev);
+            start.x1 = p.x; start.y1 = p.y;
+            const el = rubberBand();
+            el.style.display = "block";
+            el.style.left = Math.min(start.ox0, p.ox) + "px";
+            el.style.top = Math.min(start.oy0, p.oy) + "px";
+            el.style.width = Math.abs(p.ox - start.ox0) + "px";
+            el.style.height = Math.abs(p.oy - start.oy0) + "px";
+            return;
+        }
         const rect = c.el.getBoundingClientRect();
         const dx = (ev.clientX - start.x) / rect.width;
         const dy = (ev.clientY - start.y) / rect.height;
@@ -601,9 +1031,37 @@ function wireGraphPan(c) {
         if (start.view.y2) c.viewport.y2 = panAxis(start.view.y2, -dy, false);
         renderOne(c);
     });
-    const end = () => { start = null; c.el.classList.remove("panning"); };
+    const end = () => {
+        if (start && start.mode === "zoom") {
+            if (band) band.style.display = "none";
+            c.el.style.cursor = "";
+            const w = Math.abs((start.x1 ?? start.x0) - start.x0);
+            const h = Math.abs((start.y1 ?? start.y0) - start.y0);
+            if (w > 6 && h > 6 && typeof wasm2d !== "undefined" && wasm2d?.selection_domain_json) {
+                try {
+                    const sel = JSON.parse(wasm2d.selection_domain_json(c.id, start.x0, start.y0, start.x1, start.y1));
+                    if (sel && sel.x && sel.y) {
+                        ensureViewport(c);
+                        c.viewport.x = sel.x;
+                        c.viewport.y = sel.y;
+                        c.suppressClick = true;
+                        renderOne(c);
+                    }
+                } catch (e) { /* keep the current view on mapping failure */ }
+            }
+        }
+        start = null;
+        c.el.classList.remove("panning");
+    };
     c.el.addEventListener("pointerup", end);
     c.el.addEventListener("pointercancel", end);
+    c.el.addEventListener("dblclick", () => {
+        if (!["figure", "grid"].includes(c.section.kind)) return;
+        if (c.section.grid?.surface) return;
+        c.viewport = null;
+        renderOne(c);
+    });
+    c.el.addEventListener("contextmenu", ev => ev.preventDefault());
     c.el.addEventListener("wheel", ev => {
         if (!["figure", "grid"].includes(c.section.kind)) return;
         ev.preventDefault();
@@ -612,28 +1070,69 @@ function wireGraphPan(c) {
     }, { passive: false });
 }
 
+// Full-width fraction-of-octave window for the variable REW-style modes:
+// Var is 1/48 below 100 Hz, 1/3 above 10 kHz, linear in log-frequency
+// between (1/6 at 1 kHz); Psychoacoustic is 1/3 below 100 Hz, 1/6 above
+// 1 kHz, varying between. Fixed 1/N modes bypass this helper.
+function smoothFractionFor(mode, freqHz) {
+    if (mode === "var") {
+        if (freqHz <= 100) return 1 / 48;
+        if (freqHz >= 10000) return 1 / 3;
+        return 1 / 48 + (1 / 3 - 1 / 48) * Math.log(freqHz / 100) / Math.log(100);
+    }
+    if (mode === "psycho") {
+        if (freqHz <= 100) return 1 / 3;
+        if (freqHz >= 1000) return 1 / 6;
+        return 1 / 3 + (1 / 6 - 1 / 3) * Math.log(freqHz / 100) / Math.log(10);
+    }
+    return 0;
+}
+
+// Equivalent rectangular bandwidth in Hz (Glasberg–Moore constants as
+// quoted by REW: 107.77·f + 24.673 with f in kHz).
+function erbHz(freqHz) {
+    return 107.77 * (freqHz / 1000) + 24.673;
+}
+
 function smoothedSection(section, smoothing) {
     const out = structuredClone(section);
     if (out.kind !== "figure" || smoothing === "none" || out.figure.x.scale !== "log") return out;
-    const halfWidth = 0.5 / Number(smoothing);
+    const erb = smoothing === "erb";
+    const psycho = smoothing === "psycho";
+    const fixedHalf = (!erb && smoothing !== "var" && !psycho) ? 0.5 / Number(smoothing) : 0;
+    // Psychoacoustic weights peaks via a cubic mean of linear amplitudes.
+    const acc = psycho ? v => Math.pow(10, 0.15 * v) : v => v;
+    const unacc = psycho ? m => (20 / 3) * Math.log10(m) : m => m;
+    const key = x => erb ? x : Math.log2(x);
+    const edges = x => {
+        if (erb) {
+            const half = erbHz(x) / 2;
+            return [x - half, x + half];
+        }
+        const half = fixedHalf || smoothFractionFor(smoothing, x) / 2;
+        const center = Math.log2(x);
+        return [center - half, center + half];
+    };
     for (const series of out.figure.series) {
         // Reference lines and candidate stems are markers, not sampled spectra.
         if (series.x.some((x, i) => !(x > 0) || (i > 0 && x <= series.x[i - 1]))) continue;
+        // Window edges stay monotone in i (bandwidth slopes are far below
+        // 1 octave/octave), so the two-pointer sweep holds for every mode.
         const source = series.y.slice();
         let left = 0, right = 0, sum = 0, count = 0;
         for (let i = 0; i < series.x.length; i++) {
             const x = series.x[i];
             if (!(x > 0) || !Number.isFinite(source[i])) continue;
-            const lo = Math.log2(x) - halfWidth, hi = Math.log2(x) + halfWidth;
-            while (left < series.x.length && Math.log2(series.x[left]) < lo) {
-                if (Number.isFinite(source[left])) { sum -= source[left]; count--; }
+            const [lo, hi] = edges(x);
+            while (left < series.x.length && key(series.x[left]) < lo) {
+                if (Number.isFinite(source[left])) { sum -= acc(source[left]); count--; }
                 left++;
             }
-            while (right < series.x.length && Math.log2(series.x[right]) <= hi) {
-                if (Number.isFinite(source[right])) { sum += source[right]; count++; }
+            while (right < series.x.length && key(series.x[right]) <= hi) {
+                if (Number.isFinite(source[right])) { sum += acc(source[right]); count++; }
                 right++;
             }
-            series.y[i] = count ? sum / count : source[i];
+            series.y[i] = count ? unacc(sum / count) : source[i];
         }
     }
     return out;
@@ -642,8 +1141,24 @@ function smoothedSection(section, smoothing) {
 function renderOne(c) {
     if (!wasm2d || !isVisible(c)) return;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const cssW = c.el.clientWidth || c.el.parentElement.clientWidth || 800;
-    const cssH = sectionHeight(c.section.kind, cssW);
+    const cssW0 = c.el.clientWidth || c.el.parentElement.clientWidth || 800;
+    let cssW = cssW0;
+    let cssH = Math.max(sectionHeight(c.section.kind, cssW),
+        Math.min(6000, Number(c.section.min_height) || 0));
+    const z = c.geomZoom || 1;
+    if (z !== 1 && !["figure", "grid"].includes(c.section.kind)) {
+        // Magnify around the fit size captured before zooming, so repeated
+        // renders (resize, tab switches) keep the same magnification.
+        if (!c.geomBase) c.geomBase = { w: cssW0, h: cssH };
+        cssW = Math.round(c.geomBase.w * z);
+        cssH = Math.round(c.geomBase.h * z);
+        c.el.style.width = cssW + "px";
+        c.el.parentElement.style.overflow = "auto";
+    } else if (c.geomBase) {
+        c.geomBase = null;
+        c.el.style.width = "";
+        c.el.parentElement.style.overflow = "";
+    }
     c.el.style.height = cssW ? cssH + "px" : c.el.style.height;
     c.el.dataset.renderer = "canvas";
     const rc = wasm2d.render_section(c.id, JSON.stringify(figureForRender(c)), cssW, cssH, dpr);
@@ -661,6 +1176,8 @@ function wireLegendClicks() {
     for (const c of canvases) {
         if (!["figure", "bar", "grid"].includes(c.section.kind)) continue;
         c.el.addEventListener("click", (ev) => {
+            // A rubber-band release also fires click; it already zoomed.
+            if (c.suppressClick) { c.suppressClick = false; return; }
             let rects = [];
             try { rects = JSON.parse(wasm2d.legend_json(c.id)); } catch (e) { return; }
             const r = c.el.getBoundingClientRect();

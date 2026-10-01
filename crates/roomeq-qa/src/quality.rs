@@ -28,7 +28,7 @@ mod enable;
 mod group;
 mod group_delay_qa_profile;
 mod metric_scorecard;
-mod misc;
+pub(crate) mod misc;
 mod mutation;
 mod option;
 mod option_override;

@@ -15,7 +15,7 @@ rm -fr ${OUT} && mkdir -p ${OUT}
     --override-config ${IN}/optimiser-iir.json \
     --output ${OUT}/dsp-iir.json
 
-./venv/bin/python3 ./scripts/display-roomeq.py \
+./venv/bin/python3 ./ui/display-roomeq \
     ${OUT}/dsp-iir.json \
     --output ${OUT}/dsp-iir.html
 
@@ -24,7 +24,7 @@ rm -fr ${OUT} && mkdir -p ${OUT}
     --override-config ${IN}/optimiser-fir.json \
     --output ${OUT}/dsp-fir.json
 
-./venv/bin/python3 ./scripts/display-roomeq.py \
+./venv/bin/python3 ./ui/display-roomeq \
     ${OUT}/dsp-fir.json \
     --output ${OUT}/dsp-fir.html
 
@@ -33,11 +33,11 @@ rm -fr ${OUT} && mkdir -p ${OUT}
     --override-config ${IN}/optimiser-mixed.json \
     --output ${OUT}/dsp-mixed.json
 
-./venv/bin/python3 ./scripts/display-roomeq.py \
+./venv/bin/python3 ./ui/display-roomeq \
     ${OUT}/dsp-mixed.json \
     --output ${OUT}/dsp-mixed.html
 
-./venv/bin/python3 ./scripts/display-roomeq.py --compare \
+./venv/bin/python3 ./ui/display-roomeq --compare \
     ${OUT}/dsp-iir.json \
     ${OUT}/dsp-fir.json \
     ${OUT}/dsp-mixed.json \

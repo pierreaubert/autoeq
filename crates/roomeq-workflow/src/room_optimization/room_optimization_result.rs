@@ -4015,6 +4015,7 @@ mod tests {
         channel.final_curve = channel.initial_curve.clone();
         result.channels.get_mut("lfe").unwrap().drivers =
             Some(vec![roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "subs_1".to_string(),
                 index: 0,
                 plugins: vec![
@@ -4058,6 +4059,7 @@ mod tests {
             roomeq_engine::output::create_crossover_plugin("LR24", 120.0, "low"),
         )];
         chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+            measured_acoustics: None,
             name: "sub1".into(),
             index: 0,
             plugins: vec![
@@ -4701,6 +4703,7 @@ mod per_driver_latency_tests {
                     plugin.parameters["room_eq_fir_placement"] = serde_json::json!("per_driver");
                     plugin.parameters["correction_design_delay_ms"] = serde_json::json!(42.6666667);
                     roomeq_model::DriverDspChain {
+                        measured_acoustics: None,
                         index,
                         name: format!("driver{index}"),
                         plugins: vec![plugin],

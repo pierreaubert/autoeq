@@ -97,7 +97,7 @@ qa-roomeq-small-stereo-20: ensure-venv
 	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_0/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_$method.json; \
-		  ./venv/bin/python3 ./scripts/display-roomeq.py \
+		  ./venv/bin/python3 ./ui/display-roomeq \
 		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_0/dsp_$method.json \
 		                   --base-config ./data_tests/roomeq/generate/$algo/small_stereo_2_0/config.json; \
 	  done \
@@ -113,7 +113,7 @@ qa-roomeq-small-stereo-21: ensure-venv
 	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_1/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_$method.json; \
-		./venv/bin/python3 ./scripts/display-roomeq.py \
+		./venv/bin/python3 ./ui/display-roomeq \
 		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_1/dsp_$method.json \
 		                   --base-config ./data_tests/roomeq/generate/$algo/small_stereo_2_1/config.json; \
 	  done \
@@ -129,7 +129,7 @@ qa-roomeq-small-stereo-22: ensure-venv
 	        --config       ./data_tests/roomeq/generate/$algo/small_stereo_2_2_group/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/small_stereo_2_2_group/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/small_stereo_2_2_group/dsp_$method.json; \
-		./venv/bin/python3 ./scripts/display-roomeq.py \
+		./venv/bin/python3 ./ui/display-roomeq \
 		                   ./data_generated/roomeq/generated/$algo/small_stereo_2_2_group/dsp_$method.json \
 		                   --base-config ./data_tests/roomeq/generate/$algo/small_stereo_2_2_group/config.json; \
 	  done \
@@ -144,7 +144,7 @@ qa-roomeq-small-stereo-51: ensure-venv
 	        --config       ./data_tests/roomeq/generate/$algo/medium_surround_5_1/config.json \
 		    --override-config ./data_tests/roomeq/generate/optimiser-config/medium_surround_5_1/optimiser-$method.json \
 		    --output       ./data_generated/roomeq/generated/$algo/medium_surround_5_1/dsp_$method.json; \
-		./venv/bin/python3 ./scripts/display-roomeq.py \
+		./venv/bin/python3 ./ui/display-roomeq \
 		                   ./data_generated/roomeq/generated/$algo/medium_surround_5_1/dsp_$method.json \
 		                   --base-config ./data_tests/roomeq/generate/$algo/medium_surround_5_1/config.json; \
 	  done \
@@ -181,7 +181,7 @@ qa-roomeq-multi-measurement: ensure-venv
 	      --config "$config" \
 	      --override-config "$override_root/$strategy.json" \
 	      --output "$output"
-	    ./venv/bin/python3 ./scripts/display-roomeq.py "$output" --base-config "$config"
+	    ./venv/bin/python3 ./ui/display-roomeq "$output" --base-config "$config"
 	  done
 	done
 	echo "=== Correctness-gated home-cinema feature matrix ==="
@@ -398,7 +398,7 @@ qa-roomeq-mutation:
 # Unit contracts for privacy-safe REW MDAT conversion.
 [group('qa-roomeq')]
 qa-roomeq-mdat:
-	python3 scripts/test_mdat2csv.py
+	PYTHONPATH=utils python3 tests/test_mdat2csv.py
 
 # Exhaustive layout x sub-topology x processing-mode audibility matrix.
 [group('qa-roomeq')]

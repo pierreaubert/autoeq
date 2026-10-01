@@ -1,5 +1,109 @@
 # Unreleased
 
+- Fix the +/− Zoom toolbar on the DSP signal-flow Sankey (and bar charts):
+  cards without a data viewport now magnify geometrically (0.5–4x crisp
+  re-render with card scrolling) instead of ignoring the click, and the
+  viewport-only Move toggle is hidden there.
+- Size the report graph preset buttons (20–200, 20–20k, 20 dB, 50 dB) to
+  the gpui-toolkit button-set xs spec (12 px text, 2 px / 6 px padding).
+- Raise report graph axis text (tick labels, axis titles, bar category
+  labels, spectrogram axes and colorbar scale) from 12 px to 14 px;
+  figure titles and series legends are unchanged.
+- Drop the legacy section number from the relative-level heading and spell
+  out that the compensation proposal is not added to the post-DSP columns,
+  which read the delivered chain's predicted curve as-is.
+- Fix the Details per speaker EQ second axis to the same 50 dB span as SPL.
+- Stack the report frequency-axis presets vertically and add 20 dB / 50 dB
+  vertical-span buttons at the top-left of SPL graphs, centered on the
+  current view.
+- Drop the legacy section numbers from the Acoustics tabs (Summary, Details
+  per speaker, Time of Flight, Symmetric monitors, Time domain analysis)
+  and lead the Details tab with the relative-level table instead of
+  trailing it at the end of Summary.
+- Anchor report target overlays to the measured per-channel mean of the L/R
+  pair over 100 Hz–10 kHz: the single report now shifts serialized absolute
+  targets by one global offset (previously plotted verbatim), and per-channel
+  comparison tabs sit at per-channel level instead of the L+R sum level
+  (+3–6 dB too hot). The L+R tab keeps its sum-matched target; legacy
+  relative targets keep their per-channel fit.
+- Cap RoomEQ report graphs at 800 px wide, centered; table wrappers that
+  share the plot card styling still fill their card.
+- Label the DSP signal-flow tab without its legacy section number.
+- Render the RoomEQ report buckets as a centered tab bar in the channel-tab
+  style, and give multi-section buckets their own sub-tabs (DSP analysis
+  switches between the rationale and the signal flow; Acoustics analysis
+  across its five sections) instead of stacked headings.
+- Regroup the RoomEQ report into three centered tabs — DSP analysis (why
+  this correction, DSP signal flow), Acoustics analysis (summary, speakers,
+  time of flight, symmetric monitors, time domain), and Psychoacoustic
+  report (EPA scores) — with the playback verdict pinned above the tabs.
+  Inside each tab the flow is flat: subheads are plain headings and every
+  table or graph sits in exactly one card (producer grouping wrappers and
+  the verdict frame no longer nest cards inside cards).
+- Split the RoomEQ report playback verdict into three boxes — recorded
+  eligibility, delivered-payload binding, and playback approval — each with
+  its own severity, so a stale payload no longer hides a recorded acceptance
+  (or vice versa). The report header now shows the RoomEQ version, the DSP
+  data date, and the render date above the renderer status, and the
+  stale-payload message names its remedy (re-finalize before playback).
+- Reorganize Python tooling: `python/` is now `ui/` (report viewer at
+  `ui/display-roomeq`, GUIs at `ui/roomeq-gui` and `ui/recording-gui`)
+  and the REW converters moved to `utils/` (`utils/mdat2csv.py`,
+  `utils/msop2csv.py`, contracts in `tests/test_mdat2csv.py`); Justfile,
+  QA recipes, shell scripts, and docs point at the new paths.
+- Adapt `ui/roomeq-gui` to the new gpui-toolkit: review curves move
+  from the removed `charts.line(id, x, y, ...)` call to the `ChartBuilder`
+  + `Dataset` API with `app.resources` binding (log frequency axis), and
+  corrupt preference files now fall back to defaults (`StateError` is
+  caught). Adds a host-free IR regression test (`test_app_ir.py`).
+- Add `ui/recording-gui` (`just recording-gui`, `just
+  test-recording-gui`): recording wizard mirroring the sotf-capture
+  workflow (devices & setup, SPL, capture, probe, bass anchor,
+  evaluating, saving) with fake + `sotf-capture`-CLI backends.
+- Harden early-vs-late band-energy figures: data where Full sits below Early
+  or Late in any band is refused (the cell stays pending) instead of plotting
+  impossible physics, and the Full envelope trace is drawn slightly heavier
+  so it stays readable where the parts converge onto it.
+- Run `roomeq-qa-synthetic` matrix phases on a bounded worker pool (default:
+  half the CPUs, shared with `roomeq-qa-quality`; `--jobs N` overrides,
+  `--jobs 1` restores serial execution). Single-speaker combos stay serial
+  inside each difficulty/target/mode group so baseline post-score reuse is
+  unchanged; indexed outputs restore deterministic summaries and artifacts.
+- Redraw waterfall surfaces REW-style: time-slice contours with hidden-line
+  removal are now the default, with a Surface toggle, a Contours toggle, and
+  a d3rs colormap dropdown (Turbo, Viridis, Plasma, Inferno, Magma, Rainbow)
+  for the opt-in filled surface; coloured ridge lines trace exported
+  resonance candidates over the slices.
+- Redraw symmetric-monitor pair graphs with three traces: the absolute
+  (magnitude) sum, the coherent complex sum from measured phase, and their
+  difference (cancellation loss) on a secondary axis capped at 40 dB. Without
+  finite phase on both members the figure shows the absolute sum alone.
+- Trim duplicated report blocks: channel tabs reuse the room-level T60 block
+  (per-driver tabs keep their unique measured-acoustics T60), Section 3 keeps
+  the time-of-flight table without the before/after bar charts, and the
+  Section 4 header drops its repeated title and nested boxes.
+- Refresh RoomEQ report graphs: every SPL-vs-frequency plot spans 50 dB with
+  a horizontal gridline every dB (labelled every 5 dB); comparison targets are
+  level-matched so the target mean equals the measured L+R mean over
+  100 Hz–10 kHz; left-drag crops a zoom box, Shift/right-drag pans,
+  double-click resets, and 20–200 / 20–20k overlay presets jump the frequency
+  axis; the smoothing menu adds 1/3, 1/2, 1/1 octave plus REW-style Var,
+  Psychoacoustic and ERB modes; the wavelet spectrogram overlays a cyan dashed
+  peak-energy-time ridge per frequency column.
+- Import six native 48 kHz L/R IRs for the three Ascilab position cases and link
+  them in their local recordings configs. Export the two magnitude-only MMM
+  curves with local L/R configuration and IIR/FIR/hybrid presets, without
+  fabricated phase or IR data.
+- Add a final collapsible DSP signal-flow report section, with an All channels
+  overview and individual output selectors,
+  ordered plugin nodes, routed input sums, and expandable saved parameters.
+  Keep d3rs flow labels inside the canvas and allow wide diagrams to scroll.
+- Extract matching native room IRs from measured-case MDAT files and link all
+  physical captures in the parent configs. Support native 3 kHz sub captures
+  and explicit per-driver acoustic sidecars without mislabeling parent sums.
+  Independent capture diagnostics need no fabricated shared-clock identity;
+  unavailable high-frequency bands stay unassessed.
+
 - Use one Room EQ report layout with automatic WebGPU surface acceleration
   and a Canvas fallback. Both use the same d3rs/WASM geometry, axes, legends,
   and rotation controls. Remove the separate GPUI statistics-view toggle.

@@ -1,0 +1,1475 @@
+"""DSP computation functions for biquad filters and smoothing."""
+
+import math
+import sys
+
+import numpy as np
+
+from data_extract import get_plottable_drivers
+
+
+def smooth_octave(freq: list[float], spl: list[float], octave_fraction: float) -> list[float]:
+    """
+    Apply octave smoothing to frequency response data.
+
+    Args:
+        freq: Frequency points in Hz
+        spl: SPL values in dB
+        octave_fraction: Smoothing width in octaves (e.g., 1/3 for 1/3 octave smoothing)
+
+    Returns:
+        Smoothed SPL values
+    """
+    if not freq or not spl or octave_fraction is None:
+        return spl
+
+    n = len(freq)
+    smoothed = []
+
+    for i in range(n):
+        f_center = freq[i]
+        if f_center <= 0:
+            smoothed.append(spl[i])
+            continue
+
+        # Calculate frequency range for this octave fraction
+        # For 1/N octave, the bandwidth is 2^(1/N) ratio
+        ratio = 2 ** (octave_fraction / 2)
+        f_low = f_center / ratio
+        f_high = f_center * ratio
+
+        # Find all points within the smoothing window
+        values = []
+        weights = []
+
+        for j in range(n):
+            if f_low <= freq[j] <= f_high:
+                # Use triangular weighting (closer to center = more weight)
+                log_dist = abs(math.log10(freq[j]) - math.log10(f_center))
+                log_half_width = math.log10(ratio)
+                weight = 1.0 - (log_dist / log_half_width) if log_half_width > 0 else 1.0
+                values.append(spl[j])
+                weights.append(max(0, weight))
+
+        if values and sum(weights) > 0:
+            # Weighted average
+            smoothed.append(sum(v * w for v, w in zip(values, weights)) / sum(weights))
+        else:
+            smoothed.append(spl[i])
+
+    return smoothed
+
+
+_FILTER_TYPE_ALIASES = {
+    "lowpass": "lowpass",
+    "lp": "lowpass",
+    "highpass": "highpass",
+    "hp": "highpass",
+    "highpassvariableq": "highpassvariableq",
+    "hpq": "highpassvariableq",
+    "bandpass": "bandpass",
+    "bp": "bandpass",
+    "peak": "peak",
+    "peaking": "peak",
+    "peakdip": "peak",
+    "parametric": "peak",
+    "pk": "peak",
+    "notch": "notch",
+    "bandstop": "notch",
+    "no": "notch",
+    "lowshelf": "lowshelf",
+    "ls": "lowshelf",
+    "highshelf": "highshelf",
+    "hs": "highshelf",
+    "allpass": "allpass",
+    "ap": "allpass",
+    "lowshelforf": "lowshelforf",
+    "lso": "lowshelforf",
+    "highshelforf": "highshelforf",
+    "hso": "highshelforf",
+    "peakmatched": "peakmatched",
+    "pkm": "peakmatched",
+}
+
+
+def _canonical_filter_type(filter_type: object) -> str:
+    key = "".join(character for character in str(filter_type).lower() if character.isalnum())
+    try:
+        return _FILTER_TYPE_ALIASES[key]
+    except KeyError as error:
+        raise ValueError(f"unsupported biquad filter type {filter_type!r}") from error
+
+
+def biquad_coefficients(
+    filter_type: object,
+    freq: float,
+    sample_rate: float = 48_000.0,
+    q: float = 1.0,
+    db_gain: float = 0.0,
+) -> tuple[float, float, float, float, float]:
+    """Return Rust-canonical normalized ``(a1, a2, b0, b1, b2)`` coefficients.
+
+    This mirrors ``math_audio_iir_fir::Biquad::constants`` for every
+    ``BiquadFilterType`` used by RoomEQ. Keeping coefficient generation in one
+    helper also prevents the plotted aggregate and per-filter curves from
+    drifting apart.
+    """
+    kind = _canonical_filter_type(filter_type)
+    sample_rate = float(sample_rate)
+    if not math.isfinite(sample_rate) or sample_rate <= 0.0:
+        sample_rate = 48_000.0
+    nyquist = sample_rate / 2.0
+    margin = nyquist * math.sqrt(sys.float_info.epsilon)
+    freq = float(freq)
+    if not math.isfinite(freq) or freq <= 0.0:
+        freq = margin
+    elif freq >= nyquist:
+        freq = nyquist - margin
+
+    q = float(q)
+    if not math.isfinite(q):
+        raise ValueError(f"biquad Q must be finite, got {q!r}")
+    if q == 0.0:
+        if kind == "notch":
+            q = 30.0
+        elif kind in {"bandpass", "highpass", "lowpass"}:
+            q = 1.0 / math.sqrt(2.0)
+        elif kind in {"lowshelf", "highshelf", "lowshelforf", "highshelforf"}:
+            q = 1.0668676536332304
+    if q <= 0.0:
+        q = 1.0e-2
+
+    db_gain = float(db_gain)
+    if not math.isfinite(db_gain):
+        db_gain = 0.0
+    amplitude = 10.0 ** (db_gain / 40.0)
+    omega = 2.0 * math.pi * freq / sample_rate
+    sine = math.sin(omega)
+    cosine = math.cos(omega)
+    alpha = sine / (2.0 * q)
+    beta = math.sqrt(2.0 * amplitude)
+
+    if kind == "lowpass":
+        b0, b1, b2 = (1.0 - cosine) / 2.0, 1.0 - cosine, (1.0 - cosine) / 2.0
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind in {"highpass", "highpassvariableq"}:
+        b0, b1, b2 = (1.0 + cosine) / 2.0, -(1.0 + cosine), (1.0 + cosine) / 2.0
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind == "bandpass":
+        b0, b1, b2 = alpha, 0.0, -alpha
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind == "notch":
+        b0, b1, b2 = 1.0, -2.0 * cosine, 1.0
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind == "peak":
+        b0, b1, b2 = 1.0 + alpha * amplitude, -2.0 * cosine, 1.0 - alpha * amplitude
+        a0, a1, a2 = 1.0 + alpha / amplitude, -2.0 * cosine, 1.0 - alpha / amplitude
+    elif kind == "lowshelf":
+        b0 = amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cosine + beta * sine)
+        b1 = 2.0 * amplitude * ((amplitude - 1.0) - (amplitude + 1.0) * cosine)
+        b2 = amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cosine - beta * sine)
+        a0 = (amplitude + 1.0) + (amplitude - 1.0) * cosine + beta * sine
+        a1 = -2.0 * ((amplitude - 1.0) + (amplitude + 1.0) * cosine)
+        a2 = (amplitude + 1.0) + (amplitude - 1.0) * cosine - beta * sine
+    elif kind == "highshelf":
+        b0 = amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cosine + beta * sine)
+        b1 = -2.0 * amplitude * ((amplitude - 1.0) + (amplitude + 1.0) * cosine)
+        b2 = amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cosine - beta * sine)
+        a0 = (amplitude + 1.0) - (amplitude - 1.0) * cosine + beta * sine
+        a1 = 2.0 * ((amplitude - 1.0) - (amplitude + 1.0) * cosine)
+        a2 = (amplitude + 1.0) - (amplitude - 1.0) * cosine - beta * sine
+    elif kind == "allpass":
+        b0, b1, b2 = 1.0 - alpha, -2.0 * cosine, 1.0 + alpha
+        a0, a1, a2 = 1.0 + alpha, -2.0 * cosine, 1.0 - alpha
+    elif kind in {"lowshelforf", "highshelforf"}:
+        linear_gain = 10.0 ** (db_gain / 20.0)
+        if kind == "lowshelforf":
+            a0 = (amplitude + 1.0) + (amplitude - 1.0) * cosine + beta * sine
+            a1 = -2.0 * ((amplitude - 1.0) + (amplitude + 1.0) * cosine)
+            a2 = (amplitude + 1.0) + (amplitude - 1.0) * cosine - beta * sine
+            sum_b = linear_gain * (a0 + a1 + a2)
+            diff_b = a0 - a1 + a2
+        else:
+            a0 = (amplitude + 1.0) - (amplitude - 1.0) * cosine + beta * sine
+            a1 = 2.0 * ((amplitude - 1.0) - (amplitude + 1.0) * cosine)
+            a2 = (amplitude + 1.0) - (amplitude - 1.0) * cosine - beta * sine
+            sum_b = a0 + a1 + a2
+            diff_b = linear_gain * (a0 - a1 + a2)
+
+        b1 = (sum_b - diff_b) / 2.0
+        p = (sum_b + diff_b) / 2.0
+        cosine_2w = math.cos(2.0 * omega)
+        sine_2w = math.sin(2.0 * omega)
+        denominator_real = a0 + a1 * cosine + a2 * cosine_2w
+        denominator_imag = -a1 * sine - a2 * sine_2w
+        target = linear_gain * (denominator_real**2 + denominator_imag**2)
+        known = (
+            p**2 / 2.0
+            + b1**2
+            + 2.0 * b1 * p * cosine
+            + p**2 / 2.0 * cosine_2w
+        )
+        d_coefficient = 0.5 - 0.5 * cosine_2w
+        d_squared = (target - known) / d_coefficient if abs(d_coefficient) > 1.0e-15 else 0.0
+        d_value = math.sqrt(d_squared) if d_squared >= 0.0 else 0.0
+        d_signed = d_value if linear_gain >= 1.0 else -d_value
+        b0, b2 = (p + d_signed) / 2.0, (p - d_signed) / 2.0
+    else:  # peakmatched
+        linear_gain = 10.0 ** (db_gain / 20.0)
+        radius = math.exp(-(omega / q) / 2.0)
+        a0, a1, a2 = 1.0, -2.0 * radius * cosine, radius**2
+        sum_b = 1.0 + a1 + a2
+        diff_b = 1.0 - a1 + a2
+        b1 = (sum_b - diff_b) / 2.0
+        p = (sum_b + diff_b) / 2.0
+        cosine_2w = math.cos(2.0 * omega)
+        sine_2w = math.sin(2.0 * omega)
+        denominator_real = 1.0 + a1 * cosine + a2 * cosine_2w
+        denominator_imag = -a1 * sine - a2 * sine_2w
+        target = linear_gain**2 * (denominator_real**2 + denominator_imag**2)
+        known = (
+            p**2 / 2.0
+            + b1**2
+            + 2.0 * b1 * p * cosine
+            + p**2 / 2.0 * cosine_2w
+        )
+        d_coefficient = 0.5 - 0.5 * cosine_2w
+        d_squared = (target - known) / d_coefficient if abs(d_coefficient) > 1.0e-15 else 0.0
+        d_value = math.sqrt(d_squared) if d_squared >= 0.0 else 0.0
+        d_signed = d_value if linear_gain >= 1.0 else -d_value
+        b0, b2 = (p + d_signed) / 2.0, (p - d_signed) / 2.0
+
+    if abs(a0) < 1.0e-15:
+        return (0.0, 0.0, 1.0, 0.0, 0.0)
+    return (a1 / a0, a2 / a0, b0 / a0, b1 / a0, b2 / a0)
+
+
+def compute_eq_response(
+    filters: list[dict], freq_points: list[float], sample_rate: float = 48_000.0
+) -> list[float]:
+    """Compute EQ magnitude using the serialized filter topology."""
+    if not filters or not freq_points:
+        return []
+    combined_db = [0.0] * len(freq_points)
+    for filt in filters:
+        for index, value in enumerate(serialized_filter_response(filt, freq_points, sample_rate)):
+            combined_db[index] += 20.0 * math.log10(max(abs(value), 1.0e-10))
+    return combined_db
+
+
+def _finite_filter_number(value, field):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise ValueError(f"invalid serialized EQ {field}: {value!r}")
+    return float(value)
+
+
+def kautz_sections(filt: dict, sample_rate: float) -> list[tuple[float, float, float]]:
+    """Read ordered (pole Hz, Q, linear weight) entries, including legacy forms."""
+    if "kautz_sections" in filt and "sections" in filt:
+        raise ValueError("duplicate Kautz section fields")
+    values = filt.get("kautz_sections", filt.get("sections", []))
+    if not isinstance(values, list):
+        raise ValueError("Kautz sections must be an array")
+    if not values:
+        values = [{"pole_freq": filt.get("freq"), "q": filt.get("q"),
+                   "gain": filt.get("db_gain", 0.0)}]
+    result = []
+    for section in values:
+        if not isinstance(section, dict):
+            raise ValueError("Kautz section must be an object")
+        keys = [key for key in ("pole_freq", "freq", "frequency", "pole_freq_hz") if key in section]
+        if len(keys) != 1:
+            raise ValueError("Kautz section requires a unique pole frequency")
+        pole = _finite_filter_number(section[keys[0]], "pole frequency")
+        q = _finite_filter_number(section.get("q"), "Q")
+        gain = _finite_filter_number(section.get("gain", 0.0), "linear weight")
+        if not 0 < pole < sample_rate / 2 or q <= 0:
+            raise ValueError("Kautz requires a sub-Nyquist positive pole and positive Q")
+        result.append((pole, q, gain))
+    return result
+
+
+def serialized_filter_response(filt: dict, frequencies: list[float], sample_rate: float) -> list[complex]:
+    """Complex transfer matching Rust's serialized EQ realization contract.
+
+    Kautz is unity plus an ordered basis bank, not a cascade of PEQs. Warped
+    biquads map both design and evaluation frequencies. This is a transfer
+    prediction, not a recording or whole-host validation.
+    """
+    sample_rate = _finite_filter_number(sample_rate, "sample rate")
+    if sample_rate <= 0:
+        raise ValueError("EQ sample rate must be positive")
+    for frequency in frequencies:
+        _finite_filter_number(frequency, "evaluation frequency")
+        if not 0 <= frequency <= sample_rate / 2:
+            raise ValueError("EQ evaluation frequency must be between DC and Nyquist")
+    topology = filt.get("topology", "biquad")
+    if topology not in ("biquad", "warped_biquad", "kautz_filter"):
+        raise ValueError(f"unsupported serialized EQ topology: {topology!r}")
+    if topology == "kautz_filter":
+        sections = []
+        for pole, q, gain in kautz_sections(filt, sample_rate):
+            radius = min(math.exp(-math.pi * pole / (max(q, 0.1) * sample_rate)), 0.9999)
+            a1 = -2 * radius * math.cos(2 * math.pi * pole / sample_rate)
+            a2 = radius * radius
+            sections.append((a1, a2, gain * (1-a2)**1.5))
+        result = []
+        for frequency in frequencies:
+            angle = -2 * math.pi * frequency / sample_rate
+            z = complex(math.cos(angle), math.sin(angle))
+            chain, value = 1+0j, 1+0j
+            for a1, a2, numerator in sections:
+                denominator = 1 + a1*z + a2*z*z
+                value += numerator * chain / denominator
+                chain *= (a2 + a1*z + z*z) / denominator
+            result.append(value)
+        return result
+
+    center = filt.get("freq", filt.get("frequency", 1_000.0))
+    q, gain = filt.get("q", 1.0), filt.get("db_gain", filt.get("gain", 0.0))
+    evaluation = frequencies
+    if topology == "warped_biquad":
+        center = _finite_filter_number(filt.get("freq"), "frequency")
+        q = _finite_filter_number(filt.get("q"), "Q")
+        gain = _finite_filter_number(filt.get("db_gain"), "dB gain")
+        if not 0 < center < sample_rate / 2 or q <= 0:
+            raise ValueError("warped EQ requires a sub-Nyquist positive frequency and positive Q")
+        default_lambda = 1.0674 * math.sqrt(2/math.pi * math.atan(0.06583*sample_rate)) - 0.1916
+        lam = _finite_filter_number(filt.get("lambda", default_lambda), "lambda")
+        if not -1 < lam < 1:
+            raise ValueError("warped EQ lambda must be between -1 and 1")
+
+        def warp(frequency):
+            omega = 2 * math.pi * frequency / sample_rate
+            omega += 2 * math.atan2(lam * math.sin(omega), 1-lam*math.cos(omega))
+            return min(max(omega * sample_rate / (2*math.pi), 0.0), sample_rate/2)
+
+        center = warp(center)
+        evaluation = [warp(frequency) for frequency in frequencies]
+    coefficients = biquad_coefficients(filt.get("filter_type", "peak"), center, sample_rate, q, gain)
+    return [_biquad_complex_response(coefficients, frequency, sample_rate) for frequency in evaluation]
+
+
+def _biquad_complex_response(
+    coefficients: tuple[float, float, float, float, float],
+    frequency: float,
+    sample_rate: float,
+) -> complex:
+    """Return the complex response of one normalized biquad."""
+    a1, a2, b0, b1, b2 = coefficients
+    omega = 2.0 * math.pi * frequency / sample_rate
+    z1 = complex(math.cos(omega), -math.sin(omega))
+    z2 = z1 * z1
+    denominator = 1.0 + a1 * z1 + a2 * z2
+    if abs(denominator) <= 1.0e-15:
+        return 0j
+    return (b0 + b1 * z1 + b2 * z2) / denominator
+
+
+def _crossover_response(
+    crossover_type: str,
+    output: str,
+    frequency_hz: float,
+    frequencies: list[float],
+    sample_rate: float,
+) -> list[complex]:
+    """Return a RoomEQ crossover transfer function on ``frequencies``."""
+    kind = "".join(ch for ch in crossover_type.lower() if ch.isalnum())
+    output_kind = "lowpass" if output.lower().startswith("low") else "highpass"
+
+    # Linkwitz-Riley filters are cascaded identical Butterworth sections.
+    if kind in {"lr24", "lr4"}:
+        section_qs = [1.0 / math.sqrt(2.0)] * 2
+    elif kind in {"lr48", "lr8"}:
+        section_qs = [0.541196100146197, 1.306562964876377] * 2
+    elif kind in {"butterworth12", "bw12"}:
+        section_qs = [1.0 / math.sqrt(2.0)]
+    elif kind in {"butterworth24", "bw24"}:
+        section_qs = [0.541196100146197, 1.306562964876377]
+    else:
+        raise ValueError(f"unsupported crossover type: {crossover_type!r}")
+
+    sections = [
+        biquad_coefficients(output_kind, frequency_hz, sample_rate, q, 0.0)
+        for q in section_qs
+    ]
+    response: list[complex] = []
+    for frequency in frequencies:
+        value = 1.0 + 0.0j
+        for section in sections:
+            value *= _biquad_complex_response(section, frequency, sample_rate)
+        response.append(value)
+    return response
+
+
+def apply_plugins_to_curve(
+    curve: dict | None,
+    plugins: list[dict],
+    sample_rate: float = 48_000.0,
+) -> dict | None:
+    """Apply gain/EQ/crossover/delay plugins to an acoustic response curve.
+
+    Magnitude and phase are both propagated. This is used by report generation
+    to predict what a microphone sees after the exported DSP chain.
+    """
+    if not curve:
+        return None
+    frequencies = curve.get("freq") or []
+    spl = curve.get("spl") or []
+    if not frequencies or len(frequencies) != len(spl):
+        return None
+
+    transfer = [1.0 + 0.0j for _ in frequencies]
+    for plugin in plugins:
+        plugin_type = str(plugin.get("plugin_type", "")).lower()
+        parameters = plugin.get("parameters", {}) or {}
+        if plugin_type == "gain":
+            gain = 10.0 ** (float(parameters.get("gain_db", 0.0)) / 20.0)
+            if parameters.get("invert", False):
+                gain = -gain
+            transfer = [value * gain for value in transfer]
+        elif plugin_type in {"delay", "limiter"}:
+            if plugin_type == "limiter":
+                ceiling = parameters.get("threshold_db")
+                expected = {"threshold_db": ceiling, "release_ms": 100.0, "lookahead_ms": 5.0,
+                            "soft": False, "true_peak": False, "isp_mode": False,
+                            "dual_release": False, "mix": 1.0, "feed_forward": True,
+                            "link_amount": 1.0, "label": "room_eq_sub_output_limiter",
+                            "room_eq_stage": "post_route"}
+                if (not isinstance(ceiling, (int, float)) or not -20.0 <= ceiling <= -1.0
+                        or parameters != expected):
+                    raise ValueError("unsupported small-signal limiter contract")
+                # Only below-threshold response is representable by a curve.
+                delay_seconds = int(0.005 * sample_rate) / sample_rate
+            else:
+                delay_seconds = float(parameters.get("delay_ms", 0.0)) / 1000.0
+            transfer = [
+                value
+                * complex(
+                    math.cos(-2.0 * math.pi * frequency * delay_seconds),
+                    math.sin(-2.0 * math.pi * frequency * delay_seconds),
+                )
+                for value, frequency in zip(transfer, frequencies)
+            ]
+        elif plugin_type == "eq":
+            for filt in parameters.get("filters", []):
+                transfer = [
+                    value * eq
+                    for value, eq in zip(transfer, serialized_filter_response(filt, frequencies, sample_rate))
+                ]
+        elif plugin_type == "convolution" and parameters.get("room_eq_fir_placement") == "per_driver":
+            taps = parameters.get("_fir_taps")
+            if not taps or parameters.get("_fir_sample_rate") != sample_rate:
+                raise ValueError("Physical FIR replay requires its matching WAV sidecar; use load_roomeq_json")
+            # Direct Horner DTFT: includes each driver's own phase and latency.
+            for index, frequency in enumerate(frequencies):
+                angle = -2.0 * math.pi * frequency / sample_rate
+                z = complex(math.cos(angle), math.sin(angle))
+                h = 0j
+                for tap in reversed(taps):
+                    h = h * z + tap
+                transfer[index] *= h
+        elif plugin_type == "crossover":
+            crossover = _crossover_response(
+                str(parameters.get("type", "LR24")),
+                str(parameters.get("output", "low")),
+                float(parameters.get("frequency", 80.0)),
+                frequencies,
+                sample_rate,
+            )
+            transfer = [value * xover for value, xover in zip(transfer, crossover)]
+
+    phase = curve.get("phase")
+    has_phase = isinstance(phase, list) and len(phase) == len(frequencies)
+    result_spl: list[float] = []
+    result_phase: list[float] = []
+    for index, value in enumerate(transfer):
+        # Match Rust's acoustic-domain floor after the complete transfer is
+        # applied. Flooring the dimensionless transfer first lets a deeply
+        # attenuated input fall below the canonical -240 dB output floor.
+        acoustic_magnitude = 10.0 ** (float(spl[index]) / 20.0) * abs(value)
+        result_spl.append(20.0 * math.log10(max(acoustic_magnitude, 1.0e-12)))
+        if has_phase:
+            result_phase.append(float(phase[index]) + math.degrees(math.atan2(value.imag, value.real)))
+
+    result: dict = {"freq": list(frequencies), "spl": result_spl}
+    if has_phase:
+        result["phase"] = result_phase
+    return result
+
+
+def resample_spl_onto_grid(
+    source_freq: list[float], source_spl: list[float], target_freq: list[float]
+) -> list[float]:
+    """Resample SPL values onto a display grid with log-frequency interpolation.
+
+    Edge-clamped: targets outside the source support hold the nearest edge
+    value. Returns the source values unchanged when resampling is impossible
+    or the grids already match, so display callers mixing curves from
+    different stages (driver measurements vs. deployed replay grids) share one
+    x-axis instead of crashing on length mismatches.
+    """
+    if (
+        not source_freq
+        or not target_freq
+        or len(source_freq) != len(source_spl)
+        or len(target_freq) == 0
+    ):
+        return list(source_spl)
+    if len(source_freq) == len(target_freq) and all(
+        a == b for a, b in zip(source_freq, target_freq)
+    ):
+        return list(source_spl)
+    pairs = sorted(
+        (float(f), float(s))
+        for f, s in zip(source_freq, source_spl)
+        if isinstance(f, (int, float))
+        and isinstance(s, (int, float))
+        and math.isfinite(f)
+        and math.isfinite(s)
+        and f > 0.0
+    )
+    if not pairs:
+        return list(source_spl)
+    if len(pairs) == 1:
+        return [pairs[0][1]] * len(target_freq)
+    log_src = [math.log10(f) for f, _ in pairs]
+    spl_src = [s for _, s in pairs]
+
+    def interp(log_f: float) -> float:
+        if log_f <= log_src[0]:
+            return spl_src[0]
+        if log_f >= log_src[-1]:
+            return spl_src[-1]
+        upper = 1
+        while upper < len(log_src) - 1 and log_src[upper] < log_f:
+            upper += 1
+        lower = upper - 1
+        span = log_src[upper] - log_src[lower]
+        position = (log_f - log_src[lower]) / span if span > 0.0 else 0.0
+        return spl_src[lower] + position * (spl_src[upper] - spl_src[lower])
+
+    return [interp(math.log10(float(f))) if f > 0.0 else spl_src[0] for f in target_freq]
+
+
+def _resample_curve_onto_grid(curve: dict | None, target_freq: list[float]) -> dict | None:
+    """Resample a response curve onto ``target_freq`` with log-frequency interpolation.
+
+    SPL is interpolated linearly in log-frequency with edge clamping (a target
+    point outside the source grid holds the nearest edge value). Phase, when
+    present on the source curve, is unwrapped before interpolation and wrapped
+    back to ``[-180, 180)`` afterwards. Returns `None` when either input is
+    unusable so callers can fall back instead of plotting garbage.
+    """
+    if not curve or not target_freq:
+        return None
+    src_freq = curve.get("freq") or []
+    src_spl = curve.get("spl") or []
+    if not src_freq or len(src_freq) != len(src_spl):
+        return None
+    if len(src_freq) == len(target_freq) and all(
+        a == b for a, b in zip(src_freq, target_freq)
+    ):
+        identical: dict = {"freq": list(target_freq), "spl": list(src_spl)}
+        if isinstance(curve.get("phase"), list) and len(curve["phase"]) == len(src_freq):
+            identical["phase"] = list(curve["phase"])
+        return identical
+    if any(not math.isfinite(f) or f <= 0.0 for f in target_freq):
+        return None
+    pairs = sorted(
+        (float(f), float(s))
+        for f, s in zip(src_freq, src_spl)
+        if isinstance(f, (int, float)) and isinstance(s, (int, float))
+        and math.isfinite(f) and math.isfinite(s) and f > 0.0
+    )
+    if not pairs:
+        return None
+    if len(pairs) == 1:
+        # A single-point source resamples to a constant curve.
+        result: dict = {"freq": list(target_freq), "spl": [pairs[0][1]] * len(target_freq)}
+        phase = curve.get("phase")
+        if isinstance(phase, list) and len(phase) == len(src_freq):
+            try:
+                single_phase = float(phase[0])
+            except (TypeError, ValueError):
+                return result
+            if math.isfinite(single_phase):
+                result["phase"] = wrap_phase([single_phase] * len(target_freq))
+        return result
+    log_src = [math.log10(f) for f, _ in pairs]
+    spl_src = [s for _, s in pairs]
+
+    def interp(log_axis: list[float], values: list[float]) -> list[float]:
+        out: list[float] = []
+        for frequency in target_freq:
+            log_f = math.log10(float(frequency))
+            if log_f <= log_axis[0]:
+                out.append(values[0])
+                continue
+            if log_f >= log_axis[-1]:
+                out.append(values[-1])
+                continue
+            upper = 1
+            while upper < len(log_axis) - 1 and log_axis[upper] < log_f:
+                upper += 1
+            lower = upper - 1
+            span = log_axis[upper] - log_axis[lower]
+            position = (log_f - log_axis[lower]) / span if span > 0.0 else 0.0
+            out.append(values[lower] + position * (values[upper] - values[lower]))
+        return out
+
+    result: dict = {"freq": list(target_freq), "spl": interp(log_src, spl_src)}
+    phase = curve.get("phase")
+    if isinstance(phase, list) and len(phase) == len(src_freq):
+        try:
+            phase_pairs = sorted(
+                (float(f), float(p))
+                for f, p in zip(src_freq, phase)
+                if isinstance(f, (int, float)) and isinstance(p, (int, float))
+                and math.isfinite(f) and math.isfinite(p) and f > 0.0
+            )
+        except (TypeError, ValueError):
+            return result
+        if len(phase_pairs) >= 2:
+            result["phase"] = wrap_phase(
+                interp(
+                    [math.log10(f) for f, _ in phase_pairs],
+                    unwrap_phase([p for _, p in phase_pairs]),
+                )
+            )
+    return result
+
+
+def _fold_sum_curves(curves: list[dict | None]) -> dict | None:
+    """Sum response curves that may live on different frequency grids.
+
+    All curves are resampled onto the first usable curve's grid, then folded
+    with :func:`complex_sum_curves` (coherent when every resampled curve
+    carries phase, incoherent power sum otherwise). Returns `None` when no
+    usable curve remains.
+    """
+    usable = [
+        curve
+        for curve in curves
+        if curve and (curve.get("freq") or []) and (curve.get("spl") or [])
+        and len(curve.get("freq") or []) == len(curve.get("spl") or [])
+    ]
+    if not usable:
+        return None
+    reference_freq = list(usable[0]["freq"])
+    total: dict | None = None
+    for curve in usable:
+        resampled = _resample_curve_onto_grid(curve, reference_freq)
+        if resampled is None:
+            return None
+        total = resampled if total is None else complex_sum_curves(total, resampled)
+        if total is None:
+            return None
+    return total
+
+
+def sum_driver_initial_curves(channel_data: dict | None) -> dict | None:
+    """Sum a multi-driver channel's raw per-driver measurements.
+
+    Multi-sub ``initial_curve`` aggregates on the channel are level-relative
+    optimizer state, not microphone data, so the honest acoustic "before"
+    reference is the (power/coherent) sum of the driver ``initial_curve``
+    entries. Returns `None` when the channel has no usable driver curves.
+    """
+    if not channel_data:
+        return None
+    drivers = channel_data.get("drivers") or []
+    return _fold_sum_curves(
+        [driver.get("initial_curve") for driver in drivers if isinstance(driver, dict)]
+    )
+
+
+def replay_serialized_output(data: dict) -> dict[str, dict]:
+    """Replay serialized channel chains without consuming reported curves."""
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    replayed = {}
+    for name, channel in (data.get("channels", {}) or {}).items():
+        curve = channel.get("initial_curve") or channel.get("raw_curve")
+        if curve and channel.get("plugins") is not None:
+            replayed[name] = apply_plugins_to_curve(curve, channel["plugins"], sample_rate)
+    return replayed
+
+
+def _sub_shared_plugins_for_own_input(sub_channel: dict) -> list[dict]:
+    """Collect the physical-sub input-chain plugins for the sub's own curve.
+
+    Everything on the sub input chain shapes the LFE logical input: unlabeled
+    legacy correction, ``pre_route``/``post_route`` staged correction, and
+    alignment delays. Only calibration the routing graph owns is excluded: the
+    ``post_dsp_input_level_alignment`` trim (applied once via
+    ``input_trim_db``) and ``route_owned`` structural DSP (realized through
+    the route transfer itself).
+    """
+    shared: list[dict] = []
+    for plugin in sub_channel.get("plugins", []) or []:
+        if not isinstance(plugin, dict):
+            continue
+        params = plugin.get("parameters", {}) or {}
+        if (
+            plugin.get("plugin_type") == "gain"
+            and params.get("label") == "post_dsp_input_level_alignment"
+        ):
+            continue
+        if params.get("room_eq_stage") == "route_owned":
+            continue
+        shared.append(plugin)
+    return shared
+
+
+def _multisub_driver_curves(sub_channel: dict) -> list[dict]:
+    """Return usable per-driver measurements of a multi-driver sub channel."""
+    return [
+        driver
+        for driver in (sub_channel.get("drivers") or [])
+        if isinstance(driver, dict) and driver.get("initial_curve")
+    ]
+
+
+def _replay_drivers_through_transfer(
+    drivers: list[dict],
+    shared_plugins: list[dict],
+    route_tail: list[dict],
+    sample_rate: float,
+) -> dict | None:
+    """Replay per-driver measurements through shared DSP plus a route transfer."""
+    replayed: list[dict | None] = []
+    for driver in drivers:
+        driver_plugins = [
+            plugin
+            for plugin in (driver.get("plugins") or [])
+            if isinstance(plugin, dict)
+            and (plugin.get("parameters", {}) or {}).get("room_eq_stage")
+            != "route_owned"
+        ]
+        replayed.append(
+            apply_plugins_to_curve(
+                driver.get("initial_curve"),
+                [*driver_plugins, *shared_plugins, *route_tail],
+                sample_rate,
+            )
+        )
+    return _fold_sum_curves(replayed)
+
+
+def _corrected_multisub_curve(
+    sub_channel: dict,
+    own_route: dict | None,
+    input_trim_db: dict,
+    sample_rate: float,
+) -> dict | None:
+    """Replay a multi-driver sub from its per-driver measurements.
+
+    A multi-sub channel aggregate ``initial_curve`` is level-relative optimizer
+    state, not microphone data, so driving the reconstruction from it lands
+    tens of dB away from the acoustic response. Each driver instead replays
+    its own alignment plugins plus the shared sub input chain and the LFE
+    route transfer, and the drivers are summed acoustically.
+    """
+    drivers = _multisub_driver_curves(sub_channel)
+    if not drivers or own_route is None:
+        return None
+    low_pass_hz = own_route.get("low_pass_hz")
+    if low_pass_hz is None:
+        return None
+    source_name = str(own_route.get("source_channel"))
+    route_tail = [
+        {
+            "plugin_type": "crossover",
+            "parameters": {
+                "type": own_route.get("crossover_type", "LR24"),
+                "output": "low",
+                "frequency": low_pass_hz,
+            },
+        },
+        {
+            "plugin_type": "gain",
+            "parameters": {
+                "gain_db": float(own_route.get("gain_db", 0.0))
+                + float(input_trim_db.get(source_name, 0.0)),
+                "invert": bool(own_route.get("polarity_inverted", False)),
+            },
+        },
+        {
+            "plugin_type": "delay",
+            "parameters": {"delay_ms": own_route.get("delay_ms", 0.0)},
+        },
+    ]
+    shared = _sub_shared_plugins_for_own_input(sub_channel)
+    return _replay_drivers_through_transfer(drivers, shared, route_tail, sample_rate)
+
+
+def driver_destination_route(data: dict, driver_name: str) -> dict | None:
+    """Return the bass-management route feeding one physical driver.
+
+    A physical sub has one route per logical input; the sub's own
+    (LFE) route is preferred, then a redirected-bass route, then any
+    route to that destination. Returns `None` when the routing graph
+    has no route to ``driver_name`` (e.g. standalone multi-sub runs).
+    """
+    graph = ((data.get("metadata") or {}).get("bass_management") or {}).get(
+        "routing_graph", {}
+    ) or {}
+    candidates = [
+        route
+        for route in (graph.get("routes", []) or [])
+        if isinstance(route, dict) and str(route.get("destination")) == driver_name
+    ]
+    for preferred_kind in ("lfe_lowpass_to_sub", "redirected_bass_lowpass_to_sub"):
+        for route in candidates:
+            if route.get("route_kind") == preferred_kind:
+                return route
+    return candidates[0] if candidates else None
+
+
+def _route_tail_plugins(route: dict | None) -> list[dict]:
+    """Convert a routing-graph route into replayable DSP plugins."""
+    if not route:
+        return []
+    tail: list[dict] = []
+    low_pass_hz = route.get("low_pass_hz")
+    high_pass_hz = route.get("high_pass_hz")
+    if low_pass_hz is not None:
+        tail.append(
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "type": route.get("crossover_type", "LR24"),
+                    "output": "low",
+                    "frequency": low_pass_hz,
+                },
+            }
+        )
+    elif high_pass_hz is not None:
+        tail.append(
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "type": route.get("crossover_type", "LR24"),
+                    "output": "high",
+                    "frequency": high_pass_hz,
+                },
+            }
+        )
+    try:
+        gain_db = float(route.get("gain_db", 0.0))
+    except (TypeError, ValueError):
+        gain_db = 0.0
+    tail.append(
+        {
+            "plugin_type": "gain",
+            "parameters": {
+                "gain_db": gain_db,
+                "invert": bool(route.get("polarity_inverted", False)),
+            },
+        }
+    )
+    try:
+        delay_ms = float(route.get("delay_ms", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        delay_ms = 0.0
+    if delay_ms:
+        tail.append({"plugin_type": "delay", "parameters": {"delay_ms": delay_ms}})
+    return tail
+
+
+def per_driver_chain_plugins(
+    data: dict, channel_name: str, driver_index: int
+) -> list[dict] | None:
+    """Return the full magnitude-shaping chain of one physical driver.
+
+    The chain is the driver's own alignment plugins (gain / crossover /
+    per-sub EQ, excluding graph-owned stages) followed by the shared
+    channel input chain (same ownership rule as the logical-input
+    reconstruction) and the destination-matched route transfer. Returns
+    `None` when the driver index is invalid.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    driver = drivers[driver_index]
+    driver_plugins = [
+        plugin
+        for plugin in (driver.get("plugins") or [])
+        if isinstance(plugin, dict)
+        and (plugin.get("parameters", {}) or {}).get("room_eq_stage") != "route_owned"
+    ]
+    shared = _sub_shared_plugins_for_own_input(channel or {})
+    route = driver_destination_route(data, str(driver.get("name")))
+    return [*driver_plugins, *shared, *_route_tail_plugins(route)]
+
+
+def split_driver_eq_plugins(
+    data: dict, channel_name: str, driver_index: int
+) -> tuple[list[dict], list[dict]] | None:
+    """Split one driver's EQ plugins by ownership.
+
+    Returns ``(driver_eq_plugins, shared_eq_plugins)`` where the first list
+    holds the physical driver's own EQ plugins and the second holds the
+    shared channel input-chain EQ plugins, using the same ownership rules as
+    :func:`per_driver_chain_plugins` (graph-owned ``route_owned`` stages are
+    excluded from both). Route-tail transfers carry no EQ plugins.
+    Returns `None` when the driver index is invalid.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    driver = drivers[driver_index]
+    driver_eq = [
+        plugin
+        for plugin in (driver.get("plugins") or [])
+        if isinstance(plugin, dict)
+        and plugin.get("plugin_type") == "eq"
+        and (plugin.get("parameters", {}) or {}).get("room_eq_stage") != "route_owned"
+    ]
+    shared_eq = [
+        plugin
+        for plugin in _sub_shared_plugins_for_own_input(channel or {})
+        if isinstance(plugin, dict) and plugin.get("plugin_type") == "eq"
+    ]
+    return (driver_eq, shared_eq)
+
+
+def per_driver_effective_eq(
+    data: dict, channel_name: str, driver_index: int
+) -> dict | None:
+    """Return the total per-driver shaping curve on the driver's own grid.
+
+    A flat 0 dB input is replayed through
+    :func:`per_driver_chain_plugins`, so the result combines the shared
+    channel EQ with that driver's gain, crossover, and route transfer.
+    This is what the "All EQ Responses" overview row plots for each
+    subwoofer of a multi-sub channel. Returns `None` when the driver
+    has no usable frequency grid.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    grid = (drivers[driver_index].get("initial_curve") or {}).get("freq") or []
+    chain = per_driver_chain_plugins(data, channel_name, driver_index) or []
+    if not grid or not chain:
+        return None
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    return apply_plugins_to_curve(
+        {"freq": list(grid), "spl": [0.0] * len(grid)}, chain, sample_rate
+    )
+
+
+def per_driver_corrected_curve(
+    data: dict, channel_name: str, driver_index: int
+) -> dict | None:
+    """Replay one driver's measurement through its full deployed chain.
+
+    Returns `None` when the driver measurement or chain is unusable so
+    callers can fall back to the raw driver measurement.
+    """
+    channel = (data.get("channels") or {}).get(channel_name)
+    drivers = get_plottable_drivers(channel)
+    if driver_index < 0 or driver_index >= len(drivers):
+        return None
+    initial = drivers[driver_index].get("initial_curve")
+    chain = per_driver_chain_plugins(data, channel_name, driver_index) or []
+    if not initial or not chain:
+        return None
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+    return apply_plugins_to_curve(initial, chain, sample_rate)
+
+
+def build_post_dsp_source_curves(data: dict) -> dict[str, dict]:
+    """Build one microphone-predicted post-DSP curve per input channel.
+
+    For a bass-managed main, the result is the coherent acoustic sum of its
+    emitted high-pass main branch and only that input's low-pass sub branch.
+    The LFE result contains only its own route. The aggregate emitted LFE
+    ``final_curve`` is deliberately not reused because it represents the whole
+    bass bus and would duplicate unrelated source channels.
+
+    Curves on different frequency grids are resampled onto the main channel
+    grid before summation, and a channel is never silently dropped: when the
+    acoustic sum cannot be formed the reported ``final_curve`` is used.
+    Multi-driver subs replay each driver's own measurement so the result
+    stays at the acoustic level instead of the level-relative aggregate.
+    """
+    deployed = data.get("deployed_source_curves") or {}
+    if deployed:
+        return deployed
+
+    channels = data.get("channels", {}) or {}
+    bass_management = (data.get("metadata", {}) or {}).get("bass_management", {}) or {}
+    graph = bass_management.get("routing_graph", {}) or {}
+    routes = graph.get("routes", []) or []
+    input_trim_db = graph.get("input_trim_db", {}) or {}
+    if not routes:
+        return {
+            name: channel["final_curve"]
+            for name, channel in channels.items()
+            if channel.get("final_curve")
+        }
+
+    sub_name = bass_management.get("physical_sub_output") or bass_management.get("lfe_channel") or "LFE"
+    sub_channel = channels.get(sub_name, {})
+    sub_initial = sub_channel.get("initial_curve")
+    if not sub_initial and not _multisub_driver_curves(sub_channel):
+        return {
+            name: channel["final_curve"]
+            for name, channel in channels.items()
+            if channel.get("final_curve")
+        }
+    if not sub_initial:
+        sub_initial = None
+
+    # Only destination post-route processing belongs to every signal emitted
+    # by the physical sub. The LFE chain's pre-route processing belongs to its
+    # logical input and must not leak into redirected L/R/etc. branches.
+    sub_post_route_plugins = [
+        plugin
+        for plugin in sub_channel.get("plugins", [])
+        if (plugin.get("parameters", {}) or {}).get("room_eq_stage") == "post_route"
+    ]
+    sample_rate = float(data.get("sample_rate", 48_000.0) or 48_000.0)
+
+    # The channel aggregate of a multi-driver sub is level-relative
+    # optimizer state. Redirected branches must replay the acoustic
+    # per-driver measurements (with driver alignment) instead of that
+    # aggregate, or every main lands tens of dB too quiet.
+    multisub_drivers = _multisub_driver_curves(sub_channel)
+    # Realize the advertised main high-pass when the main chain does not
+    # already realize it: a generic-path main ``final_curve`` is full range,
+    # so summing it directly with the low-pass sub branch double-counts
+    # bass. Routed executors stamp the route-owned high-pass into the chain
+    # (matching the graph after the joint solution adopts it), and replaying
+    # the graph transfer on top would double-filter instead.
+    def _chain_realizes_highpass(channel: dict) -> bool:
+        for plugin in channel.get("plugins", []) or []:
+            if not isinstance(plugin, dict):
+                continue
+            params = plugin.get("parameters", {}) or {}
+            if (
+                str(plugin.get("plugin_type", "")).lower() == "crossover"
+                and str(params.get("output", "")).lower().startswith("high")
+                and params.get("room_eq_stage") == "route_owned"
+            ):
+                return True
+        return False
+
+    main_highpass_by_source: dict[str, dict] = {}
+    for route in routes:
+        if route.get("route_kind") == "main_highpass_to_self" and route.get(
+            "high_pass_hz"
+        ) is not None:
+            main_highpass_by_source[str(route.get("source_channel"))] = route
+
+    routed_by_source: dict[str, dict] = {}
+    for route in routes:
+        route_kind = route.get("route_kind")
+        if route_kind not in {"redirected_bass_lowpass_to_sub", "lfe_lowpass_to_sub"}:
+            continue
+        low_pass_hz = route.get("low_pass_hz")
+        if low_pass_hz is None:
+            continue
+        source_name = str(route.get("source_channel"))
+        source_plugins = (channels.get(source_name, {}) or {}).get("plugins", [])
+        source_pre_route_plugins = [
+            plugin
+            for plugin in source_plugins
+            if (plugin.get("parameters", {}) or {}).get("room_eq_stage")
+            == "pre_route"
+            and not (
+                plugin.get("plugin_type") == "gain"
+                and (plugin.get("parameters", {}) or {}).get("label")
+                == "post_dsp_input_level_alignment"
+            )
+        ]
+        # The canonical routing graph owns this labeled calibration trim.
+        # Excluding its serialized plugin above keeps Rust and Python from
+        # applying it twice while every other pre-route transfer remains common
+        # to the main and redirected-sub branches.
+        route_input_trim_db = float(input_trim_db.get(source_name, 0.0))
+        route_tail = [
+            {
+                "plugin_type": "crossover",
+                "parameters": {
+                    "type": route.get("crossover_type", "LR24"),
+                    "output": "low",
+                    "frequency": low_pass_hz,
+                },
+            },
+            {
+                "plugin_type": "gain",
+                "parameters": {
+                    "gain_db": float(route.get("gain_db", 0.0))
+                    + route_input_trim_db,
+                    "invert": bool(route.get("polarity_inverted", False)),
+                },
+            },
+            {
+                "plugin_type": "delay",
+                "parameters": {"delay_ms": route.get("delay_ms", 0.0)},
+            },
+        ]
+        if multisub_drivers and route_kind == "redirected_bass_lowpass_to_sub":
+            routed = _replay_drivers_through_transfer(
+                multisub_drivers,
+                [*source_pre_route_plugins, *sub_post_route_plugins],
+                route_tail,
+                sample_rate,
+            )
+        else:
+            route_plugins = [
+                *source_pre_route_plugins,
+                *route_tail,
+                *sub_post_route_plugins,
+            ]
+            routed = apply_plugins_to_curve(sub_initial, route_plugins, sample_rate)
+        if routed:
+            routed_by_source[source_name] = routed
+
+    # A multi-driver sub aggregate is level-relative optimizer state, not
+    # microphone data. Replay each driver's own measurement so the LFE
+    # logical-input curve stays at the acoustic level of the driver curves
+    # shown in the original-curves row.
+    own_route = next(
+        (
+            route
+            for route in routes
+            if route.get("route_kind") == "lfe_lowpass_to_sub"
+            and str(route.get("source_channel")) == sub_name
+            and route.get("low_pass_hz") is not None
+        ),
+        None,
+    )
+    multisub = _corrected_multisub_curve(
+        sub_channel, own_route, input_trim_db, sample_rate
+    )
+    if multisub is not None:
+        routed_by_source[sub_name] = multisub
+
+    results: dict[str, dict] = {}
+    for name, channel in channels.items():
+        routed = routed_by_source.get(name)
+        final_curve = channel.get("final_curve")
+        if name == sub_name:
+            if routed is not None:
+                results[name] = routed
+            elif final_curve:
+                results[name] = final_curve
+        elif routed is not None and final_curve:
+            # Realize the advertised main high-pass before the acoustic sum,
+            # unless the chain already realizes it (see above).
+            main_branch = final_curve
+            highpass = main_highpass_by_source.get(name)
+            if highpass is not None and not _chain_realizes_highpass(channel):
+                realized = apply_plugins_to_curve(
+                    final_curve,
+                    [
+                        {
+                            "plugin_type": "crossover",
+                            "parameters": {
+                                "type": highpass.get("crossover_type", "LR24"),
+                                "output": "high",
+                                "frequency": highpass.get("high_pass_hz"),
+                            },
+                        },
+                        {
+                            "plugin_type": "delay",
+                            "parameters": {
+                                "delay_ms": highpass.get("delay_ms", 0.0)
+                            },
+                        },
+                    ],
+                    sample_rate,
+                )
+                if realized is not None:
+                    main_branch = realized
+            # The main and sub branches may live on different grids (e.g.
+            # full-range mains vs. a sub-only grid). Resample the sub branch
+            # onto the main grid instead of dropping the channel.
+            aligned = _resample_curve_onto_grid(
+                routed, list(main_branch.get("freq") or [])
+            )
+            combined = (
+                complex_sum_curves(main_branch, aligned)
+                if aligned is not None
+                else None
+            )
+            results[name] = combined if combined is not None else final_curve
+        elif final_curve:
+            results[name] = final_curve
+    return results
+
+
+def unwrap_phase(phase_deg: list[float]) -> list[float]:
+    """Unwrap phase in degrees to remove discontinuities.
+
+    Handles arbitrarily large jumps by rounding the correction to the
+    nearest multiple of 360 degrees.
+    """
+    if not phase_deg:
+        return phase_deg
+    unwrapped = [phase_deg[0]]
+    for i in range(1, len(phase_deg)):
+        diff = phase_deg[i] - unwrapped[-1]
+        # Round to nearest multiple of 360 to remove wrapping
+        correction = round(diff / 360.0) * 360.0
+        unwrapped.append(phase_deg[i] - correction)
+    return unwrapped
+
+
+def wrap_phase(phase_deg: list[float]) -> list[float]:
+    """Wrap phase to the JSON/report convention ``[-180, 180)``."""
+    return [((float(value) + 180.0) % 360.0) - 180.0 for value in phase_deg]
+
+
+def compute_group_delay_from_ir(
+    ir: dict | None,
+    min_freq: float = 20.0,
+    max_freq: float = 20_000.0,
+    point_count: int = 512,
+) -> tuple[list[float], list[float]]:
+    """Derive group delay from an impulse-response waveform.
+
+    The serialized curve phase is intentionally wrapped for display and a
+    sparse log-frequency phase curve cannot be unwrapped reliably when the
+    acoustic propagation delay spans multiple turns between points.  The IR
+    retains that timing, so its dense FFT phase is the authoritative source
+    for the group-delay plot.
+    """
+    if not ir:
+        return [], []
+    time_ms = np.asarray(ir.get("time_ms", []), dtype=float)
+    amplitude = np.asarray(ir.get("amplitude", []), dtype=float)
+    if time_ms.size < 4 or amplitude.size != time_ms.size:
+        return [], []
+
+    steps_ms = np.diff(time_ms)
+    finite_steps = steps_ms[np.isfinite(steps_ms) & (steps_ms > 0.0)]
+    if finite_steps.size == 0:
+        return [], []
+    sample_rate = 1000.0 / float(np.median(finite_steps))
+    nyquist = sample_rate / 2.0
+    upper = min(float(max_freq), nyquist)
+    lower = max(float(min_freq), sample_rate / amplitude.size)
+    if not math.isfinite(sample_rate) or lower >= upper:
+        return [], []
+
+    spectrum = np.fft.rfft(amplitude)
+    fft_freq = np.fft.rfftfreq(amplitude.size, d=1.0 / sample_rate)
+    magnitude = np.abs(spectrum)
+    peak_magnitude = float(np.max(magnitude))
+    if not math.isfinite(peak_magnitude) or peak_magnitude <= 1.0e-12:
+        return [], []
+
+    phase = np.unwrap(np.angle(spectrum))
+    output_freq = np.geomspace(lower, upper, max(8, int(point_count)))
+    output_phase = np.interp(output_freq, fft_freq, phase)
+    omega = 2.0 * np.pi * output_freq
+    group_delay_ms = -np.gradient(output_phase, omega) * 1000.0
+    output_magnitude = np.interp(output_freq, fft_freq, magnitude)
+    valid = (
+        np.isfinite(group_delay_ms)
+        & np.isfinite(output_magnitude)
+        & (output_magnitude >= peak_magnitude * 1.0e-8)
+    )
+    return output_freq[valid].tolist(), group_delay_ms[valid].tolist()
+
+
+def compute_group_delay(
+    freq: list[float], phase_deg: list[float],
+) -> tuple[list[float], list[float]]:
+    """Compute group delay from frequency and phase data.
+
+    Group delay = -d(phase)/d(omega), where omega = 2*pi*f.
+    Phase is unwrapped before differentiation.
+
+    Returns:
+        (freq_out, gd_ms): Frequency points and group delay in milliseconds.
+        Output has len(freq)-1 points (centered between input points).
+    """
+    if len(freq) < 2 or len(phase_deg) < 2:
+        return [], []
+
+    unwrapped = unwrap_phase(phase_deg)
+
+    freq_out: list[float] = []
+    gd_ms: list[float] = []
+    for i in range(len(freq) - 1):
+        f0, f1 = freq[i], freq[i + 1]
+        if f0 <= 0 or f1 <= 0 or f1 == f0:
+            continue
+        omega0 = 2 * math.pi * f0
+        omega1 = 2 * math.pi * f1
+        dphi = math.radians(unwrapped[i + 1] - unwrapped[i])
+        domega = omega1 - omega0
+        gd_s = -dphi / domega
+        freq_out.append(math.sqrt(f0 * f1))  # geometric mean
+        gd_ms.append(gd_s * 1000.0)
+
+    return freq_out, gd_ms
+
+
+def generate_freq_points(min_freq: float = 20.0, max_freq: float = 20000.0, n_points: int = 200) -> list[float]:
+    """Generate logarithmically spaced frequency points."""
+    log_min = math.log10(min_freq)
+    log_max = math.log10(max_freq)
+    return [10 ** (log_min + (log_max - log_min) * i / (n_points - 1)) for i in range(n_points)]
+
+
+def complex_sum_curves(l_curve: dict | None, r_curve: dict | None) -> dict | None:
+    """Coherent (complex) sum of two frequency-response curves.
+
+    Each curve is a dict with `freq` (Hz), `spl` (dB), and optionally
+    `phase` (degrees). Both curves must share the same frequency grid.
+
+    When both curves have phase data the sum is computed in the complex
+    plane: each band is converted to a complex amplitude
+    `10**(spl/20) * exp(j * phase_rad)`, the two phasors are added, and
+    the magnitude is converted back to dB. The output curve also
+    carries the resulting `phase` so downstream phase / group-delay
+    plots keep working.
+
+    When phase is missing on either side, the function falls back to an
+    incoherent power sum: `10*log10(10**(L/10) + 10**(R/10))`. This
+    yields the same result the ear would hear for two uncorrelated
+    sources but does not preserve phase information, so the output
+    curve has no `phase` field.
+
+    Returns `None` if either input is missing or the frequency grids
+    do not match (in which case the caller should skip rendering the
+    L+R panel rather than silently producing wrong data).
+    """
+    if not l_curve or not r_curve:
+        return None
+    l_freq = l_curve.get("freq") or []
+    r_freq = r_curve.get("freq") or []
+    l_spl = l_curve.get("spl") or []
+    r_spl = r_curve.get("spl") or []
+    if not l_freq or not r_freq or not l_spl or not r_spl:
+        return None
+    if len(l_freq) != len(r_freq) or len(l_spl) != len(r_spl):
+        return None
+    # Sanity check: grids should be element-wise equal in this pipeline
+    # (both channels are interpolated onto the same logarithmic grid by
+    # the optimizer). Bail out if they aren't to avoid silent garbage.
+    for lf, rf in zip(l_freq, r_freq):
+        if abs(lf - rf) > max(1e-6, lf * 1e-9):
+            return None
+
+    l_phase = l_curve.get("phase")
+    r_phase = r_curve.get("phase")
+    if (
+        l_phase is not None
+        and r_phase is not None
+        and len(l_phase) == len(l_freq)
+        and len(r_phase) == len(r_freq)
+    ):
+        # Local references so type-checkers can narrow Optional → list.
+        l_phase_arr: list[float] = l_phase
+        r_phase_arr: list[float] = r_phase
+        spl_out: list[float] = []
+        phase_out: list[float] = []
+        for i in range(len(l_freq)):
+            mag_l = 10.0 ** (l_spl[i] / 20.0)
+            mag_r = 10.0 ** (r_spl[i] / 20.0)
+            phi_l = math.radians(l_phase_arr[i])
+            phi_r = math.radians(r_phase_arr[i])
+            re = mag_l * math.cos(phi_l) + mag_r * math.cos(phi_r)
+            im = mag_l * math.sin(phi_l) + mag_r * math.sin(phi_r)
+            mag_sum = math.sqrt(re * re + im * im)
+            if mag_sum <= 0.0:
+                spl_out.append(-200.0)
+                phase_out.append(0.0)
+            else:
+                spl_out.append(20.0 * math.log10(mag_sum))
+                phase_out.append(math.degrees(math.atan2(im, re)))
+        return {"freq": list(l_freq), "spl": spl_out, "phase": phase_out}
+
+    # Phase missing — fall back to incoherent power sum.
+    spl_out = [
+        10.0 * math.log10(10.0 ** (l_spl[i] / 10.0) + 10.0 ** (r_spl[i] / 10.0))
+        for i in range(len(l_freq))
+    ]
+    return {"freq": list(l_freq), "spl": spl_out}
+
+
+def _finite_phase_list(curve: dict | None) -> bool:
+    """True when ``curve`` carries finite per-bin phase in degrees."""
+    if not curve:
+        return False
+    freq = curve.get("freq") or []
+    phase = curve.get("phase")
+    return (
+        isinstance(phase, list)
+        and len(phase) == len(freq)
+        and len(freq) > 0
+        and all(
+            isinstance(p, (int, float)) and not isinstance(p, bool) and math.isfinite(p)
+            for p in phase
+        )
+    )
+
+
+def symmetric_complex_sum(
+    curve_a: dict | None, curve_b: dict | None, target_freq: list[float]
+) -> list[float] | None:
+    """Coherent pair sum of two final curves, resampled onto ``target_freq``.
+
+    Both curves need finite measured phase; without it no coherent sum
+    exists and this returns `None` (callers show the absolute sum alone
+    instead of mislabeling a power sum as coherent). Curves are resampled
+    with :func:`_resample_curve_onto_grid` (phase unwrapped first), then
+    folded with :func:`complex_sum_curves`, whose ``phase``-carrying output
+    proves the coherent path was taken.
+    """
+    if not _finite_phase_list(curve_a) or not _finite_phase_list(curve_b):
+        return None
+    if not target_freq:
+        return None
+    resampled_a = _resample_curve_onto_grid(curve_a, list(target_freq))
+    resampled_b = _resample_curve_onto_grid(curve_b, list(target_freq))
+    if (
+        resampled_a is None
+        or resampled_b is None
+        or "phase" not in resampled_a
+        or "phase" not in resampled_b
+    ):
+        return None
+    total = complex_sum_curves(resampled_a, resampled_b)
+    if total is None or "phase" not in total:
+        return None
+    return total["spl"]
+
+
+def synthesize_lr_channel(l_ch_data: dict | None, r_ch_data: dict | None) -> dict | None:
+    """Build a synthetic 'L+R' channel dict from the L and R channel data.
+
+    Sums `initial_curve` and `final_curve` via `complex_sum_curves`.
+    Drops `eq_response` (per-channel EQ filter responses are not
+    summable in any meaningful way) and any per-channel impulse-response
+    blobs (they would need to be summed in the time domain, out of scope
+    here).
+
+    Returns `None` if either side is missing both curves.
+    """
+    if not l_ch_data or not r_ch_data:
+        return None
+    initial = complex_sum_curves(
+        l_ch_data.get("initial_curve"), r_ch_data.get("initial_curve")
+    )
+    final = complex_sum_curves(
+        l_ch_data.get("final_curve"), r_ch_data.get("final_curve")
+    )
+    if not initial and not final:
+        return None
+    out: dict = {"channel": "L+R", "plugins": []}
+    if initial:
+        out["initial_curve"] = initial
+    if final:
+        out["final_curve"] = final
+    return out

@@ -39,6 +39,7 @@ check-jsonschema --schemafile input_schema.json your_config.json
 | `target_curve` | string | No | - | Target frequency response curve |
 | `optimizer` | object | No | defaults | Optimization parameters |
 | `recording_config` | object | No | - | Recording configuration (device settings, signal parameters used during capture) |
+| `measured_impulse_responses` | object | No | - | Native measured room IRs backing independent channel or driver acoustic reports |
 | `ctc` | object | No | - | Cross-talk cancellation / binaural-aware correction using measured two-ear IRs or HRTF/SOFA data |
 
 ---
@@ -49,6 +50,16 @@ This optional root-level object describes the physical room and the measurement
 session. All its fields are optional; omit unknown values rather than inventing
 them. It does not replace the measurement paths in `speakers` or the measured IR
 declarations in `measured_impulse_responses`.
+
+Measured IR entries contain `path`, optional `sample_rate_hz` (1–192 kHz),
+optional `timing_reference_id`, and optional `output_channel`/`driver` targeting
+the exact delivered driver. Without `output_channel`, the map key is the channel.
+Native samples and time origins are preserved; 3 kHz subwoofer captures are
+supported with unavailable high-frequency bands. A driver capture is never
+substituted for a measured whole-speaker response. Independent acoustic reports
+can omit unknown timing IDs; coherent sums and relative timing still require
+separate, explicit shared-clock evidence. See the measured-IR section in
+[`INPUT_FORMAT.md`](../src/bin/roomeq/INPUT_FORMAT.md) for details.
 
 ```json
 {

@@ -13,6 +13,11 @@ from .dsp import _crossover_response
 _FREQUENCY_COLUMNS = ("frequency", "freq", "frequency_hz", "freq_hz")
 _SPL_COLUMNS = ("spl", "spl_db", "level", "level_db")
 
+#: Midband (Hz) over which a design-target level is matched to measured data.
+#: Reports anchor every channel tab's target to the per-channel mean of the
+#: measured L/R pair over this band so one global calibration offset applies.
+TARGET_LEVEL_MATCH_BAND_HZ = (100.0, 10_000.0)
+
 
 def _column(row: dict[str, str], names: tuple[str, ...]) -> str | None:
     normalized = {str(key).strip().lower(): value for key, value in row.items()}
@@ -95,6 +100,97 @@ def _interpolate_log_space(target: dict, frequencies: list[float]) -> list[float
         )
 
     return result
+
+
+def band_mean_spl(
+    curve: dict,
+    min_freq: float,
+    max_freq: float,
+) -> float | None:
+    """Arithmetic mean of finite SPL samples inside ``[min_freq, max_freq]``."""
+    frequencies = curve.get("freq") or []
+    levels = curve.get("spl") or []
+    if len(frequencies) != len(levels):
+        return None
+    values = [
+        level
+        for frequency, level in zip(frequencies, levels, strict=True)
+        if min_freq <= frequency <= max_freq and math.isfinite(level)
+    ]
+    if not values:
+        return None
+    return sum(values) / len(values)
+
+
+def shift_target_to_reference_band_mean(
+    target: dict,
+    reference: dict,
+    min_freq: float = TARGET_LEVEL_MATCH_BAND_HZ[0],
+    max_freq: float = TARGET_LEVEL_MATCH_BAND_HZ[1],
+) -> dict | None:
+    """Interpolate ``target`` onto ``reference`` and match band means.
+
+    Unlike :func:`align_target_to_curve` (per-channel optimizer-band fit with
+    a relative-to-peak stopband guard), this applies the report-level rule:
+    the target mean over ``[min_freq, max_freq]`` equals the reference mean
+    over the same band. Returns ``None`` when either band is empty.
+    """
+    frequencies = list(reference.get("freq") or [])
+    reference_spl = list(reference.get("spl") or [])
+    if not frequencies or len(frequencies) != len(reference_spl):
+        return None
+    if not target.get("freq") or not target.get("spl"):
+        return None
+    target_spl = _interpolate_log_space(target, frequencies)
+    reference_mean = band_mean_spl(
+        {"freq": frequencies, "spl": reference_spl}, min_freq, max_freq
+    )
+    target_mean = band_mean_spl(
+        {"freq": frequencies, "spl": target_spl}, min_freq, max_freq
+    )
+    if reference_mean is None or target_mean is None:
+        return None
+    offset = reference_mean - target_mean
+    return {
+        "freq": frequencies,
+        "spl": [level + offset for level in target_spl],
+    }
+
+
+def global_target_offset_for_pair(
+    reference_l: dict | None,
+    reference_r: dict | None,
+    shape: dict | None,
+    min_freq: float = TARGET_LEVEL_MATCH_BAND_HZ[0],
+    max_freq: float = TARGET_LEVEL_MATCH_BAND_HZ[1],
+) -> float | None:
+    """Single offset anchoring a target shape to measured per-channel level.
+
+    The anchor is the mean of the L and R reference band means over
+    ``[min_freq, max_freq]``: with no L/R pair (or an empty band) there is
+    no anchor (``None``) and targets render as serialized. The one offset
+    applies to every channel tab, preserving designed inter-channel target
+    differences. Unlike an L+R *sum* anchor, per-channel overlays land at
+    the level of the per-channel data instead of 3-6 dB above it.
+    """
+    if not isinstance(shape, dict) or not shape.get("freq") or not shape.get("spl"):
+        return None
+    if not isinstance(reference_l, dict) or not isinstance(reference_r, dict):
+        return None
+    mean_l = band_mean_spl(reference_l, min_freq, max_freq)
+    mean_r = band_mean_spl(reference_r, min_freq, max_freq)
+    if mean_l is None or mean_r is None:
+        return None
+    grid = list(reference_l.get("freq") or []) or list(reference_r.get("freq") or [])
+    if not grid:
+        return None
+    shape_mean = band_mean_spl(
+        {"freq": grid, "spl": _interpolate_log_space(shape, grid)},
+        min_freq, max_freq,
+    )
+    if shape_mean is None:
+        return None
+    return (mean_l + mean_r) / 2.0 - shape_mean
 
 
 def align_target_to_curve(
@@ -217,12 +313,25 @@ def _target_alignment_band_for_channel(
     return reference_min, reference_max
 
 
+def _global_anchor_offset(
+    data: dict, reference_curves: dict[str, dict]
+) -> float | None:
+    """Mean-based offset for absolute targets; None without an L/R anchor."""
+    channels = data.get("channels") or {}
+    shape = (channels.get("L") or {}).get("target_curve") or (
+        channels.get("R") or {}
+    ).get("target_curve")
+    return global_target_offset_for_pair(
+        reference_curves.get("L"), reference_curves.get("R"), shape
+    )
+
+
 def build_target_overlay_curves(
     data: dict,
     reference_curves: dict[str, dict],
     json_path: Path | None = None,
 ) -> dict[str, dict]:
-    """Use serialized absolute targets; align legacy relative targets only."""
+    """Absolute targets share one global level anchor; legacy targets align per channel."""
     target = load_target_shape(data, json_path)
 
     optimizer = (
@@ -232,16 +341,20 @@ def build_target_overlay_curves(
     min_freq = float(optimizer.get("min_freq", 20.0))
     max_freq = float(optimizer.get("max_freq", 20_000.0))
 
+    # Serialized absolute targets carry the design shape but not the measured
+    # level: shift every channel's overlay by the single L/R-anchored offset.
+    anchor = _global_anchor_offset(data, reference_curves)
+
     result = {}
     for channel_name, reference in reference_curves.items():
         absolute_target = ((data.get("channels") or {}).get(channel_name) or {}).get("target_curve")
         if absolute_target and absolute_target.get("freq") and absolute_target.get("spl"):
             frequencies = list(reference.get("freq") or [])
             if frequencies:
-                result[channel_name] = {
-                    "freq": frequencies,
-                    "spl": _interpolate_log_space(absolute_target, frequencies),
-                }
+                spl = _interpolate_log_space(absolute_target, frequencies)
+                if anchor is not None:
+                    spl = [level + anchor for level in spl]
+                result[channel_name] = {"freq": frequencies, "spl": spl}
             continue
         if target is None:
             continue

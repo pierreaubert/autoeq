@@ -1398,6 +1398,54 @@ def complex_sum_curves(l_curve: dict | None, r_curve: dict | None) -> dict | Non
     return {"freq": list(l_freq), "spl": spl_out}
 
 
+def _finite_phase_list(curve: dict | None) -> bool:
+    """True when ``curve`` carries finite per-bin phase in degrees."""
+    if not curve:
+        return False
+    freq = curve.get("freq") or []
+    phase = curve.get("phase")
+    return (
+        isinstance(phase, list)
+        and len(phase) == len(freq)
+        and len(freq) > 0
+        and all(
+            isinstance(p, (int, float)) and not isinstance(p, bool) and math.isfinite(p)
+            for p in phase
+        )
+    )
+
+
+def symmetric_complex_sum(
+    curve_a: dict | None, curve_b: dict | None, target_freq: list[float]
+) -> list[float] | None:
+    """Coherent pair sum of two final curves, resampled onto ``target_freq``.
+
+    Both curves need finite measured phase; without it no coherent sum
+    exists and this returns `None` (callers show the absolute sum alone
+    instead of mislabeling a power sum as coherent). Curves are resampled
+    with :func:`_resample_curve_onto_grid` (phase unwrapped first), then
+    folded with :func:`complex_sum_curves`, whose ``phase``-carrying output
+    proves the coherent path was taken.
+    """
+    if not _finite_phase_list(curve_a) or not _finite_phase_list(curve_b):
+        return None
+    if not target_freq:
+        return None
+    resampled_a = _resample_curve_onto_grid(curve_a, list(target_freq))
+    resampled_b = _resample_curve_onto_grid(curve_b, list(target_freq))
+    if (
+        resampled_a is None
+        or resampled_b is None
+        or "phase" not in resampled_a
+        or "phase" not in resampled_b
+    ):
+        return None
+    total = complex_sum_curves(resampled_a, resampled_b)
+    if total is None or "phase" not in total:
+        return None
+    return total["spl"]
+
+
 def synthesize_lr_channel(l_ch_data: dict | None, r_ch_data: dict | None) -> dict | None:
     """Build a synthetic 'L+R' channel dict from the L and R channel data.
 

@@ -14,6 +14,7 @@ from scripts.src.dsp import (
     replay_serialized_output,
     resample_spl_onto_grid,
     sum_driver_initial_curves,
+    symmetric_complex_sum,
     wrap_phase,
 )
 
@@ -1012,6 +1013,58 @@ class PerDriverSubCurveTests(unittest.TestCase):
         self.assertEqual(corrected["freq"], initial["freq"])
         for out, raw, shaping in zip(corrected["spl"], initial["spl"], effective["spl"]):
             self.assertAlmostEqual(out, raw + shaping, places=1)
+
+
+class SymmetricComplexSumTests(unittest.TestCase):
+    def _curve(self, spl, phase):
+        freq = [100.0, 1000.0, 10000.0]
+        curve = {"freq": list(freq), "spl": list(spl)}
+        if phase is not None:
+            curve["phase"] = list(phase)
+        return curve
+
+    def test_in_phase_sums_to_plus_six_db(self):
+        out = symmetric_complex_sum(
+            self._curve([80.0] * 3, [0.0] * 3),
+            self._curve([80.0] * 3, [0.0] * 3),
+            [100.0, 1000.0, 10000.0],
+        )
+        assert out is not None
+        for value in out:
+            self.assertAlmostEqual(value, 86.02059991327962, places=9)
+
+    def test_quadrature_and_opposition(self):
+        out = symmetric_complex_sum(
+            self._curve([80.0, 80.0, 80.0], [0.0, 0.0, 0.0]),
+            self._curve([80.0, 80.0, 80.0], [90.0, 90.0, 180.0]),
+            [100.0, 1000.0, 10000.0],
+        )
+        assert out is not None
+        self.assertAlmostEqual(out[0], 83.01029995663981, places=9)
+        # Opposite phase cancels almost completely (sin(pi) is ~1e-16,
+        # so the sum lands near -238 dB rather than the -200 floor).
+        self.assertLess(out[2], -200.0)
+
+    def test_missing_or_nonfinite_phase_returns_none(self):
+        good = self._curve([80.0] * 3, [0.0] * 3)
+        self.assertIsNone(symmetric_complex_sum(
+            good, self._curve([80.0] * 3, None), [100.0]))
+        self.assertIsNone(symmetric_complex_sum(
+            good, self._curve([80.0] * 3, [0.0, float("nan"), 0.0]),
+            [100.0, 1000.0, 10000.0]))
+        self.assertIsNone(symmetric_complex_sum(good, good, []))
+        self.assertIsNone(symmetric_complex_sum(None, good, [100.0]))
+
+    def test_resamples_onto_combo_grid(self):
+        out = symmetric_complex_sum(
+            self._curve([80.0] * 3, [0.0] * 3),
+            self._curve([80.0] * 3, [0.0] * 3),
+            [100.0, 316.22776601683796, 1000.0, 3162.2776601683795, 10000.0],
+        )
+        assert out is not None
+        self.assertEqual(len(out), 5)
+        for value in out:
+            self.assertAlmostEqual(value, 86.02059991327962, places=9)
 
 
 if __name__ == "__main__":

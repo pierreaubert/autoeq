@@ -76,6 +76,34 @@ export function schema_version() {
 }
 
 /**
+ * Map a rubber-band pixel rectangle to data domains for box zoom.
+ *
+ * `x0/y0/x1/y1` are canvas CSS px (origin top-left). Returns
+ * `{"x":[lo,hi],"y":[lo,hi]}` in data units, or `""` when the canvas is
+ * unknown, never rendered a figure, or the selection is degenerate.
+ * @param {string} canvas_id
+ * @param {number} x0
+ * @param {number} y0
+ * @param {number} x1
+ * @param {number} y1
+ * @returns {string}
+ */
+export function selection_domain_json(canvas_id, x0, y0, x1, y1) {
+    let deferred2_0;
+    let deferred2_1;
+    try {
+        const ptr0 = passStringToWasm0(canvas_id, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.selection_domain_json(ptr0, len0, x0, y0, x1, y1);
+        deferred2_0 = ret[0];
+        deferred2_1 = ret[1];
+        return getStringFromWasm0(ret[0], ret[1]);
+    } finally {
+        wasm.__wbindgen_free(deferred2_0, deferred2_1, 1);
+    }
+}
+
+/**
  * Flip one series' visibility and re-render. Returns 1 when re-rendered,
  * 0 when the canvas or series is unknown, -99 on an internal panic
  * (see [`last_error`]).

@@ -3,28 +3,61 @@
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from scripts.src.target_overlay import (
     align_target_to_curve,
     build_target_overlay_curves,
+    global_target_offset_for_pair,
 )
 
 
 class TargetOverlayTests(unittest.TestCase):
-    def test_serialized_shared_target_is_not_reanchored_to_each_bass_response(self):
-        target = {"freq": [20.0, 20_000.0], "spl": [84.0, 76.0]}
+    def test_serialized_shared_target_shares_one_global_offset(self):
+        target = {"freq": [20.0, 20_000.0], "spl": [84.0, 84.0]}
         data = {
             "channels": {name: {"target_curve": target} for name in ("L", "R")},
             "metadata": {"effective_config": {"optimizer": {"min_freq": 20.0, "max_freq": 200.0}}},
         }
         references = {
-            "L": {"freq": [20.0, 200.0, 20_000.0], "spl": [70.0, 72.0, 76.0]},
-            "R": {"freq": [20.0, 200.0, 20_000.0], "spl": [90.0, 88.0, 76.0]},
+            "L": {"freq": [20.0, 200.0, 20_000.0], "spl": [70.0, 70.0, 70.0]},
+            "R": {"freq": [20.0, 200.0, 20_000.0], "spl": [90.0, 90.0, 90.0]},
         }
         overlays = build_target_overlay_curves(data, references)
+        # One offset for both channels ((70 + 90) / 2 - 84 = -4), not a
+        # per-channel fit to each bass response.
         self.assertEqual(overlays["L"], overlays["R"])
-        self.assertEqual(overlays["L"]["spl"][0], 84.0)
-        self.assertEqual(overlays["L"]["spl"][-1], 76.0)
+        self.assertEqual(overlays["L"]["spl"], [80.0, 80.0, 80.0])
+
+    def test_global_anchor_preserves_inter_channel_target_differences(self):
+        freq = [20.0, 200.0, 20_000.0]
+        data = {
+            "channels": {
+                "L": {"target_curve": {"freq": [20.0, 20_000.0], "spl": [84.0, 84.0]}},
+                "R": {"target_curve": {"freq": [20.0, 20_000.0], "spl": [80.0, 80.0]}},
+            },
+            "metadata": {"effective_config": {"optimizer": {"min_freq": 20.0, "max_freq": 200.0}}},
+        }
+        references = {
+            "L": {"freq": list(freq), "spl": [70.0, 70.0, 70.0]},
+            "R": {"freq": list(freq), "spl": [90.0, 90.0, 90.0]},
+        }
+        overlays = build_target_overlay_curves(data, references)
+        # Anchor from the L shape: (70 + 90) / 2 - 84 = -4 on both tabs.
+        self.assertEqual(overlays["L"]["spl"], [80.0, 80.0, 80.0])
+        self.assertEqual(overlays["R"]["spl"], [76.0, 76.0, 76.0])
+
+    def test_global_anchor_needs_pair_shape_and_band(self):
+        ref = {"freq": [100.0, 1000.0], "spl": [70.0, 70.0]}
+        shape = {"freq": [100.0, 1000.0], "spl": [80.0, 80.0]}
+        self.assertEqual(global_target_offset_for_pair(ref, ref, shape), -10.0)
+        self.assertIsNone(global_target_offset_for_pair(None, ref, shape))
+        self.assertIsNone(global_target_offset_for_pair(ref, None, shape))
+        self.assertIsNone(global_target_offset_for_pair(ref, ref, None))
+        bogus_shape: Any = "target.csv"
+        self.assertIsNone(global_target_offset_for_pair(ref, ref, bogus_shape))
+        self.assertIsNone(global_target_offset_for_pair(
+            {"freq": [20.0], "spl": [70.0]}, ref, shape))
 
     def test_interpolates_target_in_log_frequency_and_aligns_level(self):
         target = {"freq": [20.0, 20_000.0], "spl": [0.0, -10.0]}

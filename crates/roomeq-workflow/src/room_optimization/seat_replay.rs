@@ -2200,6 +2200,7 @@ mod tests {
         chain.drivers = Some(
             (0..2)
                 .map(|index| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: format!("Two subs_{}", index + 1),
                     index,
                     plugins: vec![],
@@ -2382,6 +2383,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(index, name)| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: name.into(),
                     index,
                     plugins: vec![],
@@ -3437,6 +3439,7 @@ mod tests {
                 low_pass.parameters["room_eq_stage"] = serde_json::json!("post_route");
                 result.channels.get_mut("sub").unwrap().drivers =
                     Some(vec![roomeq_model::DriverDspChain {
+                        measured_acoustics: None,
                         name: "sub".into(),
                         index: 0,
                         initial_curve: None,

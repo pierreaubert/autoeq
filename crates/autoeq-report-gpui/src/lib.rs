@@ -403,6 +403,7 @@ mod tests {
                 figure_section("B", Some("Right")),
                 figure_section("C", None),
             ],
+            provenance: None,
         }
     }
 

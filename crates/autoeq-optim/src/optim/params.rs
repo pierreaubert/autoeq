@@ -10,6 +10,16 @@ use crate::optim::SmoothnessPenaltyConfig;
 
 pub use autoeq_core::PeqModel;
 
+/// Optional explicit hinge bands for the `PkLsHs` trailing tilt pair.
+/// Each `None` band falls back to its geometric half of the correction band.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TiltBandsHz {
+    /// LS hinge band `[lo, hi]` in Hz (`None` = lower half).
+    pub ls: Option<[f64; 2]>,
+    /// HS hinge band `[lo, hi]` in Hz (`None` = upper half).
+    pub hs: Option<[f64; 2]>,
+}
+
 /// Optional frequency-dependent Q policy used by RoomEQ.
 ///
 /// The optimizer still receives rectangular parameter bounds, therefore a
@@ -42,6 +52,10 @@ pub struct OptimParams {
     pub num_filters: usize,
     pub peq_model: PeqModel,
     pub sample_rate: f64,
+    /// Explicit hinge bands (Hz) for the `PkLsHs` trailing tilt pair.
+    /// `None` (or a `None` band) splits the correction band geometrically:
+    /// LS hinges on the lower half, HS on the upper half.
+    pub tilt_bands_hz: Option<TiltBandsHz>,
 
     // -- Bounds --
     pub min_freq: f64,
@@ -99,6 +113,7 @@ impl From<&Args> for OptimParams {
             num_filters: args.num_filters,
             peq_model: args.effective_peq_model(),
             sample_rate: args.sample_rate,
+            tilt_bands_hz: None,
             min_freq: args.min_freq,
             max_freq: args.max_freq,
             min_q: args.min_q,

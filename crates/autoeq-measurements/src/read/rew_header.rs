@@ -3,7 +3,7 @@
 //! REW writes measurement metadata as `*` comment lines above the data
 //! table (microphone, stimulus, smoothing, timing notes). CSV exports of
 //! `.mdat` captures carry the same keys as `#` comment lines (see
-//! `scripts/mdat2csv.py`), which the curve loaders already skip. This
+//! `utils/mdat2csv.py`), which the curve loaders already skip. This
 //! module transcribes either comment form into a facts struct so evidence
 //! intake can cite declarations with provenance. Every field is a
 //! declaration, never an independently verified claim: an

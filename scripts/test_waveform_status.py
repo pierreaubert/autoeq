@@ -8,6 +8,13 @@ from pathlib import Path
 from scripts.src.acceptance_views import waveform_status_html
 
 
+AVAILABLE_STATES = (
+    "Measured room impulse response imported",
+    "Calculated impulse response saved — prediction after DSP",
+    "Impulse response reconstructed from the input frequency response",
+)
+
+
 class WaveformStatusTests(unittest.TestCase):
     def test_main_and_comparison_reports_include_saved_reasons(self):
         from scripts.src.report import create_html_report, create_comparison_html_report
@@ -40,11 +47,22 @@ class WaveformStatusTests(unittest.TestCase):
 
     def test_reasons_are_visible_and_escaped(self):
         html = waveform_status_html(self.fixture(), "<mode>")
-        self.assertIn("Saved predicted view available", html)
+        self.assertIn("Impulse response reconstructed from the input frequency response", html)
         self.assertIn("Unavailable: driver &lt;woofer&gt;: phase unavailable", html)
         self.assertIn("&lt;mode&gt;", html)
-        self.assertIn("not raw captures", html.replace("—", " "))
+        self.assertIn("not a new microphone measurement", html)
         self.assertNotIn("<woofer>", html)
+
+    def test_passed_views_use_measured_or_calculated_states(self):
+        data = self.fixture()
+        data["channels"]["L"]["t60_octaves"] = {"basis": "measured_room_ir"}
+        data["channels"]["L"]["post_ir"] = {"amplitude": [1.0]}
+        for check in data["metadata"]["stage_outcomes"][0]["checks"]:
+            check["passed"] = True
+            check.pop("diagnostic", None)
+        html = waveform_status_html(data)
+        self.assertIn("Measured room impulse response imported", html)
+        self.assertIn("Calculated impulse response saved — prediction after DSP", html)
 
     def test_inconsistent_status_is_not_promoted(self):
         data = self.fixture()
@@ -63,7 +81,8 @@ class WaveformStatusTests(unittest.TestCase):
                 data["metadata"] = metadata
                 html = waveform_status_html(data)
                 self.assertIn("Unavailable:", html)
-                self.assertNotIn("Saved predicted view available", html)
+                for state in AVAILABLE_STATES:
+                    self.assertNotIn(state, html)
 
     def test_checks_cover_exact_channel_view_set(self):
         for fault in ("missing", "duplicate", "unknown_channel", "unknown_view", "bad_channel"):
@@ -82,7 +101,8 @@ class WaveformStatusTests(unittest.TestCase):
                     data["channels"]["L"] = []
                 html = waveform_status_html(data)
                 self.assertIn("Unavailable:", html)
-                self.assertNotIn("Saved predicted view available", html)
+                for state in AVAILABLE_STATES:
+                    self.assertNotIn(state, html)
 
     def test_channel_names_with_colons_are_preserved(self):
         data = self.fixture()
@@ -90,5 +110,5 @@ class WaveformStatusTests(unittest.TestCase):
         for check in data["metadata"]["stage_outcomes"][0]["checks"]:
             check["id"] += ":woofer"
         html = waveform_status_html(data)
-        self.assertIn("Saved predicted view available", html)
+        self.assertIn("Impulse response reconstructed from the input frequency response", html)
         self.assertIn("L:woofer", html)

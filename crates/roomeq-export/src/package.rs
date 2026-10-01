@@ -583,6 +583,7 @@ mod tests {
                     "channel" => chain.plugins.push(plugin),
                     _ => {
                         chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+                            measured_acoustics: None,
                             name: "woofer".into(),
                             index: 0,
                             plugins: vec![plugin],
@@ -774,6 +775,7 @@ mod tests {
         let mut graph = DspGraph::new("test");
         let (_, mut chain) = convolution_chain("left", "source/a:phase.wav");
         chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+            measured_acoustics: None,
             name: "woofer".into(),
             index: 2,
             plugins: chain.plugins.clone(),

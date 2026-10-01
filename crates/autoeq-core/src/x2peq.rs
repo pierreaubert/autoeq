@@ -374,6 +374,29 @@ mod tests {
     }
 
     #[test]
+    fn x2peq_pk_ls_hs_decodes_trailing_tilt_pair() {
+        use crate::iir::BiquadFilterType;
+        // One peak plus the LS/HS tilt pair.
+        let x = vec![
+            2.0, 1.0, -3.0, // 100 Hz peak
+            2.0, 1.0, 2.0, // LS hinge
+            3.5, 1.0, -4.0, // HS hinge
+        ];
+        let peq = x2peq(&x, 48_000.0, PeqModel::PkLsHs);
+        assert_eq!(peq.len(), 3);
+        assert_eq!(peq[0].1.filter_type, BiquadFilterType::Peak);
+        assert_eq!(peq[1].1.filter_type, BiquadFilterType::Lowshelf);
+        assert_eq!(peq[2].1.filter_type, BiquadFilterType::Highshelf);
+        assert!((peq[1].1.freq - 100.0).abs() < 1e-9);
+        // Roundtrip preserves order, types, and values.
+        let back = peq2x(&peq, PeqModel::PkLsHs);
+        assert_eq!(back.len(), x.len());
+        for (a, b) in back.iter().zip(x.iter()) {
+            assert!((a - b).abs() < 1e-9, "{a} != {b}");
+        }
+    }
+
+    #[test]
     fn build_sorted_filters_orders_by_frequency() {
         let x = vec![3.0, 1.0, 0.0, 2.0, 1.0, 0.0]; // 1kHz then 100Hz
         let rows = build_sorted_filters(&x, PeqModel::Pk);

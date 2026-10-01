@@ -430,6 +430,7 @@ fn test_export_with_drivers() {
             }],
             drivers: Some(vec![
                 DriverDspChain {
+                    measured_acoustics: None,
                     name: "woofer".to_string(),
                     index: 0,
                     plugins: vec![
@@ -446,6 +447,7 @@ fn test_export_with_drivers() {
                     measured_band_hz: None,
                 },
                 DriverDspChain {
+                    measured_acoustics: None,
                     name: "tweeter".to_string(),
                     index: 1,
                     plugins: vec![PluginConfigWrapper {
@@ -503,6 +505,7 @@ fn test_export_with_drivers() {
 
 fn per_sub_driver(name: &str, index: usize, low_pass_hz: f64) -> DriverDspChain {
     DriverDspChain {
+        measured_acoustics: None,
         name: name.to_string(),
         index,
         plugins: vec![

@@ -84,6 +84,7 @@ impl OptimizerConfigBuilder {
         high_frequency_correction,
         Option<super::HighFrequencyCorrectionConfig>
     );
+    setter!(tilt_stage, Option<super::TiltStageConfig>);
     setter!(
         early_late_correction,
         Option<super::EarlyLateCorrectionConfig>

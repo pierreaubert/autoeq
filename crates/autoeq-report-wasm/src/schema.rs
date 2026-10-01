@@ -9,6 +9,24 @@ use serde::{Deserialize, Serialize};
 /// Schema discriminator embedded in every payload.
 pub const SCHEMA_VERSION: &str = "autoeq-report-data-v1";
 
+/// Provenance line rendered above the renderer status in the shell header.
+///
+/// All fields are optional display strings: the shell shows whichever are
+/// present (`RoomEQ <version>`, `Data <timestamp>`, `Report <timestamp>`)
+/// and hides the line when the whole block is absent.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ReportProvenance {
+    /// RoomEQ producer/report-generator version, e.g. `"0.5.74"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roomeq_version: Option<String>,
+    /// Wall-clock emission moment of the DSP data (`metadata.timestamp`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_timestamp: Option<String>,
+    /// Wall-clock moment the HTML report was rendered.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generated_at: Option<String>,
+}
+
 /// Top-level payload embedded in the HTML shell.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReportPayload {
@@ -18,6 +36,9 @@ pub struct ReportPayload {
     pub title: String,
     /// Ordered page content.
     pub sections: Vec<Section>,
+    /// Optional header provenance (additive; older shells ignore it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<ReportProvenance>,
 }
 
 impl ReportPayload {
@@ -27,6 +48,7 @@ impl ReportPayload {
             schema: SCHEMA_VERSION.to_string(),
             title: title.into(),
             sections: Vec::new(),
+            provenance: None,
         }
     }
 }
@@ -93,6 +115,16 @@ pub struct GridData {
     /// Optional surface elevation and azimuth in degrees; display-only camera state.
     #[serde(default)]
     pub rotation: Option<[f64; 2]>,
+    /// Surface fill colormap: turbo, viridis, plasma, inferno, magma, rainbow.
+    /// Unknown names fall back to turbo; heatmaps keep the fixed legend.
+    #[serde(default = "default_colormap")]
+    pub colormap: String,
+    /// Surface fill visibility; REW-style contour default hides the fill.
+    #[serde(default)]
+    pub show_surface: bool,
+    /// Time-slice contour visibility on surface views.
+    #[serde(default = "default_true")]
+    pub show_contours: bool,
 }
 
 /// X-axis scale for a [`Figure`].
@@ -157,6 +189,10 @@ fn default_line_width() -> f32 {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_colormap() -> String {
+    String::from("turbo")
 }
 
 /// Optional dash override (absent = solid).
@@ -321,6 +357,9 @@ pub struct SankeyLink {
 /// Flow (Sankey) diagram.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SankeyChart {
+    /// Draw fixed-height plugin boxes and arrows instead of quantity bands.
+    #[serde(default)]
+    pub node_boxes: bool,
     /// Figure title.
     #[serde(default)]
     pub title: String,

@@ -51,7 +51,7 @@ pub use driver_optimization::{
 };
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use math_audio_optimisation as de;
-pub use optim::params::{FrequencyQPolicy, OptimParams};
+pub use optim::params::{FrequencyQPolicy, OptimParams, TiltBandsHz};
 pub use optim::run_descriptor::{
     OptimizationRunDescriptor, OptimizationRunResult, OptimizerExecutionPlatform, ParameterBounds,
 };

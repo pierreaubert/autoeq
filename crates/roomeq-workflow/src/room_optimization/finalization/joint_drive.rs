@@ -482,6 +482,7 @@ mod tests {
         original.channels.get_mut("Sub1").unwrap().drivers = Some(
             (0..3)
                 .map(|index| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: format!("Sub{}", index + 1),
                     index,
                     plugins: Vec::new(),
@@ -531,6 +532,7 @@ mod tests {
         original.channels.get_mut("Sub1").unwrap().drivers = Some(
             (0..3)
                 .map(|index| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: format!("Sub{}", index + 1),
                     index,
                     plugins: Vec::new(),
@@ -581,6 +583,7 @@ mod tests {
         original.channels.get_mut("Sub1").unwrap().drivers = Some(
             (0..3)
                 .map(|index| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: format!("Sub{}", index + 1),
                     index,
                     plugins: Vec::new(),
@@ -640,6 +643,7 @@ mod tests {
         let (mut original, _) = super::super::tests::implicit_lfe_fixture();
         original.channels.get_mut("Sub1").unwrap().drivers = Some(vec![
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "Sub1".into(),
                 index: 0,
                 plugins: vec![
@@ -657,6 +661,7 @@ mod tests {
                 measured_band_hz: None,
             },
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "Sub2".into(),
                 index: 1,
                 plugins: Vec::new(),
@@ -734,6 +739,7 @@ mod tests {
                 .into_iter()
                 .enumerate()
                 .map(|(index, name)| roomeq_model::DriverDspChain {
+                    measured_acoustics: None,
                     name: name.into(),
                     index,
                     plugins: Vec::new(),

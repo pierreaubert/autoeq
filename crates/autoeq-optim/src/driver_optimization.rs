@@ -36,6 +36,7 @@ pub fn create_driver_optimization_params(
         num_filters: 0,
         peq_model: PeqModel::Pk,
         sample_rate,
+        tilt_bands_hz: None,
         min_freq,
         max_freq,
         min_q: 0.5,

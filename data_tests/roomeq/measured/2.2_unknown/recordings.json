@@ -1,4 +1,30 @@
 {
+  "measured_impulse_responses": {
+    "L": {
+      "path": "measured_ir/L_No_EQ_Sep_1__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "unknown-mlp-session-1"
+    },
+    "R": {
+      "path": "measured_ir/R_No_EQ_Sep_1__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "unknown-mlp-session-1"
+    },
+    "subs_1": {
+      "path": "measured_ir/L_Sub_No_EQ_Sep_1__ir.csv",
+      "sample_rate_hz": 3000,
+      "output_channel": "Sub1",
+      "driver": "Sub1",
+      "timing_reference_id": "unknown-mlp-session-1"
+    },
+    "subs_2": {
+      "path": "measured_ir/R_Sub_No_EQ_Sep_1__ir.csv",
+      "sample_rate_hz": 3000,
+      "output_channel": "Sub1",
+      "driver": "Sub2",
+      "timing_reference_id": "unknown-mlp-session-1"
+    }
+  },
   "version": "3.0.0",
   "system": {
     "model": "stereo",

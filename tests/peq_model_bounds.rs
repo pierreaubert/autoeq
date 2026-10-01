@@ -5,6 +5,7 @@
 
 use autoeq::OptimParams;
 use autoeq::PeqModel;
+use autoeq::TiltBandsHz;
 use autoeq::cli::Args;
 use autoeq::workflow::setup_bounds;
 use clap::Parser;
@@ -204,6 +205,10 @@ fn test_q_bounds_consistency() {
                 // parameter, so setup_bounds pins the serialized slot.
                 assert_eq!(lower[q_lower_idx], 1.0);
                 assert_eq!(upper[q_upper_idx], 1.0);
+            } else if model == PeqModel::PkLsHs && i >= 1 {
+                // Trailing tilt pair (LS at 1, HS at 2 with 3 filters).
+                assert_eq!(lower[q_lower_idx], 1.0);
+                assert_eq!(upper[q_upper_idx], 1.0);
             } else {
                 // Normal peak filters
                 assert!(
@@ -301,4 +306,80 @@ fn test_uses_highpass_first() {
     // Free should not use highpass
     args.peq_model = PeqModel::Free;
     assert!(!args.uses_highpass_first());
+}
+
+#[test]
+fn test_pk_ls_hs_trailing_tilt_bounds() {
+    // 3 peaks plus the LS/HS tilt pair; hinges default to geometric halves.
+    let args = create_test_args(PeqModel::PkLsHs, 5);
+    let (lower, upper) = setup_bounds(&OptimParams::from(&args));
+    assert_eq!(lower.len(), 15);
+    assert_eq!(upper.len(), 15);
+
+    let mid_log = (20.0_f64 * 20000.0_f64).sqrt().log10();
+    // LS group (index 3): lower half, pinned Q, shelf gains.
+    assert!((lower[9] - 20.0_f64.log10()).abs() < 1e-12);
+    assert!((upper[9] - mid_log).abs() < 1e-12);
+    assert_eq!(lower[10], 1.0);
+    assert_eq!(upper[10], 1.0);
+    assert_eq!(lower[11], -6.0);
+    assert_eq!(upper[11], 6.0);
+    // HS group (index 4): upper half, pinned Q, shelf gains.
+    assert!((lower[12] - mid_log).abs() < 1e-12);
+    assert!((upper[12] - 20000.0_f64.log10()).abs() < 1e-12);
+    assert_eq!(lower[13], 1.0);
+    assert_eq!(upper[13], 1.0);
+    assert_eq!(lower[14], -6.0);
+    assert_eq!(upper[14], 6.0);
+}
+
+#[test]
+fn test_pk_ls_hs_preserves_peak_bands() {
+    // Enabling tilt must not move the main filters' bounds.
+    let tilted = create_test_args(PeqModel::PkLsHs, 5);
+    let (t_lower, t_upper) = setup_bounds(&OptimParams::from(&tilted));
+    let plain = create_test_args(PeqModel::Pk, 3);
+    let (p_lower, p_upper) = setup_bounds(&OptimParams::from(&plain));
+    assert_eq!(&t_lower[..9], &p_lower[..]);
+    assert_eq!(&t_upper[..9], &p_upper[..]);
+}
+
+#[test]
+fn test_pk_ls_hs_degenerate_single_filter_keeps_treble_shelf() {
+    let args = create_test_args(PeqModel::PkLsHs, 1);
+    let (lower, upper) = setup_bounds(&OptimParams::from(&args));
+    assert_eq!(lower.len(), 3);
+    let mid_log = (20.0_f64 * 20000.0_f64).sqrt().log10();
+    assert!((lower[0] - mid_log).abs() < 1e-12);
+    assert!((upper[0] - 20000.0_f64.log10()).abs() < 1e-12);
+    assert_eq!(lower[1], 1.0);
+    assert_eq!(upper[1], 1.0);
+    assert_eq!(lower[2], -6.0);
+    assert_eq!(upper[2], 6.0);
+}
+
+#[test]
+fn test_pk_ls_hs_explicit_bands_clamp_into_correction_band() {
+    let args = create_test_args(PeqModel::PkLsHs, 4);
+    let mut params = OptimParams::from(&args);
+    params.tilt_bands_hz = Some(TiltBandsHz {
+        ls: Some([10.0, 100.0]),
+        hs: Some([1000.0, 5000.0]),
+    });
+    let (lower, upper) = setup_bounds(&params);
+    // LS partially below min_freq clamps to [20, 100].
+    assert!((lower[6] - 20.0_f64.log10()).abs() < 1e-12);
+    assert!((upper[6] - 100.0_f64.log10()).abs() < 1e-12);
+    // HS override passes through verbatim.
+    assert!((lower[9] - 1000.0_f64.log10()).abs() < 1e-12);
+    assert!((upper[9] - 5000.0_f64.log10()).abs() < 1e-12);
+
+    // Fully outside collapses to the band edge (same as edge anchors).
+    params.tilt_bands_hz = Some(TiltBandsHz {
+        ls: None,
+        hs: Some([30000.0, 40000.0]),
+    });
+    let (lower, upper) = setup_bounds(&params);
+    assert!((lower[9] - 20000.0_f64.log10()).abs() < 1e-12);
+    assert!((upper[9] - 20000.0_f64.log10()).abs() < 1e-12);
 }

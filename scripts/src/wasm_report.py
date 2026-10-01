@@ -140,14 +140,33 @@ def sankey_chart(title, nodes, links, tab=None):
     }
 
 
-def html_section(html, tab=None):
-    """Raw HTML section dict (tables, summaries, notes)."""
-    return {"kind": "html", "html": html, "tab": tab}
+def html_section(html, tab=None, flat=False):
+    """Raw HTML section dict (tables, summaries, notes).
+
+    ``flat`` skips the shell card chrome for self-framed content such as
+    the playback-verdict boxes.
+    """
+    section = {"kind": "html", "html": html, "tab": tab}
+    if flat:
+        section["flat"] = True
+    return section
 
 
-def payload(title, sections):
-    """Top-level payload dict."""
-    return {"schema": SCHEMA_VERSION, "title": title, "sections": sections}
+def payload(title, sections, provenance=None):
+    """Top-level payload dict.
+
+    ``provenance`` is an optional ``{"roomeq_version": ..., "data_timestamp":
+    ..., "generated_at": ...}`` mapping rendered as the shell header line
+    above the renderer status. Unknown keys are dropped.
+    """
+    document = {"schema": SCHEMA_VERSION, "title": title, "sections": sections}
+    if provenance:
+        kept = {key: provenance[key] for key in
+                ("roomeq_version", "data_timestamp", "generated_at")
+                if provenance.get(key)}
+        if kept:
+            document["provenance"] = kept
+    return document
 
 
 # ---------------------------------------------------------------------------
@@ -213,14 +232,24 @@ def embedded_figure(section):
     return f'<div class="report-figure" data-section="{encoded}"></div>'
 
 
-def grid_figure(title, freqs, times, rows, *, surface=False, highlights=None):
-    """Rows are time-major; full exported levels retain their original reference."""
+def grid_figure(title, freqs, times, rows, *, surface=False, highlights=None,
+                colormap="turbo", show_surface=False, show_contours=True):
+    """Rows are time-major; full exported levels retain their original reference.
+
+    Surface views default to REW-style time-slice contours with the filled
+    surface hidden; the viewer toolbar offers the fill, its colormap, and
+    the contours as runtime toggles.
+    """
     section = figure(title, axis("Frequency (Hz)", "log", freqs[0], min(20000, freqs[-1])),
                      axis("Time from broadband peak (ms)", "linear", max(-1, times[0]),
                           times[-1] if surface else min(15, times[-1])))
     section["kind"] = "grid"
     section["grid"] = {"x": freqs, "y": times, "z": rows, "surface": surface,
                        "zmin": -60 if surface else -30, "zmax": 0, "highlights": []}
+    if surface:
+        section["grid"]["colormap"] = colormap
+        section["grid"]["show_surface"] = show_surface
+        section["grid"]["show_contours"] = show_contours
     for index, name, color in highlights or []:
         section["grid"]["highlights"].append(index)
         section["figure"]["series"].append(series(name, [], [], color=color))

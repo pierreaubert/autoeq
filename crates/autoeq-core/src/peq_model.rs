@@ -14,6 +14,8 @@ pub enum PeqModel {
     LsPk,
     #[value(name = "ls-pk-hs")]
     LsPkHs,
+    #[value(name = "pk-ls-hs")]
+    PkLsHs,
     #[value(name = "free-pk-free")]
     FreePkFree,
     #[value(name = "free")]
@@ -28,6 +30,7 @@ impl fmt::Display for PeqModel {
             Self::HpPkLp => "hp-pk-lp",
             Self::LsPk => "ls-pk",
             Self::LsPkHs => "ls-pk-hs",
+            Self::PkLsHs => "pk-ls-hs",
             Self::FreePkFree => "free-pk-free",
             Self::Free => "free",
         })
@@ -42,6 +45,7 @@ impl PeqModel {
             Self::LsPk,
             Self::HpPkLp,
             Self::LsPkHs,
+            Self::PkLsHs,
             Self::FreePkFree,
             Self::Free,
         ]
@@ -55,6 +59,9 @@ impl PeqModel {
             Self::LsPk => "First filter is low shelve, rest are peak filters",
             Self::LsPkHs => {
                 "First filter is low shelve, last is high shelve, rest are peak filters"
+            }
+            Self::PkLsHs => {
+                "Peak filters followed by a low-shelve plus high-shelve tilt pair at the end"
             }
             Self::FreePkFree => "First and last filters can be any type, middle filters are peak",
             Self::Free => "All filters can be any type (peak, highpass, lowpass, shelf)",
@@ -72,6 +79,7 @@ impl std::str::FromStr for PeqModel {
             "hp-pk-lp" => Ok(Self::HpPkLp),
             "ls-pk" => Ok(Self::LsPk),
             "ls-pk-hs" => Ok(Self::LsPkHs),
+            "pk-ls-hs" => Ok(Self::PkLsHs),
             "free-pk-free" => Ok(Self::FreePkFree),
             "free" => Ok(Self::Free),
             _ => Err(format!("Unknown PEQ model: {s}")),

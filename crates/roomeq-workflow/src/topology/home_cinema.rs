@@ -4176,6 +4176,7 @@ fn optimize_home_cinema_with_sub(
                 }
                 let driver_curve = d.initial_curve.as_ref().map(|c| c.into());
                 DriverDspChain {
+                    measured_acoustics: None,
                     name: d.name.clone(),
                     index: i,
                     plugins: driver_plugins,
@@ -4963,6 +4964,7 @@ mod post_dsp_level_tests {
                     .mapv(|frequency| 360.0 * frequency * delay / 1000.0),
             );
             drivers.push(DriverDspChain {
+                measured_acoustics: None,
                 name: name.clone(),
                 index,
                 // The serialized driver gain and output report describe the
@@ -5094,6 +5096,7 @@ mod post_dsp_level_tests {
                     .mapv(|frequency| 360.0 * frequency * delay / 1000.0),
             );
             drivers.push(DriverDspChain {
+                measured_acoustics: None,
                 name: name.clone(),
                 index,
                 plugins: vec![

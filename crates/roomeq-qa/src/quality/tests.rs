@@ -498,6 +498,7 @@ fn electrical_qa_keeps_same_named_driver_ports_separate() {
         chain.plugins = vec![roomeq_engine::output::create_gain_plugin(6.0)];
         chain.drivers = Some(vec![
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "woofer".into(),
                 index: 0,
                 initial_curve: None,
@@ -507,6 +508,7 @@ fn electrical_qa_keeps_same_named_driver_ports_separate() {
                 )],
             },
             roomeq_model::DriverDspChain {
+                measured_acoustics: None,
                 name: "tweeter".into(),
                 index: 1,
                 initial_curve: None,

@@ -98,7 +98,7 @@ PYEOF
 for scenario in "${scenarios[@]}"; do
     for capture in "$IN/$scenario"/*.mdat; do
         [[ -f "$capture" ]] || continue
-        "$PYTHON" ./scripts/mdat2csv.py "$capture" --no-clobber
+        "$PYTHON" ./utils/mdat2csv.py "$capture" --no-clobber
     done
     for mode in "${modes[@]}"; do
         mode_out="$OUT/$scenario/$mode"
@@ -136,7 +136,7 @@ for scenario in "${scenarios[@]}"; do
             failures+=("$scenario/$mode: roomeq exit $run_status")
             continue
         fi
-        if ! "$PYTHON" ./scripts/display-roomeq.py "$result" \
+        if ! "$PYTHON" ./ui/display-roomeq "$result" \
             --output "$mode_out/dsp-$mode.html"; then
             failures+=("$scenario/$mode: display failed")
             continue
@@ -153,7 +153,7 @@ for scenario in "${scenarios[@]}"; do
         if ! "$PYTHON" ./scripts/check_roomeq_measured_result.py "${results[@]}"; then
             failures+=("$scenario: cross-mode recheck failed")
         fi
-        if ! "$PYTHON" ./scripts/display-roomeq.py --compare "${results[@]}" \
+        if ! "$PYTHON" ./ui/display-roomeq --compare "${results[@]}" \
             --output "$OUT/$scenario/compare.html"; then
             failures+=("$scenario: compare failed")
         fi

@@ -981,6 +981,7 @@ mod tests {
                 let mut channel = chain(vec![fir.clone(), create_gain_plugin(-2.0)]);
                 channel.drivers = Some(vec![
                     DriverDspChain {
+                        measured_acoustics: None,
                         name: "low".into(),
                         index: 0,
                         plugins: vec![fir.clone()],
@@ -988,6 +989,7 @@ mod tests {
                         measured_band_hz: None,
                     },
                     DriverDspChain {
+                        measured_acoustics: None,
                         name: "high".into(),
                         index: 1,
                         plugins: vec![create_gain_plugin(-6.0)],
@@ -1075,6 +1077,7 @@ mod tests {
         let mut chain = chain(vec![create_gain_plugin(-6.020_599_913_279_624)]);
         chain.drivers = Some(vec![
             DriverDspChain {
+                measured_acoustics: None,
                 name: "woofer".to_string(),
                 index: 0,
                 plugins: vec![create_gain_plugin(0.0)],
@@ -1082,6 +1085,7 @@ mod tests {
                 measured_band_hz: None,
             },
             DriverDspChain {
+                measured_acoustics: None,
                 name: "tweeter".to_string(),
                 index: 1,
                 plugins: vec![create_gain_plugin(0.0)],

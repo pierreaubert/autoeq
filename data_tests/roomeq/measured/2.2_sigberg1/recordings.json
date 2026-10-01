@@ -1,5 +1,29 @@
 {
   "version": "3.0.0",
+  "measured_impulse_responses": {
+    "L": {
+      "path": "measured_ir/Left_speaker__ir.csv",
+      "sample_rate_hz": 48000
+    },
+    "R": {
+      "path": "measured_ir/Right_speaker__ir.csv",
+      "sample_rate_hz": 48000
+    },
+    "subs_1": {
+      "path": "measured_ir/left_sub__ir.csv",
+      "sample_rate_hz": 3000,
+      "output_channel": "Sub1",
+      "driver": "Sub1",
+      "timing_reference_id": "sigberg1-mlp-session-1"
+    },
+    "subs_2": {
+      "path": "measured_ir/right_sub__ir.csv",
+      "sample_rate_hz": 3000,
+      "output_channel": "Sub1",
+      "driver": "Sub2",
+      "timing_reference_id": "sigberg1-mlp-session-1"
+    }
+  },
   "system": {
     "model": "stereo",
     "speakers": {

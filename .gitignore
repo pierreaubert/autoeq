@@ -33,9 +33,11 @@ _site
 !crates/*/CHANGELOG.md
 
 # python
-__pycache__
-.venv
-venv
+__pycache__/
+.venv/
+venv/
+*.egg-info/
+build/
 
 # MCP
 /.chunkhound
@@ -54,6 +56,7 @@ check_output_*.txt
 /.evo
 /.muse
 /reviews
+/autoeq-agent
 
 # Logs
 logs
@@ -86,3 +89,6 @@ CTAGS
 
 # Reproducible derivatives of tracked measured REW captures.
 /data_tests/roomeq/measured/*/*_csv/
+
+# Keep the measured-IR provenance and remaining import limitations.
+!/docs/MEASURED_IR_IMPORT.md

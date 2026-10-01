@@ -376,6 +376,7 @@ mod tests {
             .push(tagged("gain", json!({"gain_db": 4.0}), "route_owned"));
         sub.drivers = Some(vec![
             DriverDspChain {
+                measured_acoustics: None,
                 name: "subs_1".into(),
                 index: 0,
                 initial_curve: None,
@@ -383,6 +384,7 @@ mod tests {
                 plugins: vec![tagged("delay", json!({"delay_ms": 9.0}), "post_route")],
             },
             DriverDspChain {
+                measured_acoustics: None,
                 name: "subs_2".into(),
                 index: 1,
                 initial_curve: None,

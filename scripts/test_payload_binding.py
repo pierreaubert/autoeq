@@ -3,6 +3,7 @@
 import copy
 import hashlib
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -26,6 +27,16 @@ def bind(data):
                             "sha256": payload_digest(payload, "graph-final-1")}}
 
 
+def status_box_colors(html):
+    """Map each playback-status box title to its border color."""
+    boxes = {}
+    for match in re.finditer(
+            r'<section class="playback-status-box"[^>]*border:2px solid (#[0-9a-f]{6})[^>]*>'
+            r"\s*<h2>(.*?)</h2>", html):
+        boxes[match.group(2)] = match.group(1)
+    return boxes
+
+
 class PayloadBindingTests(unittest.TestCase):
     def test_playback_banner_cannot_reuse_stale_approval(self):
         from scripts.src.report import _playback_status_html
@@ -34,12 +45,59 @@ class PayloadBindingTests(unittest.TestCase):
             "outcome": "accepted", "accepted": True, "decision": "accepted"}}
         bind(data)
         valid = _playback_status_html(data["metadata"], data=data)
-        self.assertIn("#2ecc71", valid)
+        self.assertEqual(status_box_colors(valid), {
+            "Saved DSP playback eligibility: accepted": "#2ecc71",
+            "Delivered payload: verified": "#2ecc71",
+            "Playback approval": "#2ecc71",
+        })
         data["channels"]["L"]["plugins"][0]["parameters"]["gain_db"] = 12.0
         stale = _playback_status_html(data["metadata"], data=data)
-        self.assertNotIn("#2ecc71", stale)
+        boxes = status_box_colors(stale)
+        # The recorded acceptance stays visible (green eligibility box),
+        # but the stale payload (yellow) blocks playback (red): no green
+        # may read as a playback go-ahead.
+        self.assertEqual(boxes["Saved DSP playback eligibility: accepted"], "#2ecc71")
+        self.assertEqual(boxes["Delivered payload: not verified"], "#f1c40f")
+        self.assertEqual(boxes["Playback approval"], "#e74c3c")
         self.assertIn("Not approved for playback", stale)
+        self.assertNotIn("Approved for playback", stale)
         self.assertIn("Delivered payload changed", stale)
+        self.assertIn("re-finalize before playback", stale)
+
+    def test_playback_banner_reports_each_verdict_separately(self):
+        from scripts.src.report import _playback_status_html
+        cases = [
+            # (acceptance, bound payload, expected box colors)
+            ({"outcome": "rejected", "violations": ["no_safe_candidate"]}, True, {
+                "Saved DSP playback eligibility: rejected": "#e74c3c",
+                "Delivered payload: verified": "#2ecc71",
+                "Playback approval": "#e74c3c",
+            }),
+            ({}, False, {
+                "Saved DSP playback eligibility: unverified": "#f1c40f",
+                "Delivered payload: not verified": "#f1c40f",
+                "Playback approval": "#e74c3c",
+            }),
+            ({"outcome": "accepted"}, False, {
+                "Saved DSP playback eligibility: accepted": "#e74c3c",
+                "Delivered payload: not verified": "#f1c40f",
+                "Playback approval": "#e74c3c",
+            }),
+        ]
+        for acceptance, bound, expected in cases:
+            with self.subTest(acceptance=acceptance, bound=bound):
+                data = bound_fixture() if bound else {"channels": {}}
+                data["metadata"] = {"correction_acceptance": dict(acceptance)}
+                if bound:
+                    bind(data)
+                html = _playback_status_html(data["metadata"], data=data)
+                self.assertEqual(status_box_colors(html), expected)
+                self.assertIn("Not approved for playback", html)
+        rejected = _playback_status_html(
+            {"correction_acceptance": {"outcome": "rejected",
+                                      "violations": ["no_safe_candidate"]}},
+            data={"channels": {}})
+        self.assertIn("Recorded violations: no_safe_candidate.", rejected)
 
     def test_payload_and_final_identity_mutations_are_detected(self):
         data = bound_fixture()
@@ -93,7 +151,15 @@ class PayloadBindingTests(unittest.TestCase):
     def test_resource_bytes_are_rechecked_without_cached_approval(self):
         preferred = Path("/Volumes/home_tmp/tmp")
         temp_root = preferred if preferred.is_dir() else Path(__file__).resolve().parents[1] / "target/qa/payload-binding-tmp"
-        temp_root.mkdir(parents=True, exist_ok=True)
+        try:
+            temp_root.mkdir(parents=True, exist_ok=True)
+            probe = tempfile.TemporaryDirectory(dir=temp_root)
+            probe.cleanup()
+        except OSError:
+            # Preferred roots may exist without being writable (foreign
+            # mounts, sandboxes); the system temp dir keeps the
+            # resource-byte contract testable anywhere.
+            temp_root = Path(tempfile.gettempdir())
         with tempfile.TemporaryDirectory(dir=temp_root) as directory:
             root = Path(directory)
             resource = root / "impulse.bin"

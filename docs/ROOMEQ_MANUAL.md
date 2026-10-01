@@ -2,7 +2,15 @@
 
 The HTML report starts with playback status, followed by collapsible evidence,
 summary, speaker details, timing, symmetric monitors, time-domain analysis,
-and EPA sections. Each section's speaker/group selector is independent.
+EPA, and DSP signal-flow sections. Each section's speaker/group selector is independent.
+The final section opens with an All channels view of the complete saved graph,
+with shared inputs branching to every physical output. Individual output tabs
+remain available. It shows numbered processing nodes, including every
+contributing input and explicit routing sums. Expand the matching table rows
+for saved plugin parameters. Routed diagrams separate pre-route processing,
+route gain/crossover/delay, and post-route processing, without duplicating
+route-owned plugins. Unsupported legacy ownership is reported, not guessed.
+Diagrams use the same d3rs/WASM renderer with or without WebGPU.
 Waterfall surfaces support mouse dragging with Rotate enabled and Reset restores
 the initial view. Wavelets show frequency horizontally and early time vertically,
 with a shared full-grid peak reference and a −30…0 dB color scale.
@@ -930,13 +938,14 @@ The report's waveform availability distinguishes an imported room IR from a reco
 input response and a predicted post-DSP response. Post-DSP level offsets include
 headroom attenuation; the separate balance column compares final monitor levels.
 Landmark plots follow the landmark table, and arrival plots follow the timing
-table. Section 4 uses Rust-exported magnitude sums over overlapping frequency
-support, not phase-coherent acoustic sums. Existing bundles can refresh this
+table. The symmetric-monitors tab uses Rust-exported magnitude sums over
+overlapping frequency support, not phase-coherent acoustic sums. Existing
+bundles can refresh this
 derived report data without rerunning optimization:
 `cargo run -p roomeq-workflow --example refresh_report_pairs -- path/to/dsp.json`.
-Then regenerate the HTML with `display-roomeq.py` and the intended `-o` path.
+Then regenerate the HTML with `ui/display-roomeq` and the intended `-o` path.
 
-`scripts/mdat2csv.py measurements.mdat output_dir` exports
+`utils/mdat2csv.py measurements.mdat output_dir` exports
 frequency-response CSVs and supported measured impulse responses as
 `<measurement>__ir.csv` (`time_ms,amplitude`). Install `scripts/requirements.txt`
 for the Java serialization decoder. Native IR amplitudes, sample intervals and
@@ -946,12 +955,23 @@ for room-acoustic analysis. Without that declaration, the IR files are exported
 but not bound into the configuration. Unsupported legacy/derived IR storage is
 reported explicitly.
 
-`scripts/display-roomeq.py room-output.json -o room-report.html` writes a
+Parent configurations can declare native measured IRs directly, including
+3 kHz subwoofer captures. Use `output_channel` and `driver` to attach a capture
+to its exact delivered driver, not the summed parent speaker. Independent
+acoustic diagnostics can omit unknown timing IDs; this does not establish a
+shared clock for sums or alignment. Driver IRs and diagnostics are exported
+as acoustic sidecars and shown on their report tabs, with bands above Nyquist
+unavailable. See [measured-case imports](MEASURED_IR_IMPORT.md) and the
+[input format](../src/bin/roomeq/INPUT_FORMAT.md) for mappings and details.
+
+`ui/display-roomeq room-output.json -o room-report.html` writes a
 self-contained HTML file: the plots render from an embedded versioned JSON
 payload (`autoeq-report-data-v1`, documented in
 `crates/autoeq-report-wasm/SCHEMA.md`) with a WebAssembly 2D canvas renderer,
 so the file needs no network access and no Plotly install. The title line
-carries a renderer status at its end. WebGPU is selected automatically when
+carries a renderer status at its end, with a provenance line above it naming
+the RoomEQ version, the DSP data date (`metadata.timestamp`), and the report
+render date. WebGPU is selected automatically when
 an adapter and device are available; dense waterfall triangles are batched on
 the GPU. The report layout, d3rs/WASM geometry, axes, legends, colors, and
 rotation controls are shared with the Canvas fallback. There is no separate
@@ -959,15 +979,21 @@ GPUI view. Missing adapters, initialization failures, or device loss fall back
 without changing the report content. Append `?renderer=canvas` to a served
 report URL to compare the portable backend for diagnostics. Surface projection
 and depth sorting still run in WASM; rasterization is GPU-accelerated.
-Per-channel sections open under shell tabs placed below the summary
-sections; legends toggle series by click. The combined overview is three
+The playback verdict stays pinned at the top, followed by three centered
+tabs — DSP analysis (why this correction, DSP signal flow), Acoustics
+analysis (summary, speakers, time of flight, symmetric monitors, time
+domain), and Psychoacoustic report (EPA scores). Inside a tab the flow is
+flat: multiple subheads open as tabs reusing the channel-tab styling (a
+lone subhead renders directly), per-channel sections open under shell
+tabs placed below the summary sections, and every table or graph sits in
+exactly one card. Legends toggle series by click. The combined overview is three
 stacked panels sharing the frequency axis — Before EQ (all channels plus
 dotted targets), EQ (all shaping curves), Corrected (all post-DSP channels
 plus dotted targets) — with the Before/Corrected panels on one SPL range.
 **All EQ Filters** lists every channel behind a channel button set. A
 frequency-landmarks table reports per-speaker peaks, notches and −6 dB LF
 extension from the measured response; level residuals are predicted from the
-post-DSP curve. The Section 1 operational share reads emitted
+post-DSP curve. The summary operational share reads emitted
 `channel_summaries` when present and otherwise derives the same share from
 legacy final `decisions` (provisional history never enters the scope).
 Rebuild the embedded bundles with `just report-dist` (stable) and
@@ -979,15 +1005,17 @@ tracked in `manifest.json` asset ownership.
 
 The saved JSON keeps the exact `DspGraph` schema with DSP data (plugins,
 metadata, decision ledger) but without the heavy measurement blobs, so it
-stays small. The Python viewer (`scripts/display-roomeq.py`, via
-`scripts/src/loaders.py`) re-injects the external curves from the sibling
+stays small. The Python viewer (`ui/display-roomeq`, via
+`ui/display-roomeq/loaders.py`) re-injects the external curves from the sibling
 directory automatically, so plots are unchanged. Legacy outputs with
 embedded curves and sidecars next to the JSON keep loading as before.
 
 ### Interactive diagnostic plots
 
-Room-average and per-speaker T60 graphs overlay the ITU-R BS.1116-3
-§8.2.3.1 Figure 1 tolerance envelope. Its reference is
+The room-mean T60 graph overlays the ITU-R BS.1116-3
+§8.2.3.1 Figure 1 tolerance envelope; channel tabs reuse that block (its
+table already carries per-speaker columns) while per-driver tabs keep
+their own measured-acoustics T60. Its reference is
 `0.25 * (volume_m3 / 100)^(1/3)` seconds when the saved effective configuration
 contains valid `recording_config.room_dimensions`. Otherwise, the viewer uses
 the measured 250–4000 Hz octave centers as an estimate of the 200 Hz–4 kHz mean,
@@ -998,11 +1026,28 @@ Without either reference no limits are invented. The upper curve starts at
 The existing fixed-window summary score is separate from this recommendation.
 
 RoomEQ report graphs use d3rs through the shared WASM renderer, including
-capture diagnostics. Waterfalls are filled projected surfaces with frequency,
-time and relative-level axes. Wavelets use logarithmic frequency horizontally,
+capture diagnostics. Waterfalls default to REW-style time-slice contours with
+frequency, time and relative-level axes; the toolbar offers a filled-surface
+toggle, a d3rs colormap dropdown (Turbo, Viridis, Plasma, Inferno, Magma,
+Rainbow) and a contour toggle, and coloured ridge lines trace the exported
+resonance candidates over the slices. Wavelets use logarithmic frequency horizontally,
 time vertically (initially -1 to 15 ms), and a labelled -30 to 0 dB colour scale.
-Zoom, move and reset operate on both grid views; smoothing applies to eligible
-frequency-response line plots, not time traces or diagnostic grids.
+A cyan dashed ridge marks peak energy arrival time per frequency column
+(earliest time holding the column maximum). Mouse wheel zooms at the cursor,
+plain left-drag crops a zoom box on line plots, Shift/right-drag pans,
+double-click resets the view, and the 20–200 / 20–20k overlay presets jump the
+frequency axis; the Move toggle keeps drag-to-pan for touch. Smoothing applies
+to eligible frequency-response line plots, not time traces or diagnostic grids:
+1/48 through 1/1 octave plus REW-style Var (1/48 below 100 Hz to 1/3 above
+10 kHz), Psychoacoustic (1/3 below 100 Hz to 1/6 above 1 kHz, cubic-mean peaks)
+and ERB (±half equivalent rectangular bandwidth) modes.
+
+Every SPL-vs-frequency plot spans 50 dB vertically with a horizontal gridline
+every dB (labelled every 5 dB). Comparison-report design targets are
+level-matched once per report: the main L/R target shape is shifted so its
+100 Hz–10 kHz mean equals the measured L+R pair mean over the same band, and
+that single offset applies to every channel tab (the L+R tab reuses the main
+shape on its own grid), preserving designed inter-channel differences.
 
 The waterfall and decay plot highlight up to two exported resonance candidates,
 ranked by longest fitted decay then highest level. Their colours match the final
@@ -1298,7 +1343,10 @@ recordings have a direct reference, a complete 20 ms early segment, a
 nonempty late segment, and at least two fully supported third-octave bands.
 Full, early, and late are energy contributions on the same full peak-band
 reference **within each capture**; full is their incoherent energy sum, not
-a complex pressure sum. The split is 20 ms after the broadband envelope
+a complex pressure sum. Both this view and the optimization per-channel
+figure refuse data where full sits below either part in any band and leave
+the cell pending instead of plotting impossible physics. The split is 20 ms
+after the broadband envelope
 peak, or after the 120 Hz lowpass envelope peak for subwoofer/LFE sources.
 The report labels the separate baseline/candidate references and shows a
 1–8 kHz early-minus-late mean only when that complete range is supported.
@@ -1391,14 +1439,14 @@ baseline IR, and synthetic noise remains labeled synthetic.
 Render these views at the top of a separate capture diagnostic report:
 
 ```bash
-venv/bin/python scripts/display-roomeq.py --capture-verification verification-report.json -o captures.html
+venv/bin/python ui/display-roomeq --capture-verification verification-report.json -o captures.html
 ```
 
 To include the same measured-capture section after the plots in one saved
 optimization report, supply both artifacts:
 
 ```bash
-venv/bin/python scripts/display-roomeq.py room-output.json --capture-verification verification-report.json -o room-report.html
+venv/bin/python ui/display-roomeq room-output.json --capture-verification verification-report.json -o room-report.html
 ```
 
 The combined renderer recomputes the saved optimization payload binding,
@@ -2567,7 +2615,13 @@ and checks actual FIR bytes against `metadata.final_convolution_sha256`.
 Use the normal result loader so relative sidecars resolve beside the saved JSON.
 Missing legacy bindings, unavailable resources, changed payloads, and changed
 FIR bytes are explicitly unverified; they cannot produce applied-delivery counts
-or a green playback-status banner. Plot-only FIR caches do not modify the
+or a green playback-approval box. The verdict renders as three boxes — recorded
+eligibility (what RoomEQ accepted), delivered-payload binding (whether the
+bytes still match the decision ledger), and playback approval (the final
+go/no-go) — so a changed payload shows as a yellow binding box plus a red
+playback box even when the recorded eligibility stays green. A changed payload
+means the recorded decisions describe different bytes; re-finalize before
+playback. Plot-only FIR caches do not modify the
 serialized graph. Packaging verifies the source ledger before rebinding after
 resource-reference rewriting. The digest is an artifact-consistency check, not
 a signature, acoustic playback verification, physical-safety proof, or listening result.

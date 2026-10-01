@@ -39,7 +39,7 @@ fi
 # Generate comparison HTML
 HTML_OUTPUT="${OUTPUT_DIR}/comparison.html"
 echo "=== Generating comparison report ==="
-./venv/bin/python scripts/display-roomeq.py --compare "${JSONS[@]}" -o "${HTML_OUTPUT}"
+./venv/bin/python ui/display-roomeq --compare "${JSONS[@]}" -o "${HTML_OUTPUT}"
 
 echo ""
 echo "=== Done ==="

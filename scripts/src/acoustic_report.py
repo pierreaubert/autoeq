@@ -739,8 +739,10 @@ def early_reflection_figures(channel_data, label, tab=None):
             continue
         curves.append(series(name, freqs, levels, color=color))
     if curves:
-        lo = min(min(s["y"]) for s in curves) - 3
-        hi = max(max(s["y"]) for s in curves) + 3
+        # Same 50 dB convention as every other SPL-vs-frequency plot: the
+        # top lands on a multiple of 5 dB so the 1 dB / 5 dB grid aligns.
+        hi = math.ceil(max(max(s["y"]) for s in curves) / 5) * 5
+        lo = hi - 50.0
         for number, event in enumerate(report["post"], 1):
             dip = event["first_dip_hz"]
             curves.append(series(f"Candidate {number}: {dip:.1f} Hz (estimated dip)",
@@ -999,12 +1001,14 @@ def level_compensation_html(data):
     if not rows:
         return ""
     parts = [
-        '<div class="filters-section">\n<h3>Section 2 — Relative level compensation</h3>\n',
+        '<div class="filters-section">\n<h3>Relative level compensation</h3>\n',
         '<p class="epa-footer">Monitor band 0.5–3 kHz, sub band 30–80 Hz. '
         "Reference: quietest monitor before correction. Compensation is proposed attenuation. "
-        "The post-DSP level offset includes EQ, alignment and headroom attenuation; a negative "
-        "value does not by itself indicate channel imbalance. The balance column compares "
-        "against that same monitor after DSP. These are predictions, not verification captures.</p>\n",
+        "The proposal is not added to the post-DSP columns, which read the delivered "
+        "chain's predicted curve as-is. The post-DSP level offset includes EQ, time "
+        "alignment and headroom attenuation; a negative value does not by itself indicate "
+        "channel imbalance. The balance column compares against that same monitor after DSP. "
+        "These are predictions, not verification captures.</p>\n",
         '<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>Level compensation (dB)</th>"
         "<th>Post-DSP offset from original reference (dB)</th>"

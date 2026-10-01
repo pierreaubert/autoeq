@@ -570,7 +570,7 @@ def correction_explanation_html(data: dict, label: str = "") -> str:
                        + "</ul></details>")
     title = "Why this correction?" + (f" — {label}" if label else "")
     return (
-        '<section class="correction-explanation" style="background:#fff;border:1px solid #ddd;border-radius:8px;padding:20px;margin:16px 0">'
+        '<section class="correction-explanation">'
         f"<h2>{escape(title)}</h2>"
         "<p>Recorded reasons for correction scope, limitations and the final outcome.</p>"
         '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;text-align:left">'

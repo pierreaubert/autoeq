@@ -9,5 +9,15 @@
       "path": "R C8C-BX8C-P1_No EQ Aug.txt",
       "name": "R"
     }
+  },
+  "measured_impulse_responses": {
+    "L": {
+      "path": "measured_ir/L_C8C-BX8C-P1__ir.csv",
+      "sample_rate_hz": 48000.0
+    },
+    "R": {
+      "path": "measured_ir/R_C8C-BX8C-P1__ir.csv",
+      "sample_rate_hz": 48000.0
+    }
   }
 }

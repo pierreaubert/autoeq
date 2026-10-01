@@ -73,7 +73,7 @@ pub struct MeasuredIr {
 /// `room_optimization::misc::is_subwoofer_channel`.
 fn is_sub_channel(name: &str) -> bool {
     let lower = name.to_lowercase();
-    lower == "lfe" || lower == "sub" || lower.starts_with("sub")
+    lower == "lfe" || lower == "sub" || lower.starts_with("sub") || lower.ends_with("_sub")
 }
 
 /// Derive the sample rate from a millisecond time grid.
@@ -179,6 +179,11 @@ pub fn load_measured_ir(
         return Err(format!("channel '{channel}': IR peak must be nonzero"));
     }
     let grid_rate = grid_sample_rate_hz(&time_ms)?;
+    if !(1_000.0..=192_000.0).contains(&grid_rate) {
+        return Err(format!(
+            "channel '{channel}': measured IR grid must be within 1–192 kHz"
+        ));
+    }
     if let Some(declared) = source.sample_rate_hz
         && (declared - grid_rate).abs() / grid_rate > 0.001
     {
@@ -189,7 +194,7 @@ pub fn load_measured_ir(
     Ok(MeasuredIr {
         channel: channel.to_string(),
         waveform: IrWaveform { time_ms, amplitude },
-        sample_rate_hz: grid_rate,
+        sample_rate_hz: source.sample_rate_hz.unwrap_or(grid_rate),
     })
 }
 
@@ -201,6 +206,9 @@ pub fn load_measured_ir(
 /// gate far below the viewer maximum. Returns `None` (cell stays pending)
 /// when any mapped value would violate the viewer contract.
 fn reflection_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelEarlyReflections> {
+    if sample_rate_hz <= 16_000.0 {
+        return None;
+    }
     let table = early_reflection_table(
         samples,
         sample_rate_hz,
@@ -268,6 +276,17 @@ fn t60_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelOctaveT60> 
     }
     let mut bands = Vec::with_capacity(rows.len());
     for row in &rows {
+        if row.centre_hz * std::f64::consts::SQRT_2 >= sample_rate_hz / 2.0 {
+            bands.push(ChannelT60Band {
+                centre_hz: row.centre_hz,
+                t60_s: None,
+                fit_range: None,
+                r2: 0.0,
+                valid: false,
+                reason: "octave band exceeds native capture Nyquist frequency".into(),
+            });
+            continue;
+        }
         let fit = match row.fit_range {
             T60FitRange::T30 => Some("T30"),
             T60FitRange::T20 => Some("T20"),
@@ -512,7 +531,8 @@ pub fn attach_measured_acoustics(
     validate_measured_ir_map(declared)?;
     let mut warnings = Vec::new();
     for (channel, source) in declared {
-        let chain = output.channels.get_mut(channel).ok_or_else(|| {
+        let output_channel = source.output_channel.as_deref().unwrap_or(channel);
+        let chain = output.channels.get_mut(output_channel).ok_or_else(|| {
             format!("channel '{channel}' declares a measured IR but has no output chain")
         })?;
         let measured = load_measured_ir(channel, source, config_dir)?;
@@ -522,6 +542,30 @@ pub fn attach_measured_acoustics(
             .iter()
             .map(|v| *v as f32)
             .collect();
+        if let Some(driver_name) = &source.driver {
+            let driver = chain.drivers.as_mut().and_then(|drivers| {
+                drivers.iter_mut().find(|driver| driver.name == *driver_name)
+            }).ok_or_else(|| format!(
+                "capture '{channel}' targets missing driver '{driver_name}' in '{output_channel}'"
+            ))?;
+            let waterfall = waterfall_report(&samples, measured.sample_rate_hz);
+            driver.measured_acoustics = Some(roomeq_model::MeasuredRoomAcoustics {
+                sample_rate_hz: measured.sample_rate_hz,
+                timing_reference_id: source.timing_reference_id.clone(),
+                early_late_curves: crate::channel_acoustics::measured_early_late_curves(
+                    &samples,
+                    measured.sample_rate_hz,
+                    is_sub_channel(driver_name),
+                ),
+                early_reflections: reflection_report(&samples, measured.sample_rate_hz),
+                t60_octaves: t60_report(&samples, measured.sample_rate_hz),
+                waterfall: waterfall.as_ref().map(|(grid, _)| grid.clone()),
+                resonance_decays: waterfall.map(|(_, decays)| decays),
+                wavelet: wavelet_report(&samples, measured.sample_rate_hz),
+                pre_ir: measured.waveform,
+            });
+            continue;
+        }
         chain.pre_ir = Some(measured.waveform);
         match crate::channel_acoustics::measured_early_late_curves(
             &samples,
@@ -574,6 +618,70 @@ mod tests {
     use super::*;
     use std::io::Write;
 
+    #[test]
+    fn native_sub_driver_capture_is_not_an_aggregate_measurement() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_ir(dir.path(), "sub.csv", 3_000.0, 1.0);
+        let mut source = source_for(path);
+        source.sample_rate_hz = Some(3_000.0);
+        source.output_channel = Some("L".into());
+        source.driver = Some("left_sub".into());
+        let mut output = DspGraph::new("1");
+        output.add_channel("L", Vec::new());
+        output.channels.get_mut("L").expect("channel").drivers =
+            Some(vec![roomeq_model::DriverDspChain {
+                measured_acoustics: None,
+                name: "left_sub".into(),
+                index: 0,
+                plugins: Vec::new(),
+                initial_curve: None,
+                measured_band_hz: None,
+            }]);
+        let declared = BTreeMap::from([("sub_capture".into(), source)]);
+        attach_measured_acoustics(&mut output, &declared, dir.path()).expect("attach");
+        let chain = &output.channels["L"];
+        assert!(
+            chain.pre_ir.is_none(),
+            "driver IR must not replace aggregate IR"
+        );
+        let capture = chain.drivers.as_ref().expect("drivers")[0]
+            .measured_acoustics
+            .as_ref()
+            .expect("capture");
+        assert!((capture.sample_rate_hz - 3_000.0).abs() < 0.1);
+        assert_eq!(capture.pre_ir.amplitude.len(), 3_000);
+        assert!(capture.timing_reference_id.is_none());
+        assert!(capture.early_reflections.is_none());
+        assert!(
+            capture
+                .t60_octaves
+                .as_ref()
+                .expect("T60")
+                .bands
+                .iter()
+                .filter(|band| band.centre_hz >= 2_000.0)
+                .all(|band| !band.valid)
+        );
+        if let Some(grid) = &capture.waterfall {
+            assert!(grid.valid_band_hz[1] <= 1_500.0);
+        }
+        if let Some(grid) = &capture.wavelet {
+            assert!(grid.valid_band_hz[1] <= 1_500.0);
+        }
+        let mut bad = declared.clone();
+        bad.get_mut("sub_capture").expect("source").driver = Some("missing".into());
+        assert!(attach_measured_acoustics(&mut output, &bad, dir.path()).is_err());
+        let bundle_path = dir.path().join("out.json");
+        crate::output_bundle::save_output_bundle(&mut output, &bundle_path).expect("save");
+        let restored = crate::output_bundle::load_output_bundle(&bundle_path).expect("reload");
+        let capture = restored.channels["L"].drivers.as_ref().expect("drivers")[0]
+            .measured_acoustics
+            .as_ref()
+            .expect("restored native capture");
+        assert_eq!(capture.sample_rate_hz, 3_000.0);
+        assert_eq!(capture.pre_ir.amplitude.len(), 3_000);
+    }
+
     fn write_ir(dir: &Path, name: &str, rate_hz: f64, seconds: f64) -> std::path::PathBuf {
         // Exponentially decaying sweep-like IR with a real reflection tap.
         let n = (seconds * rate_hz) as usize;
@@ -597,6 +705,8 @@ mod tests {
 
     fn source_for(path: std::path::PathBuf) -> MeasuredIrSource {
         MeasuredIrSource {
+            output_channel: None,
+            driver: None,
             path,
             sample_rate_hz: None,
             timing_reference_id: None,

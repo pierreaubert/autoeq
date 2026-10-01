@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 
 use roomeq_model::{
     ChannelEarlyLateCurves, ChannelResonanceDecays, ChannelWaterfall, ChannelWavelet, CurveData,
-    DspGraph, IrWaveform,
+    DspGraph, IrWaveform, MeasuredRoomAcoustics,
 };
 
 /// Name of the run log written inside the assets directory.
@@ -167,7 +167,9 @@ fn write_ir_csv(path: &Path, ir: &IrWaveform) -> std::io::Result<()> {
     let mut out = String::with_capacity(ir.time_ms.len() * 24);
     out.push_str("time_ms,amplitude\n");
     for (time, amplitude) in ir.time_ms.iter().zip(ir.amplitude.iter()) {
-        out.push_str(&format!("{time:.6},{amplitude:.9}\n"));
+        // Default float formatting round-trips; fixed decimal precision can
+        // erase low-level native IR tails and shift capture time origins.
+        out.push_str(&format!("{time},{amplitude}\n"));
     }
     std::fs::write(path, out)
 }
@@ -380,6 +382,15 @@ pub fn extract_measurements_to_assets(
         if let Some(drivers) = chain.drivers.as_mut() {
             for (index, driver) in drivers.iter_mut().enumerate() {
                 let driver_tag = sanitize_name(&driver.name);
+                driver.measured_acoustics = extract_json_blob::<MeasuredRoomAcoustics>(
+                    assets_dir,
+                    &mut extracted,
+                    &mut channel_index,
+                    &name,
+                    &format!("driver{index}_{driver_tag}_measured_acoustics"),
+                    format!("{tag}__driver{index}_{driver_tag}__measured_acoustics.json"),
+                    driver.measured_acoustics.take(),
+                );
                 let kind = format!("driver{index}_{driver_tag}_initial_curve");
                 let before = driver.initial_curve.take();
                 driver.initial_curve = extract_curve(
@@ -628,6 +639,17 @@ pub fn load_output_bundle(output_path: &Path) -> Result<DspGraph, Box<dyn std::e
                 _ => {
                     if let Some(rest) = kind.strip_prefix("driver")
                         && let Some((index_text, suffix)) = rest.split_once('_')
+                        && suffix.ends_with("_measured_acoustics")
+                        && let Ok(driver_index) = index_text.parse::<usize>()
+                        && let Some(drivers) = chain.drivers.as_mut()
+                        && let Some(driver) = drivers.get_mut(driver_index)
+                        && driver.measured_acoustics.is_none()
+                    {
+                        driver.measured_acoustics =
+                            read_json_blob::<MeasuredRoomAcoustics>(&path).ok();
+                    }
+                    if let Some(rest) = kind.strip_prefix("driver")
+                        && let Some((index_text, suffix)) = rest.split_once('_')
                         && suffix.ends_with("_initial_curve")
                         && let Ok(driver_index) = index_text.parse::<usize>()
                         && let Some(drivers) = chain.drivers.as_mut()
@@ -666,6 +688,20 @@ pub fn load_output_bundle(output_path: &Path) -> Result<DspGraph, Box<dyn std::e
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_ir_sidecar_preserves_tails_and_time_origin() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("native.csv");
+        let ir = IrWaveform {
+            time_ms: vec![-0.1234567890123, 0.2098765443210333],
+            amplitude: vec![0.1234567890123456, -1.234567890123456e-12],
+        };
+        write_ir_csv(&path, &ir).expect("save native IR");
+        let restored = read_ir_csv(&path).expect("reload native IR");
+        assert_eq!(restored.time_ms, ir.time_ms);
+        assert_eq!(restored.amplitude, ir.amplitude);
+    }
     use roomeq_model::CurveData;
 
     fn curve(freq: Vec<f64>, spl: Vec<f64>) -> CurveData {

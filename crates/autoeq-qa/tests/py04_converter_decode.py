@@ -3,7 +3,7 @@
 
 Oracle: crates/autoeq-qa/wolfram/py04_converter_decode.wls (independent
 SPL=20 log10|H|, phase=Arg(H) in degrees, 6-decimal CSV rounding).
-Compares scripts/msop2csv.py decode_response plus the f"{v:.6f}" CSV
+Compares utils/msop2csv.py decode_response plus the f"{v:.6f}" CSV
 format used by mdat2csv/msop2csv exporters.
 Tolerance: A, absolute error <= 1e-9 (native units); rounding exact.
 """
@@ -18,7 +18,7 @@ TOL_ABS = 1e-9
 
 ROOT = Path(__file__).resolve().parents[3]
 GOLDEN = ROOT / "crates/autoeq-qa/wolfram/goldens/py04_converter_decode.json"
-MODULE = ROOT / "scripts/msop2csv.py"
+MODULE = ROOT / "utils/msop2csv.py"
 
 
 def fail(message):

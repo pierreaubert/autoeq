@@ -84,7 +84,8 @@ impl PeqLayout for PeqModel {
             | PeqModel::HpPk
             | PeqModel::HpPkLp
             | PeqModel::LsPk
-            | PeqModel::LsPkHs => 3,
+            | PeqModel::LsPkHs
+            | PeqModel::PkLsHs => 3,
             PeqModel::FreePkFree | PeqModel::Free => 4,
         }
     }
@@ -95,7 +96,8 @@ impl PeqLayout for PeqModel {
             | PeqModel::HpPk
             | PeqModel::HpPkLp
             | PeqModel::LsPk
-            | PeqModel::LsPkHs => ParamLayout {
+            | PeqModel::LsPkHs
+            | PeqModel::PkLsHs => ParamLayout {
                 type_idx: None,
                 freq_idx: 0,
                 q_idx: 1,
@@ -167,6 +169,15 @@ impl PeqLayout for PeqModel {
                 if i == 0 {
                     BiquadFilterType::Lowshelf
                 } else if i == num_filters - 1 {
+                    BiquadFilterType::Highshelf
+                } else {
+                    BiquadFilterType::Peak
+                }
+            }
+            PeqModel::PkLsHs => {
+                if num_filters >= 2 && i == num_filters - 2 {
+                    BiquadFilterType::Lowshelf
+                } else if num_filters >= 1 && i == num_filters - 1 {
                     BiquadFilterType::Highshelf
                 } else {
                     BiquadFilterType::Peak
@@ -398,6 +409,42 @@ mod tests {
         assert_eq!(
             determine_filter_type(1, 3, PeqModel::HpPk, None),
             BiquadFilterType::Peak
+        );
+    }
+
+    #[test]
+    fn determine_filter_type_pk_ls_hs_trailing_pair() {
+        assert_eq!(
+            determine_filter_type(0, 4, PeqModel::PkLsHs, None),
+            BiquadFilterType::Peak
+        );
+        assert_eq!(
+            determine_filter_type(1, 4, PeqModel::PkLsHs, None),
+            BiquadFilterType::Peak
+        );
+        assert_eq!(
+            determine_filter_type(2, 4, PeqModel::PkLsHs, None),
+            BiquadFilterType::Lowshelf
+        );
+        assert_eq!(
+            determine_filter_type(3, 4, PeqModel::PkLsHs, None),
+            BiquadFilterType::Highshelf
+        );
+    }
+
+    #[test]
+    fn determine_filter_type_pk_ls_hs_degenerate_layouts() {
+        assert_eq!(
+            determine_filter_type(0, 2, PeqModel::PkLsHs, None),
+            BiquadFilterType::Lowshelf
+        );
+        assert_eq!(
+            determine_filter_type(1, 2, PeqModel::PkLsHs, None),
+            BiquadFilterType::Highshelf
+        );
+        assert_eq!(
+            determine_filter_type(0, 1, PeqModel::PkLsHs, None),
+            BiquadFilterType::Highshelf
         );
     }
 

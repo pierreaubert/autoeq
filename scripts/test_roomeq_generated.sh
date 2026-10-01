@@ -44,12 +44,12 @@ run_case() {
             --output "$output"
     fi
     if [[ -n "$override" ]]; then
-        ./venv/bin/python3 ./scripts/display-roomeq.py \
+        ./venv/bin/python3 ./ui/display-roomeq \
             "$output" \
             --output "$scenario_out/dsp-$stem.html" \
             --base-config "$base_config"
     else
-        ./venv/bin/python3 ./scripts/display-roomeq.py \
+        ./venv/bin/python3 ./ui/display-roomeq \
             "$output" \
             --output "$scenario_out/dsp-$stem.html"
     fi
@@ -66,7 +66,7 @@ compare_cases() {
     for stem in "$@"; do
         files+=("$scenario_out/dsp-$stem.json")
     done
-    ./venv/bin/python3 ./scripts/display-roomeq.py \
+    ./venv/bin/python3 ./ui/display-roomeq \
         --compare "${files[@]}" \
         --output "$scenario_out/compare.html"
 }

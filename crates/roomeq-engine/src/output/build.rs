@@ -286,6 +286,7 @@ pub fn build_multidriver_dsp_chain_with_curves(
             .map(|c| c.into());
 
         driver_chains.push(DriverDspChain {
+            measured_acoustics: None,
             name: get_driver_name(i, n_drivers),
             index: i,
             plugins: driver_plugins,
@@ -388,6 +389,7 @@ pub fn build_topology_dsp_chain_with_curves(
                 ));
             }
             DriverDspChain {
+                measured_acoustics: None,
                 name: name.clone(),
                 index: driver_index,
                 plugins,
@@ -596,6 +598,7 @@ pub fn build_multisub_dsp_chain_advanced(
             .map(|c| c.into());
 
         driver_chains.push(DriverDspChain {
+            measured_acoustics: None,
             name: format!("{}_{}", group_name, i + 1),
             index: i,
             plugins: sub_plugins,
@@ -673,6 +676,7 @@ fn build_dual_driver_array_chain(
         .and_then(|curves| curves.first())
         .map(|c| c.into());
     driver_chains.push(DriverDspChain {
+        measured_acoustics: None,
         name: front_name.to_string(),
         index: 0,
         plugins: front_plugins,
@@ -692,6 +696,7 @@ fn build_dual_driver_array_chain(
         .and_then(|curves| curves.get(1))
         .map(|c| c.into());
     driver_chains.push(DriverDspChain {
+        measured_acoustics: None,
         name: rear_name.to_string(),
         index: 1,
         plugins: rear_plugins,

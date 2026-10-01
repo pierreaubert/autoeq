@@ -260,7 +260,7 @@ pub(super) fn variance(values: &[f64]) -> f64 {
 /// memory until the machine OOMs. Default to half the CPU count so each
 /// active optimization still has parallel evaluators, but the overall
 /// working set stays bounded. `--jobs N` overrides.
-pub(super) fn default_parallel_jobs() -> usize {
+pub(crate) fn default_parallel_jobs() -> usize {
     std::thread::available_parallelism()
         .map(|p| p.get().max(1) / 2)
         .unwrap_or(1)

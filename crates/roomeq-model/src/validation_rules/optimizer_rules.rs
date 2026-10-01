@@ -266,6 +266,47 @@ pub fn rule_high_frequency_correction(ctx: &mut ValidationContext<'_>) {
     }
 }
 
+pub fn rule_tilt_stage(ctx: &mut ValidationContext<'_>) {
+    let Some(tilt) = ctx.opt.tilt_stage else {
+        return;
+    };
+    if !tilt.enabled {
+        return;
+    }
+    if ctx.opt.peq_model.as_str() != "pk" {
+        ctx.add_error(format!(
+            "tilt_stage requires peq_model 'pk' (got '{}'): the tilt pair is only defined after peak filters",
+            ctx.opt.peq_model
+        ));
+    }
+    let [band_lo, band_hi] = ctx.opt.active_correction_band();
+    for (name, band) in [
+        ("ls_band_hz", tilt.ls_band_hz),
+        ("hs_band_hz", tilt.hs_band_hz),
+    ] {
+        let Some([lo, hi]) = band else {
+            continue;
+        };
+        if !lo.is_finite() || !hi.is_finite() || lo <= 0.0 {
+            ctx.add_error(format!(
+                "tilt_stage.{name} ([{lo}, {hi}]) must be finite with a positive lower edge"
+            ));
+            continue;
+        }
+        if lo >= hi {
+            ctx.add_error(format!(
+                "tilt_stage.{name} ([{lo}, {hi}]) must ascend (lo < hi)"
+            ));
+            continue;
+        }
+        if hi <= band_lo || lo >= band_hi {
+            ctx.add_error(format!(
+                "tilt_stage.{name} ([{lo}, {hi}]) lies fully outside the correction band [{band_lo}, {band_hi}]"
+            ));
+        }
+    }
+}
+
 pub fn rule_early_late_correction(ctx: &mut ValidationContext<'_>) {
     let Some(early_late) = ctx.opt.early_late_correction else {
         return;
@@ -594,6 +635,7 @@ pub fn rule_peq_model(ctx: &mut ValidationContext<'_>) {
         "ls-pk",
         "hp-pk-lp",
         "ls-pk-hs",
+        "pk-ls-hs",
         "free-pk-free",
         "free",
     ];
@@ -865,6 +907,7 @@ pub fn run_optimizer_validation_rules(ctx: &mut ValidationContext<'_>) {
     rule_filter_audibility(ctx);
     rule_pruning_budget(ctx);
     rule_high_frequency_correction(ctx);
+    rule_tilt_stage(ctx);
     rule_early_late_correction(ctx);
     rule_validation_bundle(ctx);
     rule_gain_bounds(ctx);

@@ -395,6 +395,9 @@ pub struct ChannelDspChain {
 /// DSP chain for an individual driver in a multi-driver speaker
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct DriverDspChain {
+    /// Native measured room capture and independent acoustic diagnostics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_acoustics: Option<MeasuredRoomAcoustics>,
     /// Driver name (e.g. "woofer", "tweeter")
     pub name: String,
     /// Driver index in the array (0 = lowest frequency)
@@ -410,6 +413,29 @@ pub struct DriverDspChain {
     /// it are trend continuation, not data.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub measured_band_hz: Option<[f64; 2]>,
+}
+
+/// Independent acoustic diagnostics from one native measured room capture.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct MeasuredRoomAcoustics {
+    /// Native sampling rate verified against the waveform time grid.
+    pub sample_rate_hz: f64,
+    /// Explicit capture clock identity, absent when unknown.
+    pub timing_reference_id: Option<String>,
+    /// Unmodified measured waveform with its original time origin.
+    pub pre_ir: IrWaveform,
+    /// Measured early/late energy when its analysis band is available.
+    pub early_late_curves: Option<ChannelEarlyLateCurves>,
+    /// Measured early reflections when their analysis band is available.
+    pub early_reflections: Option<ChannelEarlyReflections>,
+    /// Measured octave decay fits, including invalid/unavailable bands.
+    pub t60_octaves: Option<ChannelOctaveT60>,
+    /// Measured STFT decay grid within the capture's frequency coverage.
+    pub waterfall: Option<ChannelWaterfall>,
+    /// Resonance fits accompanying the measured waterfall.
+    pub resonance_decays: Option<ChannelResonanceDecays>,
+    /// Measured wavelet grid within the capture's frequency coverage.
+    pub wavelet: Option<ChannelWavelet>,
 }
 
 /// Backend-neutral serialized plugin descriptor. Native adapters translate this

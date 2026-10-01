@@ -650,7 +650,7 @@ for recording in "${RECORDINGS[@]}"; do
     HTML_OUTPUT="${OUTPUT_DIR}/comparison.html"
     echo ""
     echo "=== Generating ${#JSONS[@]}-case comparison report ==="
-    "${PYTHON}" "${SCRIPT_DIR}/display-roomeq.py" --compare "${JSONS[@]}" -o "${HTML_OUTPUT}"
+    "${PYTHON}" "${SCRIPT_DIR}/../ui/display-roomeq" --compare "${JSONS[@]}" -o "${HTML_OUTPUT}"
     echo "  Report: ${HTML_OUTPUT}"
 
     # Open in browser (macOS)

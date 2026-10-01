@@ -3099,12 +3099,12 @@
           "type": "array"
         },
         "freqs_per_octave": {
-          "description": "Log-grid density in frequencies per octave; always `6`.",
+          "description": "Log-grid density: `48` in dense measured exports, `6` in legacy reports.",
           "format": "double",
           "type": "number"
         },
         "hop_ms": {
-          "description": "Raw frame hop in milliseconds; always `1`.",
+          "description": "Minimum nominal hop in milliseconds; use `times_ms` for exact coordinates.\nDense exports sample at 0.1 ms through 15 ms and 1 ms thereafter.",
           "format": "double",
           "type": "number"
         },
@@ -4671,20 +4671,9 @@
           "format": "double",
           "type": "number"
         },
-        "room_dimensions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RoomDimensions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Room dimensions (L × W × H in metres). When present together with\na measured impulse response, enables a measurement-driven\nSchroeder frequency via `RoomDimensions::schroeder_frequency_with_rt60`\nusing the RT60 measured from the IR. When absent, the optimizer\nfalls back to the `schroeder_freq` field above."
-        },
         "schroeder_freq": {
           "default": 300.0,
-          "description": "Schroeder frequency (Hz). Below: modal, above: statistical.\n\nWhen `room_dimensions` is also provided AND an impulse response is\navailable, this value is overridden at run time by a\nmeasurement-driven Schroeder frequency: the optimizer measures\nRT60 from the IR via Schroeder backward integration and plugs it\ninto `f_S ≈ 2000 · √(RT60 / V)` with V from `room_dimensions`. In\nthat case this field is used only as the fallback if the RT60 fit\nfails.",
+          "description": "Schroeder frequency (Hz). Below: modal, above: statistical.\n\nWhen `recording_config.room_dimensions` is provided AND an impulse response is\navailable, this value is overridden at run time by a\nmeasurement-driven Schroeder frequency: the optimizer measures\nRT60 from the IR via Schroeder backward integration and plugs it\ninto `f_S ≈ 2000 · √(RT60 / V)` with V from the recording dimensions. In\nthat case this field is used only as the fallback if the RT60 fit\nfails.",
           "format": "double",
           "type": "number"
         },
@@ -4947,6 +4936,17 @@
             }
           ],
           "description": "Initial frequency response curve for this driver before optimization (optional)"
+        },
+        "measured_acoustics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeasuredRoomAcoustics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Native measured room capture and independent acoustic diagnostics."
         },
         "measured_band_hz": {
           "description": "Measured frequency span of this driver's capture in Hz, when the\nstored display curve was extended past it for full-range DSP replay.\nPlots of the raw measurement should clip to this band; points outside\nit are trend continuation, not data.",
@@ -5694,7 +5694,7 @@
         },
         "max_attenuation_db": {
           "default": 12.0,
-          "description": "Maximum additional attenuation the selector may install. It does not\nauthorize acoustic output loss: the final acoustic gate still applies.",
+          "description": "Maximum additional attenuation installed on non-subwoofer outputs, in dB.\nSubwoofer-only cuts are exempt; common cuts remain bounded because they affect mains.\nElectrical ceilings and final acoustic checks still apply to every candidate.",
           "format": "double",
           "type": "number"
         },
@@ -6857,6 +6857,20 @@
       "additionalProperties": false,
       "description": "One measured room impulse response backing a channel's acoustic report.",
       "properties": {
+        "driver": {
+          "description": "Exact delivered driver name; omit for a whole-channel capture.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "output_channel": {
+          "description": "Delivered channel; defaults to the declaration's map key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "path": {
           "description": "IR file path, resolved against the configuration directory.\nCSV with a `time_ms,amplitude` header.",
           "type": "string"
@@ -6870,7 +6884,7 @@
           ]
         },
         "timing_reference_id": {
-          "description": "Shared clock identity across simultaneously captured channels.\nRequired on every entry when more than one channel declares a\nmeasured IR, so no cross-channel analysis can silently mix clocks.",
+          "description": "Shared clock identity across simultaneously captured channels.\nOptional for independent diagnostics. Absence never establishes\neligibility for coherent sums or cross-channel timing.",
           "type": [
             "string",
             "null"
@@ -6879,6 +6893,98 @@
       },
       "required": [
         "path"
+      ],
+      "type": "object"
+    },
+    "MeasuredRoomAcoustics": {
+      "description": "Independent acoustic diagnostics from one native measured room capture.",
+      "properties": {
+        "early_late_curves": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelEarlyLateCurves"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Measured early/late energy when its analysis band is available."
+        },
+        "early_reflections": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelEarlyReflections"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Measured early reflections when their analysis band is available."
+        },
+        "pre_ir": {
+          "$ref": "#/$defs/IrWaveform",
+          "description": "Unmodified measured waveform with its original time origin."
+        },
+        "resonance_decays": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelResonanceDecays"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Resonance fits accompanying the measured waterfall."
+        },
+        "sample_rate_hz": {
+          "description": "Native sampling rate verified against the waveform time grid.",
+          "format": "double",
+          "type": "number"
+        },
+        "t60_octaves": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelOctaveT60"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Measured octave decay fits, including invalid/unavailable bands."
+        },
+        "timing_reference_id": {
+          "description": "Explicit capture clock identity, absent when unknown.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "waterfall": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelWaterfall"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Measured STFT decay grid within the capture's frequency coverage."
+        },
+        "wavelet": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChannelWavelet"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Measured wavelet grid within the capture's frequency coverage."
+        }
+      },
+      "required": [
+        "sample_rate_hz",
+        "pre_ir"
       ],
       "type": "object"
     },
@@ -11224,17 +11330,6 @@
             "min_q": 0.5
           },
           "description": "Low frequency filter configuration (below Schroeder)"
-        },
-        "room_dimensions": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RoomDimensions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Room dimensions for auto-calculation (optional)"
         },
         "schroeder_freq": {
           "default": 300.0,

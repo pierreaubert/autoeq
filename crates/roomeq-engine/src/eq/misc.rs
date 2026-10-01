@@ -1,6 +1,6 @@
 use crate::Curve;
 use crate::PeqModel;
-use crate::config_adapter::OptimizerConfigExt;
+use crate::config_adapter::{OptimizerConfigExt, apply_tilt_stage};
 use autoeq_optim::loss::LossType;
 use roomeq_model::OptimizerConfig;
 
@@ -173,6 +173,13 @@ pub(super) fn build_optim_params(
     params.min_freq = effective_min_freq;
     params.max_freq = effective_max_freq;
     params.loss = loss_type;
+    // Re-apply the tilt mapping deterministically from base values: the model
+    // override above would otherwise clobber the adapter's PkLsHs mapping
+    // while keeping its num_filters + 2 count.
+    let (peq_model, num_filters, tilt_bands_hz) =
+        apply_tilt_stage(peq_model, config.num_filters, config.tilt_stage);
     params.peq_model = peq_model;
+    params.num_filters = num_filters;
+    params.tilt_bands_hz = tilt_bands_hz;
     params
 }

@@ -561,6 +561,7 @@ mod tests {
         chain.drivers = Some(
             (0..2)
                 .map(|index| DriverDspChain {
+                    measured_acoustics: None,
                     name: format!("speaker/{index}"),
                     index,
                     plugins: vec![],

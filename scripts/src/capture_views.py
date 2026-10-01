@@ -294,6 +294,10 @@ def _early_late_html(view):
                     or any(not finite(value) or not -120.01 <= value <= 0.01
                            for value in values)):
                 raise ValueError("invalid capture early/late levels")
+        full, early, late = (curve["spl"] for curve in curves)
+        if any(f + 1e-6 < e or f + 1e-6 < l for f, e, l in zip(full, early, late)):
+            raise ValueError("capture early/late full level below a part: "
+                             "incoherent energy sum violated")
         parts.append(f'<h4>{label}</h4><p>Direct sample: {record["direct_sample"]}.</p>')
         parts.append(embedded_figure(figure(label + ": early vs late energy",
             axis("Frequency (Hz)", "log"), axis("Level vs full peak band (dB)"),
@@ -331,11 +335,15 @@ def resonance_summary_html(data):
     """All exported pre-correction resonance candidates, grouped by speaker."""
     entries = []
     for name, channel in (data.get("channels") or {}).items():
-        waterfall, decays = channel.get("waterfall"), channel.get("resonance_decays")
-        if not optimization_waterfall_html(waterfall, decays):
-            entries.append((name, None))
-        else:
-            entries.append((name, decays["decays"]))
+        drivers = [(f'{name} / {driver.get("name", "driver")}', driver["measured_acoustics"])
+                   for driver in channel.get("drivers") or []
+                   if isinstance(driver, dict) and isinstance(driver.get("measured_acoustics"), dict)]
+        for label, capture in drivers or [(name, channel)]:
+            waterfall, decays = capture.get("waterfall"), capture.get("resonance_decays")
+            if not optimization_waterfall_html(waterfall, decays):
+                entries.append((label, None))
+            else:
+                entries.append((label, decays["decays"]))
     if not any(modes is not None for _, modes in entries):
         return ""
     count = max(1, max(len(modes or []) for _, modes in entries))
@@ -363,7 +371,7 @@ def resonance_summary_html(data):
 
 
 def _waterfall_wireframe_figure(times, freqs, rows, color, caption, aria_label, resonances=()):
-    """Use a filled d3rs surface, retaining the function name for existing callers."""
+    """REW-style contour waterfall with resonance ridge lines over the slices."""
     highlights = [(min(range(len(freqs)), key=lambda i: abs(freqs[i]-r["freq_hz"])),
                    f'{r["freq_hz"]:.1f} Hz', resonance_color(r["freq_hz"]))
                   for r in worst_resonances(resonances)]
@@ -406,7 +414,8 @@ def _wavelet_heatmap_figure(freqs, times, rows, caption, aria_label):
     early_count = sum(-1 <= t <= 15 for t in times)
     return (f'<p>Three-cycle wavelet; first 15 ms ({early_count} exported time samples). '
             'Log-frequency x-axis, time y-axis. '
-            'Colours retain the full-grid peak reference. Display cells reflect the '
+            'Colours retain the full-grid peak reference. The cyan dashed ridge marks '
+            'peak energy arrival time per frequency. Display cells reflect the '
             'exported sampling; zoom cannot restore omitted samples.</p>' + embedded_figure(section))
 
 

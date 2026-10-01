@@ -4,7 +4,7 @@
 //! normalization, and no acoustic fitting or resampling is performed here.
 
 use d3rs::axis::{AxisConfig, AxisLayout};
-use d3rs::color::{D3Color, interpolate_colors};
+use d3rs::color::{D3Color, SequentialScheme, interpolate_colors};
 use d3rs::scale::{LinearScale, LogScale, Scale};
 use d3rs::surface::{OrthographicProjection, Projection, SurfaceData, SurfaceMesh, SurfacePoint3D};
 
@@ -34,11 +34,40 @@ fn valid(grid: &GridData) -> bool {
         && grid.zmin < grid.zmax
 }
 
+/// Peak energy arrival time per frequency column: `(freq_hz, time_ms)`.
+///
+/// Each column's peak is the earliest time holding the column maximum —
+/// ties resolve to first arrival. Levels keep their exported reference;
+/// only the argmax index is used, so display clipping cannot move it.
+pub(crate) fn peak_energy_times(x: &[f64], y: &[f64], z: &[Vec<f64>]) -> Vec<(f64, f64)> {
+    let mut out = Vec::with_capacity(x.len());
+    for (fi, &freq) in x.iter().enumerate() {
+        let mut best: Option<(usize, f64)> = None;
+        for (ti, row) in z.iter().enumerate() {
+            if let Some(&db) = row.get(fi) {
+                let better = match best {
+                    None => true,
+                    Some((_, top)) => db > top,
+                };
+                if better {
+                    best = Some((ti, db));
+                }
+            }
+        }
+        if let Some((ti, _)) = best
+            && let Some(&time) = y.get(ti)
+        {
+            out.push((freq, time));
+        }
+    }
+    out
+}
+
 fn level_color(t: f64) -> String {
-    // Fixed blue/cyan/green/yellow/red legend, shared by cells and colorbar.
+    // Fixed violet/blue/cyan/green/yellow/red legend, shared by cells and colorbar.
     interpolate_colors(
         &[
-            D3Color::rgb(15, 15, 130),
+            D3Color::rgb(26, 10, 80),
             D3Color::rgb(25, 90, 255),
             D3Color::rgb(90, 240, 240),
             D3Color::rgb(150, 255, 110),
@@ -49,6 +78,29 @@ fn level_color(t: f64) -> String {
         t.clamp(0.0, 1.0) as f32,
     )
     .to_hex()
+}
+
+/// Surface fill color from a d3rs sequential map. Unknown names fall back
+/// to turbo so a mistyped viewer option never blanks the surface.
+fn surface_color(map: &str, t: f64) -> D3Color {
+    let scale = match map {
+        "viridis" => SequentialScheme::viridis(),
+        "plasma" => SequentialScheme::plasma(),
+        "inferno" => SequentialScheme::inferno(),
+        "magma" => SequentialScheme::magma(),
+        "rainbow" => SequentialScheme::rainbow(),
+        _ => SequentialScheme::turbo(),
+    };
+    scale.get(t.clamp(0.0, 1.0))
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn to_rgb(color: D3Color) -> [u8; 3] {
+    [
+        (color.r.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.g.clamp(0.0, 1.0) * 255.0).round() as u8,
+        (color.b.clamp(0.0, 1.0) * 255.0).round() as u8,
+    ]
 }
 
 fn path(ctx: &mut impl Ctx, points: &[(f64, f64)], fill: bool) {
@@ -169,6 +221,9 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
         };
         ctx.set_stroke("#cccccc");
         ctx.set_line_width(0.7);
+        // Axis tick labels, axis titles and colorbar scale read at 14px;
+        // the figure title and series legend above stay at 12px.
+        ctx.set_font("14px system-ui");
         for f in log_grid_ticks(xmin, xmax) {
             path(
                 ctx,
@@ -190,7 +245,7 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
                 false,
             );
             let (x, y) = project(xmin, ymin, db);
-            ctx.fill_text(&fmt_num(db), x - 8.0, y + 4.0, TextAlign::Right);
+            ctx.fill_text(&fmt_num(db), x - 8.0, y + 5.0, TextAlign::Right);
         }
         for t in LinearScale::new().domain(ymin, ymax).ticks(5) {
             path(
@@ -199,7 +254,7 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
                 false,
             );
             let (x, y) = project(xmin, t, grid.zmin);
-            ctx.fill_text(&fmt_num(t), x - 8.0, y + 4.0, TextAlign::Right);
+            ctx.fill_text(&fmt_num(t), x - 8.0, y + 5.0, TextAlign::Right);
         }
         let fi: Vec<usize> = (0..grid.x.len())
             .filter(|i| grid.x[*i] >= xmin && grid.x[*i] <= xmax)
@@ -207,40 +262,73 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
         let ti: Vec<usize> = (0..grid.y.len())
             .filter(|i| grid.y[*i] >= ymin && grid.y[*i] <= ymax)
             .collect();
-        let points = ti
-            .iter()
-            .map(|&t| {
-                fi.iter()
-                    .map(|&f| {
-                        SurfacePoint3D::new(
-                            sx(xs.scale(grid.x[f])),
-                            sy(ys.scale(grid.y[t])),
-                            sz(zs.scale(grid.z[t][f].clamp(grid.zmin, grid.zmax))),
-                            grid.z[t][f],
-                        )
-                    })
-                    .collect()
-            })
-            .collect();
-        let mut mesh = SurfaceMesh::from_surface_data(&SurfaceData::from_grid(points));
-        mesh.depth_sort(&projection);
-        let triangles: Vec<_> = mesh
-            .triangles
-            .iter()
-            .map(|triangle| {
-                let points = triangle.vertices.map(|p| {
-                    let q = projection.project_point(&p);
-                    (q.x, q.y)
-                });
-                let css = level_color(zs.scale(triangle.avg_t));
-                let rgb = u32::from_str_radix(css.trim_start_matches('#'), 16).unwrap_or(0);
-                PaintTriangle {
-                    points,
-                    color: [(rgb >> 16) as u8, (rgb >> 8) as u8, rgb as u8],
-                }
-            })
-            .collect();
-        ctx.triangles(&triangles);
+        if grid.show_surface {
+            let points: Vec<Vec<SurfacePoint3D>> = ti
+                .iter()
+                .map(|&t| {
+                    fi.iter()
+                        .map(|&f| {
+                            SurfacePoint3D::new(
+                                sx(xs.scale(grid.x[f])),
+                                sy(ys.scale(grid.y[t])),
+                                sz(zs.scale(grid.z[t][f].clamp(grid.zmin, grid.zmax))),
+                                grid.z[t][f],
+                            )
+                        })
+                        .collect()
+                })
+                .collect();
+            let mut mesh = SurfaceMesh::from_surface_data(&SurfaceData::from_grid(points));
+            mesh.depth_sort(&projection);
+            let triangles: Vec<_> = mesh
+                .triangles
+                .iter()
+                .map(|triangle| {
+                    let points = triangle.vertices.map(|p| {
+                        let q = projection.project_point(&p);
+                        (q.x, q.y)
+                    });
+                    PaintTriangle {
+                        points,
+                        color: to_rgb(surface_color(&grid.colormap, zs.scale(triangle.avg_t))),
+                    }
+                })
+                .collect();
+            ctx.triangles(&triangles);
+        }
+        if grid.show_contours && fi.len() >= 2 {
+            // REW-style wireframe: each time slice is a black polyline over a
+            // white underfill, painted back-to-front for hidden-line removal.
+            let mut order: Vec<usize> = ti.clone();
+            order.sort_by(|&a, &b| {
+                let depth = |t: usize| {
+                    projection.point_depth(&SurfacePoint3D::new(
+                        sx(0.5),
+                        sy(ys.scale(grid.y[t])),
+                        sz(0.0),
+                        0.0,
+                    ))
+                };
+                depth(b)
+                    .partial_cmp(&depth(a))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            let first = *fi.first().expect("checked non-empty");
+            let last = *fi.last().expect("checked non-empty");
+            for &t in &order {
+                let mut poly: Vec<(f64, f64)> = fi
+                    .iter()
+                    .map(|&f| project(grid.x[f], grid.y[t], grid.z[t][f]))
+                    .collect();
+                poly.push(project(grid.x[last], grid.y[t], grid.zmin));
+                poly.push(project(grid.x[first], grid.y[t], grid.zmin));
+                ctx.set_fill("#ffffff");
+                path(ctx, &poly, true);
+                ctx.set_stroke("#111111");
+                ctx.set_line_width(1.0);
+                path(ctx, &poly[..poly.len() - 2], false);
+            }
+        }
         for (i, &f) in grid.highlights.iter().enumerate() {
             let Some(series) = fig.series.get(i).filter(|s| s.visible) else {
                 continue;
@@ -335,10 +423,46 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
             false,
             false,
         );
+        // Peak energy arrival per frequency (cyan dashed ridge). Drawn
+        // after the axes so it stays crisp over cells and gridlines;
+        // segments outside the viewport lift the pen instead of painting
+        // the margins.
+        ctx.set_stroke("#00d5ff");
+        ctx.set_line_width(2.0);
+        ctx.set_dash(&[6.0, 4.0]);
+        ctx.begin_path();
+        let mut pen = false;
+        for (freq, time) in peak_energy_times(&grid.x, &grid.y, &grid.z) {
+            if freq < xmin || freq > xmax || time < ymin || time > ymax {
+                pen = false;
+                continue;
+            }
+            let (px, py) = (x.scale(freq), y.scale(time));
+            if !px.is_finite() || !py.is_finite() {
+                pen = false;
+                continue;
+            }
+            if pen {
+                ctx.line_to(px, py);
+            } else {
+                ctx.move_to(px, py);
+                pen = true;
+            }
+        }
+        ctx.stroke();
+        ctx.set_dash(&[]);
     }
     // Numeric colorbar is part of both views, with unchanged dB reference.
+    // Surface views follow the selected fill map; heatmaps keep the legend.
+    let bar = |t: f64| {
+        if grid.surface {
+            surface_color(&grid.colormap, t).to_hex()
+        } else {
+            level_color(t)
+        }
+    };
     for i in 0..100 {
-        ctx.set_fill(&level_color(1.0 - i as f64 / 99.0));
+        ctx.set_fill(&bar(1.0 - i as f64 / 99.0));
         ctx.fill_rect(
             left + pw + 24.0,
             top + ph * i as f64 / 100.0,
@@ -358,4 +482,57 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
     }
     ctx.fill_text("dB", left + pw + 24.0, top - 12.0, TextAlign::Left);
     meta
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{peak_energy_times, surface_color, to_rgb};
+
+    #[test]
+    fn peak_energy_picks_earliest_column_maximum() {
+        let x = vec![20.0, 100.0, 1000.0];
+        let y = vec![-1.0, 0.0, 2.0, 5.0];
+        let z = vec![
+            vec![-30.0, -30.0, -30.0],
+            vec![-6.0, -3.0, -30.0],
+            vec![-12.0, -3.0, -1.0],
+            vec![-20.0, -9.0, -4.0],
+        ];
+        assert_eq!(
+            peak_energy_times(&x, &y, &z),
+            vec![(20.0, 0.0), (100.0, 0.0), (1000.0, 2.0)]
+        );
+    }
+
+    #[test]
+    fn peak_energy_skips_missing_cells_without_panicking() {
+        let x = vec![20.0, 100.0];
+        let y = vec![0.0];
+        let z = vec![vec![-3.0]];
+        assert_eq!(peak_energy_times(&x, &y, &z), vec![(20.0, 0.0)]);
+        assert!(peak_energy_times(&[], &[], &[]).is_empty());
+    }
+
+    #[test]
+    fn surface_maps_differ_and_unknown_falls_back_to_turbo() {
+        let at = |map: &str| to_rgb(surface_color(map, 0.5));
+        let turbo = at("turbo");
+        assert_eq!(at("no-such-map"), turbo);
+        let others = [
+            at("viridis"),
+            at("plasma"),
+            at("inferno"),
+            at("magma"),
+            at("rainbow"),
+        ];
+        assert!(
+            others.iter().any(|c| *c != turbo),
+            "maps must differ from turbo at mid-scale"
+        );
+        // Clamping keeps out-of-range stops in gamut.
+        for map in ["turbo", "viridis", "plasma", "inferno", "magma", "rainbow"] {
+            let _ = to_rgb(surface_color(map, -1.0));
+            let _ = to_rgb(surface_color(map, 2.0));
+        }
+    }
 }

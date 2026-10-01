@@ -9,8 +9,8 @@ on:
       - "crates/autoeq-optim/**"
       - "src/roomeq/**"
       - "data_tests/roomeq/**"
-      - "scripts/mdat2csv.py"
-      - "scripts/test_mdat2csv.py"
+      - "utils/mdat2csv.py"
+      - "tests/test_mdat2csv.py"
       - "Justfile"
   schedule:
     - cron: "17 2 * * *"

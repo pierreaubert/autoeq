@@ -60,6 +60,7 @@ mod sub_optimizer_config;
 mod supporting_source_config;
 mod supporting_source_group;
 mod target_response_config;
+mod tilt_stage_config;
 #[cfg(test)]
 mod tests;
 mod types;
@@ -123,6 +124,7 @@ pub use sub_optimizer_config::*;
 pub use supporting_source_config::*;
 pub use supporting_source_group::*;
 pub use target_response_config::*;
+pub use tilt_stage_config::*;
 pub use types::*;
 pub use user_preference::*;
 pub use validation::*;

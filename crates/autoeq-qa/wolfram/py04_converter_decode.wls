@@ -1,5 +1,5 @@
 (* autoeq-qa case autoeq-qa.py04-converter-decode.v1 (catalogue family PY04).
-   Independent evaluation of the converter axis math (scripts/msop2csv.py
+   Independent evaluation of the converter axis math (utils/msop2csv.py
    decode_response): SPL = 20*log10(|H|), phase = Arg(H) in degrees, plus
    the declared 6-decimal CSV rounding of freq/spl/phase. *)
 

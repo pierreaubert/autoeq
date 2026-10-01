@@ -1,6 +1,9 @@
 from __future__ import annotations
-import json, tempfile, threading, unittest
+import json, sys, tempfile, threading, unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from roomeq_gui.commands import RoomEqCommand
 from roomeq_gui.document import RoomEqDocument
 from roomeq_gui.review import ResultReview, display_series
@@ -47,4 +50,4 @@ class BaselineTests(unittest.TestCase):
     def test_bundled_schemas_match_checked_in_contracts(self):
         root = Path(__file__).resolve().parents[3]
         for kind in ("input", "output"):
-            self.assertEqual(json.loads((root / "python/roomeq-gui/roomeq_gui/resources" / f"{kind}_schema.json").read_text()), json.loads((root / "src/bin/roomeq" / f"{kind}_schema.json").read_text()))
+            self.assertEqual(json.loads((root / "ui/roomeq-gui/roomeq_gui/resources" / f"{kind}_schema.json").read_text()), json.loads((root / "src/bin/roomeq" / f"{kind}_schema.json").read_text()))

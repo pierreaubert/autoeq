@@ -46,6 +46,7 @@ fn joint_room_eq_path_models_mixed_fir_iir_band_split() {
 #[test]
 fn joint_room_eq_path_models_driver_crossover_branches() {
     let low_driver = roomeq_model::DriverDspChain {
+        measured_acoustics: None,
         name: "woofer".to_string(),
         index: 0,
         plugins: vec![PluginConfigWrapper {

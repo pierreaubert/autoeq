@@ -1,4 +1,30 @@
 {
+  "measured_impulse_responses": {
+    "L": {
+      "path": "measured_ir/L_NO_GLM_NO_XO_L_MAIN_MLP_Jul_2__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "genelec-mlp-session-1"
+    },
+    "R": {
+      "path": "measured_ir/R_NO_GLM_NO_XO_R_MAIN_MLP_Jul_2__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "genelec-mlp-session-1"
+    },
+    "subs_1": {
+      "path": "measured_ir/L_NO_GLM_NO_XO_L_SUB_MLP_Jul_2__ir.csv",
+      "sample_rate_hz": 48000,
+      "output_channel": "Sub1",
+      "driver": "Sub1",
+      "timing_reference_id": "genelec-mlp-session-1"
+    },
+    "subs_2": {
+      "path": "measured_ir/L_NO_GLM_NO_XO_R_SUB_MLP_Jul_2__ir.csv",
+      "sample_rate_hz": 48000,
+      "output_channel": "Sub1",
+      "driver": "Sub2",
+      "timing_reference_id": "genelec-mlp-session-1"
+    }
+  },
   "version": "3.0.0",
   "system": {
     "model": "stereo",

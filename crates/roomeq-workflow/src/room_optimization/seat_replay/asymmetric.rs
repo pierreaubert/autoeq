@@ -4,6 +4,7 @@ use roomeq_model::DriverDspChain;
 
 fn driver(name: &str, index: usize, gain: f64, delay: f64) -> DriverDspChain {
     DriverDspChain {
+        measured_acoustics: None,
         name: name.into(),
         index,
         plugins: vec![
@@ -88,6 +89,7 @@ fn driver_fir_is_not_mistaken_for_parent_retained_fir() {
     let chain = result.channels.get_mut("left").unwrap();
     chain.plugins = vec![convolution("shared.wav")];
     chain.drivers = Some(vec![DriverDspChain {
+        measured_acoustics: None,
         name: "woofer".into(),
         index: 0,
         plugins: vec![convolution("driver.wav")],

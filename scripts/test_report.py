@@ -2,6 +2,7 @@
 
 import copy
 import json
+import math
 import re
 import subprocess
 import sys
@@ -33,8 +34,19 @@ from scripts.src.acoustic_report import (
     tof_html,
     tof_table,
 )
-from scripts.src.figures import create_tof_figure
+from scripts.src.figures import (
+    create_comparison_zoomed_figure,
+    create_tof_figure,
+    create_zoomed_figure,
+)
+from scripts.src.target_overlay import (
+    band_mean_spl,
+    shift_target_to_reference_band_mean,
+)
 from scripts.src.report import (
+    BUCKET_ACOUSTICS,
+    BUCKET_DSP,
+    BUCKET_PSYCHOACOUSTIC,
     _all_eq_filters_html,
     _gain_plugins_html,
     _channel_display_final_curve,
@@ -45,6 +57,9 @@ from scripts.src.report import (
     _has_redirected_bass_route,
     _mixed_phase_summary_html,
     _playback_status_html,
+    _report_provenance,
+    _roomeq_version,
+    _workspace_roomeq_version,
     create_comparison_html_report,
     create_html_report,
 )
@@ -52,6 +67,7 @@ from scripts.test_figures import two_sub_overview_data
 from scripts.test_capture_views import fixture as capture_verification_fixture
 from scripts.src.payload_binding import ALGORITHM, payload_digest
 from scripts.src.loaders import RoomEqData
+from scripts.src.wasm_report import grid_figure
 
 
 def _driver_eq_split_data():
@@ -108,7 +124,7 @@ class BoundCaptureReportTests(unittest.TestCase):
             html_path = directory / "report.html"
             result_path.write_text(json.dumps(data), encoding="utf-8")
             capture_path.write_text(json.dumps(capture), encoding="utf-8")
-            command = [sys.executable, str(Path(__file__).with_name("display-roomeq.py")),
+            command = [sys.executable, str(Path(__file__).resolve().parent.parent / "ui" / "display-roomeq"),
                        str(result_path), "-o", str(html_path),
                        "--capture-verification", str(capture_path)]
             run = subprocess.run(command, capture_output=True, text=True, check=False)
@@ -240,6 +256,21 @@ class ChannelDisplayCurveTests(unittest.TestCase):
 
 
 class SubDriverTabTests(unittest.TestCase):
+    def test_native_driver_acoustics_are_rendered_in_the_driver_tab(self):
+        data = two_sub_overview_data()
+        data["channels"]["LFE"]["drivers"][0]["measured_acoustics"] = {
+            "sample_rate_hz": 3000.0,
+            "pre_ir": {"time_ms": [0.0, 1.0, 2.0], "amplitude": [1.0, 0.5, 0.1]},
+            "t60_octaves": {"basis": "measured_room_ir", "min_r2": 0.9, "bands": []},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+        self.assertIn("Independent measured driver IR: Left Sub", html)
+        self.assertIn("native sample rate 3000.0 Hz", html)
+        self.assertIn("T60 bands beyond Nyquist are marked unavailable", html)
+
     def test_two_subs_expand_into_per_sub_tabs(self):
         entries = display_channel_entries(two_sub_overview_data())
 
@@ -633,7 +664,7 @@ class SummarySectionTests(unittest.TestCase):
             html = output.read_text(encoding="utf-8")
         self.assertIn("Recorded final correction decisions", html)
         self.assertLess(html.index("Recorded final correction decisions"),
-                        html.index("Section 1: Summary"))
+                        html.index('"subhead": "Summary"'))
         self.assertLess(html.index("Recorded final correction decisions"),
                         html.index('"title": "Combined Overview — Before EQ"'))
         with tempfile.TemporaryDirectory() as directory:
@@ -655,7 +686,7 @@ class SummarySectionTests(unittest.TestCase):
         self.assertNotIn("<h2>All EQ Filters</h2>", html)
         self.assertIn("<h2>Crossover Configuration</h2>", html)
         self.assertIn("Not approved for playback", html)
-        self.assertLess(html.index("Why this correction?"), html.index("Section 1: Summary"))
+        self.assertLess(html.index("Why this correction?"), html.index('"subhead": "Summary"'))
         self.assertLess(html.index("Why this correction?"), html.index('"title": "Combined Overview — Before EQ"'))
         # Summaries precede the per-channel tabs (first non-null section tab).
         self.assertLess(
@@ -743,15 +774,31 @@ class AcousticReportTests(unittest.TestCase):
         self.assertIsNone(t60_itu_reference(data))
         self.assertIn("limits unavailable", t60_itu_note(None))
 
-    def test_symmetric_pair_uses_fifty_db_view_without_changing_data(self):
+    def test_symmetric_pair_shows_three_traces_with_fifty_db_view(self):
         from scripts.src.figures import create_symmetric_pair_figure
-        for difference in ([70.0, -200.0], [None, None]):
-            plot = create_symmetric_pair_figure(
-                "L+R", [100.0, 1000.0], [86.0, 87.0], difference)["figure"]
-            self.assertEqual(plot["y"]["max"] - plot["y"]["min"], 50.0)
-            self.assertGreater(plot["y"]["max"], 87.0)
-            self.assertEqual(plot["series"][1]["y"], difference)
-        empty = create_symmetric_pair_figure("L+R", [], [], [])["figure"]
+        plot = create_symmetric_pair_figure(
+            "L+R", [100.0, 1000.0], [86.0, 87.0], [86.0, 80.0])["figure"]
+        self.assertEqual(plot["y"]["max"] - plot["y"]["min"], 50.0)
+        self.assertGreater(plot["y"]["max"], 87.0)
+        self.assertEqual(
+            [s["name"] for s in plot["series"]],
+            ["L+R absolute sum", "L+R complex sum", "L+R sum difference"],
+        )
+        self.assertEqual(plot["series"][2]["y"], [0.0, 7.0])
+        self.assertEqual(plot["series"][2]["y_axis"], 1)
+        self.assertEqual(plot["y2"]["label"], "Sum difference (dB)")
+        self.assertEqual(plot["y2"]["max"], 40.0)
+        # Deep cancellations pin to the 40 dB display ceiling.
+        deep = create_symmetric_pair_figure(
+            "L+R", [100.0], [86.0], [-200.0])["figure"]
+        self.assertEqual(deep["series"][2]["y"], [40.0])
+        # Without a complex sum only the absolute sum draws.
+        solo = create_symmetric_pair_figure(
+            "L+R", [100.0, 1000.0], [86.0, 87.0], None)["figure"]
+        self.assertEqual(len(solo["series"]), 1)
+        self.assertIsNone(solo["y2"])
+        self.assertIn("absolute sum only", solo["title"])
+        empty = create_symmetric_pair_figure("L+R", [], [], None)["figure"]
         self.assertEqual(empty["y"]["max"] - empty["y"]["min"], 50.0)
 
     def test_summary_reflection_level_requires_measured_and_valid_emitted_events(self):
@@ -1077,8 +1124,7 @@ class AcousticReportTests(unittest.TestCase):
         for expected in ("Section 1 — Results summary",
                          "Relative level compensation",
                          "Time of flight",
-                         "Section 2: Details per speaker",
-                         "Section 4 — Symmetric monitors",
+                         "Details per speaker",
                          "Symmetric pair: L+R",
                          "ITU-R BS.1116-3 upper limit",
                          "ITU-R BS.1116-3 lower limit",
@@ -1088,18 +1134,25 @@ class AcousticReportTests(unittest.TestCase):
                          "First dip (Hz)",
                          "Early vs late sound: pending roomeq field",
                          "Room mean: measured octave-band T60",
-                         "L: measured octave-band T60",
                          "Room T60 contributing speakers by octave: 63 Hz: 1"):
             self.assertIn(expected, html)
+        # Removed duplications: no repeated Section 4 heading, no per-channel
+        # T60 figure (the room block above carries per-speaker columns).
+        self.assertNotIn("Section 4 — Symmetric monitors", html)
+        self.assertNotIn("L: measured octave-band T60", html)
         # The flatness cell quotes live inside payload HTML (JSON-escaped on
         sections = report_payload(html)["sections"]
-        groups = list(dict.fromkeys(s["group"] for s in sections if s.get("group")))
-        self.assertEqual(groups, ["Why this correction?", "Section 1: Summary",
-            "Section 2: Details per speaker", "Section 3: Time of Flight",
-            "Section 4: Symmetric monitors", "Section 5: Time domain analysis", "Section 6: EPA scores"])
-        self.assertNotIn("group", sections[0])
+        pairs = [(s["bucket"], s["subhead"]) for s in sections if s.get("bucket")]
+        subheads = list(dict.fromkeys(subhead for _, subhead in pairs))
+        self.assertEqual(subheads, ["Why this correction?", "Summary",
+            "Details per speaker", "Time of Flight",
+            "Symmetric monitors", "Time domain analysis", "Section 6: EPA scores",
+            "DSP signal flow"])
+        self.assertEqual(list(dict.fromkeys(bucket for bucket, _ in pairs)),
+                         [BUCKET_DSP, BUCKET_ACOUSTICS, BUCKET_PSYCHOACOUSTIC])
+        self.assertNotIn("bucket", sections[0])
         self.assertNotIn("Optimization Summary", html)
-        details = [s for s in sections if s.get("group") == groups[2] and s.get("kind") == "figure"]
+        details = [s for s in sections if s.get("subhead") == subheads[2] and s.get("kind") == "figure"]
         self.assertEqual([s["tab"] for s in details], ["L", "R", "C"])
         self.assertTrue(all("Frequency landmarks" not in s["figure"]["title"] for s in details))
         # The flatness cell quotes live inside payload HTML (JSON-escaped on
@@ -1148,6 +1201,438 @@ class AcousticReportTests(unittest.TestCase):
         # The ratio cell flips from pending to its +6 dB value.
         self.assertIn(">+6.0<", summary)
         self.assertNotIn("needs roomeq field: early_late_curves", summary)
+
+
+class SplPresentationTests(unittest.TestCase):
+    def test_band_mean_spl_uses_finite_in_band_samples_only(self):
+        curve = {
+            "freq": [50.0, 100.0, 1000.0, 10_000.0, 20_000.0],
+            "spl": [0.0, 70.0, 80.0, 90.0, 0.0],
+        }
+        mean = band_mean_spl(curve, 100.0, 10_000.0)
+        assert mean is not None
+        self.assertAlmostEqual(mean, 80.0)
+        self.assertIsNone(band_mean_spl(curve, 200.0, 500.0))
+        self.assertIsNone(band_mean_spl({"freq": [100.0], "spl": [80.0, 81.0]},
+                                        100.0, 10_000.0))
+
+    def test_shift_target_matches_reference_band_mean(self):
+        reference = {
+            "freq": [50.0, 100.0, 1000.0, 10_000.0, 20_000.0],
+            "spl": [70.0, 72.0, 74.0, 76.0, 78.0],
+        }
+        target = {
+            "freq": [100.0, 1000.0, 10_000.0],
+            "spl": [80.0, 80.0, 80.0],
+        }
+        shifted = shift_target_to_reference_band_mean(target, reference)
+        assert shifted is not None
+        self.assertEqual(shifted["freq"], reference["freq"])
+        shifted_mean = band_mean_spl(shifted, 100.0, 10_000.0)
+        reference_mean = band_mean_spl(reference, 100.0, 10_000.0)
+        assert shifted_mean is not None and reference_mean is not None
+        self.assertAlmostEqual(shifted_mean, reference_mean)
+        # Empty reference band: no alignment possible.
+        self.assertIsNone(shift_target_to_reference_band_mean(
+            target, {"freq": [20.0, 30.0], "spl": [70.0, 71.0]}))
+
+    def test_zoomed_figures_default_to_50_db_span(self):
+        curve = {"freq": [20.0, 100.0, 500.0], "spl": [70.0, 72.0, 74.0]}
+        fig = create_zoomed_figure("L", curve, curve)
+        self.assertAlmostEqual(
+            fig["figure"]["y"]["max"] - fig["figure"]["y"]["min"], 50.0)
+        fig = create_comparison_zoomed_figure(
+            "L", [("iir", {"final_curve": curve})])
+        self.assertAlmostEqual(
+            fig["figure"]["y"]["max"] - fig["figure"]["y"]["min"], 50.0)
+
+
+class ComparisonTargetLevelTests(unittest.TestCase):
+    def _stereo_mode(self, level_db, target_db):
+        freq = [20.0, 50.0, 100.0, 200.0, 500.0, 1000.0,
+                2000.0, 5000.0, 10_000.0, 20_000.0]
+        curve = {"freq": list(freq), "spl": [level_db] * len(freq)}
+        target = {"freq": list(freq), "spl": [target_db] * len(freq)}
+        channel = {
+            "initial_curve": dict(curve),
+            "final_curve": dict(curve),
+            "target_curve": dict(target),
+        }
+        return {"channels": {"L": copy.deepcopy(channel),
+                             "R": copy.deepcopy(channel)},
+                "metadata": {}}
+
+    def _overlay_target(self, payload, tab):
+        figures = [
+            section["figure"]
+            for section in payload["sections"]
+            if section["kind"] == "figure"
+            and section.get("tab") == tab
+            and "Mode Comparison" in section["figure"]["title"]
+        ]
+        self.assertEqual(len(figures), 1)
+        targets = [s for s in figures[0]["series"] if s["name"] == "Target"]
+        self.assertEqual(len(targets), 1)
+        return targets[0]
+
+    def test_channel_targets_match_per_channel_mean_and_lr_matches_sum(self):
+        data = self._stereo_mode(75.0, 85.0)
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "comparison.html"
+            create_comparison_html_report([("iir", data)], output)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        for tab in ("L", "R"):
+            target = self._overlay_target(payload, tab)
+            mean = band_mean_spl(
+                {"freq": target["x"], "spl": target["y"]}, 100.0, 10_000.0)
+            assert mean is not None
+            self.assertAlmostEqual(mean, 75.0, places=6)
+        # The L+R tab shows the magnitude-only power sum, so its target
+        # stays matched to the summed level.
+        target = self._overlay_target(payload, "L+R")
+        mean = band_mean_spl(
+            {"freq": target["x"], "spl": target["y"]}, 100.0, 10_000.0)
+        assert mean is not None
+        self.assertAlmostEqual(mean, 75.0 + 10.0 * math.log10(2.0), places=6)
+
+
+class DriverTabT60Tests(unittest.TestCase):
+    def test_driver_tabs_keep_their_own_t60(self):
+        freq = [20.0, 100.0, 1000.0]
+        centers = (63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+        t60 = {
+            "basis": "measured_room_ir",
+            "min_r2": 0.9,
+            "bands": [
+                {"centre_hz": c, "valid": True, "t60_s": 0.3,
+                 "fit_range": "T30", "r2": 0.95, "reason": None}
+                for c in centers
+            ],
+        }
+        data = {
+            "channels": {
+                "LFE": {
+                    "drivers": [{
+                        "name": "Sub1",
+                        "initial_curve": {"freq": list(freq), "spl": [70.0] * 3},
+                        "measured_acoustics": {"t60_octaves": t60},
+                    }],
+                },
+            },
+            "metadata": {},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            html = output.read_text(encoding="utf-8")
+        # Driver-level fits exist nowhere else, so driver tabs keep them
+        # while channel tabs reuse the room-level block.
+        self.assertIn("Sub1: measured octave-band T60", html)
+        self.assertNotIn("LFE: measured octave-band T60", html)
+
+
+class SymmetricComplexSumReportTests(unittest.TestCase):
+    def test_pair_figure_draws_absolute_complex_and_difference(self):
+        freq = [100.0, 1000.0]
+        abs_level = 80.0 + 20.0 * math.log10(2.0)
+        data = {
+            "channels": {
+                "L": {
+                    "initial_curve": {"freq": list(freq), "spl": [80.0, 80.0]},
+                    "final_curve": {"freq": list(freq), "spl": [80.0, 80.0],
+                                    "phase": [0.0, 0.0]},
+                },
+                "R": {
+                    "initial_curve": {"freq": list(freq), "spl": [80.0, 80.0]},
+                    "final_curve": {"freq": list(freq), "spl": [80.0, 80.0],
+                                    "phase": [0.0, 90.0]},
+                },
+            },
+            "metadata": {},
+        }
+        wrapped = RoomEqData(data, Path("."))
+        setattr(wrapped, "symmetric_pairs", {"L+R": {
+            "freq": list(freq),
+            "sum_spl": [abs_level, abs_level],
+            "diff_spl": [-120.0, -120.0],
+        }})
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(wrapped, output, None)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        figures = [
+            section["figure"]
+            for section in payload["sections"]
+            if section["kind"] == "figure" and section.get("tab") == "L+R"
+            and section["figure"]["title"].startswith("Symmetric pair: L+R")
+        ]
+        self.assertEqual(len(figures), 1)
+        by_name = {s["name"]: s for s in figures[0]["series"]}
+        self.assertEqual(
+            sorted(by_name),
+            ["L+R absolute sum", "L+R complex sum", "L+R sum difference"],
+        )
+        # In phase at 100 Hz (no cancellation), quadrature at 1 kHz.
+        self.assertAlmostEqual(by_name["L+R complex sum"]["y"][0], abs_level)
+        self.assertAlmostEqual(
+            by_name["L+R complex sum"]["y"][1], 83.01029995663981, places=6)
+        self.assertAlmostEqual(by_name["L+R sum difference"]["y"][0], 0.0)
+        self.assertAlmostEqual(
+            by_name["L+R sum difference"]["y"][1], 3.01029995663981, places=6)
+
+    def test_pair_figure_without_phase_shows_absolute_only(self):
+        freq = [100.0, 1000.0]
+        data = {
+            "channels": {
+                side: {
+                    "initial_curve": {"freq": list(freq), "spl": [80.0, 80.0]},
+                    "final_curve": {"freq": list(freq), "spl": [80.0, 80.0]},
+                }
+                for side in ("L", "R")
+            },
+            "metadata": {},
+        }
+        wrapped = RoomEqData(data, Path("."))
+        setattr(wrapped, "symmetric_pairs", {"L+R": {
+            "freq": list(freq),
+            "sum_spl": [86.0, 86.0],
+            "diff_spl": [-120.0, -120.0],
+        }})
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(wrapped, output, None)
+            html = output.read_text(encoding="utf-8")
+        payload = report_payload(html)
+        figures = [
+            section["figure"]
+            for section in payload["sections"]
+            if section["kind"] == "figure" and section.get("tab") == "L+R"
+            and section["figure"]["title"].startswith("Symmetric pair: L+R")
+        ]
+        self.assertEqual(len(figures), 1)
+        self.assertEqual(
+            [s["name"] for s in figures[0]["series"]], ["L+R absolute sum"])
+        self.assertIn("complex sum unavailable", html)
+
+
+class WaterfallSurfaceDefaultsTests(unittest.TestCase):
+    def test_surface_defaults_to_contours_with_hidden_fill(self):
+        section = grid_figure(
+            "Waterfall", [20.0, 20000.0], [0.0, 500.0],
+            [[0.0, -60.0], [-60.0, -60.0]], surface=True)
+        grid = section["grid"]
+        self.assertEqual(grid["colormap"], "turbo")
+        self.assertIs(grid["show_surface"], False)
+        self.assertIs(grid["show_contours"], True)
+
+    def test_surface_display_options_override_defaults(self):
+        section = grid_figure(
+            "Waterfall", [20.0, 20000.0], [0.0, 500.0],
+            [[0.0, -60.0], [-60.0, -60.0]], surface=True,
+            colormap="viridis", show_surface=True, show_contours=False)
+        grid = section["grid"]
+        self.assertEqual(grid["colormap"], "viridis")
+        self.assertIs(grid["show_surface"], True)
+        self.assertIs(grid["show_contours"], False)
+
+    def test_heatmap_omits_surface_display_keys(self):
+        section = grid_figure(
+            "Wavelet", [20.0, 20000.0], [-1.0, 15.0],
+            [[0.0, -30.0], [-30.0, -30.0]])
+        grid = section["grid"]
+        self.assertNotIn("colormap", grid)
+        self.assertNotIn("show_surface", grid)
+        self.assertNotIn("show_contours", grid)
+
+
+class ReportProvenanceTests(unittest.TestCase):
+    def test_roomeq_version_prefers_stamped_producer_version(self):
+        self.assertEqual(
+            _roomeq_version({"metadata": {"producer_version": "9.9.9"}}), "9.9.9")
+        self.assertEqual(
+            _roomeq_version({"metadata": {"producer_version": "  "},
+                             "roomeq_version": "8.8.8"}), "8.8.8")
+        self.assertEqual(_roomeq_version({}), _workspace_roomeq_version())
+
+    def test_workspace_roomeq_version_tracks_cargo_toml(self):
+        version = _workspace_roomeq_version()
+        assert version is not None
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+        cargo = (Path(__file__).resolve().parent.parent / "Cargo.toml"
+                 ).read_text(encoding="utf-8")
+        package = cargo.split("[workspace.package]", 1)[1].split("[", 1)[0]
+        self.assertIn(f'version = "{version}"', package)
+
+    def test_report_provenance_carries_version_and_dates(self):
+        provenance = _report_provenance(
+            [("", {"metadata": {"timestamp": "2026-10-01T10:00:00Z"}})])
+        self.assertEqual(provenance["roomeq_version"], _workspace_roomeq_version())
+        self.assertEqual(provenance["data_timestamp"], "2026-10-01T10:00:00Z")
+        self.assertRegex(provenance["generated_at"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+        mixed = _report_provenance([
+            ("a", {"metadata": {"producer_version": "1.0", "timestamp": "t1"}}),
+            ("b", {"metadata": {"producer_version": "2.0", "timestamp": "t2"}}),
+        ])
+        self.assertEqual(mixed["roomeq_version"], "1.0 / 2.0")
+        self.assertEqual(mixed["data_timestamp"], "t1 / t2")
+
+    def test_html_report_embeds_provenance_payload(self):
+        data = _driver_eq_split_data()
+        metadata: dict = data.setdefault("metadata", {})
+        metadata["timestamp"] = "2026-10-01T10:00:00Z"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        self.assertEqual(payload["provenance"]["roomeq_version"],
+                         _workspace_roomeq_version())
+        self.assertEqual(payload["provenance"]["data_timestamp"],
+                         "2026-10-01T10:00:00Z")
+        self.assertIn("generated_at", payload["provenance"])
+
+    def test_shell_renders_provenance_above_renderer_status(self):
+        template = (Path(__file__).resolve().parent.parent / "crates"
+                    / "autoeq-report-wasm" / "shell" / "template.html"
+                    ).read_text(encoding="utf-8")
+        self.assertLess(template.index('id="report-provenance"'),
+                        template.index('id="renderer-status"'))
+        for field in ("provenance.roomeq_version", "provenance.data_timestamp",
+                      "provenance.generated_at"):
+            self.assertIn(field, template)
+        # Text assignment keeps untrusted values out of the HTML parser.
+        self.assertIn('getElementById("report-provenance").textContent', template)
+
+
+class ReportBucketTests(unittest.TestCase):
+    def test_single_report_assigns_three_buckets(self):
+        data = _driver_eq_split_data()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        sections = payload["sections"]
+        # The flat playback verdict stays unbucketed ahead of the tabs.
+        self.assertNotIn("bucket", sections[0])
+        self.assertTrue(sections[0].get("flat"))
+        self.assertIn("playback-status", sections[0]["html"])
+        pairs = [(section.get("bucket"), section.get("subhead"))
+                 for section in sections[1:]]
+        self.assertTrue(all(bucket for bucket, _ in pairs))
+        self.assertTrue(all(subhead for _, subhead in pairs))
+        self.assertFalse(any("group" in section for section in sections))
+        ordered = list(dict.fromkeys(pairs))
+        self.assertEqual(ordered, [
+            (BUCKET_DSP, "Why this correction?"),
+            (BUCKET_ACOUSTICS, "Summary"),
+            (BUCKET_ACOUSTICS, "Details per speaker"),
+            (BUCKET_ACOUSTICS, "Time of Flight"),
+            (BUCKET_ACOUSTICS, "Symmetric monitors"),
+            (BUCKET_ACOUSTICS, "Time domain analysis"),
+            (BUCKET_PSYCHOACOUSTIC, "Section 6: EPA scores"),
+            (BUCKET_DSP, "DSP signal flow"),
+        ])
+        self.assertEqual(
+            [BUCKET_DSP, BUCKET_ACOUSTICS, BUCKET_PSYCHOACOUSTIC],
+            ["DSP analysis", "Acoustics analysis", "Psychoacoustic report"])
+
+    def test_comparison_report_stays_unbucketed(self):
+        data = _driver_eq_split_data()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "comparison.html"
+            create_comparison_html_report([("iir", data), ("fir", data)], output)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        self.assertFalse(any("bucket" in section for section in payload["sections"]))
+
+    def test_relative_levels_lead_the_details_tab(self):
+        data = _driver_eq_split_data()
+        grid = [100.0, 1000.0, 2000.0, 3000.0]
+        data["channels"]["L"]["initial_curve"] = {"freq": grid, "spl": [0.0, 0.0, 0.0, 0.0]}
+        data["channels"]["R"]["initial_curve"] = {"freq": grid, "spl": [1.0, 1.0, 1.0, 1.0]}
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        sections = payload["sections"]
+        details = [s for s in sections if s.get("subhead") == "Details per speaker"]
+        self.assertTrue(details)
+        self.assertIn("Relative level compensation", details[0].get("html", ""))
+        self.assertIsNone(details[0].get("tab"))
+        summary = [s for s in sections if s.get("subhead") == "Summary"]
+        self.assertFalse(any("Relative level compensation" in s.get("html", "")
+                             for s in summary))
+
+    def test_shell_renders_centered_bucket_tabs(self):
+        template = (Path(__file__).resolve().parent.parent / "crates"
+                    / "autoeq-report-wasm" / "shell" / "template.html"
+                    ).read_text(encoding="utf-8")
+        self.assertIn('["DSP analysis", "Acoustics analysis", "Psychoacoustic report"]',
+                      template)
+        self.assertIn("buildBucketPage", template)
+        bar = template.split(".bucket-bar {", 1)[1].split("}", 1)[0]
+        self.assertIn("justify-content: center", bar)
+        buttons = template.split(".bucket-bar button {", 1)[1].split("}", 1)[0]
+        self.assertIn("border-radius: 8px 8px 0 0", buttons)
+
+    def test_bucket_subheads_render_as_tabs(self):
+        template = (Path(__file__).resolve().parent.parent / "crates"
+                    / "autoeq-report-wasm" / "shell" / "template.html"
+                    ).read_text(encoding="utf-8")
+        self.assertIn("buildBucketPage", template)
+        self.assertIn("subhead-bar", template)
+        self.assertIn("subpage", template)
+        self.assertIn(".tabbar, .subhead-bar", template)
+        self.assertNotIn("bucket-subhead", template)
+
+    def test_single_card_rule_and_flat_verdict(self):
+        template = (Path(__file__).resolve().parent.parent / "crates"
+                    / "autoeq-report-wasm" / "shell" / "template.html"
+                    ).read_text(encoding="utf-8")
+        self.assertIn(".html-section.flat", template)
+        self.assertIn(".html-section .filters-section", template)
+        self.assertIn(".html-section .plot-container", template)
+        self.assertIn('sec.flat ? " flat" : ""', template)
+
+    def test_details_eq_second_axis_spans_50db(self):
+        data = _driver_eq_split_data()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "report.html"
+            create_html_report(data, output, None)
+            payload = report_payload(output.read_text(encoding="utf-8"))
+        full = [s["figure"] for s in payload["sections"]
+                if s.get("kind") == "figure"
+                and s.get("subhead") == "Details per speaker"
+                and "(Full Range)" in s["figure"].get("title", "")
+                and s["figure"].get("y2")]
+        self.assertTrue(full)
+        for fig in full:
+            self.assertEqual(fig["y2"]["min"], -25.0)
+            self.assertEqual(fig["y2"]["max"], 25.0)
+
+    def test_frequency_graphs_stack_presets_and_offer_db_spans(self):
+        template = (Path(__file__).resolve().parent.parent / "crates"
+                    / "autoeq-report-wasm" / "shell" / "template.html"
+                    ).read_text(encoding="utf-8")
+        freq = template.split(".freq-presets {", 1)[1].split("}", 1)[0]
+        self.assertIn("flex-direction: column", freq)
+        self.assertIn(".db-presets", template)
+        self.assertIn("setDbSpan", template)
+        self.assertIn("for (const span of [20, 50])", template)
+
+    def test_graphs_are_capped_at_800px(self):
+        template = (Path(__file__).resolve().parent.parent / "crates"
+                    / "autoeq-report-wasm" / "shell" / "template.html"
+                    ).read_text(encoding="utf-8")
+        card = template.split(".plot-container {", 1)[1].split("}", 1)[0]
+        self.assertIn("max-width: 800px", card)
+        self.assertIn("margin: 0 auto 20px", card)
+        self.assertIn(".html-section .plot-container:not(:has(canvas))", template)
+        self.assertIn(".html-section .plot-container:has(canvas)", template)
+
+    def test_correction_explanation_has_no_inline_card(self):
+        from scripts.src.correction_explanation import correction_explanation_html
+        html = correction_explanation_html({"channels": {}, "metadata": {}})
+        self.assertIn('<section class="correction-explanation">', html)
+        self.assertNotIn("background:#fff", html)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,36 @@
 {
+  "measured_impulse_responses": {
+    "L": {
+      "path": "measured_ir/L_r3m_ported_48k_FL_260706a_direct_Jul_6_-20_dBFS__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "kef-mlp-session-1"
+    },
+    "R": {
+      "path": "measured_ir/R_r3m_ported_48k_FR_260706a_direct_Jul_6_-20_dBFS__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "kef-mlp-session-1"
+    },
+    "C": {
+      "path": "measured_ir/C_r3m_ported_48k_FC_260706a_direct_Jul_6_-20_dBFS__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "kef-mlp-session-1"
+    },
+    "BL": {
+      "path": "measured_ir/BL_r3m_ported_48k_RL_260706a_direct_Jul_6_-20_dBFS__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "kef-mlp-session-1"
+    },
+    "BR": {
+      "path": "measured_ir/BR_r3m_ported_48k_RR_260706a_direct_Jul_6_-20_dBFS__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "kef-mlp-session-1"
+    },
+    "Sub1": {
+      "path": "measured_ir/LFE_r3m_ported_48k_LFE_260706a_direct_Jul_6_-20_dBFS__ir.csv",
+      "sample_rate_hz": 48000,
+      "timing_reference_id": "kef-mlp-session-1"
+    }
+  },
   "version": "3.0.0",
   "system": {
     "model": "home_cinema",

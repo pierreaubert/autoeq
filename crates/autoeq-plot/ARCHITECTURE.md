@@ -43,5 +43,5 @@ std::fs::write("report.html", fig.to_html())?; // interactive; static_export cov
 ## Consumers
 
 `autoeq-cli` (optional). The RoomEQ HTML path used by
-`scripts/display-roomeq.py` is separate (`scripts/src/report.py`); see the
+`ui/display-roomeq` is separate (`ui/display-roomeq/report.py`); see the
 RoomEQ display flow in `docs/ARCHITECTURE.md`.

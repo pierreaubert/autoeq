@@ -21,8 +21,8 @@ use wasm_bindgen::prelude::*;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 use autoeq_report_wasm::draw::{
-    Ctx, DrawMeta, LegendEntry, PaintTriangle, TextAlign, draw_bar, draw_figure, draw_sankey,
-    paint_triangles,
+    Ctx, DrawMeta, LegendEntry, PaintTriangle, PlotGeometry, TextAlign, draw_bar, draw_figure,
+    draw_sankey, paint_triangles,
 };
 use autoeq_report_wasm::grid::draw_grid;
 use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
@@ -31,6 +31,7 @@ use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
 struct Retained {
     section: Section,
     legend: Vec<LegendEntry>,
+    plot: Option<PlotGeometry>,
     w: f64,
     h: f64,
     dpr: f64,
@@ -202,6 +203,7 @@ pub fn render_section(canvas_id: &str, section_json: &str, w: f64, h: f64, dpr: 
             Retained {
                 section,
                 legend: meta.legend,
+                plot: meta.plot,
                 w,
                 h,
                 dpr,
@@ -209,6 +211,35 @@ pub fn render_section(canvas_id: &str, section_json: &str, w: f64, h: f64, dpr: 
         );
     }
     0
+}
+
+/// Map a rubber-band pixel rectangle to data domains for box zoom.
+///
+/// `x0/y0/x1/y1` are canvas CSS px (origin top-left). Returns
+/// `{"x":[lo,hi],"y":[lo,hi]}` in data units, or `""` when the canvas is
+/// unknown, never rendered a figure, or the selection is degenerate.
+#[wasm_bindgen]
+pub fn selection_domain_json(canvas_id: &str, x0: f64, y0: f64, x1: f64, y1: f64) -> String {
+    let plot = state()
+        .lock()
+        .map(|map| map.get(canvas_id).and_then(|r| r.plot))
+        .unwrap_or(None);
+    let Some(plot) = plot else {
+        return String::new();
+    };
+    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
+        return String::new();
+    }
+    let (ax, ay) = plot.invert(x0.min(x1), y0.min(y1));
+    let (bx, by) = plot.invert(x0.max(x1), y0.max(y1));
+    let (x_lo, x_hi) = (ax.min(bx), ax.max(bx));
+    let (y_lo, y_hi) = (ay.min(by), ay.max(by));
+    if !(x_lo.is_finite() && x_hi.is_finite() && y_lo.is_finite() && y_hi.is_finite())
+        || !(x_hi > x_lo && y_hi > y_lo)
+    {
+        return String::new();
+    }
+    format!("{{\"x\":[{x_lo:.6},{x_hi:.6}],\"y\":[{y_lo:.6},{y_hi:.6}]}}")
 }
 
 /// Legend hit rectangles for a rendered canvas as JSON
@@ -380,6 +411,7 @@ fn rerender(canvas_id: &str, w: f64, h: f64, dpr: f64) -> i32 {
         && let Some(r) = map.get_mut(canvas_id)
     {
         r.legend = meta.legend;
+        r.plot = meta.plot;
     }
     1
 }
@@ -419,5 +451,13 @@ mod tests {
         assert_eq!(legend_json("no-such-canvas"), "[]");
         assert_eq!(toggle_series("no-such-canvas", 0), 0);
         assert_eq!(last_error(), "");
+        assert_eq!(
+            selection_domain_json("no-such-canvas", 0.0, 0.0, 10.0, 10.0),
+            ""
+        );
+        assert_eq!(
+            selection_domain_json("no-such-canvas", f64::NAN, 0.0, 10.0, 10.0),
+            ""
+        );
     }
 }

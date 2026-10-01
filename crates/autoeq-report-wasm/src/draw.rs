@@ -105,6 +105,47 @@ pub struct LegendEntry {
 pub struct DrawMeta {
     /// Legend entries in series order (empty when the legend is hidden).
     pub legend: Vec<LegendEntry>,
+    /// Plot-area geometry for client-side rubber-band zoom mapping.
+    /// `None` for chart kinds that do not support box zoom.
+    pub plot: Option<PlotGeometry>,
+}
+
+/// Plot-area rectangle plus data domains of the last figure render.
+#[derive(Debug, Clone, Copy)]
+pub struct PlotGeometry {
+    /// Plot-area left edge in CSS px.
+    pub plot_x: f64,
+    /// Plot-area top edge in CSS px.
+    pub plot_y: f64,
+    /// Plot-area width in CSS px.
+    pub plot_w: f64,
+    /// Plot-area height in CSS px.
+    pub plot_h: f64,
+    /// Current x domain (data units).
+    pub x_lo: f64,
+    /// Current x domain (data units).
+    pub x_hi: f64,
+    /// Current primary-y domain (data units).
+    pub y_lo: f64,
+    /// Current primary-y domain (data units).
+    pub y_hi: f64,
+    /// True when the x axis is logarithmic.
+    pub log_x: bool,
+}
+
+impl PlotGeometry {
+    /// Map a canvas CSS-px point to data coordinates, clamped to the plot.
+    pub fn invert(&self, px: f64, py: f64) -> (f64, f64) {
+        let t = ((px - self.plot_x) / self.plot_w).clamp(0.0, 1.0);
+        let u = ((py - self.plot_y) / self.plot_h).clamp(0.0, 1.0);
+        let x = if self.log_x && self.x_lo > 0.0 && self.x_hi > self.x_lo {
+            self.x_lo * (self.x_hi / self.x_lo).powf(t)
+        } else {
+            self.x_lo + (self.x_hi - self.x_lo) * t
+        };
+        let y = self.y_hi + (self.y_lo - self.y_hi) * u;
+        (x, y)
+    }
 }
 
 /// Plot area paddings in CSS px.
@@ -119,9 +160,11 @@ struct Pad {
 const FONT: &str = "12px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const FONT_TITLE: &str = "600 14px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const FONT_SMALL: &str = "11px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
+const FONT_AXIS: &str = "14px system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
 const INK: &str = "#333333";
 const INK_FAINT: &str = "#777777";
 const GRID: &str = "#e6e6e6";
+const GRID_MINOR: &str = "#f0f0f0";
 const AXIS: &str = "#999999";
 
 /// Default series color: `d3rs` category10 slot (wraps around).
@@ -395,6 +438,54 @@ pub(crate) fn fmt_log_grid(v: f64) -> String {
     }
 }
 
+/// Y label that selects the audio SPL grid: labeled majors on an adaptive
+/// 1/2/5 stride plus a horizontal gridline every integer dB.
+pub(crate) const SPL_DB_LABEL: &str = "SPL (dB)";
+
+/// Major (labeled) and minor (1 dB gridline-only) ticks for an SPL axis.
+///
+/// The major stride is the smallest 1/2/5 step holding the label count near
+/// a dozen (5 dB for the standard 50 dB span); minors cover every other
+/// integer dB so the horizontal grid lands every dB. Both lists stay within
+/// `[y_lo, y_hi)`, mirroring [`log_grid_ticks`].
+pub(crate) fn spl_db_ticks(y_lo: f64, y_hi: f64) -> (Vec<f64>, Vec<f64>) {
+    if !(y_lo.is_finite() && y_hi.is_finite() && y_hi > y_lo) {
+        return (Vec::new(), Vec::new());
+    }
+    let span = y_hi - y_lo;
+    let stride = [1.0, 2.0, 5.0, 10.0, 25.0, 50.0, 100.0, 250.0]
+        .into_iter()
+        .find(|step| span / step <= 12.0)
+        .unwrap_or(500.0);
+    let mut majors = Vec::new();
+    let mut value = (y_lo / stride).ceil() * stride;
+    // Snap near-integers: ceil(4.9999999) style float dust must not shift
+    // the grid off the multiples the labels promise.
+    if (value / stride - (value / stride).round()).abs() < 1e-9 {
+        value = (value / stride).round() * stride;
+    }
+    while value < y_hi - 1e-9 {
+        if value >= y_lo - 1e-9 {
+            majors.push(value);
+        }
+        value += stride;
+    }
+    let mut minors = Vec::new();
+    // Bound minor count on extreme zoom-outs (past ~150 lines they merge
+    // into sub-pixel noise); the labeled majors still mark the scale.
+    if span <= 150.0 {
+        let mut db = (y_lo + 1e-9).ceil();
+        while db < y_hi - 1e-9 {
+            let ratio = db / stride;
+            if (ratio - ratio.round()).abs() > 1e-9 {
+                minors.push(db);
+            }
+            db += 1.0;
+        }
+    }
+    (majors, minors)
+}
+
 /// Draw one Cartesian line figure; returns legend geometry.
 pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta {
     ctx.set_fill("#ffffff");
@@ -549,11 +640,17 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
         XMap::Log(s) => AxisLayout::from_scale(s, &x_cfg, plot_w as f32),
         XMap::Linear(s) => AxisLayout::from_scale(s, &x_cfg, plot_w as f32),
     };
-    let y_cfg = AxisConfig::left()
+    let mut y_cfg = AxisConfig::left()
         .with_ticks(6)
         .with_tick_size(5.0)
         .with_formatter(fmt_num)
         .with_title(fig.y.label.clone());
+    if fig.y.label == SPL_DB_LABEL {
+        let (majors, minors) = spl_db_ticks(y_lo, y_hi);
+        y_cfg = y_cfg
+            .with_tick_values(majors)
+            .with_minor_tick_values(minors);
+    }
     let y_layout = AxisLayout::from_scale(&yscale, &y_cfg, plot_h as f32);
     draw_axis_layout(ctx, &x_layout, plot_y + plot_h, plot_h, true, false);
     draw_axis_layout(ctx, &y_layout, plot_x, plot_w, false, false);
@@ -650,7 +747,20 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
     }
 
     // Legend column (right of the plot area, past any y2 labels).
-    let mut meta = DrawMeta::default();
+    let mut meta = DrawMeta {
+        plot: Some(PlotGeometry {
+            plot_x,
+            plot_y,
+            plot_w,
+            plot_h,
+            x_lo,
+            x_hi,
+            y_lo,
+            y_hi,
+            log_x,
+        }),
+        ..DrawMeta::default()
+    };
     if fig.legend && !fig.series.is_empty() {
         let lx = plot_x + plot_w + 10.0 + if y2_active { 56.0 } else { 0.0 };
         let mut ly = plot_y + 2.0;
@@ -716,6 +826,24 @@ pub(crate) fn draw_axis_layout(
             }
         }
         ctx.stroke();
+        // Minor gridlines (e.g. the 1 dB SPL horizontals) stay lighter so
+        // the labeled majors keep the visual hierarchy. Only axes that set
+        // explicit minor tick values are affected.
+        if !layout.minor_ticks.is_empty() {
+            ctx.set_stroke(GRID_MINOR);
+            ctx.set_line_width(1.0);
+            ctx.begin_path();
+            for t in &layout.minor_ticks {
+                if horizontal {
+                    ctx.move_to(t.position, cross);
+                    ctx.line_to(t.position, cross - plot_len);
+                } else {
+                    ctx.move_to(cross, t.position);
+                    ctx.line_to(cross + plot_len, t.position);
+                }
+            }
+            ctx.stroke();
+        }
     }
     // Tick marks (relative to the axis line).
     ctx.set_stroke(AXIS);
@@ -747,7 +875,7 @@ pub(crate) fn draw_axis_layout(
     }
     // Tick labels.
     ctx.set_fill(INK);
-    ctx.set_font(FONT);
+    ctx.set_font(FONT_AXIS);
     for t in layout.all_ticks() {
         let Some(label) = t.label.as_ref() else {
             continue;
@@ -762,13 +890,13 @@ pub(crate) fn draw_axis_layout(
         if horizontal {
             ctx.fill_text(label, p.x as f64, cross + p.y as f64, TextAlign::Center);
         } else if mirror {
-            ctx.fill_text(label, cross + p.x as f64, t.position + 4.0, TextAlign::Left);
+            ctx.fill_text(label, cross + p.x as f64, t.position + 5.0, TextAlign::Left);
         } else {
             // Nudge up half a line for optical centering on the tick.
             ctx.fill_text(
                 label,
                 cross + p.x as f64,
-                t.position + 4.0,
+                t.position + 5.0,
                 TextAlign::Right,
             );
         }
@@ -776,7 +904,7 @@ pub(crate) fn draw_axis_layout(
     // Axis title.
     if let Some(title) = &layout.title {
         ctx.set_fill(INK_FAINT);
-        ctx.set_font(FONT);
+        ctx.set_font(FONT_AXIS);
         if horizontal {
             ctx.fill_text(
                 &title.text,
@@ -931,7 +1059,7 @@ pub fn draw_bar(
         }
         // Category label.
         ctx.set_fill(INK);
-        ctx.set_font(FONT_SMALL);
+        ctx.set_font(FONT_AXIS);
         let label = truncate_label(cat, ctx, slot - 6.0);
         ctx.fill_text(&label, cx, plot_y + plot_h + 18.0, TextAlign::Center);
     }
@@ -1000,7 +1128,7 @@ pub fn draw_sankey(ctx: &mut impl Ctx, chart: &SankeyChart, w: f64, h: f64) {
     let Ok(layout) = SankeyLayout::new()
         .width(area_w)
         .height(area_h)
-        .node_width(14.0)
+        .node_width(if chart.node_boxes { 140.0 } else { 14.0 })
         .node_padding(10.0)
         .try_compute(&chart.nodes, &inputs)
     else {
@@ -1009,6 +1137,48 @@ pub fn draw_sankey(ctx: &mut impl Ctx, chart: &SankeyChart, w: f64, h: f64) {
         ctx.fill_text("no flow data", 12.0, top + 16.0, TextAlign::Left);
         return;
     };
+
+    if chart.node_boxes {
+        // Fixed-height boxes show processing, not a conserved flow quantity.
+        // d3rs still owns the layered positions and split/sum layout.
+        ctx.set_stroke("#4a90d9");
+        ctx.set_line_width(2.0);
+        ctx.set_dash(&[]);
+        for link in &layout.links {
+            let source = &layout.nodes[link.source];
+            let target = &layout.nodes[link.target];
+            let sx = 12.0 + source.x1;
+            let tx = 12.0 + target.x0;
+            let sy = top + (source.y0 + source.y1) / 2.0;
+            let ty = top + (target.y0 + target.y1) / 2.0;
+            let midpoint = (sx + tx) / 2.0;
+            ctx.begin_path();
+            ctx.move_to(sx, sy);
+            ctx.bezier_to(midpoint, sy, midpoint, ty, tx, ty);
+            ctx.stroke();
+            ctx.set_fill("#4a90d9");
+            ctx.begin_path();
+            ctx.move_to(tx, ty);
+            ctx.line_to(tx - 7.0, ty - 4.0);
+            ctx.line_to(tx - 7.0, ty + 4.0);
+            ctx.close_path();
+            ctx.fill();
+        }
+        ctx.set_font(FONT_SMALL);
+        for node in &layout.nodes {
+            let x = 12.0 + node.x0;
+            let y = top + (node.y0 + node.y1) / 2.0;
+            let width = node.x1 - node.x0;
+            ctx.set_fill("#4a90d9");
+            ctx.fill_rect(x, y - 19.0, width, 38.0);
+            ctx.set_fill("#eef5fc");
+            ctx.fill_rect(x + 1.0, y - 18.0, width - 2.0, 36.0);
+            ctx.set_fill(INK);
+            let label = truncate_label(&node.id, ctx, width - 10.0);
+            ctx.fill_text(&label, x + width / 2.0, y + 4.0, TextAlign::Center);
+        }
+        return;
+    }
 
     // Links under the nodes.
     for (li, link) in layout.links.iter().enumerate() {
@@ -1046,9 +1216,8 @@ pub fn draw_sankey(ctx: &mut impl Ctx, chart: &SankeyChart, w: f64, h: f64) {
         ctx.set_fill(INK);
         let name = truncate_label(&node.id, ctx, 150.0);
         // Rightmost layer labels go left of the node.
-        let is_sink = layout.links.iter().all(|l| l.target != node.index);
         let dest_right = layout.nodes.iter().any(|o| o.x0 > node.x0 + 1.0);
-        if dest_right && !is_sink {
+        if dest_right {
             ctx.fill_text(&name, nx + nw + 5.0, ny + nh / 2.0 + 4.0, TextAlign::Left);
         } else {
             let tw = ctx.text_width(&name);
@@ -1204,6 +1373,9 @@ mod tests {
             zmax: 0.0,
             highlights: vec![1],
             rotation: None,
+            colormap: String::from("turbo"),
+            show_surface: false,
+            show_contours: true,
         };
         for surface in [false, true] {
             grid.surface = surface;
@@ -1215,6 +1387,26 @@ mod tests {
             assert!(texts.iter().any(|t| t.0 == "Time (ms)"));
             assert!(texts.iter().any(|t| t.0 == "dB"));
             assert!(!ctx.ops.borrow().iter().any(|op| op.contains("NaN")));
+            // The heatmap overlays the cyan dashed peak-energy-time ridge.
+            if !surface {
+                assert!(
+                    ctx.ops.borrow().iter().any(|op| op == "stroke=#00d5ff"),
+                    "heatmap must draw the peak-energy-time curve"
+                );
+            } else {
+                // Default surface: contour slices with white hidden-line
+                // underfill, one fill plus one stroke per time slice.
+                let ops = ctx.ops.borrow();
+                assert_eq!(
+                    ops.iter().filter(|op| op.as_str() == "fill-path").count(),
+                    3,
+                    "each slice needs a hidden-line underfill"
+                );
+                assert!(
+                    ops.iter().any(|op| op.as_str() == "stroke=#111111"),
+                    "surface must draw contour slices"
+                );
+            }
         }
         grid.rotation = Some([40.0, 50.0]);
         let mut rotated = Rec::default();
@@ -1284,6 +1476,70 @@ mod tests {
     }
 
     #[test]
+    fn spl_ticks_label_every_5db_and_grid_every_db() {
+        let (majors, minors) = spl_db_ticks(-20.0, 30.0);
+        assert_eq!(
+            majors,
+            vec![-20.0, -15.0, -10.0, -5.0, 0.0, 5.0, 10.0, 15.0, 20.0, 25.0]
+        );
+        assert_eq!(minors.len(), 40);
+        assert!(minors.contains(&-19.0));
+        assert!(minors.contains(&29.0));
+        assert!(!minors.iter().any(|v| (v / 5.0).fract() == 0.0));
+        // Zoomed-in spans tighten the label stride instead of going sparse.
+        let (majors, minors) = spl_db_ticks(-2.0, 6.0);
+        assert_eq!(majors, vec![-2.0, -1.0, 0.0, 1.0, 2.0, 3.0, 4.0, 5.0]);
+        assert!(minors.is_empty());
+        // Degenerate domains yield no ticks rather than a stuck loop.
+        assert_eq!(spl_db_ticks(5.0, 5.0), (Vec::new(), Vec::new()));
+        assert_eq!(spl_db_ticks(f64::NAN, 5.0), (Vec::new(), Vec::new()));
+    }
+
+    #[test]
+    fn spl_figure_draws_minor_db_gridlines_and_reports_geometry() {
+        let mut fig = demo_figure();
+        fig.y.min = Some(-20.0);
+        fig.y.max = Some(30.0);
+        let mut ctx = Rec::default();
+        let meta = draw_figure(&mut ctx, &fig, 900.0, 500.0);
+        let ops = ctx.ops.borrow().join("\n");
+        assert!(ops.contains("stroke=#f0f0f0"), "minor dB gridlines missing");
+        assert!(ops.contains("stroke=#e6e6e6"), "major gridlines missing");
+        let plot = meta.plot.expect("figure must report plot geometry");
+        assert!(plot.plot_w > 100.0 && plot.plot_h > 100.0);
+        assert!(plot.log_x);
+        // Corners invert back to the explicit domains.
+        let (x0, y1) = plot.invert(plot.plot_x, plot.plot_y);
+        let (x1, y0) = plot.invert(plot.plot_x + plot.plot_w, plot.plot_y + plot.plot_h);
+        assert!((x0 - 20.0).abs() < 1e-9);
+        assert!((x1 - 20000.0).abs() < 1e-6);
+        assert!((y0 - -20.0).abs() < 1e-9);
+        assert!((y1 - 30.0).abs() < 1e-9);
+        // A log-decade midpoint maps to the middle of the plot width.
+        let (mid, _) = plot.invert(plot.plot_x + plot.plot_w / 2.0, plot.plot_y);
+        assert!((mid - 20.0 * 1000.0_f64.sqrt()).abs() / mid < 1e-9);
+        // Out-of-plot points clamp instead of escaping the domain.
+        let (cx, cy) = plot.invert(-1000.0, 1e6);
+        assert!((cx - 20.0).abs() < 1e-9);
+        assert!((cy - -20.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn non_spl_figure_keeps_default_ticks() {
+        let mut fig = demo_figure();
+        fig.y.label = "Gain (dB)".to_string();
+        fig.y.min = Some(-20.0);
+        fig.y.max = Some(30.0);
+        let mut ctx = Rec::default();
+        draw_figure(&mut ctx, &fig, 900.0, 500.0);
+        let ops = ctx.ops.borrow().join("\n");
+        assert!(
+            !ops.contains("stroke=#f0f0f0"),
+            "minor grid leaked to Gain axis"
+        );
+    }
+
+    #[test]
     fn figure_draws_visible_series_only() {
         let mut ctx = Rec::default();
         let meta = draw_figure(&mut ctx, &demo_figure(), 900.0, 500.0);
@@ -1328,6 +1584,7 @@ mod tests {
     fn sankey_bands_stay_inside_nodes() {
         use crate::schema::{SankeyChart, SankeyLink};
         let chart = SankeyChart {
+            node_boxes: false,
             title: String::new(),
             nodes: vec!["in".to_string(), "out".to_string()],
             links: vec![SankeyLink {
@@ -1344,6 +1601,36 @@ mod tests {
         assert!(ops.contains("fill-path"), "band must be filled");
         assert!(ctx.texts.borrow().iter().any(|t| t.0 == "in"));
         assert!(ctx.texts.borrow().iter().any(|t| t.0 == "out"));
+    }
+
+    #[test]
+    fn signal_flow_boxes_keep_all_labels_and_draw_arrows() {
+        let chart: SankeyChart = serde_json::from_str(
+            r#"{
+            "node_boxes": true,
+            "nodes": ["Input L", "Input R", "Sum", "Limiter", "Output Sub"],
+            "links": [
+                {"source":0,"target":2,"value":1},
+                {"source":1,"target":2,"value":1},
+                {"source":2,"target":3,"value":1},
+                {"source":3,"target":4,"value":1}
+            ]
+        }"#,
+        )
+        .unwrap();
+        let mut ctx = Rec::default();
+        draw_sankey(&mut ctx, &chart, 1000.0, 400.0);
+        for label in &chart.nodes {
+            assert!(ctx.texts.borrow().iter().any(|text| &text.0 == label));
+        }
+        assert_eq!(
+            ctx.ops
+                .borrow()
+                .iter()
+                .filter(|op| op.as_str() == "fill-path")
+                .count(),
+            4
+        );
     }
 
     #[test]

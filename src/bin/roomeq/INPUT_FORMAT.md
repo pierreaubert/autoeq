@@ -1136,7 +1136,7 @@ Enable the prototype by adding a `rir_prototype` block inside the speaker's
 
 ## Measured room impulse responses
 
-`python3 scripts/mdat2csv.py measurements.mdat output_dir --timing-reference-id session-1`
+`python3 utils/mdat2csv.py` measurements.mdat output_dir --timing-reference-id session-1`
 exports supported REW `IRData/SampledData` impulses as `<measurement>__ir.csv`
 and adds their declarations to `recordings.json`. Install
 `scripts/requirements.txt` first. The reference ID is an operator declaration:
@@ -1148,7 +1148,7 @@ storage requiring interpretation are reported as unavailable rather than guessed
 
 Channels can declare a measured room IR backing the R1–R5 acoustic report
 fields (early reflections, early/late curves, octave T60, waterfall with
-resonance decays, wavelet). Keys are output channel names; each entry is a
+resonance decays, wavelet). Keys identify captures, defaulting to output channel names; each entry is a
 `time_ms,amplitude` CSV captured in the room (swept-sine deconvolution or
 equivalent), resolved against the configuration directory:
 
@@ -1166,10 +1166,22 @@ equivalent), resolved against the configuration directory:
 
 - `path` (required): IR file with a `time_ms,amplitude` header.
 - `sample_rate_hz` (optional): verified against the file's time grid;
-  a mismatch fails ingestion fail-closed.
-- `timing_reference_id` (optional for one channel, required on every entry
-  when several channels declare IRs): shared clock identity so no
-  cross-channel analysis can silently mix clocks.
+  a mismatch fails ingestion fail-closed. Native rates from 1–192 kHz are
+  accepted, including REW's 3 kHz subwoofer captures. Data is not resampled;
+  bands above the capture's Nyquist frequency are unavailable.
+- `output_channel` (optional): delivered output channel; defaults to the map key.
+- `driver` (optional): exact delivered driver name within that channel. A driver
+  IR backs only that driver's report, never the summed parent response.
+- `timing_reference_id` (optional): explicit clock identity. Independent
+  per-capture diagnostics do not require a shared clock. Unknown IDs must be
+  omitted, not fabricated; these declarations do not authorize coherent sums
+  or cross-channel timing analysis.
+
+For example, a native sub capture in a two-sub delivered bus can use
+`"subs_2": {"path": "measured_ir/right_sub__ir.csv", "sample_rate_hz": 3000,
+"output_channel": "Sub1", "driver": "Sub2"}`. Driver diagnostics and the native
+waveform are saved as a `measured_acoustics` sidecar. Duplicate targets and
+missing channel/driver names are rejected.
 
 Ingestion gates (all fail-closed): uniform time grid, finite samples with a
 nonzero peak, a declaration for a channel the run actually outputs. The
@@ -1215,11 +1227,11 @@ Capture-verification manifests (separate from RoomConfig) can supply
 source/seat/stimulus, SHA-256, settings, usable support, rate, and record length
 are checked against the candidate and verification plan. See the manual's
 "Declared calibrated IR comparisons" section for the exact handoff and
-`display-roomeq.py --capture-verification` report command. No baseline means
+`ui/display-roomeq --capture-verification` report command. No baseline means
 unavailable, not a reconstructed pre-correction capture.
 The viewer can also place those bound diagnostics after the plots in one
 optimization report with
-`display-roomeq.py room-output.json --capture-verification verification-report.json -o room-report.html`.
+`ui/display-roomeq room-output.json --capture-verification verification-report.json -o room-report.html`.
 It verifies the saved optimization payload and referenced FIR bytes first,
 then requires the verification candidate graph ID to match. A mismatch or
 stale payload yields an unavailable capture section, never an adopted view.

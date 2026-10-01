@@ -41,6 +41,7 @@ fn base_params() -> OptimParams {
         num_filters: 2,
         peq_model: PeqModel::Pk,
         sample_rate: 48000.0,
+        tilt_bands_hz: None,
         min_freq: 20.0,
         max_freq: 20000.0,
         min_q: 0.5,

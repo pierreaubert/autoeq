@@ -110,11 +110,19 @@ check-roomeq-schema-baselines:
 
 [group('test')]
 test-roomeq-gui:
-	PYTHONPATH=python/roomeq-gui python3 -m unittest discover python/roomeq-gui/tests
+	PYTHONPATH=ui/roomeq-gui python3 -m unittest discover ui/roomeq-gui/tests
 
 [group('build')]
 roomeq-gui:
-	PYTHONPATH=python/roomeq-gui python3 -m roomeq_gui
+	PYTHONPATH=ui/roomeq-gui python3 -m roomeq_gui
+
+[group('test')]
+test-recording-gui:
+	PYTHONPATH=ui/recording-gui python3 -m unittest discover ui/recording-gui/tests
+
+[group('build')]
+recording-gui *args:
+	PYTHONPATH=ui/recording-gui python3 -m recording_gui {{args}}
 
 # ----------------------------------------------------------------------
 # LINT / FORMAT

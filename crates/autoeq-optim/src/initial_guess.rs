@@ -252,7 +252,8 @@ pub fn create_smart_initial_guesses(
                 | crate::PeqModel::HpPk
                 | crate::PeqModel::HpPkLp
                 | crate::PeqModel::LsPk
-                | crate::PeqModel::LsPkHs => {
+                | crate::PeqModel::LsPkHs
+                | crate::PeqModel::PkLsHs => {
                     // Fixed filter types: [freq, Q, gain]
                     let base_idx = i * 3;
                     let log_freq = freq_var

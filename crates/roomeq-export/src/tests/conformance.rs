@@ -762,6 +762,7 @@ fn camilladsp_accepts_single_sub_output_declaration() {
 fn camilladsp_routed_export_rejects_driver_branches() {
     let mut output = make_routed_bass_output();
     output.channels.get_mut("L").unwrap().drivers = Some(vec![roomeq_model::DriverDspChain {
+        measured_acoustics: None,
         name: "woofer".to_string(),
         index: 0,
         plugins: vec![PluginConfigWrapper {
@@ -826,6 +827,7 @@ fn hierarchical_physical_sub_output() -> DspGraph {
     routing.routes.extend(second_routes);
     output.channels.get_mut("LFE").unwrap().drivers = Some(vec![
         roomeq_model::DriverDspChain {
+            measured_acoustics: None,
             name: "LFE".into(),
             index: 0,
             plugins: Vec::new(),
@@ -833,6 +835,7 @@ fn hierarchical_physical_sub_output() -> DspGraph {
             measured_band_hz: None,
         },
         roomeq_model::DriverDspChain {
+            measured_acoustics: None,
             name: "SUB2".into(),
             index: 1,
             plugins: vec![PluginConfigWrapper {

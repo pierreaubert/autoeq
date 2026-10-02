@@ -17,6 +17,9 @@ struct OptimizationInvocationOptions {
 /// Struct to hold optimization results including convergence status
 pub(super) struct OptimizationResult {
     pub(super) params: Vec<f64>,
+    /// Exact parameter and objective-constraint envelope selected for this
+    /// invocation, retained for validation of any serialized PEQ output.
+    pub(super) effective_envelope: EffectiveOptimizationEnvelope,
     pub(super) converged: bool,
     pub(super) pre_objective: Option<f64>,
     pub(super) post_objective: Option<f64>,
@@ -33,6 +36,145 @@ pub(super) struct OptimizationResult {
     /// Keeps the reported evidence aligned with the shipped preset; see
     /// [`super::save::apo_roundtrip_objective_gap`].
     pub(super) apo_roundtrip_gap: Option<f64>,
+}
+
+/// Immutable snapshot of the effective limits used by one optimizer run.
+///
+/// The parameter boxes are the exact vectors passed to the backend. The
+/// objective gain envelopes are retained separately because
+/// [`autoeq::optim::OwnedConstraintSpec`] carries Q limits but deliberately
+/// falls back to `ObjectiveData` for boost, cut, and composite checks.
+#[derive(Debug, Clone)]
+pub(super) struct EffectiveOptimizationEnvelope {
+    pub(super) peq_model: autoeq::PeqModel,
+    pub(super) num_filters: usize,
+    pub(super) sample_rate_hz: f64,
+    pub(super) loss_type: autoeq::LossType,
+    pub(super) lower_bounds: Vec<f64>,
+    pub(super) upper_bounds: Vec<f64>,
+    pub(super) constraints: autoeq::optim::OwnedConstraintSpec,
+    pub(super) max_boost_envelope: Option<Vec<(f64, f64)>>,
+    pub(super) min_cut_envelope: Option<Vec<(f64, f64)>>,
+    pub(super) composite_frequencies_hz: Vec<f64>,
+    pub(super) composite_band_hz: [f64; 2],
+    pub(super) objective_max_db: f64,
+    pub(super) objective_min_db: f64,
+}
+
+impl EffectiveOptimizationEnvelope {
+    pub(super) fn capture(
+        params: &autoeq::OptimParams,
+        objective_data: &ObjectiveData,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+    ) -> Result<Self, String> {
+        if params.peq_model != objective_data.peq_model {
+            return Err(format!(
+                "optimizer PEQ model {} does not match objective model {}",
+                params.peq_model, objective_data.peq_model
+            ));
+        }
+        if params.loss != objective_data.loss_type {
+            return Err(format!(
+                "optimizer loss {:?} does not match objective loss {:?}",
+                params.loss, objective_data.loss_type
+            ));
+        }
+        if !params.sample_rate.is_finite()
+            || params.sample_rate <= 0.0
+            || params.sample_rate != objective_data.srate
+        {
+            return Err(format!(
+                "optimizer sample rate {} does not match objective sample rate {}",
+                params.sample_rate, objective_data.srate
+            ));
+        }
+        if !objective_data.max_db.is_finite() || !objective_data.min_db.is_finite() {
+            return Err(String::from("objective gain limits must be finite"));
+        }
+        if lower_bounds.is_empty() || lower_bounds.len() != upper_bounds.len() {
+            return Err(format!(
+                "optimizer bounds must have matching non-empty vectors (lower={}, upper={})",
+                lower_bounds.len(),
+                upper_bounds.len()
+            ));
+        }
+        for (index, (&lower, &upper)) in lower_bounds.iter().zip(upper_bounds).enumerate() {
+            if !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err(format!(
+                    "optimizer bounds at parameter {index} are invalid: [{lower}, {upper}]"
+                ));
+            }
+        }
+        if autoeq::optim::is_peq_layout_loss(objective_data.loss_type) {
+            let expected_len = params
+                .num_filters
+                .checked_mul(autoeq_plot::param_utils::params_per_filter(
+                    params.peq_model,
+                ))
+                .ok_or_else(|| String::from("optimizer PEQ parameter count overflowed"))?;
+            if params.num_filters == 0 || lower_bounds.len() != expected_len {
+                return Err(format!(
+                    "optimizer bounds have {} parameters; model {} with {} filters requires {expected_len}",
+                    lower_bounds.len(),
+                    params.peq_model,
+                    params.num_filters
+                ));
+            }
+        }
+
+        let constraints = autoeq::optim::OwnedConstraintSpec::from_params(params)?;
+        constraints.as_spec().validate()?;
+        if let Some(knots) = objective_data.max_boost_envelope.as_deref() {
+            autoeq::optim::validate_envelope_knots(knots, "objective_max_boost", false)?;
+        }
+        if let Some(knots) = objective_data.min_cut_envelope.as_deref() {
+            autoeq::optim::validate_envelope_knots(knots, "objective_min_cut", false)?;
+        }
+        let has_composite_envelope = objective_data.max_boost_envelope.is_some()
+            || objective_data.min_cut_envelope.is_some();
+        let composite_frequencies_hz = if has_composite_envelope
+            && autoeq::optim::is_peq_layout_loss(objective_data.loss_type)
+        {
+            if !objective_data.min_freq.is_finite()
+                || !objective_data.max_freq.is_finite()
+                || objective_data.min_freq <= 0.0
+                || objective_data.min_freq >= objective_data.max_freq
+            {
+                return Err(String::from(
+                    "objective composite envelope has an invalid frequency band",
+                ));
+            }
+            let frequencies = objective_data.freqs.as_slice().ok_or_else(|| {
+                String::from("objective composite envelope requires a contiguous frequency grid")
+            })?;
+            autoeq::optim::validated_composite_grid(
+                frequencies,
+                objective_data.min_freq,
+                objective_data.max_freq,
+                constraints.subdivisions_per_bin,
+            )?;
+            frequencies.to_vec()
+        } else {
+            Vec::new()
+        };
+
+        Ok(Self {
+            peq_model: params.peq_model,
+            num_filters: params.num_filters,
+            sample_rate_hz: params.sample_rate,
+            loss_type: objective_data.loss_type,
+            lower_bounds: lower_bounds.to_vec(),
+            upper_bounds: upper_bounds.to_vec(),
+            constraints,
+            max_boost_envelope: objective_data.max_boost_envelope.clone(),
+            min_cut_envelope: objective_data.min_cut_envelope.clone(),
+            composite_frequencies_hz,
+            composite_band_hz: [objective_data.min_freq, objective_data.max_freq],
+            objective_max_db: objective_data.max_db,
+            objective_min_db: objective_data.min_db,
+        })
+    }
 }
 
 pub(super) fn perform_optimization(
@@ -201,6 +343,13 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
     }
     let (lower_bounds, upper_bounds) =
         bounds.unwrap_or_else(|| autoeq::workflow::setup_bounds(params));
+    let effective_envelope = EffectiveOptimizationEnvelope::capture(
+        params,
+        objective_data,
+        &lower_bounds,
+        &upper_bounds,
+    )
+    .map_err(std::io::Error::other)?;
 
     // Generate an initial guess or finalize the validated warm-start candidate.
     let mut x = if let Some(candidate) = initial_candidate {
@@ -525,6 +674,7 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
 
     Ok(OptimizationResult {
         params: x,
+        effective_envelope,
         converged,
         pre_objective,
         post_objective,

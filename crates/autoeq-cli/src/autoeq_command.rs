@@ -928,6 +928,8 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
                 request: &product.request,
                 prepared: &product.prepared,
                 compatibility: &product.prepared.target_compatibility,
+                source_parameters: &opt_result.params,
+                effective_envelope: &opt_result.effective_envelope,
                 max_filter_transfer_delta_db,
                 verification_frequencies_hz,
             },

@@ -20,7 +20,7 @@ cannot replace them.
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
 | A04 measurement/live analysis | Partial | Machine-bound calibrated live PSD, band SPL and CLI profile wiring committed; distortion/linearity and hardware validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
-| A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
+| A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
 | A08 recoverable jobs | Partial | Exact DE continuation and public dependency pin committed; focused production integration passes, broader cancellation/recovery and final matrix acceptance remain |
 | A09 realized correction | Partial | Kautz multirate witnesses pass; fresh Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
@@ -668,3 +668,25 @@ Subsequent changes require checks appropriate to their scope.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-finalqa-20261002/evidence`, including
 the detached identity/fixture inventories, individual package logs and
 `package-matrix/summary.json`.
+
+## Renderer capability discovery
+
+Commit `c58d9e79` exposes a versioned renderer capability response and an early
+`autoeq --product-renderer-capabilities` JSON query. The query requires no input
+or device profile, refuses additional work arguments before file loading, and
+opens no device. APO reports declared profile checks, quantized filter-transfer
+comparison and exact preset/provenance binding. Its production path does not
+reparse the emitted text or verify running hardware.
+
+RME and Apple AU remain explicitly unavailable to profiled product export with
+a stable reason code. Their legacy serializers remain available: the RME writer
+can transform topology, caps each channel at nine filters and emits zero channel
+gain/delay; the Apple writer caps at sixteen bands, stores single-precision
+parameters and lacks sample-rate binding. These are current serializer limits,
+not inferred limits for every hardware model. A verified consumer/device
+contract remains necessary to enable either profile path.
+
+Focused product tests pass 12/12, capability tests across the three owners pass
+4/4, and actual-binary subprocess checks pass 2/2. Strict production Clippy
+passes for the three libraries. These scoped checks follow the frozen `53819ed`
+matrix; the full matrix is not relabeled as testing this later commit.

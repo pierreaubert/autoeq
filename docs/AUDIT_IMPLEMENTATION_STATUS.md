@@ -18,12 +18,12 @@ cannot replace them.
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Machine-bound calibrated live PSD and band SPL API committed; CLI profile wiring, distortion/linearity and hardware validation remain |
+| A04 measurement/live analysis | Partial | Machine-bound calibrated live PSD, band SPL and CLI profile wiring committed; distortion/linearity and hardware validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
 | A08 recoverable jobs | Partial | Exact DE continuation and public dependency pin committed; focused production integration passes, broader cancellation/recovery and final matrix acceptance remain |
-| A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
+| A09 realized correction | Partial | Kautz multirate witnesses pass; fresh Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
 | A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
@@ -508,6 +508,16 @@ anchor amplitude, mismatch and invalid-frame witnesses pass 24/24. Strict captur
 library Clippy passes. Ignored lockfile bytes were restored. CLI parameter wiring
 and hardware validation remain; no audio was emitted or recorded.
 
+Companion capture commit `39b1c52` wires optional profile and machine-settings
+JSON into the live CLI. Bounded files and relative curve paths are validated
+before device access. A validation-only command returns declared profile status
+without opening hardware. Saved calibration bindings and anchor curve digests
+remain independent of runtime machine settings; gain/device changes and replaced
+curve bytes cannot silently rebind an old SPL anchor. Missing anchor digests are
+refused; explicit null is accepted for a response-free anchor. CLI tests pass
+12/12 and strict CLI Clippy passes. The ignored capture lockfile is restored to
+its original bytes. Hardware and calibration polarity validation remain open.
+
 ## Frozen numerical gate review
 
 The first headless-compatible frozen source run passed all 140 Rust test targets,
@@ -563,3 +573,42 @@ selects a phase-bearing row by its semantic property. The related backend runner
 also used obsolete 16-row assumptions; it now binds exact indices and axis values
 to the checked-in parameter registry. Omitted/reordered/duplicated rows, altered
 axes and boolean indices are refused. Fresh integrated evidence remains pending.
+
+## Public report pins and fresh correction canaries
+
+Commit `53819ed` replaces all three report dependency paths with exact public
+GPUI revisions at `d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d`. The lock changes
+only the 17 package source identities. Locked offline metadata and both native
+report library checks pass in an isolated checkout with no GPUI sibling.
+The GPUI WASM library check passes with the build-only
+`RUSTC_BOOTSTRAP=wasm_thread` override; plain stable rejects that upstream
+dependency's nightly feature. A fresh default-toolchain WASM distribution and
+registry package preparation remain open. The local math DSP patch remains a
+separate clean-installation prerequisite.
+
+A fresh detached `210592a` canary preserves its source, lock, dependency and
+fixture identities before and after execution. The Kautz matched-budget
+multirate witness passes with 18 outcome rows and no contract failures.
+These are analytic magnitude challenges, without physical damping or listening
+claims.
+
+The measured Genelec cross-mode run exits with failure: 11 checks pass, one
+IIR result reverts, and CM1 bass parity fails. The IIR Sub1 sampled transfer gain
+is 19.5852776 dB against the unchanged 12 dB budget. This is the coherent sum
+of absolute transfer gains for declared unit inputs, sampled at 8193 frequencies
+at 48 kHz. It is not a measured PCM peak or acoustic SPL. The raw historical
+field name `max_sampled_peak_dbfs` is retained in the evidence; the summary
+labels its units explicitly.
+
+CM1 bass parity has median 4.54 against 3.0 and maximum 9.65 against 4.25.
+Main and upper-band parity and timing pass. All mode scores remain unchanged
+at 2.1282; these results do not establish correction improvement. The run
+retains seat and useful-output rejection evidence. Its unavailable F3 reference
+does not establish physical excursion protection. A separate synthetic Hybrid
+protection serialization/replay witness passes.
+
+Evidence is retained in
+`/Volumes/home_tmp/tmp/autoeq-audit-evidence/a09-canaries-20261002/results-fresh-210592a.json`,
+SHA-256 `116473dd22341a10e2d9fda5f37c3b4ecf55b2ad36371aaa1ecb17a9bd25b75a`.
+Original fixtures, golden data and acceptance limits are unchanged. Diagnosis
+of the Genelec failure continues; A09 remains partial.

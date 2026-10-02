@@ -7,7 +7,7 @@ use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::option_override::OptionOverride;
 use super::parse_maxeval;
 use super::parse_seed_runs;
-use super::run::deployed_final_curve;
+use super::run::{compare_cross_mode_band, deployed_final_curve};
 use super::types::TestResult;
 use super::validate::{
     TargetTiltValidationOptions, validate_option_effect, validate_phase_alignment,
@@ -1169,4 +1169,124 @@ fn quality_seed_runs_rejects_unsupported_values() {
     ] {
         assert!(parse_seed_runs(&args).is_err(), "accepted {args:?}");
     }
+}
+
+#[test]
+fn strict_cross_mode_parity_refuses_missing_modes_and_declared_channels() {
+    let modes = ["IIR", "FIR", "Hybrid", "MixedPhase"];
+    let curve = curve_with_slope(0.0);
+    let complete = vec![
+        ("L".to_string(), vec![Some(curve.clone()); 4]),
+        ("R".to_string(), vec![Some(curve.clone()); 4]),
+    ];
+    let comparison = compare_cross_mode_band(&complete, &modes, 100.0, 500.0);
+    assert_eq!(comparison.expected_comparisons, 12);
+    assert_eq!(comparison.available_comparisons, 12);
+    assert!(comparison.passes(0.0, Some(0.0)));
+
+    // The remaining zero-difference pairs used to pass after this missing
+    // mode was silently skipped.
+    let mut missing_mode = complete.clone();
+    missing_mode[1].1[2] = None;
+    let comparison = compare_cross_mode_band(&missing_mode, &modes, 100.0, 500.0);
+    assert_eq!(comparison.expected_comparisons, 12);
+    assert_eq!(comparison.available_comparisons, 9);
+    assert_eq!(comparison.median_rms, 0.0);
+    assert!(!comparison.passes(3.0, Some(4.25)));
+    assert!(
+        comparison
+            .unavailable
+            .iter()
+            .any(|reason| reason.contains("R IIR vs Hybrid"))
+    );
+
+    let mut missing_channel = complete;
+    missing_channel[1].1.clear();
+    let comparison = compare_cross_mode_band(&missing_channel, &modes, 100.0, 500.0);
+    assert_eq!(comparison.expected_comparisons, 12);
+    assert_eq!(comparison.available_comparisons, 6);
+    assert!(!comparison.passes(3.0, Some(4.25)));
+    assert!(!compare_cross_mode_band(&[], &modes, 100.0, 500.0).passes(3.0, None));
+    assert!(!compare_cross_mode_band(&missing_channel, &["IIR"], 100.0, 500.0).passes(3.0, None));
+}
+
+#[test]
+fn strict_cross_mode_parity_keeps_shape_limits_with_complete_coverage() {
+    let curves = vec![(
+        "L".to_string(),
+        vec![Some(curve_with_slope(0.0)), Some(curve_with_slope(12.0))],
+    )];
+    let comparison = compare_cross_mode_band(&curves, &["IIR", "FIR"], 100.0, 500.0);
+    assert_eq!(
+        comparison.available_comparisons,
+        comparison.expected_comparisons
+    );
+    assert!(comparison.unavailable.is_empty());
+    assert!(!comparison.passes(3.0, Some(4.25)));
+}
+
+#[test]
+fn cross_mode_rms_refuses_invalid_or_incomplete_evidence_without_panicking() {
+    let reference = curve_with_slope(0.0);
+    let mut invalid = Vec::new();
+    let mut curve = reference.clone();
+    curve.spl = ndarray::arr1(&[0.0]);
+    invalid.push(curve);
+    let mut curve = reference.clone();
+    curve.spl[1] = f64::NAN;
+    invalid.push(curve);
+    let mut curve = reference.clone();
+    curve.freq[1] = curve.freq[0];
+    invalid.push(curve);
+    let mut curve = reference.clone();
+    curve.freq[1] = f64::NAN;
+    invalid.push(curve);
+    let mut curve = reference.clone();
+    curve.freq = ndarray::arr1(&[200.0, 300.0, 400.0, 500.0]);
+    invalid.push(curve);
+    let mut curve = reference.clone();
+    curve.freq = ndarray::arr1(&[100.0, 200.0, 300.0, 400.0]);
+    invalid.push(curve);
+    let mut curve = reference.clone();
+    curve.freq = ndarray::arr1(&[100.0, 500.0]);
+    curve.spl = ndarray::arr1(&[0.0, 0.0]);
+    invalid.push(curve);
+    for curve in invalid {
+        assert!(level_matched_rms_curve_difference_db(&reference, &curve, 100.0, 500.0).is_none());
+        assert!(level_matched_rms_curve_difference_db(&curve, &reference, 100.0, 500.0).is_none());
+        let comparisons = compare_cross_mode_band(
+            &[("L".to_string(), vec![Some(reference.clone()), Some(curve)])],
+            &["IIR", "FIR"],
+            100.0,
+            500.0,
+        );
+        assert!(!comparisons.passes(3.0, Some(4.25)));
+    }
+    for (fmin, fmax) in [
+        (f64::NAN, 500.0),
+        (100.0, f64::INFINITY),
+        (-1.0, 500.0),
+        (500.0, 100.0),
+    ] {
+        assert!(
+            level_matched_rms_curve_difference_db(&reference, &reference, fmin, fmax).is_none()
+        );
+    }
+}
+
+#[test]
+fn cross_mode_rms_aligns_distinct_supported_grids() {
+    let reference = Curve {
+        freq: ndarray::arr1(&[100.0, 200.0, 300.0, 400.0, 500.0]),
+        spl: ndarray::arr1(&[1.0, 2.0, 3.0, 4.0, 5.0]),
+        ..Default::default()
+    };
+    let shifted = Curve {
+        freq: ndarray::arr1(&[50.0, 150.0, 250.0, 350.0, 450.0, 550.0]),
+        spl: ndarray::arr1(&[6.5, 7.5, 8.5, 9.5, 10.5, 11.5]),
+        ..Default::default()
+    };
+    assert!(
+        level_matched_rms_curve_difference_db(&reference, &shifted, 100.0, 500.0).unwrap() < 1e-12
+    );
 }

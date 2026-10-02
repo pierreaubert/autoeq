@@ -490,6 +490,75 @@ fn correction_passband_violations(result: &RoomOptimizationResult) -> Vec<String
     violations
 }
 
+/// Complete channel and mode coverage for one strict parity band.
+#[derive(Debug)]
+pub(super) struct CrossModeBandComparison {
+    pub(super) expected_comparisons: usize,
+    pub(super) available_comparisons: usize,
+    pub(super) unavailable: Vec<String>,
+    pub(super) median_rms: f64,
+    pub(super) max_rms: f64,
+}
+
+impl CrossModeBandComparison {
+    pub(super) fn passes(&self, median_limit: f64, max_limit: Option<f64>) -> bool {
+        self.expected_comparisons > 0
+            && self.available_comparisons == self.expected_comparisons
+            && self.unavailable.is_empty()
+            && self.median_rms <= median_limit
+            && max_limit.is_none_or(|limit| self.max_rms <= limit)
+    }
+}
+
+pub(super) fn compare_cross_mode_band(
+    channel_curves: &[(String, Vec<Option<Curve>>)],
+    mode_names: &[&str],
+    fmin: f64,
+    fmax: f64,
+) -> CrossModeBandComparison {
+    let mut differences = Vec::new();
+    let mut unavailable = Vec::new();
+    let mut expected_comparisons = 0;
+    if channel_curves.is_empty() || mode_names.len() < 2 {
+        unavailable.push("no declared channels or fewer than two modes".to_string());
+    }
+    for (channel, curves) in channel_curves {
+        for first in 0..mode_names.len() {
+            for second in (first + 1)..mode_names.len() {
+                expected_comparisons += 1;
+                let rms = curves
+                    .get(first)
+                    .and_then(Option::as_ref)
+                    .zip(curves.get(second).and_then(Option::as_ref))
+                    .and_then(|(first, second)| {
+                        level_matched_rms_curve_difference_db(first, second, fmin, fmax)
+                    });
+                if let Some(rms) = rms {
+                    differences.push(rms);
+                } else {
+                    unavailable.push(format!(
+                        "{channel} {} vs {} ({fmin}..{fmax}Hz)",
+                        mode_names[first], mode_names[second]
+                    ));
+                }
+            }
+        }
+    }
+    let available_comparisons = differences.len();
+    let median_rms = median(differences.clone()).unwrap_or(f64::INFINITY);
+    let max_rms = differences
+        .into_iter()
+        .reduce(f64::max)
+        .unwrap_or(f64::INFINITY);
+    CrossModeBandComparison {
+        expected_comparisons,
+        available_comparisons,
+        unavailable,
+        median_rms,
+        max_rms,
+    }
+}
+
 pub(super) fn run_cross_mode_convergence_tests(
     name: &str,
     base_config_path: &Path,
@@ -517,6 +586,7 @@ pub(super) fn run_cross_mode_convergence_tests(
 
     // Run every production processing mode and collect comparable artifacts.
     let mut mode_results: Vec<(&str, RoomOptimizationResult)> = Vec::new();
+    let mut expected_main_channels = std::collections::BTreeSet::new();
 
     for (mode_name, processing_mode, override_file) in modes {
         let override_path = override_config_dir.join(override_file);
@@ -534,6 +604,13 @@ pub(super) fn run_cross_mode_convergence_tests(
             );
         } else {
             clamp_strict_measured_maxeval(&mut config, maxeval);
+            expected_main_channels.extend(
+                config
+                    .speakers
+                    .keys()
+                    .filter(|channel| !super::misc::is_lfe_or_sub_channel(channel))
+                    .cloned(),
+            );
         }
         // Strict measured regressions exercise the checked-in production
         // fixture unchanged except for clamping optimizer.max_iter. Filter
@@ -595,10 +672,19 @@ pub(super) fn run_cross_mode_convergence_tests(
     // curves. Strict cases use level-matched RMS bands; legacy generic cases
     // retain their historical broad maximum-difference smoke gate.
     if strict {
-        let channel_names = redirected_main_channels(&mode_results[0].1);
-        let mode_pairs: Vec<(usize, usize)> = (0..mode_results.len())
-            .flat_map(|first| ((first + 1)..mode_results.len()).map(move |second| (first, second)))
+        // Configuration owns the expected channels. A missing channel in every
+        // result must still contribute unavailable comparisons.
+        let channel_curves: Vec<_> = expected_main_channels
+            .into_iter()
+            .map(|channel| {
+                let curves = mode_results
+                    .iter()
+                    .map(|(_, result)| deployed_final_curve(result, &channel))
+                    .collect();
+                (channel, curves)
+            })
             .collect();
+        let mode_names: Vec<_> = mode_results.iter().map(|(name, _)| *name).collect();
         let bands = [
             (
                 "bass",
@@ -617,33 +703,23 @@ pub(super) fn run_cross_mode_convergence_tests(
             ),
         ];
         for (band_name, fmin, fmax, median_limit, max_limit) in bands {
-            let mut differences = Vec::new();
-            for channel in &channel_names {
-                let curves: Vec<Option<Curve>> = mode_results
-                    .iter()
-                    .map(|(_, result)| deployed_final_curve(result, channel))
-                    .collect();
-                for &(first, second) in &mode_pairs {
-                    if let (Some(first), Some(second)) = (&curves[first], &curves[second])
-                        && let Some(rms) =
-                            level_matched_rms_curve_difference_db(first, second, fmin, fmax)
-                    {
-                        differences.push(rms);
-                    }
-                }
-            }
-            let median_rms = median(differences.clone()).unwrap_or(f64::INFINITY);
-            let max_rms = differences.into_iter().fold(f64::NEG_INFINITY, f64::max);
-            let max_rms = if max_rms.is_finite() {
-                max_rms
+            let comparison = compare_cross_mode_band(&channel_curves, &mode_names, fmin, fmax);
+            let median_rms = comparison.median_rms;
+            let max_rms = comparison.max_rms;
+            let pass = comparison.passes(median_limit, max_limit);
+            let coverage = format!(
+                "comparisons={}/{}",
+                comparison.available_comparisons, comparison.expected_comparisons
+            );
+            let unavailable = if comparison.unavailable.is_empty() {
+                String::new()
             } else {
-                f64::INFINITY
+                format!(", unavailable: {}", comparison.unavailable.join("; "))
             };
-            let pass = median_rms <= median_limit && max_limit.is_none_or(|limit| max_rms <= limit);
             let status = if pass { "PASS" } else { "FAIL" };
             writeln!(
                 out,
-                "  CM-1 {band_name} parity: median_rms={median_rms:.2}dB max_rms={max_rms:.2}dB  {status}"
+                "  CM-1 {band_name} parity: median_rms={median_rms:.2}dB max_rms={max_rms:.2}dB {coverage}  {status}"
             )
             .unwrap();
             results.push(TestResult {
@@ -652,7 +728,7 @@ pub(super) fn run_cross_mode_convergence_tests(
                 scorecard: placeholder_scorecard(max_rms),
                 pass,
                 reason: format!(
-                    "median_rms={median_rms:.2}dB (limit={median_limit:.2}dB), max_rms={max_rms:.2}dB{}",
+                    "median_rms={median_rms:.2}dB (limit={median_limit:.2}dB), max_rms={max_rms:.2}dB{}, {coverage}{unavailable}",
                     max_limit.map_or_else(String::new, |limit| format!(" (limit={limit:.2}dB)"))
                 ),
             });

@@ -147,9 +147,40 @@ fn parameter_matrix_backend_complex_transfer() {
     assert!(version.status.success());
     let rows: Vec<serde_json::Value> =
         serde_json::from_slice(&std::fs::read(matrix).unwrap()).unwrap();
-    assert_eq!(rows.len(), 16, "only a completed matrix can be replayed");
+    let registry: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../qa/registry/parameter-matrix-pr.json"
+    ))
+    .expect("checked-in parameter registry");
+    let expected_rows = registry["rows"].as_array().expect("registry rows");
+    assert_eq!(
+        rows.len(),
+        expected_rows.len(),
+        "only a completed matrix can be replayed"
+    );
     for (index, row) in rows.iter().enumerate() {
         assert_eq!(row["row"].as_u64(), Some(index as u64));
+        for (axis, expected) in [
+            "topology",
+            "mode",
+            "sample_rate",
+            "filter_count",
+            "grid_size",
+            "measurement_shape",
+            "phase",
+            "crossover",
+            "fir_duration",
+        ]
+        .iter()
+        .zip(
+            expected_rows[index]
+                .as_array()
+                .expect("registry axis values"),
+        ) {
+            assert_eq!(
+                &row["requested_axes"][*axis], expected,
+                "row {index}, axis {axis}"
+            );
+        }
         let bundle = &row["replay_bundle"];
         let directory = Path::new(bundle["directory"].as_str().unwrap());
         let evidence_path = directory.join("backend-complex-transfer.json");
@@ -164,7 +195,7 @@ fn parameter_matrix_backend_complex_transfer() {
             "backend": backend, "backend_version": String::from_utf8_lossy(&version.stdout),
             "requested_axes": row["requested_axes"], "unexecuted_axes": row["unexecuted_axes"]});
         save_evidence(&evidence);
-        record_backend_row_failure(&mut evidence, &save_evidence, |evidence| {
+        record_backend_row_failure(&mut evidence, save_evidence, |evidence| {
             evidence["phase"] = json!("load_and_validate_artifacts");
             let graph: DspGraph = serde_json::from_slice(
                 &std::fs::read(directory.join(bundle["selected_output"].as_str().unwrap()))
@@ -279,7 +310,7 @@ fn parameter_matrix_backend_complex_transfer() {
             evidence["frequencies_hz"] = json!(frequencies);
             evidence["input_channels"] = json!(inputs);
             evidence["output_channels"] = json!(outputs);
-            save_evidence(&evidence);
+            save_evidence(evidence);
             let frames = 131_072;
             let amplitude = 1 << 26;
             evidence["frames_per_input"] = json!(frames);
@@ -354,7 +385,7 @@ fn parameter_matrix_backend_complex_transfer() {
             evidence["impulse_amplitude_s32"] = json!(amplitude);
             evidence["absolute_error_allowance"] = json!(0.0001);
             evidence["relative_error_allowance"] = json!(0.01);
-            save_evidence(&evidence);
+            save_evidence(evidence);
             eprintln!(
                 "matrix backend row {index}: {} inputs, {} outputs, {rate} Hz, max complex error {max_error}",
                 inputs.len(),

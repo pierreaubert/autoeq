@@ -289,7 +289,8 @@ fn export_stale_candidate_evidence_not_rebound_silently() {
 
     // The final inventory binds the committed bytes: presenting replacement
     // bytes for the same reference must fail, never rebind.
-    let error = canonical_dsp_identity(&graph, 48_000.0, &[replacement.clone()]).unwrap_err();
+    let error =
+        canonical_dsp_identity(&graph, 48_000.0, std::slice::from_ref(&replacement)).unwrap_err();
     assert!(
         error
             .to_string()

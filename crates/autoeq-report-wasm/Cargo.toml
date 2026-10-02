@@ -17,4 +17,4 @@ workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.22"
-d3rs = { package = "gpui-d3rs", path = "../../../gpui-toolkit/crates/gpui-d3rs", version = "0.9", default-features = false }
+d3rs = { package = "gpui-d3rs", git = "https://github.com/pierreaubert/gpui-toolkit", rev = "d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d", version = "=0.9.19", default-features = false }

@@ -25,6 +25,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 // Include split modules
+#[path = "autoeq/apo_profile_verifier.rs"]
+mod apo_profile_verifier;
 #[path = "autoeq/load.rs"]
 mod load;
 #[path = "autoeq/postscore.rs"]
@@ -904,10 +906,11 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         let serialized_preamp = profile
             .apo_serialized_preamp_db()
             .map_err(|error| anyhow!("device profile rejected APO preamp: {error}"))?;
+        let verification_frequencies_hz = standard_freq
+            .as_slice()
+            .ok_or_else(|| anyhow!("APO transfer comparison frequency grid is not contiguous"))?;
         let max_filter_transfer_delta_db = max_finite_filter_transfer_delta_db(
-            standard_freq.as_slice().ok_or_else(|| {
-                anyhow!("APO transfer comparison frequency grid is not contiguous")
-            })?,
+            verification_frequencies_hz,
             &designed_filters,
             &serialized_filters,
         )?;
@@ -926,6 +929,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
                 prepared: &product.prepared,
                 compatibility: &product.prepared.target_compatibility,
                 max_filter_transfer_delta_db,
+                verification_frequencies_hz,
             },
         )
         .await
@@ -1326,7 +1330,7 @@ mod tests {
         )])
         .expect("capability query should need no measurements or device profile");
         let value: serde_json::Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["schema_version"], 2);
         assert_eq!(value["renderers"].as_array().unwrap().len(), 3);
         assert_eq!(value["renderers"][0]["renderer"], "equalizer_apo");
         assert_eq!(value["renderers"][0]["product_profile_export"], "verified");

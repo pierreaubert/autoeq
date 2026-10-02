@@ -76,7 +76,7 @@ pub enum ProductRenderer {
 }
 
 /// Schema version for the machine-readable product renderer capability report.
-pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 1;
+pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 2;
 
 /// Format emitted by the corresponding legacy or checked product serializer.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,6 +129,7 @@ pub enum ProductRendererVerifiedFeature {
     SourceTargetAndRigProvenanceSidecar,
     PresetSha256Binding,
     QuantizedFilterTransferCheck,
+    StrictEmittedTextRoundTripCheck,
 }
 
 /// Known behavior that limits what a renderer capability report promises.
@@ -140,6 +141,14 @@ pub enum ProductRendererLimitation {
     /// The APO check validates serialization and declared limits, not playback
     /// hardware behavior or audibility.
     RuntimeDeviceAndAudibilityAreNotVerified,
+    /// Profiled APO output refuses filter syntax outside its checked subset.
+    ProfiledApoRefusesUnverifiedFilterSyntax,
+    /// APO text does not bind a device or channel; both are inherited from the
+    /// including Equalizer APO configuration.
+    ProfiledApoRoutingIsInheritedFromIncludingConfiguration,
+    /// The core's shelves use a fixed slope, while Equalizer APO LS/HS commands
+    /// apply consumer-specific Q and corner-frequency semantics.
+    ProfiledApoRefusesShelvesWithMismatchedTransferSemantics,
     /// The legacy RME writer can reshape or replace filters to fit its fixed
     /// topology and supported filter slots.
     LegacyRmeWriterMayTransformFilterTopology,
@@ -197,10 +206,14 @@ impl ProductRenderer {
                     ProductRendererVerifiedFeature::SourceTargetAndRigProvenanceSidecar,
                     ProductRendererVerifiedFeature::PresetSha256Binding,
                     ProductRendererVerifiedFeature::QuantizedFilterTransferCheck,
+                    ProductRendererVerifiedFeature::StrictEmittedTextRoundTripCheck,
                 ],
                 known_limitations: vec![
                     ProductRendererLimitation::PresetRequiresUserInstallation,
                     ProductRendererLimitation::RuntimeDeviceAndAudibilityAreNotVerified,
+                    ProductRendererLimitation::ProfiledApoRefusesUnverifiedFilterSyntax,
+                    ProductRendererLimitation::ProfiledApoRoutingIsInheritedFromIncludingConfiguration,
+                    ProductRendererLimitation::ProfiledApoRefusesShelvesWithMismatchedTransferSemantics,
                 ],
             },
             Self::RmeTotalMix => ProductRendererCapability {
@@ -311,6 +324,129 @@ fn required_filter_types(model: crate::PeqModel) -> Vec<&'static str> {
     }
 }
 
+fn required_profiled_apo_filter_types(
+    model: crate::PeqModel,
+    num_filters: usize,
+    minimum_q: f64,
+    maximum_q: f64,
+) -> Vec<&'static str> {
+    let mut types = match model {
+        crate::PeqModel::Pk => vec!["PK"],
+        crate::PeqModel::HpPk => {
+            if num_filters <= 1 {
+                vec!["HPQ"]
+            } else {
+                vec!["HPQ", "PK"]
+            }
+        }
+        crate::PeqModel::HpPkLp => {
+            if num_filters <= 1 {
+                vec!["HPQ"]
+            } else {
+                let mut result = vec!["HPQ", "LPQ"];
+                if num_filters > 2 {
+                    result.push("PK");
+                }
+                // setup_bounds constrains HpPkLp's last Q to
+                // [max(1, min_q.max(0.1)).min(max_q),
+                //  max(1.5, lower).min(max_q)]. Use that actual interval: the
+                // ordinary global Q range often includes the default while
+                // the low-pass Q interval does not.
+                let q_lower = minimum_q.max(0.1);
+                let lowpass_q_min = 1.0_f64.max(q_lower).min(maximum_q);
+                let lowpass_q_max = 1.5_f64.max(lowpass_q_min).min(maximum_q);
+                if lowpass_q_min <= crate::iir::DEFAULT_Q_HIGH_LOW_PASS
+                    && crate::iir::DEFAULT_Q_HIGH_LOW_PASS <= lowpass_q_max
+                {
+                    result.push("LP");
+                }
+                result
+            }
+        }
+        crate::PeqModel::LsPk => {
+            if num_filters <= 1 {
+                vec!["LS"]
+            } else {
+                vec!["LS", "PK"]
+            }
+        }
+        crate::PeqModel::LsPkHs => match num_filters {
+            0 | 1 => vec!["LS"],
+            2 => vec!["LS", "HS"],
+            _ => vec!["LS", "PK", "HS"],
+        },
+        crate::PeqModel::PkLsHs => match num_filters {
+            0 | 1 => vec!["HS"],
+            2 => vec!["LS", "HS"],
+            _ => vec!["PK", "LS", "HS"],
+        },
+        crate::PeqModel::FreePkFree | crate::PeqModel::Free => vec![
+            "PK", "LP", "LPQ", "HP", "HPQ", "LS", "HS", "BP", "NO", "AP", "LSO", "HSO", "PKM",
+        ],
+    };
+    types.sort_unstable();
+    types.dedup();
+    types
+}
+
+fn profiled_apo_filter_kind(filter: &crate::iir::Biquad) -> Result<&'static str, String> {
+    let kind = match filter.filter_type {
+        crate::iir::BiquadFilterType::Peak => "PK",
+        crate::iir::BiquadFilterType::Lowpass => {
+            if (filter.q - crate::iir::DEFAULT_Q_HIGH_LOW_PASS).abs() < f64::EPSILON {
+                "LP"
+            } else {
+                "LPQ"
+            }
+        }
+        crate::iir::BiquadFilterType::Highpass => {
+            if (filter.q - crate::iir::DEFAULT_Q_HIGH_LOW_PASS).abs() < f64::EPSILON {
+                "HP"
+            } else {
+                "HPQ"
+            }
+        }
+        crate::iir::BiquadFilterType::HighpassVariableQ => "HPQ",
+        crate::iir::BiquadFilterType::Lowshelf => {
+            return Err(profiled_apo_filter_refusal("LS"));
+        }
+        crate::iir::BiquadFilterType::Highshelf => {
+            return Err(profiled_apo_filter_refusal("HS"));
+        }
+        crate::iir::BiquadFilterType::AllPass => "AP",
+        crate::iir::BiquadFilterType::Bandpass
+        | crate::iir::BiquadFilterType::Notch
+        | crate::iir::BiquadFilterType::LowshelfOrf
+        | crate::iir::BiquadFilterType::HighshelfOrf
+        | crate::iir::BiquadFilterType::PeakMatched => {
+            return Err(format!(
+                "profiled Equalizer APO export refuses unverified filter type '{}'",
+                filter.filter_type.short_name()
+            ));
+        }
+    };
+    if kind != "PK" && filter.db_gain != 0.0 {
+        return Err(format!(
+            "profiled Equalizer APO {kind} output does not encode filter gain"
+        ));
+    }
+    Ok(kind)
+}
+
+fn is_supported_profiled_apo_filter_kind(kind: &str) -> bool {
+    matches!(kind, "PK" | "LP" | "LPQ" | "HP" | "HPQ" | "AP")
+}
+
+fn profiled_apo_filter_refusal(kind: &str) -> String {
+    if matches!(kind, "LS" | "HS") {
+        format!(
+            "profiled Equalizer APO refuses {kind} shelves: core fixed-slope shelves do not match consumer Q and corner-frequency semantics"
+        )
+    } else {
+        format!("profiled Equalizer APO export refuses unverified filter type '{kind}'")
+    }
+}
+
 fn validate_declared_tokens(
     values: &[String],
     label: &str,
@@ -411,7 +547,7 @@ impl DeviceProfile {
             &self.supported_filter_types,
             "filter type",
             &[
-                "PK", "LP", "HP", "LS", "HS", "HPQ", "BP", "NO", "AP", "LSO", "HSO", "PKM",
+                "PK", "LP", "LPQ", "HP", "HS", "HPQ", "LS", "BP", "NO", "AP", "LSO", "HSO", "PKM",
             ],
         )?;
         if params.num_filters > self.maximum_filter_count {
@@ -430,7 +566,23 @@ impl DeviceProfile {
                 self.id, params.peq_model
             ));
         }
-        let required_types = required_filter_types(params.peq_model);
+        let required_types = if self.renderer == ProductRenderer::EqualizerApo {
+            required_profiled_apo_filter_types(
+                params.peq_model,
+                params.num_filters,
+                params.min_q,
+                params.max_q,
+            )
+        } else {
+            required_filter_types(params.peq_model)
+        };
+        if self.renderer == ProductRenderer::EqualizerApo
+            && let Some(unsupported) = required_types
+                .iter()
+                .find(|filter_type| !is_supported_profiled_apo_filter_kind(filter_type))
+        {
+            return Err(profiled_apo_filter_refusal(unsupported));
+        }
         if let Some(unsupported) = required_types.iter().find(|filter_type| {
             !self
                 .supported_filter_types
@@ -462,6 +614,13 @@ impl DeviceProfile {
         }
         if self.preamp_db.is_none_or(|value| !value.is_finite()) {
             return Err("device profile requires an explicit finite preamp value".into());
+        }
+        if self.renderer == ProductRenderer::EqualizerApo
+            && self.preamp_db.is_some_and(|value| value > 0.0)
+        {
+            return Err(
+                "profiled Equalizer APO export requires a non-positive preamp value".into(),
+            );
         }
         if let Some(reason) = self.renderer.capability().refusal_code {
             return Err(format!("renderer {:?} {}", self.renderer, reason.message()));
@@ -530,7 +689,11 @@ impl DeviceProfile {
                     index + 1
                 ));
             }
-            let filter_type = filter.filter_type.short_name();
+            let filter_type = if self.renderer == ProductRenderer::EqualizerApo {
+                profiled_apo_filter_kind(filter)?
+            } else {
+                filter.filter_type.short_name()
+            };
             if !self
                 .supported_filter_types
                 .iter()
@@ -603,9 +766,18 @@ impl DeviceProfile {
             .preamp_db
             .filter(|value| value.is_finite())
             .ok_or_else(|| "device profile requires an explicit finite preamp value".to_string())?;
-        format!("{preamp:.1}")
+        if preamp > 0.0 {
+            return Err(
+                "profiled Equalizer APO export requires a non-positive preamp value".into(),
+            );
+        }
+        let serialized = format!("{preamp:.1}")
             .parse()
-            .map_err(|_| "APO preamp serialization was not numeric".to_string())
+            .map_err(|_| "APO preamp serialization was not numeric".to_string())?;
+        if serialized > 0.0 {
+            return Err("serialized Equalizer APO preamp must be non-positive".into());
+        }
+        Ok(serialized)
     }
 }
 
@@ -1296,9 +1468,19 @@ mod tests {
                 .contains(&ProductRendererVerifiedFeature::QuantizedFilterTransferCheck)
         );
         assert!(
+            apo.verified_features
+                .contains(&ProductRendererVerifiedFeature::StrictEmittedTextRoundTripCheck)
+        );
+        assert!(
             apo.known_limitations
                 .contains(&ProductRendererLimitation::RuntimeDeviceAndAudibilityAreNotVerified)
         );
+        assert!(apo.known_limitations.contains(
+            &ProductRendererLimitation::ProfiledApoRoutingIsInheritedFromIncludingConfiguration
+        ));
+        assert!(apo.known_limitations.contains(
+            &ProductRendererLimitation::ProfiledApoRefusesShelvesWithMismatchedTransferSemantics
+        ));
 
         let rme = ProductRenderer::RmeTotalMix.capability();
         assert_eq!(
@@ -1338,7 +1520,7 @@ mod tests {
         );
 
         let encoded = serde_json::to_value(&report).unwrap();
-        assert_eq!(encoded["schema_version"], 1);
+        assert_eq!(encoded["schema_version"], 2);
         assert_eq!(encoded["renderers"][0]["renderer"], "equalizer_apo");
         assert_eq!(encoded["renderers"][1]["renderer"], "rme_total_mix");
         assert_eq!(encoded["renderers"][2]["renderer"], "apple_au");
@@ -1419,6 +1601,133 @@ mod tests {
                 .unwrap_err()
                 .contains("filter type")
         );
+    }
+
+    #[test]
+    fn profiled_apo_refuses_unsupported_types_and_positive_preamp_before_search() {
+        let params = optimizer_params();
+        let mut positive_preamp = device_profile("studio", 48_000.0);
+        positive_preamp.preamp_db = Some(1.0);
+        assert!(
+            positive_preamp
+                .validate_for_optimizer(&params)
+                .unwrap_err()
+                .contains("non-positive preamp")
+        );
+
+        let mut free_params = params.clone();
+        free_params.peq_model = crate::PeqModel::Free;
+        let mut free_profile = device_profile("studio", 48_000.0);
+        free_profile.supported_peq_models.push("free".into());
+        free_profile.supported_filter_types.extend(
+            [
+                "LPQ", "HP", "HPQ", "LS", "HS", "BP", "NO", "AP", "LSO", "HSO", "PKM",
+            ]
+            .into_iter()
+            .map(str::to_owned),
+        );
+        let refusal = free_profile
+            .validate_for_optimizer(&free_params)
+            .expect_err("free APO profiles must refuse types outside the checked subset");
+        assert!(refusal.contains("unverified filter type"), "{refusal}");
+
+        let mut profile = device_profile("studio", 48_000.0);
+        profile.supported_filter_types.push("NO".into());
+        let notch = crate::iir::Biquad::new(
+            crate::iir::BiquadFilterType::Notch,
+            1_000.0,
+            48_000.0,
+            1.0,
+            0.0,
+        );
+        let refusal = profile
+            .validate_filters(48_000.0, &[notch])
+            .expect_err("declaring a device type cannot expand the verified APO syntax subset");
+        assert!(
+            refusal.contains("refuses unverified filter type"),
+            "{refusal}"
+        );
+    }
+
+    #[test]
+    fn profiled_apo_refuses_shelf_models_before_optimizer_search_and_direct_validation() {
+        for model in [crate::PeqModel::LsPk, crate::PeqModel::PkLsHs] {
+            let mut params = optimizer_params();
+            params.peq_model = model;
+            params.num_filters = 3;
+            let mut profile = device_profile("studio", 48_000.0);
+            profile.supported_peq_models = vec![model.to_string()];
+            profile.supported_filter_types = vec!["PK".into(), "LS".into(), "HS".into()];
+
+            let refusal = profile
+                .validate_for_optimizer(&params)
+                .expect_err("shelf topologies must be refused before optimization starts");
+            assert!(refusal.contains("fixed-slope shelves"), "{refusal}");
+        }
+
+        let profile = device_profile("studio", 48_000.0);
+        for shelf in [
+            crate::iir::Biquad::new(
+                crate::iir::BiquadFilterType::Lowshelf,
+                100.0,
+                48_000.0,
+                0.71,
+                3.0,
+            ),
+            crate::iir::Biquad::new(
+                crate::iir::BiquadFilterType::Highshelf,
+                10_000.0,
+                48_000.0,
+                0.71,
+                -3.0,
+            ),
+        ] {
+            let refusal = profile
+                .validate_filters(48_000.0, &[shelf])
+                .expect_err("shelf filters must not be admitted by direct profile validation");
+            assert!(refusal.contains("fixed-slope shelves"), "{refusal}");
+        }
+    }
+
+    #[test]
+    fn profiled_apo_optimizer_gate_uses_actual_hpq_and_lpq_emission_kinds() {
+        let mut params = optimizer_params();
+        params.peq_model = crate::PeqModel::HpPk;
+        params.num_filters = 2;
+        let mut profile = device_profile("studio", 48_000.0);
+        profile.supported_peq_models = vec!["hp-pk".into()];
+        profile.supported_filter_types = vec!["HPQ".into(), "PK".into()];
+        assert!(profile.validate_for_optimizer(&params).is_ok());
+
+        profile.supported_filter_types = vec!["HP".into(), "PK".into()];
+        let refusal = profile
+            .validate_for_optimizer(&params)
+            .expect_err("HPQ output must be declared explicitly");
+        assert!(refusal.contains("HPQ"), "{refusal}");
+
+        params.peq_model = crate::PeqModel::HpPkLp;
+        params.num_filters = 3;
+        profile.supported_peq_models = vec!["hp-pk-lp".into()];
+        profile.supported_filter_types = vec!["HPQ".into(), "PK".into(), "LPQ".into()];
+        assert!(profile.validate_for_optimizer(&params).is_ok());
+        profile.supported_filter_types.retain(|kind| kind != "LPQ");
+        assert!(
+            profile
+                .validate_for_optimizer(&params)
+                .unwrap_err()
+                .contains("LPQ")
+        );
+
+        params.max_q = crate::iir::DEFAULT_Q_HIGH_LOW_PASS;
+        profile.supported_filter_types = vec!["HPQ".into(), "PK".into(), "LPQ".into()];
+        assert!(
+            profile
+                .validate_for_optimizer(&params)
+                .unwrap_err()
+                .contains("LP' required")
+        );
+        profile.supported_filter_types.push("LP".into());
+        assert!(profile.validate_for_optimizer(&params).is_ok());
     }
 
     #[test]

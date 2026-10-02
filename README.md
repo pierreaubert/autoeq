@@ -139,6 +139,12 @@ roomeq-engine`; no workspace crate depends on the root facade.
 
 The `autoeq` binary optimizes EQ for individual speakers (anechoic) or headphones.
 
+Run `autoeq --product-renderer-capabilities` by itself for a versioned JSON
+report before supplying measurements or a device profile. Equalizer APO has
+checked profile export; RME and Apple AU report their current legacy serializer
+limits and refusal reasons for profiled export. Device limits remain explicit
+per-machine parameters. This query opens no audio device.
+
 See the [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) for usage, parameters, algorithm selection, and examples.
 
 ---

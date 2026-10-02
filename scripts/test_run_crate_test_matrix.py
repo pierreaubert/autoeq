@@ -3,11 +3,21 @@
 import pathlib
 import json
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
 
 from scripts import run_crate_test_matrix as matrix
+
+QA_TESTS = pathlib.Path(__file__).resolve().parents[1] / "crates/autoeq-qa/tests"
+sys.path.insert(0, str(QA_TESTS))
+from qa_support.metrics import maximum_error_metrics, require_finite_numbers
+from py05_heldout_contract import (
+    _validate_fixture as validate_py05_fixture,
+    _validate_output_grid as validate_py05_output_grid,
+)
+from h02_scorer_sign import _h02_error_metrics
 
 
 class PythonQaResultTests(unittest.TestCase):
@@ -55,6 +65,21 @@ class PythonQaResultTests(unittest.TestCase):
         status, _ = matrix.parse_python_qa_result(self.CASE, exceeded_error, 0)
         self.assertEqual(status, "failed")
 
+    def test_both_error_metrics_are_required_and_finite(self):
+        for field in ("max_abs_error", "max_rel_error"):
+            missing = self.record()
+            del missing[field]
+            status, _ = matrix.parse_python_qa_result(
+                self.CASE, json.dumps(missing), 0
+            )
+            self.assertEqual(status, "failed")
+
+            for invalid in (float("nan"), float("inf"), True):
+                status, _ = matrix.parse_python_qa_result(
+                    self.CASE, json.dumps(self.record(**{field: invalid})), 0
+                )
+                self.assertEqual(status, "failed")
+
     def test_duplicate_json_key_is_rejected(self):
         stdout = (
             '{"QA_RESULT":true,"case":"PY01","case":"PY01",'
@@ -64,6 +89,50 @@ class PythonQaResultTests(unittest.TestCase):
         )
         status, _ = matrix.parse_python_qa_result(self.CASE, stdout, 0)
         self.assertEqual(status, "failed")
+
+
+class PythonQaErrorMetricTests(unittest.TestCase):
+    def test_zero_reference_uses_documented_unit_denominator(self):
+        self.assertEqual(maximum_error_metrics([(2.5e-6, 0.0)]), (2.5e-6, 2.5e-6))
+
+    def test_nonfinite_comparison_or_fixture_values_are_rejected(self):
+        for pair in ((float("nan"), 0.0), (0.0, float("inf"))):
+            with self.subTest(pair=pair), self.assertRaises(ValueError):
+                maximum_error_metrics([pair])
+        with self.assertRaises(ValueError):
+            require_finite_numbers([80.0, float("nan")], "fixture")
+
+    def test_py05_rejects_nonfinite_input_arrays(self):
+        fixture = {
+            "grid_hz": [100.0],
+            "base_spl_db": [float("nan")],
+            "base_phase_deg": [0.0],
+            "heldout_spl_db": [81.0],
+            "heldout_phase_deg": [1.0],
+        }
+        with self.assertRaisesRegex(ValueError, "not finite"):
+            validate_py05_fixture(fixture)
+
+    def test_py05_rejects_displaced_frequency_rows(self):
+        self.assertEqual(validate_py05_output_grid([100.0], [100.0]), [(100.0, 100.0)])
+        with self.assertRaisesRegex(ValueError, "frequency grid differs"):
+            validate_py05_output_grid([100.001], [100.0])
+
+    def test_h02_metrics_include_coefficients_and_complex_response(self):
+        max_abs, max_rel = _h02_error_metrics(
+            [1.0001, 1.0, 1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0, 1.0, 1.0],
+            [(1.01 + 0j, 1.0 + 0j)] * 4
+            + [(1.0 + 0j, 1.0 + 0j)] * 4,
+        )
+        self.assertAlmostEqual(max_abs, 0.01)
+        self.assertAlmostEqual(max_rel, 0.01)
+
+    def test_h02_preserves_zero_complex_reference_refusal(self):
+        with self.assertRaisesRegex(ValueError, "zero reference and nonzero error"):
+            _h02_error_metrics(
+                [1.0] * 5, [1.0] * 5, [(1e-12 + 0j, 0j)]
+            )
 
 
 class RustQaTargetTests(unittest.TestCase):

@@ -20,7 +20,7 @@ cannot replace them.
 | A03 capture/backend handoff | Partial | Producer/consumer and lossless legacy import committed; repeated/partial selection and hardware cancellation evidence remain |
 | A04 measurement/live analysis | Partial | Bounded raw level/RTA and independent device selectors implemented; calibrated live units, distortion/linearity and device validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
-| A06 speaker/headphone workflows | Open | Backend source/rig/target/device contracts and reference comparisons; UI deferred |
+| A06 speaker/headphone workflows | In implementation | Explicit source/rig/target/device contracts and APO profile export under review; reference comparisons and remaining renderer profiles pending; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
 | A08 recoverable jobs | Partial | Durable validated warm starts committed; exact population/adaptation/RNG continuation still requires implementation and equivalence evidence |
 | A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
@@ -194,3 +194,94 @@ not supplied a bound activation receipt, a new PCM witness or device/capture
 evidence. Later resource consumers must verify the exact convolution bytes they
 load, and activation must bind the realized graph, rate/layout and hardware
 assignment before any applied-playback claim. UI implementation remains deferred.
+
+## Verified-byte capture and routed pruning review
+
+Commit `8d10029` validates WAV format and finite samples from a private disk
+snapshot of the exact bytes hashed against the acquisition inventory. The
+bounded streaming path does not reopen the mutable source for parsing. All six
+capture-handoff tests passed, including replacement between verification and
+WAV inspection. Response CSV parsing was already frozen in the earlier slice.
+
+Commit `e35cd7c` makes routed-pruning refusal diagnostics retain the complete
+condition set and actual final acceptance/seat reasons. The public-workflow
+fixture now uses analytic main/sub peaks inside their respective passbands,
+the default positive benefit floor, explicit pre-route ownership, and a planted
+zero-gain section as the neutral removal candidate. Single, multiple and grouped
+sub outputs exercise report-only and enforcement, exported processing identity,
+seat replay and correlated-input conditions. The full exported pruning suite
+passed 6/6; its six-row routed matrix takes about 110 seconds. These are
+synthetic contract witnesses with low-confidence perceptual proxy declarations,
+not listening or hardware approval.
+
+Commit `6d775f5` corrects mechanical pre-existing test lints without changing
+numerical gates. Strict workflow clippy with `--lib --tests --no-deps -- -D warnings`
+passed after these fixes.
+
+## Historical realized-mode witnesses
+
+Local evidence is retained at
+`/Volumes/home_tmp/tmp/autoeq-audit-evidence/a09-canaries-20261002/`.
+The unchanged ignored Kautz multirate witness passed 1/1 with its +3 dB budget at
+44.1/48/96 kHz and 0/+3 Hz shifts. All six emitted finite realizations remain
+within that bound. Unshifted Kautz is slightly worse on this analytic curve;
+the shifted candidates improve. This proves a scoped synthetic DSP realization.
+
+The measured Genelec 5.1.4 quality case exited 1: 11 PASS, 1 REVERTED and 1 FAIL.
+IIR sampled electrical boost is 19.59 dB against the unchanged 12 dB registry
+limit; CM-1 bass median/max are 5.34/9.65 dB against 3.00/4.25 dB. The IIR preset
+uses a dynamic sub-output limiter, while the other presets use static sub
+attenuation. Their final small-signal transfers therefore differ. The explicit
+18 dB non-sub attenuation-cap refusals belong to Hybrid (18.670 dB) and
+MixedPhase (18.491 dB). The FIR candidate has distinct recorded seat, boost and
+useful-output refusals. No original guard was loosened. A separate potential
+Hybrid excursion-filter omission is being investigated.
+
+Kautz identities were stable through its run. Genelec's dependency/source HEADs
+changed during execution; its before/after identities and compile log are saved,
+so it is not reported as a source-frozen acceptance run. Integrated numerical
+QA remains pending after the implementation sources stabilize.
+
+## Headless report dependency repair
+
+The report backend's `default-features = false` plotting dependency could not
+compile after its upstream surface geometry became GPUI-gated. The isolated
+`gpui-toolkit-audit-headless` branch exposes the existing pure surface geometry
+and projection API, keeps rendering feature requirements, and gates renderer
+examples appropriately. Its integration witness passed as an external consumer
+with default features disabled. AutoEQ report tests passed 26/26; native and
+`wasm32-unknown-unknown` report checks passed. The dependency still reports five
+pre-existing deprecated-constant warnings in quadtree code.
+
+The audit-only `gpui-toolkit` symlink now targets that isolated branch, based on
+`b46f339b34e27404645459b3a143c05c40085925`. The original checkout remains untouched.
+Earlier numerical evidence used earlier plotting sources as its metadata states;
+the next integrated gate must record this changed resolved source identity.
+
+## Hybrid protection and SPL anchor review
+
+Commit `23eeca6` retains excursion protection before the Hybrid crossover in
+the emitted chain. The optimization curve already contained that protection;
+the fix restores the actual serialized processing stage without applying it
+again during residual design. The public-path regression checks serialized
+complex transfer against the exact protection response and replays the reported
+curve from the same raw measurement. Channel execution passed 10/10, mixed
+crossover passed 6/6, and the narrowed regression passed again after review.
+This is frequency-domain evidence, not PCM or hardware playback evidence.
+Strict engine clippy remains open with 35 pre-existing diagnostics in the
+engine library/tests; no new regression diagnostic was reported.
+
+Companion capture commit `a5efadd` rejects silent, clipped, nonfinite and
+inconsistent SPL reference levels, invalid capture rates and reference
+frequencies at or above Nyquist. Saving an anchor requires a completed capture
+and finite external-meter reading. A new calibration generation clears the
+previous capture and reading. Three focused calibration/refusal tests and the
+recording-configuration persistence test passed; strict capture library/test
+clippy passed. No device was opened. The raw live monitor still leaves absolute
+SPL unknown, and per-machine microphone/channel/gain association and executed
+hardware calibration remain required.
+
+The headless GPUI dependency repair is committed as `7413827` in the isolated
+`gpui-toolkit-audit-headless` worktree. This exposes existing pure surface
+geometry to report consumers without enabling renderer dependencies. It does
+not implement UI screens or interactions.

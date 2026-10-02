@@ -2377,7 +2377,9 @@ mod tests {
                     let (mut result, _) = fixture();
                     let filter = Biquad::new(BiquadFilterType::Peak, 60.0, fs, 3.0, -0.1);
                     result.channels.get_mut("L").unwrap().plugins =
-                        vec![roomeq_engine::output::create_eq_plugin(&[filter.clone()])];
+                        vec![roomeq_engine::output::create_eq_plugin(
+                            std::slice::from_ref(&filter),
+                        )];
                     result.channel_results.get_mut("L").unwrap().biquads = vec![filter];
                     let subs = if is_sub {
                         [String::from("L")].into()

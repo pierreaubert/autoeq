@@ -170,9 +170,7 @@ mod tests {
         assert!(measured_early_late_curves(&[], 48_000.0, false).is_none());
         assert!(measured_early_late_curves(&[0.0; 64], 48_000.0, false).is_none());
         // Late window past the IR end: no complete split.
-        assert!(
-            measured_early_late_curves(&two_tap_ir()[..200].to_vec(), 48_000.0, false).is_none()
-        );
+        assert!(measured_early_late_curves(&two_tap_ir()[..200], 48_000.0, false).is_none());
         let mut non_finite = two_tap_ir();
         non_finite[100] = f32::NAN;
         assert!(measured_early_late_curves(&non_finite, 48_000.0, false).is_none());

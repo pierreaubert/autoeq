@@ -17,7 +17,7 @@ cannot replace them.
 | A00 QA/build coverage | Partial | Foundation committed; integrated 124-case numerical run and all-package build/test evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
-| A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; schema refresh and hardware cancellation evidence remain |
+| A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
 | A04 measurement/live analysis | Partial | Bounded raw level/RTA and independent device selectors implemented; calibrated live units, distortion/linearity and device validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
@@ -25,8 +25,8 @@ cannot replace them.
 | A08 recoverable jobs | Partial | Durable validated warm starts committed; exact population/adaptation/RNG continuation still requires implementation and equivalence evidence |
 | A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
-| A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery and broader consumer witnesses remain |
-| A12 applied playback/verification | Partial | Existing native graph lowering and A/B session contracts inventoried; exact graph/rate/resource activation, device stress and associated measured capture remain |
+| A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
+| A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
 | A13 rendering/accessibility | Deferred | Begin after backend work |
 | A14 perceptual/listening evidence | Partial | Independent references/domain registry and relevant blinded listening evidence |
 | A15 spatial/adaptive studies | Open | Separate held-out measured studies with explicit implement/constrain/decline outcomes |
@@ -369,7 +369,7 @@ Focused capture tests passed 32/32, CLI tests 1/1, core tests 6/6 and handoff te
 10/10. The workflow library passed 1007 tests with 7 ignored; strict workflow
 Clippy passed. A later focused legacy-selection check passed after the A08 math
 API override. Per-machine device, channel, gain and calibration assignments remain
-parameters. Schema baselines and actual hardware cancellation evidence are pending.
+parameters. Canonical input/output schema baselines now regenerate and verify; actual hardware cancellation evidence is pending.
 
 ## Frozen native preparation verification
 
@@ -386,6 +386,49 @@ processing at 44.1/48/96 kHz after original source paths are removed or replaced
 negative controls cover rate, reversed channel order, resource and latency limits,
 and unsupported alignment effects. This run uses isolated DAW/capture/AutoEQ
 sources and command-only math overrides, including the in-progress A08 API.
-Strict production Clippy and final application/capture integration checks remain
-pending because the companion engine activation-receipt API is being edited.
+SOTF commit `6ac71e199` contains this preparation path. Strict production
+Clippy passes, graph/rack application tests pass 17/17 and capture integration
+passes 1/1 after the companion receipt API stabilized. The 90-test RoomEQ suite
+also passes again against the committed math A08 API.
 No audio device was opened, and no hardware or acoustic acceptance is claimed.
+
+
+## Coupled external/native restart recovery
+
+Commit `37b276a` binds a durable external-package journal to the old and intended
+native graph hashes, staged file bytes and explicit installation markers. Native
+transaction recovery precedes external recovery. An old native root restores
+owned external files; a committed new root validates or finishes the package.
+Unknown native/external content, changed staging, unsupported journal fields and
+ambiguous ownership preserve recovery evidence and fail closed. Native-only CLI
+publication uses the ordinary publisher and requires no external journal.
+
+Verification in an isolated source mirror: workflow library 1016 passed/7 ignored,
+RoomEQ CLI library 70 passed, Python loader 21 passed, and strict workflow/CLI
+Clippy passed. Root regenerated and verified both canonical schemas with the
+mirror-built CLI, SHA-256
+`d93ecb8d4f609778e640c7963391ff9e80163d8c205201af51e7cfe9881abcb3`.
+The mirror uses clean math A08 commit `acdea21f853629a13b7f88f8baef51eb0394754c`
+and the previously recorded local math/headless report dependencies. Recovery
+does not provide cross-filesystem visibility atomicity. A crash before ownership
+becomes durable requires manual resolution; non-Unix directory-entry durability
+remains best-effort.
+
+## Processing graph commit receipts
+
+DAW commit `2619efd` and SOTF Player commit `0d477a2ef` add typed graph update
+receipts. Each binds the requested graph serialization SHA-256 to its matched
+processing-thread request and host generation, processing rate/channels/latency,
+oversampling policy and separate playback rate/channel configuration. Playback
+reconfiguration failure preserves the processing commit receipt and stopped
+state; playback fields then describe the last known configuration. Capped output
+counts remain explicit. The additive Player API reports `NoEngine`, while its
+legacy wrapper preserves prior behavior.
+
+The engine apply module passes 8/8, including graph binding, 64-channel
+processing with a two-channel playback cap, post-commit device rebuild failure
+and unacknowledged-candidate timeout cancellation. Strict engine production
+Clippy passes; the Player no-engine witness passes 1/1. Only the intended SHA-256
+dependency edge is committed to each lock; audit-only dependency overrides are
+excluded. A receipt proves processing-thread commit, with no physical callback
+emission or hardware capture claim.

@@ -17,6 +17,9 @@
 
 pub use backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
 
+/// Version of the optimizer implementation used in warm-start identities.
+pub const OPTIMIZER_IMPLEMENTATION_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// Unified optimizer backend trait and capability descriptors.
 pub mod backend;
 /// Gaussian-process Bayesian optimisation backend.

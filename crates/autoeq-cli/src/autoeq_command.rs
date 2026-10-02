@@ -21,6 +21,7 @@ use clap::Parser;
 use log::warn;
 use log::{error, info};
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 // Include split modules
 #[path = "autoeq/load.rs"]
@@ -100,9 +101,154 @@ pub async fn run_command() -> Result<()> {
     Ok(())
 }
 
+fn cli_config_identity(
+    params: &autoeq::OptimParams,
+    input: &autoeq::Curve,
+    target: &autoeq::Curve,
+    deviation: &autoeq::Curve,
+    spin_data: Option<&std::collections::HashMap<String, autoeq::Curve>>,
+) -> Result<String> {
+    let mut canonical_params = params.clone();
+    canonical_params.algo = autoeq::workflow::resume::canonical_optimizer_identity(&params.algo)
+        .map_err(|error| anyhow!("{error}"))?;
+    let mut parts = vec![
+        format!("cli-optimizer-params:{canonical_params:#?}"),
+        format!("input:{}", input.content_hash()?),
+        format!("target:{}", target.content_hash()?),
+        format!("deviation:{}", deviation.content_hash()?),
+    ];
+    if let Some(spin_data) = spin_data {
+        let mut hashes = spin_data
+            .iter()
+            .map(|(name, curve)| Ok((name, curve.content_hash()?)))
+            .collect::<Result<Vec<_>>>()?;
+        hashes.sort_by(|left, right| left.0.cmp(right.0));
+        for (name, hash) in hashes {
+            parts.push(format!("spin:{name}:{hash}"));
+        }
+    }
+    Ok(autoeq::workflow::resume::config_identity_digest(
+        parts.iter().map(String::as_str),
+    ))
+}
+
+#[derive(Clone)]
+struct CliCheckpointIdentity {
+    measurement: String,
+    config: String,
+    normalization: String,
+    sample_rate: f64,
+    lower_bounds: Vec<f64>,
+    upper_bounds: Vec<f64>,
+    algorithm: String,
+    algorithm_version: String,
+    budget: usize,
+    seed: Option<u64>,
+}
+
+impl CliCheckpointIdentity {
+    fn as_identity(&self) -> autoeq::workflow::resume::WarmStartIdentity<'_> {
+        autoeq::workflow::resume::WarmStartIdentity {
+            measurement_identity: &self.measurement,
+            config_identity: &self.config,
+            normalization_hash: Some(&self.normalization),
+            sample_rate: self.sample_rate,
+            lower_bounds: &self.lower_bounds,
+            upper_bounds: &self.upper_bounds,
+            algorithm: &self.algorithm,
+            algorithm_version: &self.algorithm_version,
+            budget: self.budget,
+        }
+    }
+}
+
+fn cli_candidate_within_bounds(candidate: &[f64], lower: &[f64], upper: &[f64]) -> bool {
+    !candidate.is_empty()
+        && candidate.len() == lower.len()
+        && candidate.len() == upper.len()
+        && candidate
+            .iter()
+            .zip(lower.iter().zip(upper))
+            .all(|(&value, (&minimum, &maximum))| {
+                value.is_finite()
+                    && minimum.is_finite()
+                    && maximum.is_finite()
+                    && minimum <= value
+                    && value <= maximum
+            })
+}
+
+fn cli_checkpoint_callback(
+    path: PathBuf,
+    identity: CliCheckpointIdentity,
+    objective_data: autoeq::optim::ObjectiveData,
+    constraint_spec: autoeq::optim::OwnedConstraintSpec,
+    best_loss: Arc<Mutex<Option<f64>>>,
+) -> runopt::CandidateProgressCallback {
+    Box::new(move |update| {
+        if !update.loss.is_finite()
+            || !cli_candidate_within_bounds(
+                &update.params,
+                &identity.lower_bounds,
+                &identity.upper_bounds,
+            )
+        {
+            return Ok(());
+        }
+
+        let Ok(finalized) = autoeq::optim::finalize_candidate(
+            "cli-checkpoint-progress",
+            &update.params,
+            &objective_data,
+            &constraint_spec.as_spec(),
+        ) else {
+            return Ok(());
+        };
+        if !finalized.loss.is_finite()
+            || !cli_candidate_within_bounds(
+                &finalized.params,
+                &identity.lower_bounds,
+                &identity.upper_bounds,
+            )
+        {
+            return Ok(());
+        }
+        let mut best_loss = best_loss
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if best_loss.is_some_and(|best| finalized.loss >= best) {
+            return Ok(());
+        }
+
+        let state = autoeq::workflow::resume::OptimizerState::from_candidate(
+            &finalized.params,
+            finalized.loss,
+            update.iteration.min(identity.budget),
+            identity.budget,
+            false,
+            identity.seed,
+            true,
+            &identity.as_identity(),
+        );
+        autoeq::workflow::resume::save_optimizer_state(&state, &path).map_err(|error| {
+            format!(
+                "failed to save progress checkpoint {}: {error}",
+                path.display()
+            )
+        })?;
+        *best_loss = Some(finalized.loss);
+        Ok(())
+    })
+}
+
 async fn run(args: autoeq::cli::Args) -> Result<()> {
     // Check if this is multi-driver mode
     if args.loss == autoeq::LossType::DriversFlat {
+        if args.resume_state.is_some() || args.checkpoint_state.is_some() {
+            return Err(anyhow!(
+                "warm-start checkpoints are not supported for multi-driver optimization yet"
+            ));
+        }
         return run_multi_driver_optimization(&args).await;
     }
 
@@ -137,11 +283,198 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     .map_err(|e| anyhow!("{}", e))
     .context("Failed to compute pre-optimization metrics")?;
 
-    // Optimize
-    info!("🚀 Starting optimization...");
-    let opt_result = runopt::perform_optimization(&optim_params, &objective_data)
-        .map_err(|e| anyhow!("{}", e))
-        .context("Optimization failed")?;
+    // Checkpoint identity binds both the prepared measurement and all current
+    // settings/data that can change search or correction behavior.
+    let measurement_identity = input_curve.content_hash()?;
+    let normalization_hash = measurement_identity.clone();
+    let config_identity = cli_config_identity(
+        &optim_params,
+        &input_curve,
+        &target_curve,
+        &deviation_curve,
+        spin_data.as_ref(),
+    )?;
+    let algorithm_identity =
+        autoeq::workflow::resume::canonical_optimizer_identity(&optim_params.algo)
+            .map_err(|error| anyhow!("{error}"))?;
+    let (lower_bounds, upper_bounds) = autoeq::workflow::setup_bounds(&optim_params);
+    let checkpoint_identity = CliCheckpointIdentity {
+        measurement: measurement_identity.clone(),
+        config: config_identity.clone(),
+        normalization: normalization_hash.clone(),
+        sample_rate: optim_params.sample_rate,
+        lower_bounds: lower_bounds.clone(),
+        upper_bounds: upper_bounds.clone(),
+        algorithm: algorithm_identity.clone(),
+        algorithm_version: autoeq::optim::OPTIMIZER_IMPLEMENTATION_VERSION.to_owned(),
+        budget: optim_params.maxeval,
+        seed: optim_params.seed,
+    };
+    let identity = checkpoint_identity.as_identity();
+    let warm_state = match args.resume_state.as_ref() {
+        Some(path) => {
+            let state = autoeq::workflow::resume::load_optimizer_state(path)
+                .map_err(|error| anyhow!("failed to load warm-start checkpoint: {error}"))?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "requested warm-start checkpoint {} does not exist",
+                        path.display()
+                    )
+                })?;
+            state
+                .check_warm_start_compatible(&identity)
+                .map_err(|reason| anyhow!("warm-start checkpoint rejected: {reason}"))?;
+            Some(state)
+        }
+        None => None,
+    };
+    let constraint_spec = autoeq::optim::OwnedConstraintSpec::from_params(&optim_params)
+        .map_err(|reason| anyhow!("invalid current optimizer constraints: {reason}"))?;
+    let warm_candidate = match warm_state.as_ref() {
+        Some(state) => {
+            let finalized = autoeq::optim::finalize_candidate(
+                "cli-warm-start",
+                &state.best_params,
+                &objective_data,
+                &constraint_spec.as_spec(),
+            )
+            .map_err(|reason| {
+                anyhow!("warm-start candidate failed current constraint validation: {reason}")
+            })?;
+            if !cli_candidate_within_bounds(&finalized.params, &lower_bounds, &upper_bounds) {
+                return Err(anyhow!(
+                    "warm-start candidate is outside current optimizer bounds after constraint validation"
+                ));
+            }
+            Some(finalized.params)
+        }
+        None => None,
+    };
+    if warm_candidate.is_some() {
+        let backend = autoeq::optim::backend::resolve(&optim_params.algo)
+            .ok_or_else(|| anyhow!("unknown optimizer backend: {}", optim_params.algo))?;
+        if !backend.supports_initial_candidate() {
+            return Err(anyhow!(
+                "warm-start reuse is unsupported for {} because this optimizer path does not use the supplied initial candidate",
+                backend.name()
+            ));
+        }
+    }
+
+    // Save a feasible candidate before the potentially long run. AutoEQ DE
+    // also exposes full parameter snapshots, so it can replace this state
+    // periodically; other backends only produce a final replacement.
+    let checkpoint_best_loss = Arc::new(Mutex::new(None));
+    let supports_candidate_progress = algorithm_identity.eq_ignore_ascii_case("autoeq:de");
+    if args.checkpoint_state.is_some() && !supports_candidate_progress {
+        warn!(
+            "{} does not expose candidate snapshots; checkpoints retain the initial candidate until the final result",
+            algorithm_identity
+        );
+    }
+    if let Some(path) = args.checkpoint_state.as_ref() {
+        let candidate = match warm_candidate.as_ref() {
+            Some(candidate) => candidate.clone(),
+            None => autoeq::workflow::initial_guess(&optim_params, &lower_bounds, &upper_bounds),
+        };
+        let finalized = autoeq::optim::finalize_candidate(
+            "cli-checkpoint-start",
+            &candidate,
+            &objective_data,
+            &constraint_spec.as_spec(),
+        )
+        .map_err(|reason| anyhow!("cannot checkpoint starting candidate: {reason}"))?;
+        let state = autoeq::workflow::resume::OptimizerState::from_candidate(
+            &finalized.params,
+            finalized.loss,
+            0,
+            optim_params.maxeval,
+            false,
+            optim_params.seed,
+            true,
+            &identity,
+        );
+        autoeq::workflow::resume::save_optimizer_state(&state, path)
+            .map_err(|error| anyhow!("failed to write warm-start checkpoint: {error}"))?;
+        *checkpoint_best_loss
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(finalized.loss);
+    }
+
+    // A saved candidate seeds a fresh optimizer population and random stream;
+    // this path does not restore exact optimizer continuation state.
+    if warm_candidate.is_some() {
+        info!("Starting optimization from a saved candidate with a fresh optimizer run...");
+    } else {
+        info!("🚀 Starting optimization...");
+    }
+    let opt_result = if let Some(path) = args
+        .checkpoint_state
+        .as_ref()
+        .filter(|_| supports_candidate_progress)
+    {
+        let callback = cli_checkpoint_callback(
+            path.clone(),
+            checkpoint_identity.clone(),
+            objective_data.clone(),
+            constraint_spec.clone(),
+            Arc::clone(&checkpoint_best_loss),
+        );
+        runopt::perform_optimization_with_progress_callback(
+            &optim_params,
+            &objective_data,
+            None,
+            warm_candidate.as_deref(),
+            callback,
+        )
+    } else {
+        match warm_candidate.as_deref() {
+            Some(candidate) => runopt::perform_optimization_with_candidate(
+                &optim_params,
+                &objective_data,
+                None,
+                candidate,
+            ),
+            None => runopt::perform_optimization(&optim_params, &objective_data),
+        }
+    }
+    .map_err(|e| anyhow!("{}", e))
+    .context("Optimization failed")?;
+    if let Some(path) = args.checkpoint_state.as_ref() {
+        let finalized = autoeq::optim::finalize_candidate(
+            "cli-checkpoint-final",
+            &opt_result.params,
+            &objective_data,
+            &constraint_spec.as_spec(),
+        )
+        .map_err(|reason| {
+            anyhow!("final optimizer candidate failed constraint validation: {reason}")
+        })?;
+        let selected_iteration = opt_result
+            .optimizer_evidence
+            .iter()
+            .find(|evidence| evidence.selected_for_output)
+            .and_then(|evidence| evidence.evaluation_count)
+            .unwrap_or(optim_params.maxeval)
+            .min(optim_params.maxeval);
+        let checkpoint_loss = *checkpoint_best_loss
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if checkpoint_loss.is_none_or(|best_loss| finalized.loss < best_loss) {
+            let state = autoeq::workflow::resume::OptimizerState::from_candidate(
+                &finalized.params,
+                finalized.loss,
+                selected_iteration,
+                optim_params.maxeval,
+                opt_result.converged,
+                optim_params.seed,
+                true,
+                &identity,
+            );
+            autoeq::workflow::resume::save_optimizer_state(&state, path)
+                .map_err(|error| anyhow!("failed to write final warm-start checkpoint: {error}"))?;
+        }
+    }
     for evidence in &opt_result.optimizer_evidence {
         log::debug!(
             "Optimizer evidence: {} termination={:?} confidence={:?} selected={} status={}",

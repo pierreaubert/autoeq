@@ -37,6 +37,10 @@ impl FilterOptimizer for AutoeqBoBackend {
         self.name
     }
 
+    fn supports_initial_candidate(&self) -> bool {
+        true
+    }
+
     fn library(&self) -> &'static str {
         "AutoEQ"
     }

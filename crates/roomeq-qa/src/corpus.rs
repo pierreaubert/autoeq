@@ -56,7 +56,14 @@ pub struct CorpusCapture {
 /// Reject captures with missing seat/source identity or duplicated payloads.
 ///
 /// A duplicated capture hash under a different seat would invent seats by
-/// copying; each seat must contribute its own capture.
+/// copying; each seat must contribute its own capture. Measured and independent
+/// reference sources also need distinct payloads, and one payload cannot carry
+/// contradictory acquisition provenance. Generated controls may deliberately
+/// use identical responses for different sources at the same seat.
+///
+/// # Errors
+///
+/// Returns an error for missing identities, duplicate capture IDs, or conflicting payload identities.
 pub fn validate_corpus(captures: &[CorpusCapture]) -> Result<(), String> {
     if captures.is_empty() {
         return Err(String::from("corpus has no captures"));
@@ -90,6 +97,20 @@ pub fn validate_corpus(captures: &[CorpusCapture]) -> Result<(), String> {
         }
         if let Some(first) = hashes.insert(capture.capture_hash.as_str(), capture) {
             let same_seat = first.scenario == capture.scenario && first.seat == capture.seat;
+            if first.provenance != capture.provenance {
+                return Err(format!(
+                    "capture hash '{}' has contradictory acquisition provenance",
+                    capture.capture_hash,
+                ));
+            }
+            if first.source != capture.source
+                && capture.provenance != CorpusProvenance::GeneratedControl
+            {
+                return Err(format!(
+                    "capture hash '{}' shared by sources '{}' and '{}': independent sources must not duplicate captures",
+                    capture.capture_hash, first.source, capture.source,
+                ));
+            }
             if !same_seat {
                 return Err(format!(
                     "capture hash '{}' shared by '{}:{}' and '{}:{}': seats must not duplicate captures",
@@ -385,6 +406,40 @@ mod corpus_tests {
         assert!(validate_corpus(&duplicate_id).is_err());
         // An empty corpus carries no evidence.
         assert!(validate_corpus(&[]).is_err());
+    }
+
+    #[test]
+    fn measured_payload_cannot_invent_an_independent_source() {
+        let mut captures = valid_corpus();
+        captures.push(capture("room_a", "R", "seat_1", "cap_4", "hash_1", true));
+        assert!(
+            validate_corpus(&captures)
+                .unwrap_err()
+                .contains("independent sources")
+        );
+    }
+
+    #[test]
+    fn duplicate_payload_cannot_change_acquisition_provenance() {
+        let mut captures = valid_corpus();
+        let mut alias = capture("room_a", "L", "seat_1", "cap_4", "hash_1", true);
+        alias.provenance = CorpusProvenance::GeneratedControl;
+        captures.push(alias);
+        assert!(
+            validate_corpus(&captures)
+                .unwrap_err()
+                .contains("contradictory acquisition provenance")
+        );
+    }
+
+    #[test]
+    fn identical_generated_source_responses_remain_valid_controls() {
+        let mut left = capture("analytic", "L", "seat_1", "left", "flat-plant", false);
+        left.provenance = CorpusProvenance::GeneratedControl;
+        let mut right = left.clone();
+        right.source = "R".into();
+        right.capture_id = "right".into();
+        assert!(validate_corpus(&[left, right]).is_ok());
     }
 
     #[test]

@@ -62,7 +62,10 @@ pub struct CaptureTakeIdentity {
     pub repeat_index: u32,
     pub raw_audio_file: String,
     pub processed_audio_file: String,
-    pub response_file: String,
+    /// Selected and analyzed takes bind a response; other completed parent
+    /// takes may remain raw-only when an explicit projection is present.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_file: Option<String>,
     pub calibration_file: String,
     pub provenance: CaptureTakeProvenance,
 }
@@ -81,6 +84,13 @@ pub struct CaptureHandoff {
     pub source_ids: Vec<String>,
     pub microphone_ids: Vec<String>,
     pub repeat_count: u32,
+    /// Explicit one-take-per-source/microphone projection. Required for repeated
+    /// or partial parents; absent remains valid for legacy complete single-repeat data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_take_ids: Option<Vec<String>>,
+    /// Exact raw journal retained in the processed bundle. Its SHA-256 equals session_id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_inventory_file: Option<String>,
     pub configuration_file: String,
     pub artifacts: Vec<CaptureArtifactIdentity>,
     pub takes: Vec<CaptureTakeIdentity>,
@@ -191,6 +201,19 @@ impl CaptureHandoff {
             &self.configuration_file,
             &[CaptureArtifactRole::Configuration],
         )?;
+        if let Some(parent_file) = &self.parent_inventory_file {
+            let parent = require(parent_file, &[CaptureArtifactRole::SupportingEvidence])?;
+            if parent.sha256 != self.session_id {
+                return Err(
+                    "parent inventory identity disagrees with the capture session ID".into(),
+                );
+            }
+        }
+        if self.selected_take_ids.is_some() && self.parent_inventory_file.is_none() {
+            return Err(
+                "an explicit take selection requires its immutable parent inventory".into(),
+            );
+        }
         if self
             .artifacts
             .iter()
@@ -224,7 +247,6 @@ impl CaptureHandoff {
             }
             if !raw_files.insert(&take.raw_audio_file)
                 || !processed_files.insert(&take.processed_audio_file)
-                || !response_files.insert(&take.response_file)
             {
                 return Err(
                     "completed capture takes cannot reuse sample or response filenames".into(),
@@ -235,13 +257,18 @@ impl CaptureHandoff {
                 &take.processed_audio_file,
                 &[CaptureArtifactRole::ProcessedAudio],
             )?;
-            require(
-                &take.response_file,
-                &[
-                    CaptureArtifactRole::MagnitudeResponse,
-                    CaptureArtifactRole::ComplexResponse,
-                ],
-            )?;
+            if let Some(response_file) = &take.response_file {
+                if !response_files.insert(response_file) {
+                    return Err("capture takes cannot reuse a response filename".into());
+                }
+                require(
+                    response_file,
+                    &[
+                        CaptureArtifactRole::MagnitudeResponse,
+                        CaptureArtifactRole::ComplexResponse,
+                    ],
+                )?;
+            }
             let calibration = require(&take.calibration_file, &[CaptureArtifactRole::Calibration])?;
             if calibration.sha256 != take.provenance.calibration_id
                 || !known(&take.provenance.device_id)
@@ -277,6 +304,49 @@ impl CaptureHandoff {
         if self.completion == CaptureCompletion::Complete && self.takes.len() != expected {
             return Err("complete capture handoff is missing declared takes".into());
         }
+        if self.selected_take_ids.is_none()
+            && (self.repeat_count != 1 || self.completion != CaptureCompletion::Complete)
+        {
+            return Err("repeated or partial capture needs explicit selected take IDs".into());
+        }
+        if let Some(selected_ids) = &self.selected_take_ids {
+            let mut selected = BTreeSet::new();
+            let mut selected_pairs = BTreeSet::new();
+            for id in selected_ids {
+                if !selected.insert(id.as_str()) {
+                    return Err(format!("selected capture take ID is duplicated: {id}"));
+                }
+                let take = self
+                    .takes
+                    .iter()
+                    .find(|take| take.take_id == *id)
+                    .ok_or_else(|| format!("selected capture take ID is unknown: {id}"))?;
+                if take.response_file.is_none()
+                    || !selected_pairs.insert((
+                        take.source_id.as_str(),
+                        take.provenance.microphone_id.as_str(),
+                    ))
+                {
+                    return Err(
+                        "selected capture takes must bind one response per source/microphone pair"
+                            .into(),
+                    );
+                }
+            }
+            let expected_pairs = sources
+                .len()
+                .checked_mul(microphones.len())
+                .ok_or("selected capture matrix size overflow")?;
+            if selected.len() != expected_pairs || selected_pairs.len() != expected_pairs {
+                return Err(
+                    "selected capture IDs must form a complete source/microphone matrix".into(),
+                );
+            }
+        } else if self.takes.iter().any(|take| take.response_file.is_none()) {
+            return Err(
+                "legacy complete single-repeat handoffs need a response for every take".into(),
+            );
+        }
         Ok(())
     }
 }
@@ -304,6 +374,8 @@ mod tests {
             source_ids: vec!["L".into()],
             microphone_ids: vec!["mic-1".into()],
             repeat_count: 1,
+            selected_take_ids: None,
+            parent_inventory_file: None,
             configuration_file: "recording.json".into(),
             artifacts: roles
                 .into_iter()
@@ -320,7 +392,7 @@ mod tests {
                 repeat_index: 0,
                 raw_audio_file: "raw.wav".into(),
                 processed_audio_file: "processed.wav".into(),
-                response_file: "response.csv".into(),
+                response_file: Some("response.csv".into()),
                 calibration_file: "calibration.txt".into(),
                 provenance: CaptureTakeProvenance {
                     microphone_id: "mic-1".into(),
@@ -388,9 +460,91 @@ mod tests {
                 .contains("missing declared takes")
         );
         handoff.completion = CaptureCompletion::Cancelled;
-        handoff.validate().unwrap();
+        assert!(
+            handoff
+                .validate()
+                .unwrap_err()
+                .contains("explicit selected")
+        );
         handoff.completion = CaptureCompletion::Failed;
+        assert!(handoff.validate().is_err());
+    }
+
+    #[test]
+    fn cancelled_repeated_parent_can_select_one_complete_matrix() {
+        let mut handoff = fixture();
+        handoff.repeat_count = 2;
+        handoff.completion = CaptureCompletion::Cancelled;
+        handoff.selected_take_ids = Some(vec!["L-mic-1-0".into()]);
+        handoff.session_id = "b".repeat(64);
+        handoff.parent_inventory_file = Some("capture-raw.json".into());
+        handoff.artifacts.push(CaptureArtifactIdentity {
+            file: "capture-raw.json".into(),
+            role: CaptureArtifactRole::SupportingEvidence,
+            bytes: 9,
+            sha256: handoff.session_id.clone(),
+        });
         handoff.validate().unwrap();
+
+        handoff.selected_take_ids = Some(vec!["unknown-take".into()]);
+        assert!(handoff.validate().unwrap_err().contains("unknown"));
+        handoff.selected_take_ids = Some(vec!["L-mic-1-0".into(), "L-mic-1-0".into()]);
+        assert!(handoff.validate().unwrap_err().contains("duplicated"));
+        handoff.selected_take_ids = Some(vec!["L-mic-1-0".into()]);
+        handoff.parent_inventory_file = None;
+        assert!(handoff.validate().unwrap_err().contains("immutable parent"));
+        handoff.parent_inventory_file = Some("capture-raw.json".into());
+        handoff.session_id = "c".repeat(64);
+        assert!(handoff.validate().unwrap_err().contains("session ID"));
+    }
+
+    #[test]
+    fn unselected_completed_takes_may_be_raw_only_but_legacy_complete_may_not() {
+        let mut handoff = fixture();
+        handoff.repeat_count = 2;
+        handoff.completion = CaptureCompletion::Cancelled;
+        handoff.selected_take_ids = Some(vec!["L-mic-1-0".into()]);
+        handoff.session_id = "b".repeat(64);
+        handoff.parent_inventory_file = Some("capture-raw.json".into());
+        handoff.artifacts.push(CaptureArtifactIdentity {
+            file: "capture-raw.json".into(),
+            role: CaptureArtifactRole::SupportingEvidence,
+            bytes: 9,
+            sha256: handoff.session_id.clone(),
+        });
+        let mut second = handoff.takes[0].clone();
+        second.take_id = "L-mic-1-1".into();
+        second.repeat_index = 1;
+        second.raw_audio_file = "raw-2.wav".into();
+        second.processed_audio_file = "processed-2.wav".into();
+        second.response_file = None;
+        handoff.artifacts.extend([
+            CaptureArtifactIdentity {
+                file: "raw-2.wav".into(),
+                role: CaptureArtifactRole::RawAudio,
+                bytes: 1,
+                sha256: "c".repeat(64),
+            },
+            CaptureArtifactIdentity {
+                file: "processed-2.wav".into(),
+                role: CaptureArtifactRole::ProcessedAudio,
+                bytes: 1,
+                sha256: "c".repeat(64),
+            },
+        ]);
+        handoff.takes.push(second);
+        handoff.validate().unwrap();
+
+        handoff.selected_take_ids = Some(vec!["L-mic-1-1".into()]);
+        assert!(
+            handoff
+                .validate()
+                .unwrap_err()
+                .contains("bind one response")
+        );
+        let mut legacy = fixture();
+        legacy.takes[0].response_file = None;
+        assert!(legacy.validate().unwrap_err().contains("legacy complete"));
     }
 
     #[test]

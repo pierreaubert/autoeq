@@ -1956,6 +1956,8 @@ mod tests {
             source_ids: vec!["L".into()],
             microphone_ids: vec!["mic-1".into()],
             repeat_count: 1,
+            selected_take_ids: None,
+            parent_inventory_file: None,
             configuration_file: "recording.json".into(),
             artifacts: artifact_specs
                 .into_iter()
@@ -1974,7 +1976,7 @@ mod tests {
                 repeat_index: 0,
                 raw_audio_file: "raw.wav".into(),
                 processed_audio_file: "processed.wav".into(),
-                response_file: "response.csv".into(),
+                response_file: Some("response.csv".into()),
                 calibration_file: "calibration.txt".into(),
                 provenance: autoeq_core::capture_provenance::CaptureTakeProvenance {
                     microphone_id: "mic-1".into(),

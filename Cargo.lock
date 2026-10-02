@@ -276,6 +276,7 @@ name = "autoeq-artifacts"
 version = "0.5.1"
 dependencies = [
  "autoeq-core",
+ "sha2",
  "tempfile",
 ]
 

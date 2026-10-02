@@ -13,6 +13,9 @@ categories = ["science", "development-tools::testing"]
 name = "autoeq_qa"
 path = "src/lib.rs"
 
+[lints]
+workspace = true
+
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-artifacts = { workspace = true }

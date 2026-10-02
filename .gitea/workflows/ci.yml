@@ -50,15 +50,24 @@ jobs:
           python3 -m unittest scripts/test_check_crate_partition.py
           python3 scripts/check_crate_partition.py --baseline-ref "${{ github.event.pull_request.base.sha }}"
 
+      - name: Check CI workflow mirror
+        run: |
+          python3 -m unittest scripts.test_check_ci_workflow_parity
+          python3 scripts/check_ci_workflow_parity.py
+
+      - name: Check numerical QA runner contracts
+        run: python3 -m unittest scripts.test_run_crate_test_matrix
+
       - name: cargo check
         run: cargo check --workspace --all-targets --all-features
 
       - name: Check RoomEQ schema baselines
         run: python3 scripts/check_roomeq_schema_baselines.py
-      - name: Test RoomEQ GPUI client
+      - name: Test RoomEQ and recording GPUI clients
         run: |
-          python3 -m pip install 'jsonschema>=4.25,<5'
-          PYTHONPATH=python/roomeq-gui python3 -m unittest discover python/roomeq-gui/tests
+          python3 -m pip install --editable ui/roomeq-gui --editable ui/recording-gui
+          PYTHONPATH=ui/roomeq-gui python3 -m unittest discover ui/roomeq-gui/tests
+          PYTHONPATH=ui/recording-gui python3 -m unittest discover ui/recording-gui/tests
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -98,6 +107,55 @@ jobs:
 
       - name: Run focused crate tests
         run: python3 scripts/run_crate_test_matrix.py --package "${{ matrix.package }}" --release
+
+  qa-autoeq-numerical:
+    name: AutoEQ numerical validation (124 manifest cases)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: crate-unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.14"
+
+      - name: Install pinned AutoEQ QA Python dependencies
+        run: python3 -m pip install --requirement scripts/autoeq-qa-requirements.txt
+
+      - name: Install Just
+        uses: extractions/setup-just@v4
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-autoeq-numerical-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Validate the complete manifest and target membership
+        run: python3 scripts/run_crate_test_matrix.py --check-qa-manifest
+
+      - name: Run all Rust and Python manifest cases
+        run: just qa-wolfram-validation
+
+      - name: Upload AutoEQ QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoeq-numerical-qa
+          path: |
+            target/qa/autoeq-qa-manifest.json
+            target/qa/autoeq-qa-rust-results.json
+            target/qa/autoeq-qa-rust-run.log
+            target/qa/autoeq-qa-python-results.json
+          if-no-files-found: warn
 
   qa-roomeq-ci:
     name: RoomEQ CI QA Gate

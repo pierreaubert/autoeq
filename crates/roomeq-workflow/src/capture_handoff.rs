@@ -10,7 +10,7 @@ use autoeq_core::capture_handoff::{
 };
 use roomeq_model::{MeasurementRef, MeasurementSource, RoomConfig, SpeakerConfig};
 use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
 
 // Limits bound imported metadata/response memory; WAV inventories are streamed.
@@ -42,7 +42,10 @@ fn read_bounded(path: &Path, limit: u64) -> Result<Vec<u8>> {
     Ok(bytes)
 }
 
-fn verify_file(path: &Path, expected: &CaptureArtifactIdentity) -> Result<()> {
+fn verify_file(
+    path: &Path,
+    expected: &CaptureArtifactIdentity,
+) -> Result<Option<tempfile::NamedTempFile>> {
     if expected.bytes > MAX_ARTIFACT_BYTES {
         bail!(
             "capture artifact exceeds its streaming size budget: {}",
@@ -53,6 +56,14 @@ fn verify_file(path: &Path, expected: &CaptureArtifactIdentity) -> Result<()> {
     if input.metadata()?.len() != expected.bytes {
         bail!("capture artifact byte count changed: {}", expected.file);
     }
+    // WAV validation consumes these exact hashed bytes. A private disk snapshot
+    // keeps bounded-memory streaming without reopening a mutable source file.
+    let mut audio_snapshot = matches!(
+        expected.role,
+        CaptureArtifactRole::RawAudio | CaptureArtifactRole::ProcessedAudio
+    )
+    .then(tempfile::NamedTempFile::new)
+    .transpose()?;
     let mut hash = Sha256::new();
     let mut count = 0_u64;
     let mut buffer = [0_u8; 65536];
@@ -69,6 +80,9 @@ fn verify_file(path: &Path, expected: &CaptureArtifactIdentity) -> Result<()> {
             );
         }
         hash.update(&buffer[..read]);
+        if let Some(snapshot) = audio_snapshot.as_mut() {
+            snapshot.write_all(&buffer[..read])?;
+        }
     }
     if count != expected.bytes
         || hash
@@ -80,11 +94,15 @@ fn verify_file(path: &Path, expected: &CaptureArtifactIdentity) -> Result<()> {
     {
         bail!("capture artifact SHA-256 changed: {}", expected.file);
     }
-    Ok(())
+    if let Some(snapshot) = audio_snapshot.as_mut() {
+        snapshot.flush()?;
+        snapshot.as_file_mut().rewind()?;
+    }
+    Ok(audio_snapshot)
 }
 
-fn verify_audio_metadata(path: &Path, rate: u32) -> Result<()> {
-    let mut reader = hound::WavReader::open(path).context("invalid capture audio WAV")?;
+fn verify_audio_metadata(input: &mut std::fs::File, rate: u32) -> Result<()> {
+    let mut reader = hound::WavReader::new(input).context("invalid capture audio WAV")?;
     let spec = reader.spec();
     if spec.sample_rate != rate
         || spec.channels != 1
@@ -152,12 +170,8 @@ pub fn verify_capture_handoff(
     }
     for artifact in &handoff.artifacts {
         let path = regular_local_file(root, &artifact.file)?;
-        verify_file(&path, artifact)?;
-        if matches!(
-            artifact.role,
-            CaptureArtifactRole::RawAudio | CaptureArtifactRole::ProcessedAudio
-        ) {
-            verify_audio_metadata(&path, handoff.sample_rate_hz)?;
+        if let Some(mut snapshot) = verify_file(&path, artifact)? {
+            verify_audio_metadata(snapshot.as_file_mut(), handoff.sample_rate_hz)?;
         }
     }
     Ok(Some(handoff))
@@ -501,6 +515,31 @@ mod tests {
         std::fs::rename(&old, &moved).unwrap();
         crate::config_loader::load_merged_config_strict(&moved.join("recording.json"), None)
             .unwrap();
+    }
+
+    #[test]
+    fn capture_audio_validation_consumes_the_verified_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let (_, handoff) = fixture(directory.path());
+        let raw = directory.path().join("raw.wav");
+        let identity = handoff
+            .artifacts
+            .iter()
+            .find(|asset| asset.file == "raw.wav")
+            .unwrap();
+        let mut snapshot = verify_file(&raw, identity).unwrap().unwrap();
+        // Simulate replacement between inventory verification and WAV parsing.
+        // The admitted bytes still describe the original finite 48 kHz capture.
+        std::fs::write(&raw, b"a changed file is not a WAV").unwrap();
+        verify_audio_metadata(snapshot.as_file_mut(), handoff.sample_rate_hz).unwrap();
+        assert!(verify_file(&raw, identity).is_err());
+        assert!(
+            verify_audio_metadata(
+                &mut std::fs::File::open(&raw).unwrap(),
+                handoff.sample_rate_hz,
+            )
+            .is_err()
+        );
     }
 
     #[test]

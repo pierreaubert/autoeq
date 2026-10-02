@@ -2267,8 +2267,7 @@ mod tests {
             Path::new("."),
             "training",
         )
-        .err()
-        .expect("full-range driver sums still require full-band evidence");
+        .expect_err("full-range driver sums still require full-band evidence");
         assert!(
             error
                 .to_string()

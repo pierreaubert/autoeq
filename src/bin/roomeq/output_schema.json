@@ -8989,6 +8989,17 @@
           ],
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
+        "tilt_stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TiltStageConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Trailing LS plus HS tilt pair appended after the main filters."
+        },
         "tolerance": {
           "default": 1e-05,
           "description": "Optimization convergence tolerance (relative)",
@@ -12685,6 +12696,43 @@
           "format": "double",
           "type": [
             "number",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TiltStageConfig": {
+      "description": "Appends an optimizer-driven LS plus HS tilt pair at the DSP chain end.\n\nThe pair extends `num_filters` by two instead of replacing peak slots, so\nenabling tilt never moves the main filters' bounds. Both shelves use the\nexisting shelf limits (+/-`max_db` gain, pinned Q) and flow through the\nsame HF guard, audibility veto, and headroom stages as every other filter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable the trailing tilt pair.",
+          "type": "boolean"
+        },
+        "hs_band_hz": {
+          "description": "HS hinge band `[lo, hi]` in Hz (`None` selects the upper geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "ls_band_hz": {
+          "description": "LS hinge band `[lo, hi]` in Hz (`None` selects the lower geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
             "null"
           ]
         }

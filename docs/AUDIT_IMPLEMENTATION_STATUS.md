@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached public-pin run passes 118 Rust and 6 Python records plus all 140 Rust targets; fresh all-package and installation evidence pending |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; cross-platform and clean installation evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -632,3 +632,39 @@ cross-build continuation or RoomEQ multi-channel resume.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/exact-process-20261002`.
 Executable SHA-256:
 `186c5b4d428c55e2027f0241aa52e72e8c17805c9ea48aed9c31a407cf655ddd`.
+
+Commit `e187dbe` retains the portable process runner and README invocation.
+Its final run passes two interruption contracts and three input-refusal
+contracts with unchanged source/input identities. A failing executable negative
+control produces a failed evidence record and no passing contracts. The runner
+accepts the CLI path and a new evidence directory as parameters and preserves
+logs/results when a contract fails.
+
+## Matched numerical and package acceptance
+
+The fresh run uses one clean detached Git worktree at
+`53819ed5f301d2b23457f6cfe685af90195956bf` throughout all three gates:
+
+- Rust numerical acceptance: 118/118 records and 140/140 targets passed;
+  no missing, malformed or failed records.
+- Pinned Python acceptance: 6/6 records passed.
+- Default-feature package library matrix: 22/22 packages passed,
+  4,046 tests passed, 25 ignored. Ignored tests are not counted as executed.
+
+Before/after source and dependency provenance match SHA-256
+`f65d218758cbbff3aa2631cacdaa065b8612212eeb3a7562cc00438c8cc66149`.
+Source tree, lock, Cargo configuration, all 1,767 fixture files and resolved
+dependencies also match in the independent before/after inventories.
+The lock SHA-256 is
+`44c04ecc4cc31c55c00ad5d542b10d5c6bb5d420abecc56fd5d041d38752adc7`.
+
+All 17 GPUI packages use the public pinned `d52e2bc` revision and optimization
+uses public math `acdea21`. Math DSP/IIR still use the recorded local reset
+worktree and its pre-existing uncommitted wavelet implementation. That local
+dependency is part of the verified provenance; these gates do not establish
+clean public installation, all-feature builds, hardware or listening acceptance.
+Subsequent changes require checks appropriate to their scope.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-finalqa-20261002/evidence`, including
+the detached identity/fixture inventories, individual package logs and
+`package-matrix/summary.json`.

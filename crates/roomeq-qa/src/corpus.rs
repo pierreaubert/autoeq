@@ -476,7 +476,7 @@ mod corpus_tests {
             assert!(!id.trim().is_empty(), "scenario without id");
             let provenance = scenario["provenance"].as_str().unwrap_or("");
             assert!(
-                matches!(provenance, "fem" | "real_measurement"),
+                matches!(provenance, "fem" | "real_measurement" | "synthetic"),
                 "scenario '{id}' has unknown provenance '{provenance}'"
             );
             let rate = scenario["sample_rate"].as_f64().unwrap_or(0.0);
@@ -486,6 +486,9 @@ mod corpus_tests {
             );
             let held_out = scenario["held_out"].as_array();
             let mut paths = std::collections::HashSet::new();
+            let mut evidence_classes = std::collections::HashSet::new();
+            let mut independent_seats = std::collections::HashSet::new();
+            let mut independent_response_paths = std::collections::HashSet::new();
             for entry in held_out.into_iter().flatten() {
                 let capture = entry["path"].as_str().unwrap_or("");
                 assert!(
@@ -496,7 +499,53 @@ mod corpus_tests {
                     paths.insert(capture),
                     "scenario '{id}' duplicates held-out '{capture}'"
                 );
+                let evidence_class = entry
+                    .get("evidence_class")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown");
+                assert!(
+                    matches!(
+                        evidence_class,
+                        "unknown"
+                            | "independent_real_measurement"
+                            | "deterministic_perturbation"
+                            | "fem_generated"
+                            | "synthetic_control"
+                    ),
+                    "scenario '{id}' has unknown held-out evidence class '{evidence_class}'"
+                );
+                evidence_classes.insert(evidence_class);
+                match evidence_class {
+                    "independent_real_measurement" => {
+                        assert_eq!(provenance, "real_measurement", "scenario '{id}'");
+                        let seat = entry["seat_id"].as_str().unwrap_or("");
+                        assert!(
+                            !seat.trim().is_empty() && seat.trim() == seat,
+                            "scenario '{id}' independent measured row needs an explicit trimmed seat_id"
+                        );
+                        let channel = entry["channel"].as_str().unwrap_or("");
+                        assert!(
+                            independent_seats.insert((channel, seat)),
+                            "scenario '{id}' repeats independent seat '{seat}' for channel '{channel}'"
+                        );
+                        assert!(
+                            independent_response_paths.insert((channel, capture)),
+                            "scenario '{id}' reuses independent response '{capture}' for channel '{channel}'"
+                        );
+                    }
+                    "deterministic_perturbation" => {
+                        assert_eq!(provenance, "real_measurement", "scenario '{id}'");
+                    }
+                    "fem_generated" => assert_eq!(provenance, "fem", "scenario '{id}'"),
+                    "synthetic_control" => assert_eq!(provenance, "synthetic", "scenario '{id}'"),
+                    "unknown" => {}
+                    _ => unreachable!("held-out evidence class was validated above"),
+                }
             }
+            assert!(
+                evidence_classes.len() <= 1,
+                "scenario '{id}' mixes held-out evidence classes"
+            );
             if paths.is_empty() {
                 assert_eq!(
                     provenance, "real_measurement",

@@ -9,9 +9,10 @@ use roomeq_model::Curve;
 use roomeq_quality::{
     AcousticBaselinePlatform, AcousticCorpusBaseline, AcousticCorpusBaselineEntry,
     AcousticCorpusManifest, AcousticCorpusScenario, AcousticQualityScorecard,
-    HeadPositionPerturbationConfig, QaTier, QualityBaselineComparison, QualityBaselineMetrics,
-    QualityBaselinePartition, QualityEvaluationConfig, QualityGateMode, QualityGatePolicy,
-    QualityGateReport, QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
+    CandidateRecommendationStatus, HeadPositionPerturbationConfig, HeldOutEvidenceStatus, QaTier,
+    QualityBaselineComparison, QualityBaselineMetrics, QualityBaselinePartition,
+    QualityEvaluationConfig, QualityGateMode, QualityGatePolicy, QualityGateReport,
+    QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
     compare_quality_to_baseline, derive_temporal_quality_evidence, evaluate_acoustic_quality,
     evaluate_quality_gate,
 };
@@ -89,11 +90,13 @@ struct Args {
 #[derive(Debug, Serialize)]
 struct ScenarioReport {
     input_files: Vec<InputFileIdentity>,
+    held_out_measurements: Vec<HeldOutEvidenceReport>,
     playback_evidence:
         Vec<roomeq_workflow::room_optimization::seat_replay::FinalPhysicalSeatPlayback>,
     seed_distribution: Option<roomeq_model::QaSeedDistribution>,
     id: String,
     provenance: String,
+    held_out_evidence_status: HeldOutEvidenceStatus,
     topology: String,
     scorecard: AcousticQualityScorecard,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,15 +109,28 @@ struct ScenarioReport {
 }
 
 #[derive(Debug, Serialize)]
+struct HeldOutEvidenceReport {
+    channel: String,
+    seat_id: Option<String>,
+    path: String,
+    evidence_class: roomeq_quality::HeldOutEvidenceClass,
+}
+
+#[derive(Debug, Serialize)]
 struct CandidateReport {
     playback_evidence:
         Vec<roomeq_workflow::room_optimization::seat_replay::FinalPhysicalSeatPlayback>,
     seed_distribution: Option<roomeq_model::QaSeedDistribution>,
     config: String,
     scorecard: AcousticQualityScorecard,
+    quality_gate: QualityGateReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     robustness: Option<RobustnessSummary>,
     deltas: CandidateDeltas,
+    /// Numeric preference before checking whether the evidence can support promotion.
+    numeric_preference: bool,
+    held_out_evidence_status: HeldOutEvidenceStatus,
+    recommendation_status: CandidateRecommendationStatus,
     recommended: bool,
 }
 
@@ -621,6 +637,7 @@ fn record_variant_failure(
         "candidate_override_config": scenario.candidate_override_config,
         "evaluation_band_hz": scenario.evaluation_band_hz,
         "held_out": scenario.held_out,
+        "held_out_evidence_status": scenario.held_out_evidence_status(),
         "error": format!("{error:#}"), "completed": completed,
     });
     let serialized = match serde_json::to_string_pretty(&record) {
@@ -734,6 +751,7 @@ pub fn run() -> Result<()> {
                 )
             })?;
         let scorecard = current.scorecard;
+        let enforce = args.enforce || scenario.gate_mode == QualityGateMode::Enforce;
         let candidate = scenario
             .candidate_override_config
             .as_deref()
@@ -747,7 +765,20 @@ pub fn run() -> Result<()> {
                             }})))?;
                 let candidate_scorecard = candidate_evaluation.scorecard;
                 let deltas = candidate_deltas(&scorecard, &candidate_scorecard);
-                let recommended = candidate_is_recommended(&candidate_scorecard, &deltas);
+                let numeric_preference =
+                    candidate_numeric_preference(&candidate_scorecard, &deltas);
+                let candidate_gate = evaluate_quality_gate(
+                    &candidate_scorecard,
+                    QualityGatePolicy::default(),
+                    true,
+                );
+                let held_out_evidence_status = scenario.held_out_evidence_status();
+                let recommendation_status = candidate_recommendation_status(
+                    numeric_preference,
+                    candidate_gate.passed,
+                    held_out_evidence_status,
+                    enforce,
+                );
                 Ok::<_, anyhow::Error>(CandidateReport {
                     playback_evidence: candidate_evaluation.playback_evidence,
                     seed_distribution: candidate_evaluation.seed_distribution,
@@ -757,13 +788,16 @@ pub fn run() -> Result<()> {
                         .to_string_lossy()
                         .into_owned(),
                     scorecard: candidate_scorecard,
+                    quality_gate: candidate_gate,
                     robustness: candidate_evaluation.robustness,
                     deltas,
-                    recommended,
+                    numeric_preference,
+                    held_out_evidence_status,
+                    recommendation_status,
+                    recommended: recommendation_status.is_recommended(),
                 })
             })
             .transpose()?;
-        let enforce = args.enforce || scenario.gate_mode == QualityGateMode::Enforce;
         let mut gate = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), enforce);
         let baseline_comparison = if let Some(snapshot) = baseline.get(&scenario.id) {
             let comparison = compare_quality_to_baseline(
@@ -798,10 +832,21 @@ pub fn run() -> Result<()> {
             .ok_or_else(|| anyhow!("missing input inventory for scenario {}", scenario.id))?;
         scenarios.push(ScenarioReport {
             input_files: scenario_inputs,
+            held_out_measurements: scenario
+                .held_out
+                .iter()
+                .map(|measurement| HeldOutEvidenceReport {
+                    channel: measurement.channel.clone(),
+                    seat_id: measurement.seat_id.clone(),
+                    path: path_label(&measurement.path),
+                    evidence_class: measurement.evidence_class,
+                })
+                .collect(),
             seed_distribution: current.seed_distribution,
             playback_evidence: current.playback_evidence,
             id: scenario.id.clone(),
             provenance: scenario.provenance.as_str().to_string(),
+            held_out_evidence_status: scenario.held_out_evidence_status(),
             topology: scenario.topology.clone(),
             scorecard,
             baseline_comparison,
@@ -1555,7 +1600,7 @@ fn candidate_deltas(
     }
 }
 
-fn candidate_is_recommended(
+fn candidate_numeric_preference(
     candidate: &AcousticQualityScorecard,
     deltas: &CandidateDeltas,
 ) -> bool {
@@ -1583,6 +1628,54 @@ fn candidate_is_recommended(
     candidate.finite && ((no_regression && material_improvement) || headroom_tradeoff)
 }
 
+fn candidate_recommendation_status(
+    numeric_preference: bool,
+    candidate_quality_gate_passed: bool,
+    evidence: HeldOutEvidenceStatus,
+    enforced: bool,
+) -> CandidateRecommendationStatus {
+    use CandidateRecommendationStatus as Recommendation;
+    use HeldOutEvidenceStatus as Evidence;
+
+    if !candidate_quality_gate_passed {
+        return Recommendation::CandidateQualityGateFailed;
+    }
+    match evidence {
+        Evidence::NoHeldOutMeasurements => Recommendation::NoHeldOutEvidence,
+        Evidence::MixedEvidenceClasses => Recommendation::MixedEvidenceNotPromoted,
+        Evidence::UnknownEvidenceNotAuthorizingGeneralization => {
+            Recommendation::UnknownEvidenceNotPromoted
+        }
+        Evidence::DeterministicPerturbationRobustnessOnly => {
+            Recommendation::DeterministicPerturbationsNotIndependentMeasuredEvidence
+        }
+        Evidence::IndependentMeasuredSeatsIncomplete => {
+            Recommendation::IndependentMeasuredSeatsIncomplete
+        }
+        Evidence::IndependentMeasuredSeatsReportOnly => {
+            Recommendation::IndependentMeasuredSeatsReportOnly
+        }
+        Evidence::IndependentMeasuredSeatsEnforced if numeric_preference => {
+            Recommendation::RecommendedForMeasuredGeneralization
+        }
+        Evidence::IndependentMeasuredSeatsEnforced => {
+            Recommendation::CandidateNotNumericallyPreferred
+        }
+        Evidence::FemGeneratedModelSpaceOnly if !enforced => {
+            Recommendation::FemModelSpaceReportOnly
+        }
+        Evidence::FemGeneratedModelSpaceOnly if numeric_preference => {
+            Recommendation::RecommendedForFemModelSpace
+        }
+        Evidence::FemGeneratedModelSpaceOnly => Recommendation::CandidateNotNumericallyPreferred,
+        Evidence::SyntheticControlOnly if !enforced => Recommendation::SyntheticControlReportOnly,
+        Evidence::SyntheticControlOnly if numeric_preference => {
+            Recommendation::RecommendedForSyntheticControl
+        }
+        Evidence::SyntheticControlOnly => Recommendation::CandidateNotNumericallyPreferred,
+    }
+}
+
 fn print_terminal_summary(report: &CorpusReport) {
     let enforced = report
         .scenarios
@@ -1604,12 +1697,23 @@ fn print_terminal_summary(report: &CorpusReport) {
                 .is_some_and(|candidate| candidate.recommended)
         })
         .count();
+    let numeric_preferences_not_promoted = report
+        .scenarios
+        .iter()
+        .filter(|scenario| {
+            scenario
+                .candidate
+                .as_ref()
+                .is_some_and(|candidate| candidate.numeric_preference && !candidate.recommended)
+        })
+        .count();
     eprintln!(
-        "Acoustic summary: {} scenarios, {} enforced, {} violations, {} candidate wins, {}",
+        "Acoustic summary: {} scenarios, {} enforced, {} violations, {} candidate promotions, {} numeric preferences not promoted, {}",
         report.scenario_count,
         enforced,
         violations,
         recommended,
+        numeric_preferences_not_promoted,
         if report.passed { "PASS" } else { "FAIL" }
     );
 }
@@ -1625,9 +1729,9 @@ fn render_markdown(report: &CorpusReport) -> String {
         if report.passed { "PASS" } else { "FAIL" }
     );
     markdown.push_str(
-        "| Scenario | Topology | Post RMS (dB) | P95 (dB) | Modal roughness (dB/oct²) | Gate | Candidate |\n",
+        "| Scenario | Topology | Held-out evidence | Post RMS (dB) | P95 (dB) | Modal roughness (dB/oct²) | Gate | Candidate recommendation |\n",
     );
-    markdown.push_str("|---|---|---:|---:|---:|---|---|\n");
+    markdown.push_str("|---|---|---|---:|---:|---:|---|---|\n");
     for scenario in &report.scenarios {
         let partition = scenario
             .scorecard
@@ -1641,18 +1745,13 @@ fn render_markdown(report: &CorpusReport) -> String {
         let candidate = scenario
             .candidate
             .as_ref()
-            .map(|candidate| {
-                if candidate.recommended {
-                    "recommended"
-                } else {
-                    "not promoted"
-                }
-            })
+            .map(|candidate| candidate.recommendation_status.as_str())
             .unwrap_or("not run");
         markdown.push_str(&format!(
-            "| {} | {} | {:.3} | {:.3} | {} | {} | {} |\n",
+            "| {} | {} | {} | {:.3} | {:.3} | {} | {} | {} |\n",
             scenario.id,
             scenario.topology,
+            scenario.held_out_evidence_status.as_str(),
             partition.post_weighted_rms_median_db,
             partition.post_p95_abs_residual_db,
             modal,
@@ -1838,6 +1937,202 @@ mod tests {
         );
         assert!(format!("{error:#}").contains("original failure"));
     }
+
+    #[test]
+    fn candidate_promotion_requires_absolute_gate_and_independent_evidence() {
+        use roomeq_quality::{
+            CandidateRecommendationStatus as Recommendation, HeldOutEvidenceStatus as Evidence,
+        };
+
+        let partition = |post_rms, post_p95, improvement| roomeq_quality::QualityPartitionMetrics {
+            curve_count: 2,
+            pre_weighted_rms_median_db: post_rms + improvement,
+            post_weighted_rms_median_db: post_rms,
+            improvement_median_db: improvement,
+            worst_position_improvement_db: improvement,
+            pre_p95_abs_residual_db: post_p95 + improvement,
+            post_p95_abs_residual_db: post_p95,
+            post_worst_abs_residual_db: post_p95,
+            mean_normalized_seat_spread_db: 0.0,
+            max_normalized_seat_spread_db: 0.0,
+            bass_post_weighted_rms_db: None,
+            upper_pre_weighted_rms_db: None,
+            upper_post_weighted_rms_db: None,
+            bass_pre_modal_roughness_db_per_octave2: None,
+            bass_post_modal_roughness_db_per_octave2: None,
+            bass_modal_roughness_improvement_db_per_octave2: None,
+        };
+        let scorecard = |post_rms, post_p95, improvement, max_boost_db| AcousticQualityScorecard {
+            useful_output: vec![roomeq_model::UsefulOutputEvidence {
+                logical_input: None,
+                partition: "held_out".into(),
+                seat_index: 0,
+                permitted_gain_db: 0.0,
+                evaluated_band_hz: [20.0, 500.0],
+                mean_level_change_db: 0.0,
+                unexplained_loss_rms_db: 0.0,
+                worst_unexplained_loss_db: None,
+                worst_loss_frequency_hz: None,
+                loss_band_threshold_db: None,
+                loss_bands: Vec::new(),
+                bass_evaluated_band_hz: None,
+                bass_unexplained_loss_rms_db: None,
+                extension_band_hz: None,
+                extension_loss_db: None,
+                peak_demand_change_db: None,
+                target_shortfall_rms_db: None,
+            }],
+            final_seats: Vec::new(),
+            training: partition(post_rms, post_p95, improvement),
+            held_out: Some(partition(post_rms, post_p95, improvement)),
+            correction_rms_db: 1.0,
+            max_boost_db,
+            max_electrical_boost_db: None,
+            max_cut_db: -1.0,
+            induced_group_delay_rms_ms: Some(0.0),
+            temporal: TemporalQualityEvidence {
+                pre_ringing_audible_db: None,
+                latency_ms: Some(0.0),
+                available_headroom_db: None,
+                phase_evidence_available: true,
+                temporal_evidence_available: true,
+                coherent_timing: roomeq_quality::CoherentTimingEvidence::Unassessed,
+                alignment_delay_ms: None,
+                total_latency_ms: None,
+            },
+            correction_band_hz: None,
+            evaluated_band_hz: [20.0, 500.0],
+            measurement_overlap_hz: Some([20.0, 500.0]),
+            finite: true,
+        };
+
+        let current = scorecard(2.0, 3.0, 1.0, 12.9);
+        let candidate = scorecard(1.0, 1.5, 2.0, 13.0);
+        let deltas = super::candidate_deltas(&current, &candidate);
+        let numeric_preference = super::candidate_numeric_preference(&candidate, &deltas);
+        assert!(
+            numeric_preference,
+            "relative metrics should prefer this candidate"
+        );
+
+        let gate = super::evaluate_quality_gate(
+            &candidate,
+            roomeq_quality::QualityGatePolicy::default(),
+            true,
+        );
+        assert!(!gate.passed);
+        assert!(
+            gate.violations
+                .contains(&"maximum_boost_exceeded".to_string())
+        );
+        assert_eq!(
+            roomeq_quality::QualityGatePolicy::default().max_boost_db,
+            12.0
+        );
+
+        let failed_gate_status = super::candidate_recommendation_status(
+            numeric_preference,
+            gate.passed,
+            Evidence::IndependentMeasuredSeatsEnforced,
+            true,
+        );
+        assert_eq!(
+            failed_gate_status,
+            Recommendation::CandidateQualityGateFailed
+        );
+        let report = CandidateReport {
+            playback_evidence: Vec::new(),
+            seed_distribution: None,
+            config: "candidate.json".into(),
+            scorecard: candidate,
+            quality_gate: gate,
+            robustness: None,
+            deltas,
+            numeric_preference,
+            held_out_evidence_status: Evidence::IndependentMeasuredSeatsEnforced,
+            recommendation_status: failed_gate_status,
+            recommended: failed_gate_status.is_recommended(),
+        };
+        let serialized = serde_json::to_value(report).unwrap();
+        assert_eq!(serialized["numeric_preference"], true);
+        assert_eq!(serialized["recommended"], false);
+        assert_eq!(serialized["quality_gate"]["passed"], false);
+        assert_eq!(
+            serialized["recommendation_status"],
+            "candidate_quality_gate_failed"
+        );
+
+        let derived = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::DeterministicPerturbationRobustnessOnly,
+            true,
+        );
+        assert_eq!(
+            derived,
+            Recommendation::DeterministicPerturbationsNotIndependentMeasuredEvidence
+        );
+        assert!(!derived.is_recommended());
+        assert_eq!(
+            derived.as_str(),
+            "deterministic_perturbations_not_independent_measured_evidence"
+        );
+
+        let unknown = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::UnknownEvidenceNotAuthorizingGeneralization,
+            true,
+        );
+        assert_eq!(unknown, Recommendation::UnknownEvidenceNotPromoted);
+        assert!(!unknown.is_recommended());
+
+        let fem = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::FemGeneratedModelSpaceOnly,
+            true,
+        );
+        assert_eq!(fem, Recommendation::RecommendedForFemModelSpace);
+        assert!(fem.is_recommended());
+        assert_ne!(fem, Recommendation::RecommendedForMeasuredGeneralization);
+
+        let synthetic_report_only = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::SyntheticControlOnly,
+            false,
+        );
+        assert_eq!(
+            synthetic_report_only,
+            Recommendation::SyntheticControlReportOnly
+        );
+        assert!(!synthetic_report_only.is_recommended());
+
+        let independent = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::IndependentMeasuredSeatsEnforced,
+            true,
+        );
+        assert_eq!(
+            independent,
+            Recommendation::RecommendedForMeasuredGeneralization
+        );
+        assert!(independent.is_recommended());
+        let report_only_independent = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::IndependentMeasuredSeatsReportOnly,
+            true,
+        );
+        assert_eq!(
+            report_only_independent,
+            Recommendation::IndependentMeasuredSeatsReportOnly
+        );
+        assert!(!report_only_independent.is_recommended());
+    }
+
     use super::*;
     use ndarray::Array1;
     use roomeq_engine::output::{build_channel_dsp_chain, create_gain_plugin};
@@ -2105,6 +2400,7 @@ mod tests {
             channel: channel.into(),
             path: "unused.csv".into(),
             seat_id: Some(seat.into()),
+            evidence_class: roomeq_quality::HeldOutEvidenceClass::Unknown,
         };
         let curve = |value| Curve {
             freq: vec![20.0, 100.0].into(),
@@ -2359,6 +2655,7 @@ mod tests {
                         channel: channel.into(),
                         path: "unused.csv".into(),
                         seat_id: Some(label.into()),
+                        evidence_class: roomeq_quality::HeldOutEvidenceClass::Unknown,
                     });
             }
         }

@@ -127,8 +127,12 @@ Bayesian run reached its time cutoff; validation/finalization occurs outside the
 search cap. These are scoped fixture results rather than derived product presets.
 
 Fixtures cover an analytic PEQ plant, an ASR headphone response with unknown rig
-calibration, and measured 8361A training/held-out magnitude responses with an
-unknown measurement rig. The historical fixtures retain that unknown provenance.
+calibration, and measured 8361A base curves with four deterministically perturbed
+held-out magnitude responses. The latter are derived robustness inputs and do
+not establish generalization to independently measured seats. The measurement
+rig remains unknown. The benchmark declaration now states this distinction and
+binds the generating script in its source hash inventory. Historical run files
+retain their original declarations; their numeric results are unchanged.
 Optimizer tests passed 351/351, QA library tests 4/4 and benchmark tests 6/6.
 Scoped clippy passed with warnings denied. Retained local run metadata records
 the report/manifest/lockfile hashes, command, host/toolchain and resolved math

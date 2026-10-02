@@ -1293,10 +1293,11 @@ impl ClassifiedOutcome {
 /// ```rust
 /// use autoeq_optim::optim::{
 ///     ClassifiedOutcome, ConstrainedCandidate, OptimizationOutcomeKind,
-///     OptimizerRunEvidence, OptimizerTermination, classify_outcome,
+///     OptimizerBackendCompletion, OptimizerRunEvidence, OptimizerTermination,
+///     classify_outcome,
 /// };
 ///
-/// let evidence = OptimizerRunEvidence::from_backend_result(
+/// let mut evidence = OptimizerRunEvidence::from_backend_result(
 ///     "autoeq:cobyla",
 ///     Ok(("converged".to_string(), 0.5)),
 ///     &[0.5],
@@ -1305,6 +1306,7 @@ impl ClassifiedOutcome {
 ///     50,
 ///     Some(3),
 /// );
+/// evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
 /// assert_eq!(evidence.termination, OptimizerTermination::Converged);
 /// let candidate = ConstrainedCandidate {
 ///     candidate_id: String::from("seed-0"),
@@ -1340,7 +1342,8 @@ pub fn classify_outcome(
         OptimizerTermination::NonConverged
         | OptimizerTermination::BackendFailure
         | OptimizerTermination::InvalidResult
-        | OptimizerTermination::UserStopped => OptimizationOutcomeKind::ConvergenceFailure,
+        | OptimizerTermination::UserStopped
+        | OptimizerTermination::TimedOut => OptimizationOutcomeKind::ConvergenceFailure,
     };
     ClassifiedOutcome {
         kind,
@@ -1352,6 +1355,7 @@ pub fn classify_outcome(
 
 #[cfg(test)]
 mod constraint_envelope_tests {
+    use super::super::OptimizerBackendCompletion;
     use super::*;
     use crate::optim::ObjectiveDataBuilder;
     use ndarray::Array1;
@@ -1728,7 +1732,8 @@ mod constraint_envelope_tests {
     fn optim_infeasible_and_budget_exhausted_distinct() {
         let flat = feasible_candidate();
         let stacked = infeasible_candidate();
-        let converged = evidence_for(Ok(("converged".to_string(), 0.5)), &flat.params);
+        let mut converged = evidence_for(Ok(("converged".to_string(), 0.5)), &flat.params);
+        converged.apply_backend_completion(OptimizerBackendCompletion::Converged);
         let exhausted = evidence_for(
             Ok(("maximum evaluations reached (nfev=50)".to_string(), 1.0)),
             &flat.params,

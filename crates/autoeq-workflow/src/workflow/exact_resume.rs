@@ -407,7 +407,7 @@ mod production_split_resume_tests {
         let callback_path = checkpoint_path.clone();
         let callback_identity = identity.clone();
         let save_and_interrupt: DECheckpointSaveCallback = Box::new(move |checkpoint| {
-            if checkpoint.generation >= 2 && checkpoint.terminal.is_none() {
+            if checkpoint.generation >= 1 && checkpoint.terminal.is_none() {
                 let state =
                     ExactOptimizerState::from_checkpoint(checkpoint.clone(), &callback_identity)
                         .map_err(|error| error.to_string())?;
@@ -437,6 +437,8 @@ mod production_split_resume_tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .expect("interrupted production run saved a generation barrier");
+        assert!(captured.generation >= 1);
+        assert!(captured.terminal.is_none());
         let loaded = load_exact_optimizer_state(&checkpoint_path)
             .expect("read actual checkpoint file")
             .expect("saved checkpoint exists");
@@ -456,6 +458,44 @@ mod production_split_resume_tests {
         .expect("resume through production setup after disk roundtrip");
         assert_eq!(resumed.0, uninterrupted.0, "resumed filters must match");
         assert_eq!(resumed.1, uninterrupted.1, "resumed loss must match");
+
+        // Simulate a saved checkpoint from the prior fresh-start schedule,
+        // whose configuration fingerprint differs after accounting for x0.
+        // Rejection must happen before objective scoring or replacing that file.
+        let mut prior_schedule_checkpoint = loaded.checkpoint.clone();
+        prior_schedule_checkpoint.configuration_fingerprint =
+            "prior-fresh-start-evaluation-schedule".to_owned();
+        let prior_schedule_state =
+            ExactOptimizerState::from_checkpoint(prior_schedule_checkpoint, &identity)
+                .expect("stale schedule still has a structurally valid state record");
+        save_exact_optimizer_state(&prior_schedule_state, &checkpoint_path)
+            .expect("write stale-schedule control state");
+        let stale_file_bytes = std::fs::read(&checkpoint_path).expect("read stale state bytes");
+        let stale_schedule_objective = analytic_objective(0.0);
+        let stale_callback_path = checkpoint_path.clone();
+        let stale_callback_identity = identity.clone();
+        let stale_schedule_save_callback: DECheckpointSaveCallback = Box::new(move |checkpoint| {
+            let state =
+                ExactOptimizerState::from_checkpoint(checkpoint.clone(), &stale_callback_identity)
+                    .map_err(|error| error.to_string())?;
+            save_exact_optimizer_state(&state, &stale_callback_path)
+                .map_err(|error| error.to_string())
+        });
+        let stale_schedule_error = run_exact(
+            &params,
+            &stale_schedule_objective,
+            Some(prior_schedule_state.checkpoint),
+            identity.clone(),
+            stale_schedule_save_callback,
+        )
+        .expect_err("a checkpoint from a different generation schedule must be rejected");
+        assert!(stale_schedule_error.to_string().contains("configuration"));
+        assert!(stale_schedule_objective.prepared.get().is_none());
+        assert_eq!(
+            std::fs::read(&checkpoint_path).expect("stale checkpoint remains present"),
+            stale_file_bytes,
+            "refusing the incompatible schedule must not replace its state file"
+        );
 
         let changed_target = analytic_objective(0.5);
         let target_error = run_exact(

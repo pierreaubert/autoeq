@@ -3,11 +3,14 @@
 //! This runner reports measured outcomes. It does not map algorithms to user
 //! presets or infer quality tiers from one run.
 
-use autoeq_optim::optim::run_control::{OptimizerBudgetProfile, OptimizerRunControl};
+use autoeq_optim::optim::run_control::{
+    OptimizerBudgetProfile, OptimizerRunControl, OptimizerRunSnapshot,
+};
 use autoeq_optim::optim::setup::{initial_guess, setup_bounds};
 use autoeq_optim::optim::{
-    MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder, OptimizerRunEvidence,
-    OptimizerTermination, compute_fitness_penalties_ref, optimize_filters_with_run_control,
+    MultiObjectiveData, ObjectiveData, ObjectiveDataBuilder, OptimizerDispatchOutcome,
+    OptimizerRunEvidence, OptimizerTermination, compute_fitness_penalties_ref,
+    optimize_filters_with_run_control_detailed,
 };
 use autoeq_optim::roomeq::MultiMeasurementStrategy;
 use autoeq_optim::{LossType, OptimParams, PeqModel};
@@ -258,8 +261,10 @@ pub struct BenchmarkCell {
     pub declared_evaluation_budget: usize,
     /// Cooperative cutoff for the cell's optimizer invocation in milliseconds.
     pub time_budget_millis: u64,
-    /// Whether the cutoff closed search scoring before the optimizer returned.
+    /// Whether the final cell snapshot observed its cooperative deadline flag.
     pub timed_out: bool,
+    /// Whether the final cell snapshot observed an explicit user-cancel flag.
+    pub user_cancelled: bool,
     /// Effective solver population/batch/generation settings, if reported.
     pub budget_profile: Option<BudgetProfileRecord>,
     /// Shared PEQ and search configuration passed to the optimizer.
@@ -270,7 +275,7 @@ pub struct BenchmarkCell {
     pub optimizer_elapsed_millis: u64,
     /// Search, finalization, and post-run scorer accounting.
     pub evaluation_counts: EvaluationCountsRecord,
-    /// Parsed termination reason from the backend result or cancellation gate.
+    /// Typed optimizer termination after applying the final run-control snapshot.
     pub termination: Option<OptimizerTermination>,
     /// Backend status text or a preflight refusal reason.
     pub status: String,
@@ -558,6 +563,11 @@ pub fn run_optimizer_benchmark(
                     &control,
                 );
                 cancellation.clear();
+                if cell.user_cancelled {
+                    cancellation_seen = true;
+                    cells.push(cell);
+                    break 'matrix;
+                }
                 cells.push(cell);
             }
         }
@@ -679,23 +689,20 @@ fn run_cell(
     let baseline = score_components(&case.training, &initial);
     let held_out_baseline = score_components(&case.held_out, &initial);
     let optimizer_started = Instant::now();
-    let timed_out = Arc::new(AtomicBool::new(false));
-    let timer_timed_out = Arc::clone(&timed_out);
     let timer_control = control.clone();
     let (finished_sender, finished_receiver) = mpsc::sync_channel(0);
     let timer = thread::spawn(move || {
         match finished_receiver.recv_timeout(Duration::from_millis(time_budget_millis)) {
             Ok(()) | Err(RecvTimeoutError::Disconnected) => {}
             Err(RecvTimeoutError::Timeout) => {
-                timer_timed_out.store(true, Ordering::Release);
                 // Closing the gate prevents later candidate evaluations.
                 // The optimizer call returns after active scoring and its
                 // finalization path have drained.
-                timer_control.request_cancel();
+                timer_control.request_deadline();
             }
         }
     });
-    let result = optimize_filters_with_run_control(
+    let controlled = optimize_filters_with_run_control_detailed(
         &mut parameters,
         &lower,
         &upper,
@@ -705,27 +712,24 @@ fn run_cell(
     );
     let _ = finished_sender.send(());
     let _ = timer.join();
-    let timed_out = timed_out.load(Ordering::Acquire);
     let optimizer_elapsed_millis = optimizer_started
         .elapsed()
         .as_millis()
         .min(u64::MAX as u128) as u64;
+    let result = controlled.result.clone();
+    let dispatch = controlled.dispatch;
     let accepted = result.is_ok();
-    let evidence = OptimizerRunEvidence::from_backend_result(
-        &resolved_backend,
-        result.clone(),
-        &parameters,
-        &lower,
-        &upper,
-        budget,
-        Some(seed),
-    );
+    let mut evidence = controlled.evidence;
     let status = result
         .as_ref()
         .map(|(status, _)| status.clone())
         .unwrap_or_else(|(reason, _)| reason.clone());
-    let snapshot = control.snapshot();
-    let cancelled = snapshot.cancellation_requested;
+    // A timer or cancellation request can arrive after the optimizer returns
+    // but before the cell report is assembled. Capture the final state only
+    // after the timer has stopped, then reapply any late stop cause.
+    let snapshot = refresh_evidence_from_final_control(&mut evidence, control);
+    let timed_out = snapshot.deadline_reached;
+    let user_cancelled = snapshot.cancellation_requested;
 
     let (training, held_out, realized, parameters_record, candidate_valid, metric_calls) =
         if accepted
@@ -805,24 +809,31 @@ fn run_cell(
         .search_failed
         .saturating_add(evaluation_counts.finalization_failed);
 
-    let refusal = if timed_out {
-        Some(format!(
+    let refusal = match evidence.termination {
+        OptimizerTermination::BackendFailure => Some(status.clone()),
+        OptimizerTermination::InvalidResult => Some(format!(
+            "optimizer returned an invalid candidate or objective; backend status: {status}"
+        )),
+        OptimizerTermination::UserStopped => {
+            Some("explicit benchmark cancellation closed search scoring; worker was awaited".into())
+        }
+        OptimizerTermination::TimedOut => Some(format!(
             "optimizer invocation exceeded cooperative time budget of {time_budget_millis} ms; search scoring was closed and active work was awaited"
-        ))
-    } else if cancelled {
-        Some("benchmark cancellation closed search scoring; worker was awaited".to_string())
-    } else if snapshot.evaluations_refused > 0 {
-        Some("backend requested candidate scores after the hard evaluation cap; those scores were refused".to_string())
-    } else if !accepted {
-        Some(status.clone())
-    } else {
-        None
+        )),
+        OptimizerTermination::EvaluationLimit
+            if matches!(dispatch, OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)) =>
+        {
+            Some(status.clone())
+        }
+        OptimizerTermination::EvaluationLimit if snapshot.evaluations_refused > 0 => Some(
+            "backend requested candidate scores after the hard evaluation cap; those scores were refused"
+                .into(),
+        ),
+        OptimizerTermination::Converged
+        | OptimizerTermination::EvaluationLimit
+        | OptimizerTermination::NonConverged => None,
     };
-    let termination = if cancelled {
-        Some(OptimizerTermination::UserStopped)
-    } else {
-        Some(evidence.termination)
-    };
+    let termination = Some(evidence.termination);
 
     BenchmarkCell {
         case_id: case.declaration.id.clone(),
@@ -834,6 +845,7 @@ fn run_cell(
         declared_evaluation_budget: budget,
         time_budget_millis,
         timed_out,
+        user_cancelled,
         budget_profile: profile_record,
         search_config: SearchConfigRecord {
             filter_count: params.num_filters,
@@ -870,6 +882,15 @@ fn run_cell(
             .is_finite()
             .then_some(evidence.max_constraint_violation),
     }
+}
+
+fn refresh_evidence_from_final_control(
+    evidence: &mut OptimizerRunEvidence,
+    control: &OptimizerRunControl,
+) -> OptimizerRunSnapshot {
+    let snapshot = control.snapshot();
+    evidence.apply_run_control(&snapshot);
+    snapshot
 }
 
 fn aggregate_objective(case: &LoadedCase) -> ObjectiveData {
@@ -992,7 +1013,10 @@ fn worst_metric(
 
 #[cfg(test)]
 mod comparison_metric_tests {
-    use super::{ObjectiveMetric, worst_metric};
+    use super::{ObjectiveMetric, refresh_evidence_from_final_control, worst_metric};
+    use autoeq_optim::optim::run_control::OptimizerRunControl;
+    use autoeq_optim::optim::{OptimizerRunEvidence, OptimizerTermination};
+    use std::num::NonZeroUsize;
 
     fn metric(final_loss: Option<f64>) -> ObjectiveMetric {
         ObjectiveMetric {
@@ -1012,6 +1036,51 @@ mod comparison_metric_tests {
             worst_metric(&missing_and_non_finite, |row| row.final_loss),
             None
         );
+    }
+
+    #[test]
+    fn final_snapshot_captures_deadline_latched_after_optimizer_return() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(2).unwrap());
+        let optimizer_return_snapshot = control.snapshot();
+        assert!(!optimizer_return_snapshot.deadline_reached);
+
+        let mut evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("legacy backend status".into(), 0.25)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            2,
+            Some(7),
+        );
+        control.request_deadline();
+        let final_snapshot = refresh_evidence_from_final_control(&mut evidence, &control);
+
+        assert!(final_snapshot.deadline_reached);
+        assert_eq!(evidence.termination, OptimizerTermination::TimedOut);
+        assert!(evidence.has_valid_candidate());
+    }
+
+    #[test]
+    fn final_snapshot_preserves_simultaneous_cancel_and_deadline_flags() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(2).unwrap());
+        let mut evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("legacy backend status".into(), 0.25)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            2,
+            Some(7),
+        );
+        control.request_deadline();
+        control.request_cancel();
+        let final_snapshot = refresh_evidence_from_final_control(&mut evidence, &control);
+
+        assert!(final_snapshot.deadline_reached);
+        assert!(final_snapshot.cancellation_requested);
+        assert_eq!(evidence.termination, OptimizerTermination::UserStopped);
+        assert!(evidence.has_valid_candidate());
     }
 }
 

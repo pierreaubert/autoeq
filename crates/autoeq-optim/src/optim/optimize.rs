@@ -43,8 +43,46 @@ pub enum OptimizerTermination {
     EvaluationLimit,
     NonConverged,
     UserStopped,
+    TimedOut,
     BackendFailure,
     InvalidResult,
+}
+
+/// Typed completion reported by a backend whose API can distinguish outcomes.
+///
+/// Legacy backends return a status string only. Their text remains diagnostic
+/// and is not treated as proof of convergence or user cancellation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizerBackendCompletion {
+    /// The solver reached its declared convergence condition.
+    Converged,
+    /// The solver stopped because its configured evaluation or iteration cap ran out.
+    EvaluationLimit,
+    /// The solver returned a usable result without claiming convergence.
+    NonConverged,
+}
+
+/// A budget refusal detected before the optimizer backend is invoked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OptimizerBudgetPreflightRefusal {
+    /// Requested hard evaluation cap.
+    pub requested_evaluations: usize,
+    /// Minimum required for one complete backend search unit.
+    pub required_evaluations: usize,
+}
+
+/// Whether a controlled optimizer invocation entered backend execution.
+///
+/// Preflight failures are structurally distinct from solver failures. The
+/// legacy tuple API still returns its historical error message.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OptimizerDispatchOutcome {
+    /// The registered backend was invoked, whether it succeeded or failed.
+    BackendInvoked,
+    /// The configured score cap could not admit the backend's minimum complete unit.
+    NotStartedBudgetRefusal(OptimizerBudgetPreflightRefusal),
+    /// Resolution or budget-profile validation failed before the backend was invoked.
+    NotStartedDispatchFailure,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -84,6 +122,9 @@ pub struct OptimizerRunEvidence {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub objective: Option<f64>,
+    /// Search evaluations from backend status, when available.
+    /// Detailed controlled calls replace this with the authoritative run-control
+    /// counter; validation/finalization scores remain in the run snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation_count: Option<usize>,
     pub evaluation_limit: usize,
@@ -104,6 +145,19 @@ pub struct OptimizerRunEvidence {
     /// here so refusal evidence survives with the result.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraint_report: Option<super::constraint_envelope::ConstrainedCandidate>,
+}
+
+/// Result of a controlled optimizer call with its stop and scoring evidence.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ControlledOptimizerRun {
+    /// Legacy backend result, including its unchanged raw status text.
+    pub result: Result<(String, f64), (String, f64)>,
+    /// Structured evidence after applying the final run-control snapshot.
+    pub evidence: OptimizerRunEvidence,
+    /// Counters and stop causes captured after finalization completed.
+    pub snapshot: super::run_control::OptimizerRunSnapshot,
+    /// Structural dispatch outcome, independent of the legacy error string.
+    pub dispatch: OptimizerDispatchOutcome,
 }
 
 const fn default_true() -> bool {
@@ -128,64 +182,128 @@ impl OptimizerRunEvidence {
         let objective = raw_objective.is_finite().then_some(raw_objective);
         let max_constraint_violation = max_bound_violation(parameters, lower_bounds, upper_bounds);
         let lower_status = status.to_ascii_lowercase();
-        let mut termination =
-            if lower_status.contains("stopped") || lower_status.contains("cancelled") {
-                OptimizerTermination::UserStopped
-            } else if !backend_accepted {
-                OptimizerTermination::BackendFailure
-            } else if lower_status.contains("maxevalreached")
-                || lower_status.contains("maximum evaluations reached")
-                || lower_status.contains("maximum iterations reached")
-                || lower_status.contains("evaluation budget exhausted")
-                || (lower_status.contains("not converged")
-                    && (lower_status.contains("maximum")
-                        || lower_status.contains("maxeval")
-                        || lower_status.contains("limit")
-                        || lower_status.contains("budget")))
-            {
-                OptimizerTermination::EvaluationLimit
-            } else if lower_status.contains("not converged") {
-                OptimizerTermination::NonConverged
-            } else {
-                OptimizerTermination::Converged
-            };
-        if objective.is_none()
-            || !max_constraint_violation.is_finite()
-            || max_constraint_violation > 1e-9
+        let invalid_parameters =
+            !max_constraint_violation.is_finite() || max_constraint_violation > 1e-9;
+        let invalid_success_objective = backend_accepted && objective.is_none();
+        let termination = if invalid_parameters || invalid_success_objective {
+            OptimizerTermination::InvalidResult
+        } else if !backend_accepted {
+            OptimizerTermination::BackendFailure
+        } else if lower_status.contains("maxevalreached")
+            || lower_status.contains("maximum evaluations reached")
+            || lower_status.contains("maximum iterations reached")
+            || lower_status.contains("evaluation budget exhausted")
+            || (lower_status.contains("not converged")
+                && (lower_status.contains("maximum")
+                    || lower_status.contains("maxeval")
+                    || lower_status.contains("limit")
+                    || lower_status.contains("budget")))
         {
-            termination = OptimizerTermination::InvalidResult;
-        }
-        let converged = termination == OptimizerTermination::Converged;
-        let best_effort = !converged
-            && termination != OptimizerTermination::UserStopped
-            && objective.is_some()
-            && max_constraint_violation.is_finite()
-            && max_constraint_violation <= 1e-9;
-        let confidence = if converged {
-            OptimizerConfidence::High
-        } else if best_effort {
-            OptimizerConfidence::Low
+            OptimizerTermination::EvaluationLimit
         } else {
-            OptimizerConfidence::Unusable
+            // A successful legacy tuple is not structured evidence of
+            // convergence, even if its status happens to contain that word.
+            OptimizerTermination::NonConverged
         };
-        Self {
+        let mut evidence = Self {
             algorithm: algorithm.to_string(),
             input_normalization: None,
             multi_input_normalization: None,
             termination,
-            converged,
-            best_effort,
+            converged: false,
+            best_effort: false,
             evaluation_count: parse_evaluation_count(&status),
             evaluation_limit,
             seed,
             status,
             objective,
             max_constraint_violation,
-            confidence,
+            confidence: OptimizerConfidence::Unusable,
             selected_for_output: true,
             restart_history: Vec::new(),
             constraint_report: None,
+        };
+        evidence.refresh_quality_flags();
+        evidence
+    }
+
+    /// Apply a structured backend completion without interpreting its status text.
+    pub fn apply_backend_completion(&mut self, completion: OptimizerBackendCompletion) {
+        if matches!(
+            self.termination,
+            OptimizerTermination::BackendFailure
+                | OptimizerTermination::InvalidResult
+                | OptimizerTermination::EvaluationLimit
+                | OptimizerTermination::UserStopped
+                | OptimizerTermination::TimedOut
+        ) {
+            return;
         }
+        self.termination = match completion {
+            OptimizerBackendCompletion::Converged => OptimizerTermination::Converged,
+            OptimizerBackendCompletion::EvaluationLimit => OptimizerTermination::EvaluationLimit,
+            OptimizerBackendCompletion::NonConverged => OptimizerTermination::NonConverged,
+        };
+        self.refresh_quality_flags();
+    }
+
+    fn apply_budget_preflight_refusal(&mut self) {
+        if self.termination != OptimizerTermination::InvalidResult {
+            self.termination = OptimizerTermination::EvaluationLimit;
+            self.refresh_quality_flags();
+        }
+    }
+
+    /// Refine the termination using typed stop causes and admitted-score counters.
+    ///
+    /// Backend failures and invalid successful results remain authoritative.
+    /// User cancellation takes precedence over a simultaneous deadline; both
+    /// flags remain visible in the snapshot. A deadline takes precedence over
+    /// score-budget exhaustion, and budget exhaustion takes precedence over a
+    /// backend convergence claim.
+    pub fn apply_run_control(&mut self, snapshot: &super::run_control::OptimizerRunSnapshot) {
+        if matches!(
+            self.termination,
+            OptimizerTermination::InvalidResult | OptimizerTermination::BackendFailure
+        ) {
+            return;
+        }
+        if snapshot.cancellation_requested {
+            self.termination = OptimizerTermination::UserStopped;
+        } else if self.termination == OptimizerTermination::UserStopped {
+            return;
+        } else if snapshot.deadline_reached {
+            self.termination = OptimizerTermination::TimedOut;
+        } else if self.termination == OptimizerTermination::TimedOut {
+            return;
+        } else if snapshot.budget_exhausted || snapshot.evaluations_refused > 0 {
+            self.termination = OptimizerTermination::EvaluationLimit;
+        }
+        self.refresh_quality_flags();
+    }
+
+    /// Whether the retained parameters and objective are finite and satisfy the recorded bounds.
+    ///
+    /// This only reports parameter validity; it does not override stop cause,
+    /// confidence, or acceptance policy.
+    pub fn has_valid_candidate(&self) -> bool {
+        self.objective.is_some_and(f64::is_finite)
+            && self.max_constraint_violation.is_finite()
+            && self.max_constraint_violation <= 1e-9
+    }
+
+    fn refresh_quality_flags(&mut self) {
+        self.converged = self.termination == OptimizerTermination::Converged;
+        self.best_effort = !self.converged
+            && self.termination != OptimizerTermination::UserStopped
+            && self.has_valid_candidate();
+        self.confidence = if self.converged {
+            OptimizerConfidence::High
+        } else if self.best_effort {
+            OptimizerConfidence::Low
+        } else {
+            OptimizerConfidence::Unusable
+        };
     }
 }
 
@@ -274,7 +392,7 @@ pub fn optimize_filters_detailed(
 /// # Errors
 ///
 /// Returns an error when the algorithm is unknown, has no budget profile, or
-/// the budget cannot fill its initial complete solver batch.
+/// the budget cannot fill its minimum complete solver search unit.
 pub fn optimize_filters_with_run_control(
     x: &mut [f64],
     lower_bounds: &[f64],
@@ -283,42 +401,74 @@ pub fn optimize_filters_with_run_control(
     params: &crate::OptimParams,
     run_control: &OptimizerRunControl,
 ) -> Result<(String, f64), (String, f64)> {
-    let backend = super::registry::resolve(&params.algo)
-        .ok_or_else(|| (format!("Unknown algorithm: {}", params.algo), f64::INFINITY))?;
+    optimize_filters_with_run_control_dispatch(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        params,
+        run_control,
+    )
+    .0
+}
+
+type ControlledOptimizationDispatch = (
+    Result<(String, f64), (String, f64)>,
+    OptimizerDispatchOutcome,
+);
+
+fn optimize_filters_with_run_control_dispatch(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+    run_control: &OptimizerRunControl,
+) -> ControlledOptimizationDispatch {
+    let not_started = |message: String| {
+        (
+            Err((message, f64::INFINITY)),
+            OptimizerDispatchOutcome::NotStartedDispatchFailure,
+        )
+    };
+    let Some(backend) = super::registry::resolve(&params.algo) else {
+        return not_started(format!("Unknown algorithm: {}", params.algo));
+    };
     let mut controlled_params = params.clone();
     controlled_params.maxeval = run_control.evaluation_budget();
-    let profile = backend
-        .evaluation_budget_profile(lower_bounds, upper_bounds, &controlled_params)
-        .ok_or_else(|| {
-            (
-                format!(
-                    "{} does not report a matched objective-evaluation budget profile",
-                    backend.name()
-                ),
-                f64::INFINITY,
-            )
-        })?;
+    let Some(profile) =
+        backend.evaluation_budget_profile(lower_bounds, upper_bounds, &controlled_params)
+    else {
+        return not_started(format!(
+            "{} does not report a matched objective-evaluation budget profile",
+            backend.name()
+        ));
+    };
     if profile.requested_evaluations != run_control.evaluation_budget() {
-        return Err((
-            format!(
-                "{} budget profile reports {} evaluations for a control cap of {}",
-                backend.name(),
-                profile.requested_evaluations,
-                run_control.evaluation_budget()
-            ),
-            f64::INFINITY,
+        return not_started(format!(
+            "{} budget profile reports {} evaluations for a control cap of {}",
+            backend.name(),
+            profile.requested_evaluations,
+            run_control.evaluation_budget()
         ));
     }
     if run_control.evaluation_budget() < profile.minimum_complete_batch {
-        return Err((
-            format!(
-                "{} requires at least {} objective evaluations for its initial complete batch; requested budget is {}",
-                backend.name(),
-                profile.minimum_complete_batch,
-                run_control.evaluation_budget()
-            ),
-            f64::INFINITY,
-        ));
+        let refusal = OptimizerBudgetPreflightRefusal {
+            requested_evaluations: run_control.evaluation_budget(),
+            required_evaluations: profile.minimum_complete_batch,
+        };
+        return (
+            Err((
+                format!(
+                    "{} requires at least {} objective evaluations for one complete search unit; requested budget is {}",
+                    backend.name(),
+                    refusal.required_evaluations,
+                    refusal.requested_evaluations
+                ),
+                f64::INFINITY,
+            )),
+            OptimizerDispatchOutcome::NotStartedBudgetRefusal(refusal),
+        );
     }
 
     let validation_snapshot = objective_data.with_validation_tracking(run_control.clone());
@@ -343,13 +493,65 @@ pub fn optimize_filters_with_run_control(
         &controlled_params,
         callback,
     );
-    finalize_dispatch_winner(
-        backend.name(),
-        x,
-        &validation_snapshot,
-        &controlled_params,
-        result,
+    (
+        finalize_dispatch_winner(
+            backend.name(),
+            x,
+            &validation_snapshot,
+            &controlled_params,
+            result,
+        ),
+        OptimizerDispatchOutcome::BackendInvoked,
     )
+}
+
+/// Optimize under run control and return both the backend tuple and typed evidence.
+///
+/// The evidence preserves the backend's raw status and applies explicit user,
+/// deadline and admitted-score stop causes from the control snapshot. A
+/// minimum-budget refusal is returned as a typed not-started outcome rather
+/// than inferred from the legacy error string. Legacy backend strings alone
+/// never imply convergence.
+pub fn optimize_filters_with_run_control_detailed(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+    run_control: &OptimizerRunControl,
+) -> ControlledOptimizerRun {
+    let (result, dispatch) = optimize_filters_with_run_control_dispatch(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        params,
+        run_control,
+    );
+    let snapshot = run_control.snapshot();
+    let mut evidence = OptimizerRunEvidence::from_backend_result(
+        &params.algo,
+        result.clone(),
+        x,
+        lower_bounds,
+        upper_bounds,
+        run_control.evaluation_budget(),
+        params.seed,
+    );
+    evidence.evaluation_count = Some(snapshot.evaluations_started);
+    if matches!(
+        dispatch,
+        OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)
+    ) {
+        evidence.apply_budget_preflight_refusal();
+    }
+    evidence.apply_run_control(&snapshot);
+    ControlledOptimizerRun {
+        result,
+        evidence,
+        snapshot,
+        dispatch,
+    }
 }
 
 /// Optimize filter parameters with optional algorithm override.
@@ -507,5 +709,39 @@ mod evidence_validation_tests {
         assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit);
         assert!(evidence.best_effort);
         assert_eq!(evidence.max_constraint_violation, 0.0);
+    }
+
+    #[test]
+    fn failed_result_with_invalid_parameters_is_invalid_result() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Err(("solver returned an invalid candidate".into(), f64::INFINITY)),
+            &[f64::NAN],
+            &[0.0],
+            &[1.0],
+            10,
+            Some(7),
+        );
+
+        assert_eq!(evidence.termination, OptimizerTermination::InvalidResult);
+        assert!(!evidence.has_valid_candidate());
+        assert!(!evidence.best_effort);
+    }
+
+    #[test]
+    fn failed_result_with_valid_candidate_and_infinite_sentinel_is_backend_failure() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Err(("solver failed independently".into(), f64::INFINITY)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            10,
+            Some(7),
+        );
+
+        assert_eq!(evidence.termination, OptimizerTermination::BackendFailure);
+        assert!(!evidence.has_valid_candidate());
+        assert!(!evidence.best_effort);
     }
 }

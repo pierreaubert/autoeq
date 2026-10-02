@@ -24,6 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2 = { workspace = true }
 tempfile = { workspace = true }
+urlencoding = { workspace = true }
 
 [dev-dependencies]
 serial_test = { workspace = true }

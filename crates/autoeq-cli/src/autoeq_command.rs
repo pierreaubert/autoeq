@@ -107,6 +107,7 @@ fn cli_config_identity(
     target: &autoeq::Curve,
     deviation: &autoeq::Curve,
     spin_data: Option<&std::collections::HashMap<String, autoeq::Curve>>,
+    product_identity: Option<&str>,
 ) -> Result<String> {
     let mut canonical_params = params.clone();
     canonical_params.algo = autoeq::workflow::resume::canonical_optimizer_identity(&params.algo)
@@ -127,9 +128,110 @@ fn cli_config_identity(
             parts.push(format!("spin:{name}:{hash}"));
         }
     }
+    if let Some(product_identity) = product_identity {
+        parts.push(format!("product-lineage:{product_identity}"));
+    }
     Ok(autoeq::workflow::resume::config_identity_digest(
         parts.iter().map(String::as_str),
     ))
+}
+
+fn cli_product_identity(
+    request: &autoeq::workflow::ProductRequest,
+    source: &autoeq::measurements::MeasurementRecord,
+    target: &autoeq::measurements::MeasurementRecord,
+    compatibility: &autoeq::workflow::TargetCompatibility,
+) -> Result<String> {
+    // Bind source and target metadata independently of interpolated objective
+    // curves. The request includes device settings and declared target support;
+    // records include full provenance and IDs; compatibility includes the
+    // resolved match/mismatch/unknown assessment.
+    let serialized = serde_json::to_string(&(
+        request,
+        &source.id,
+        &source.provenance,
+        &target.id,
+        &target.provenance,
+        compatibility,
+    ))?;
+    Ok(autoeq::workflow::resume::config_identity_digest([
+        serialized.as_str(),
+    ]))
+}
+
+fn validate_product_config_dispatch(args: &autoeq::cli::Args) -> Result<()> {
+    if args.product_config.is_some()
+        && matches!(
+            args.loss,
+            autoeq::LossType::DriversFlat | autoeq::LossType::MultiSubFlat
+        )
+    {
+        return Err(anyhow!(
+            "--product-config is not supported by multi-driver or multi-sub optimization; use the existing RoomEQ workflow for room correction"
+        ));
+    }
+    if args.product_config.is_some() && args.qa.is_some() {
+        return Err(anyhow!(
+            "--product-config cannot be combined with --qa because the QA path does not publish the profiled preset and provenance pair"
+        ));
+    }
+    Ok(())
+}
+
+fn max_finite_filter_transfer_delta_db(
+    frequencies: &[f64],
+    designed_filters: &[autoeq::iir::Biquad],
+    serialized_filters: &[autoeq::iir::Biquad],
+) -> Result<f64> {
+    if frequencies.is_empty() {
+        return Err(anyhow!(
+            "APO transfer comparison requires at least one frequency"
+        ));
+    }
+    let mut designed_response = Vec::with_capacity(frequencies.len());
+    let mut serialized_response = Vec::with_capacity(frequencies.len());
+    for &frequency in frequencies {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return Err(anyhow!(
+                "APO transfer comparison has an invalid frequency {frequency} Hz"
+            ));
+        }
+        designed_response.push(
+            designed_filters
+                .iter()
+                .map(|filter| filter.log_result(frequency))
+                .sum::<f64>(),
+        );
+        serialized_response.push(
+            serialized_filters
+                .iter()
+                .map(|filter| filter.log_result(frequency))
+                .sum::<f64>(),
+        );
+    }
+    max_finite_response_delta_db(&designed_response, &serialized_response)
+}
+
+fn max_finite_response_delta_db(before: &[f64], after: &[f64]) -> Result<f64> {
+    if before.is_empty() || before.len() != after.len() {
+        return Err(anyhow!(
+            "APO transfer comparison requires matching non-empty response vectors"
+        ));
+    }
+    let mut maximum = 0.0_f64;
+    for (&before, &after) in before.iter().zip(after) {
+        if !before.is_finite() || !after.is_finite() {
+            return Err(anyhow!(
+                "APO transfer comparison contains a non-finite response"
+            ));
+        }
+        let delta = (after - before).abs();
+        if !delta.is_finite() {
+            return Err(anyhow!("APO transfer delta is non-finite"));
+        }
+        maximum = maximum.max(delta);
+    }
+    Ok(maximum)
 }
 
 #[derive(Clone)]
@@ -242,6 +344,7 @@ fn cli_checkpoint_callback(
 }
 
 async fn run(args: autoeq::cli::Args) -> Result<()> {
+    validate_product_config_dispatch(&args)?;
     // Check if this is multi-driver mode
     if args.loss == autoeq::LossType::DriversFlat {
         if args.resume_state.is_some() || args.checkpoint_state.is_some() {
@@ -252,15 +355,46 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         return run_multi_driver_optimization(&args).await;
     }
 
-    // Load and prepare all input data
+    // Product manifests select and preserve a distinct source/target lineage.
+    // The old flag-based path remains unchanged when no manifest is supplied.
+    let optim_params = autoeq::OptimParams::from(&args);
+    let product_input = if let Some(path) = args.product_config.as_deref() {
+        if args.curve.is_some()
+            || args.target.is_some()
+            || args.speaker.is_some()
+            || args.version.is_some()
+            || args.measurement.is_some()
+        {
+            return Err(anyhow!(
+                "--product-config owns source and target selection; do not combine it with --curve, --target, --speaker, --version, or --measurement"
+            ));
+        }
+        Some(
+            load::load_product_config(path, &optim_params)
+                .await
+                .map_err(|error| anyhow!("{error}"))
+                .context("Failed to load product workflow configuration")?,
+        )
+    } else {
+        None
+    };
     let (standard_freq, input_curve, target_curve, deviation_curve, spin_data) =
-        load::load_and_prepare(&args)
-            .await
-            .map_err(|e| anyhow!("{}", e))
-            .context("Failed to load and prepare input data")?;
+        if let Some(product) = product_input.as_ref() {
+            (
+                product.curves.standard_freq.clone(),
+                product.curves.input_curve.clone(),
+                product.curves.target_curve.clone(),
+                product.curves.deviation_curve.clone(),
+                product.curves.spin_curves.clone(),
+            )
+        } else {
+            load::load_and_prepare(&args)
+                .await
+                .map_err(|error| anyhow!("{error}"))
+                .context("Failed to load and prepare input data")?
+        };
 
     // Objective data
-    let optim_params = autoeq::OptimParams::from(&args);
     let (objective_data, use_cea) = autoeq::workflow::setup_objective_data(
         &optim_params,
         &input_curve,
@@ -287,12 +421,24 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     // settings/data that can change search or correction behavior.
     let measurement_identity = input_curve.content_hash()?;
     let normalization_hash = measurement_identity.clone();
+    let product_identity = product_input
+        .as_ref()
+        .map(|product| {
+            cli_product_identity(
+                &product.request,
+                &product.prepared.source_record,
+                &product.prepared.target_profile.record,
+                &product.prepared.target_compatibility,
+            )
+        })
+        .transpose()?;
     let config_identity = cli_config_identity(
         &optim_params,
         &input_curve,
         &target_curve,
         &deviation_curve,
         spin_data.as_ref(),
+        product_identity.as_deref(),
     )?;
     let algorithm_identity =
         autoeq::workflow::resume::canonical_optimizer_identity(&optim_params.algo)
@@ -619,16 +765,64 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     }
 
     // Save PEQ settings to APO format file
-    save::save_peq_to_file(
-        &args,
-        &opt_result.params,
-        &output_path,
-        &objective_data.loss_type,
-        None,
-    )
-    .await
-    .map_err(|e| anyhow!("{}", e))
-    .context("Failed to save PEQ file")?;
+    if let Some(product) = product_input.as_ref() {
+        let designed_filters = autoeq::x2peq::x2peq(
+            &opt_result.params,
+            args.sample_rate,
+            args.effective_peq_model(),
+        )
+        .into_iter()
+        .map(|(_, filter)| filter)
+        .collect::<Vec<_>>();
+        let profile = &product.request.device_profile;
+        profile
+            .validate_filters(args.sample_rate, &designed_filters)
+            .map_err(|error| anyhow!("device profile rejected designed filters: {error}"))?;
+        let serialized_filters = profile
+            .apo_serialized_filters(args.sample_rate, &designed_filters)
+            .map_err(|error| anyhow!("device profile rejected APO serialization: {error}"))?;
+        let serialized_preamp = profile
+            .apo_serialized_preamp_db()
+            .map_err(|error| anyhow!("device profile rejected APO preamp: {error}"))?;
+        let max_filter_transfer_delta_db = max_finite_filter_transfer_delta_db(
+            standard_freq.as_slice().ok_or_else(|| {
+                anyhow!("APO transfer comparison frequency grid is not contiguous")
+            })?,
+            &designed_filters,
+            &serialized_filters,
+        )?;
+        info!(
+            "APO quantization max filter-response delta: {:.6} dB; explicit preamp: {:.1} dB",
+            max_filter_transfer_delta_db, serialized_preamp
+        );
+        save::save_profiled_apo_to_file(
+            &args,
+            &serialized_filters,
+            serialized_preamp,
+            &output_path,
+            &objective_data.loss_type,
+            save::ProductExportContext {
+                request: &product.request,
+                prepared: &product.prepared,
+                compatibility: &product.prepared.target_compatibility,
+                max_filter_transfer_delta_db,
+            },
+        )
+        .await
+        .map_err(|error| anyhow!("{error}"))
+        .context("Failed to save verified Equalizer APO profile")?;
+    } else {
+        save::save_peq_to_file(
+            &args,
+            &opt_result.params,
+            &output_path,
+            &objective_data.loss_type,
+            None,
+        )
+        .await
+        .map_err(|error| anyhow!("{error}"))
+        .context("Failed to save PEQ file")?;
+    }
 
     Ok(())
 }
@@ -784,9 +978,33 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use super::{
+        cli_product_identity, max_finite_filter_transfer_delta_db, max_finite_response_delta_db,
+        validate_product_config_dispatch,
+    };
     use autoeq::cli::Args;
     use clap::Parser;
     use ndarray::Array1;
+    use std::path::PathBuf;
+
+    fn checkpoint_test_record() -> autoeq::measurements::MeasurementRecord {
+        autoeq::measurements::MeasurementRecord::legacy(autoeq::Curve {
+            freq: Array1::from_vec(vec![20.0, 1_000.0, 20_000.0]),
+            spl: Array1::zeros(3),
+            phase: None,
+            ..Default::default()
+        })
+        .unwrap()
+    }
+
+    fn checkpoint_test_rig() -> autoeq::measurements::MeasurementRigIdentity {
+        serde_json::from_value(serde_json::json!({
+            "kind": "acoustic_measurement",
+            "domain": "test-lab",
+            "id": "rig-a"
+        }))
+        .unwrap()
+    }
 
     #[test]
     fn setup_bounds_hp_pk_mode_overrides_first_triplet() {
@@ -821,6 +1039,143 @@ mod tests {
         assert!((ub[3] - args.max_freq.log10()).abs() < 1e-12);
         assert!((ub[4] - args.max_q).abs() < 1e-12);
         assert!((ub[5] - args.max_db).abs() < 1e-12);
+    }
+
+    #[test]
+    fn product_checkpoint_identity_binds_full_lineage_and_device_profile() {
+        use autoeq::workflow::{
+            DeviceProfile, DeviceRange, ProductMode, ProductRenderer, ProductRequest,
+            ProductSource, ProductTarget, TargetCompatibility, TargetCompatibilityStatus,
+        };
+
+        let rig = checkpoint_test_rig();
+        let request = ProductRequest {
+            mode: ProductMode::Speaker,
+            source: ProductSource::Csv {
+                path: PathBuf::from("source.csv"),
+                measurement_rig: Some(rig.clone()),
+            },
+            target: ProductTarget::Csv {
+                path: PathBuf::from("target.csv"),
+                supported_measurement_rigs: vec![rig.clone()],
+            },
+            device_profile: DeviceProfile {
+                id: "studio-chain".into(),
+                playback_device_id: "coreaudio:studio".into(),
+                renderer: ProductRenderer::EqualizerApo,
+                sample_rate_hz: 48_000.0,
+                maximum_filter_count: 4,
+                supported_peq_models: vec!["pk".into()],
+                supported_filter_types: vec!["PK".into()],
+                frequency_hz: DeviceRange {
+                    minimum: 20.0,
+                    maximum: 20_000.0,
+                },
+                q: DeviceRange {
+                    minimum: 0.5,
+                    maximum: 10.0,
+                },
+                gain_db: DeviceRange {
+                    minimum: -12.0,
+                    maximum: 12.0,
+                },
+                preamp_db: Some(-3.0),
+            },
+            reject_declared_target_mismatch: true,
+        };
+        let source = checkpoint_test_record();
+        let target = checkpoint_test_record();
+        let compatibility = TargetCompatibility {
+            status: TargetCompatibilityStatus::Unknown,
+            measurement_rig: None,
+            supported_measurement_rigs: vec![rig.clone()],
+            explanation: "test compatibility".into(),
+        };
+        let original = cli_product_identity(&request, &source, &target, &compatibility).unwrap();
+
+        let mut changed_profile = request.clone();
+        changed_profile.device_profile.preamp_db = Some(-2.0);
+        assert_ne!(
+            original,
+            cli_product_identity(&changed_profile, &source, &target, &compatibility).unwrap()
+        );
+
+        let mut changed_source = source.clone();
+        changed_source.provenance.measurement_rig = Some(rig);
+        assert_ne!(
+            original,
+            cli_product_identity(&request, &changed_source, &target, &compatibility).unwrap()
+        );
+
+        let mut changed_target = target.clone();
+        changed_target.provenance.source_id = Some("custom-target-v2".into());
+        assert_ne!(
+            original,
+            cli_product_identity(&request, &source, &changed_target, &compatibility).unwrap()
+        );
+
+        let mut changed_compatibility = compatibility.clone();
+        changed_compatibility.status = TargetCompatibilityStatus::DeclaredMismatch;
+        assert_ne!(
+            original,
+            cli_product_identity(&request, &source, &target, &changed_compatibility).unwrap()
+        );
+    }
+
+    #[test]
+    fn product_config_refuses_legacy_early_dispatch_paths() {
+        let mut args = Args::parse_from(["autoeq-test"]);
+        args.product_config = Some(PathBuf::from("request.json"));
+        args.loss = autoeq::LossType::DriversFlat;
+        assert!(
+            validate_product_config_dispatch(&args)
+                .unwrap_err()
+                .to_string()
+                .contains("multi-driver or multi-sub")
+        );
+
+        args.loss = autoeq::LossType::MultiSubFlat;
+        assert!(validate_product_config_dispatch(&args).is_err());
+
+        args.loss = autoeq::LossType::SpeakerFlat;
+        args.qa = Some(1.0);
+        assert!(
+            validate_product_config_dispatch(&args)
+                .unwrap_err()
+                .to_string()
+                .contains("--qa")
+        );
+    }
+
+    #[test]
+    fn filter_transfer_delta_rejects_non_finite_points_instead_of_hiding_them() {
+        let filter = autoeq::iir::Biquad::new(
+            autoeq::iir::BiquadFilterType::Peak,
+            1_000.0,
+            48_000.0,
+            1.0,
+            2.0,
+        );
+        let filters = [filter];
+        assert_eq!(
+            max_finite_filter_transfer_delta_db(&[100.0, 1_000.0], &filters, &filters).unwrap(),
+            0.0
+        );
+        assert!(
+            max_finite_filter_transfer_delta_db(&[100.0, f64::NAN], &filters, &filters)
+                .unwrap_err()
+                .to_string()
+                .contains("invalid frequency")
+        );
+
+        assert!(
+            max_finite_response_delta_db(&[0.0, f64::NAN], &[0.0, 1.0])
+                .unwrap_err()
+                .to_string()
+                .contains("non-finite")
+        );
+        assert!(max_finite_response_delta_db(&[0.0], &[f64::NAN]).is_err());
+        assert!(max_finite_response_delta_db(&[f64::MAX], &[-f64::MAX]).is_err());
     }
 
     #[test]

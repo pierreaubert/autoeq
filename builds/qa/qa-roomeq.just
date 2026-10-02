@@ -306,12 +306,17 @@ qa-roomeq-supporting-source:
 # are rejected by the final safety gate).
 [group('qa-roomeq')]
 qa-roomeq-contract-pr maxeval="600000":
+	mkdir -p "${ROOMEQ_QA_DIR:-target/qa}"
+	rm -f "${ROOMEQ_QA_DIR:-target/qa}/public-workflow-contracts.json" "${ROOMEQ_QA_DIR:-target/qa}/public-workflow-contracts.log"
 	{{cargo}} test --release -p roomeq-engine dsp_realization --lib
 	{{cargo}} test --release -p roomeq-engine main_sub_optimizer_matches --lib
 	{{cargo}} test --release -p roomeq-workflow ctc --lib
 	{{cargo}} nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/channel_matching_is_applied_to_the_complete_routed_source|routed_finalization_and_replay_reject_unowned_channel_stages/)'
 	{{cargo}} nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/(best_effort_snapshot|splice_replay)_checks_every_unaccepted_source|best_effort_records_each_accepted_residual_source|splice_replay_reverts_later_source_after_accepted_residual/)'
 	{{cargo}} test --release -p roomeq-qa registry --lib
+	{{cargo}} test --release -p autoeq-qa --test qa_contract public_workflows::public_workflow_contract_runner -- --exact --nocapture
+	{{cargo}} test --release -p autoeq-qa --test wolfram_re23_ctc_regularized
+	{{cargo}} test --release -p autoeq-qa --test wolfram_re18_dba_sum
 	{{cargo}} test --release -p roomeq-qa quality_maxeval --lib
 	{{cargo}} test --release -p roomeq-qa quality_seed_runs --lib
 	{{cargo}} run --features qa --bin roomeq-qa-quality --release -- --case "Cross-Mode measured Genelec 5.1.4" --jobs 1 --maxeval {{maxeval}} --seed-runs 1

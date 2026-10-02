@@ -161,6 +161,8 @@ jobs:
     name: RoomEQ CI QA Gate
     runs-on: ubuntu-latest
     needs: crate-unit-tests
+    env:
+      ROOMEQ_QA_DIR: target/qa
     steps:
       - uses: actions/checkout@v4
 
@@ -175,6 +177,11 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Clear stale public workflow evidence
+        run: |
+          mkdir -p "$ROOMEQ_QA_DIR"
+          rm -f "$ROOMEQ_QA_DIR/public-workflow-contracts.json" "$ROOMEQ_QA_DIR/public-workflow-contracts.log"
 
       - name: Install Just
         uses: extractions/setup-just@v4
@@ -204,6 +211,15 @@ jobs:
 
       - name: Run deterministic RoomEQ correctness contracts
         run: just qa-roomeq-contract-pr
+      - name: Upload public workflow contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-public-workflow-contracts
+          path: |
+            target/qa/public-workflow-contracts.json
+            target/qa/public-workflow-contracts.log
+          if-no-files-found: warn
 
       - name: Run RoomEQ CI QA
         run: just qa-roomeq-ci

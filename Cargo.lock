@@ -2046,6 +2046,7 @@ dependencies = [
 [[package]]
 name = "gpui-d3rs"
 version = "0.9.19"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "delaunator",
  "gpui-profiler",
@@ -2061,10 +2062,12 @@ dependencies = [
 [[package]]
 name = "gpui-profiler"
 version = "0.9.3"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 
 [[package]]
 name = "gpui-toolkit-collections"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "gpui-toolkit-gpui-util",
  "indexmap",
@@ -2074,6 +2077,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-derive-refineable"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2083,6 +2087,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-gpui"
 version = "0.2.3"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -2159,6 +2164,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-gpui-macros"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -2169,6 +2175,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-gpui-shared-string"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "schemars",
  "serde",
@@ -2178,6 +2185,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-gpui-util"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "anyhow",
  "log",
@@ -2187,6 +2195,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-gpui-web"
 version = "0.1.1"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
@@ -2210,6 +2219,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-gpui-wgpu"
 version = "0.1.2"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -2236,6 +2246,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-http-client"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "anyhow",
  "async-compression",
@@ -2255,6 +2266,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-media"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -2269,6 +2281,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-perf"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "gpui-toolkit-collections",
  "serde",
@@ -2278,6 +2291,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-refineable"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "gpui-toolkit-derive-refineable",
 ]
@@ -2285,6 +2299,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-scheduler"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "async-task",
  "backtrace",
@@ -2298,6 +2313,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-sum-tree"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "heapless",
  "log",
@@ -2308,6 +2324,7 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-util-macros"
 version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "gpui-toolkit-perf",
  "quote",

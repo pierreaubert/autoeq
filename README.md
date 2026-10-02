@@ -302,6 +302,26 @@ just qa-beyerdynamic-dt1990pro  # Headphone tests
 just qa-edifierw830nb        # Multiple algorithm comparison
 ```
 
+#### Exact continuation across CLI process interruption
+
+On a POSIX host, build the CLI and run the device-free process contracts with a
+new evidence directory:
+
+```bash
+cargo build --locked --features cli --bin autoeq
+python3 scripts/run_autoeq_exact_resume_process_contracts.py \
+  --binary target/debug/autoeq --output target/qa/exact-process-new
+```
+
+Set `--binary` to the resolved Cargo target directory when using a custom
+`CARGO_TARGET_DIR`. The runner requires SIGINT and SIGKILL interruption after a
+saved generation, full final-state equality with an uninterrupted seeded run,
+and refusal of changed seed/budget or malformed state. It records source, binary
+and input hashes and fails if they change. Logs and `results.json` remain in the
+new directory, including on a contract failure. These checks cover the same
+executable and numeric environment; they do not establish cross-build resume or
+every filesystem crash window.
+
 ### Benchmarking
 
 ```bash

@@ -284,16 +284,23 @@ mod tests {
     }
 
     #[test]
-    fn converged_global_reports_converged() {
+    fn legacy_convergence_text_does_not_claim_typed_convergence() {
         let params = test_params(false);
         let objective = test_objective_data();
         let backend = MockOptimizerBackend::ok(GLOBAL_STATUS, 1.0);
 
         let result = perform_optimization_with_backend(&params, &objective, None, &backend)
-            .expect("converged global result should succeed");
+            .expect("a finite legacy result should remain usable");
 
-        assert!(result.converged);
+        assert!(!result.converged);
         assert_eq!(result.post_objective, Some(1.0));
+        assert_eq!(result.optimizer_evidence.len(), 1);
+        assert_eq!(
+            result.optimizer_evidence[0].termination,
+            autoeq::optim::OptimizerTermination::NonConverged,
+            "legacy status text is diagnostic, even when it says converged"
+        );
+        assert!(result.optimizer_evidence[0].best_effort);
     }
 
     #[test]

@@ -1051,3 +1051,18 @@ speaker/headphone reference and hardware consumer checks remain open.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-effective-envelope-evidence-20261002/final-gate-run-manifest.json`,
 SHA-256 `5d1db9d5f1d342cabd891f53301856fcf88d53a5511dff24dc415615c66007d5`;
 root review: `/Users/pierre/a06-envelope-independent-review.json`.
+
+### Integration with conservative optimizer termination
+
+The first full CLI library run after integration passed 74/75 tests. Its
+remaining old test inferred convergence from a successful legacy status
+string. The corrected regression asserts `NonConverged`, best-effort and a
+usable finite result when typed completion is absent, including text that
+says "converged". Production termination policy is unchanged. The combined
+CLI library now passes 75/75 and strict production CLI Clippy passes on
+the current root branch. These are scoped integration checks; the high-level
+CLI backend seam still returns legacy tuples and cannot confirm convergence.
+Raw successful logs: `/Users/pierre/autoeq-integrated-cli-8b6648e.log` and
+`/Users/pierre/autoeq-integrated-cli-clippy-8b6648e.log`. The initial failing
+test and an intermediate test-only enum spelling compile error are retained
+in separate local diagnostic records.

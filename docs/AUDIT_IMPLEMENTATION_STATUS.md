@@ -690,3 +690,39 @@ Focused product tests pass 12/12, capability tests across the three owners pass
 4/4, and actual-binary subprocess checks pass 2/2. Strict production Clippy
 passes for the three libraries. These scoped checks follow the frozen `53819ed`
 matrix; the full matrix is not relabeled as testing this later commit.
+
+
+## Focused MSO finalization and dependency closure
+
+A repeated release-mode `canonical_mso_seed59_cumulative_finalization` check
+passes from detached `53819ed`. Actual Cargo-resolved source, dependency, lock
+and fixture inventories match before and after the repeat. Its accepted
+finalization uses correction strength 0.625 and improves weighted RMS from
+6.450 to 6.107 dB. Median improvement over the ten training channel/seat pairs
+is 0.391 dB; the smallest per-pair improvement is 0.207 dB. Four sampled
+steady-state outputs stay within unit peak across 8,217 frequencies at 48 kHz.
+The largest output is Sub1 at 0.99426, using 0.252 dB of static attenuation.
+
+Optimizer confidence remains low (`optimizer_no_selected_run`): none of the
+recorded optimizer runs was selected for output. The finalizer independently
+compares the accepted strength candidate. There are no held-out seats,
+crossover timing assessment, transient playback or acoustic measurements in
+this check. Its local DSP dependency remains recorded in the frozen inventory.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/a09-canaries-20261002/seed59-repeat-53819ed`.
+
+The strict Genelec failure remains valid after diagnosis. Its registry requires
+a functional artifact and forbids safe reversion. The IIR graph's terminal
+limiter does not establish compliance with the sampled small-signal transfer
+gain budget. The other modes' fallback static attenuation changes delivered
+bass. Neither fact authorizes changing the budget or declaring improvement.
+
+Isolated math commit `42a47e3` adds the already-required detailed wavelet API
+with 0.1 ms early-time sample positions. It preserves the kernel, relative
+level convention and display bounds; denser sampling does not increase the
+kernel's resolving power. Nonfinite sample rates refuse before grid creation.
+The complete DSP library suite passes 616/616, all nine wavelet tests pass,
+and strict library/test Clippy passes. AutoEQ measured-IR consumer tests pass
+12/12 and the workflow library checks with command-only overrides to this
+reviewed math checkout. AutoEQ source and lock remain unchanged. Public
+publication and subsequent removal of the local dependency patch remain open.
+Consumer evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/a00-wavelet-consumer-20261002-53819ed`.

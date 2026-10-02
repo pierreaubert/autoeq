@@ -1,4 +1,4 @@
-//! Hard objective-evaluation budgets and cooperative cancellation.
+//! Hard objective-evaluation budgets and cooperative stop requests.
 
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Condvar, Mutex};
@@ -82,6 +82,7 @@ struct RunState {
     validation_component_evaluations_completed: usize,
     validation_evaluations_in_flight: usize,
     cancellation_requested: bool,
+    deadline_reached: bool,
 }
 
 /// Point-in-time objective-evaluation and cancellation accounting.
@@ -99,7 +100,7 @@ pub struct OptimizerRunSnapshot {
     pub component_evaluations_started: usize,
     /// Per-measurement objective components that returned.
     pub component_evaluations_completed: usize,
-    /// Candidate evaluations rejected after cancellation or budget exhaustion.
+    /// Candidate evaluations rejected after cancellation, deadline, or budget exhaustion.
     pub evaluations_refused: usize,
     /// Candidate evaluations still scoring when the snapshot was taken.
     pub evaluations_in_flight: usize,
@@ -115,8 +116,12 @@ pub struct OptimizerRunSnapshot {
     pub validation_component_evaluations_completed: usize,
     /// Validation scores active when the snapshot was taken.
     pub validation_evaluations_in_flight: usize,
-    /// Whether cancellation was requested.
+    /// Whether an explicit user cancellation was requested.
     pub cancellation_requested: bool,
+    /// Whether the run's time deadline elapsed.
+    pub deadline_reached: bool,
+    /// Whether the hard search-score budget has been fully admitted.
+    pub budget_exhausted: bool,
 }
 
 impl OptimizerRunControl {
@@ -136,13 +141,15 @@ impl OptimizerRunControl {
         self.inner.budget.get()
     }
 
-    /// Whether the gate is closed by cancellation or budget exhaustion.
+    /// Whether the gate is closed by a user stop, deadline, or budget exhaustion.
     pub fn stop_requested(&self) -> bool {
         let state = self.lock_state();
-        state.cancellation_requested || state.evaluations_started >= self.inner.budget.get()
+        state.cancellation_requested
+            || state.deadline_reached
+            || state.evaluations_started >= self.inner.budget.get()
     }
 
-    /// Close the gate so no later expensive score can start.
+    /// Record an explicit user cancellation and close the gate.
     pub fn request_cancel(&self) {
         let mut state = self.lock_state();
         state.cancellation_requested = true;
@@ -151,7 +158,16 @@ impl OptimizerRunControl {
         }
     }
 
-    /// Close the gate and wait for active objective scores to finish.
+    /// Record that the run deadline elapsed and close the gate.
+    pub fn request_deadline(&self) {
+        let mut state = self.lock_state();
+        state.deadline_reached = true;
+        if state.evaluations_in_flight + state.validation_evaluations_in_flight == 0 {
+            self.inner.idle.notify_all();
+        }
+    }
+
+    /// Record explicit user cancellation, close the gate, and wait for active scores.
     ///
     /// The optimizer worker may still be unwinding its own loop; callers must
     /// also join or await that worker before reporting the run as finished.
@@ -184,6 +200,7 @@ impl OptimizerRunControl {
         match stage {
             EvaluationStage::Search => {
                 if state.cancellation_requested
+                    || state.deadline_reached
                     || state.evaluations_started >= self.inner.budget.get()
                 {
                     state.evaluations_refused = state.evaluations_refused.saturating_add(1);
@@ -286,6 +303,8 @@ fn snapshot(budget: usize, state: &RunState) -> OptimizerRunSnapshot {
             .validation_component_evaluations_completed,
         validation_evaluations_in_flight: state.validation_evaluations_in_flight,
         cancellation_requested: state.cancellation_requested,
+        deadline_reached: state.deadline_reached,
+        budget_exhausted: state.evaluations_started >= budget,
     }
 }
 
@@ -315,6 +334,7 @@ mod tests {
         assert_eq!(snapshot.component_evaluations_started, 6);
         assert_eq!(snapshot.component_evaluations_completed, 6);
         assert_eq!(snapshot.evaluations_refused, 1);
+        assert!(snapshot.budget_exhausted);
     }
 
     #[test]
@@ -352,6 +372,35 @@ mod tests {
         assert_eq!(snapshot.evaluations_in_flight, 0);
         assert_eq!(snapshot.evaluations_completed, 1);
         assert_eq!(snapshot.evaluations_refused, 1);
+    }
+
+    #[test]
+    fn deadline_is_distinct_from_user_cancellation_and_closes_search_gate() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(2).unwrap());
+        control.request_deadline();
+
+        let snapshot = control.snapshot();
+        assert!(!snapshot.cancellation_requested);
+        assert!(snapshot.deadline_reached);
+        assert!(!snapshot.budget_exhausted);
+        assert!(control.stop_requested());
+        assert!(
+            control
+                .begin_evaluation(EvaluationStage::Search, 1)
+                .is_none()
+        );
+        assert_eq!(control.snapshot().evaluations_refused, 1);
+    }
+
+    #[test]
+    fn simultaneous_user_and_deadline_requests_remain_inspectable() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(2).unwrap());
+        control.request_deadline();
+        control.request_cancel();
+
+        let snapshot = control.snapshot();
+        assert!(snapshot.cancellation_requested);
+        assert!(snapshot.deadline_reached);
     }
 
     #[test]

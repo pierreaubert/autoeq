@@ -20,12 +20,12 @@ cannot replace them.
 | A03 capture/backend handoff | Partial | Producer/consumer and lossless legacy import committed; repeated/partial selection and hardware cancellation evidence remain |
 | A04 measurement/live analysis | Partial | Bounded raw level/RTA and independent device selectors implemented; calibrated live units, distortion/linearity and device validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
-| A06 speaker/headphone workflows | In implementation | Explicit source/rig/target/device contracts and APO profile export under review; reference comparisons and remaining renderer profiles pending; UI deferred |
+| A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
 | A08 recoverable jobs | Partial | Durable validated warm starts committed; exact population/adaptation/RNG continuation still requires implementation and equivalence evidence |
 | A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
-| A11 bundles/export | In implementation | Transaction recovery, resource identity/capability query, consumer transfer/relocation witnesses |
+| A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; combined external/native restart recovery, frozen playback API and broader consumer witnesses remain |
 | A12 applied playback/verification | Partial | Existing native graph lowering and A/B session contracts inventoried; exact graph/rate/resource activation, device stress and associated measured capture remain |
 | A13 rendering/accessibility | Deferred | Begin after backend work |
 | A14 perceptual/listening evidence | Partial | Independent references/domain registry and relevant blinded listening evidence |
@@ -285,3 +285,46 @@ The headless GPUI dependency repair is committed as `7413827` in the isolated
 `gpui-toolkit-audit-headless` worktree. This exposes existing pure surface
 geometry to report consumers without enabling renderer dependencies. It does
 not implement UI screens or interactions.
+
+## Product and artifact publication
+
+Commit `ce8da5d` adds an explicit speaker/headphone product request with independent
+source and target provenance, a match/mismatch/unknown rig assessment, and a
+per-machine device profile. The profiled CLI currently verifies Equalizer APO
+serialization, including rounded filters and explicit preamp. Unsupported profile
+renderers and legacy early-dispatch combinations are refused. Checkpoint identity
+binds source/target provenance, compatibility and the entire device profile.
+Preset provenance binds exact preset bytes through SHA-256 and a public verifier.
+Publication rolls back ordinary second-file failures without overwriting a newer
+concurrent preset; this is not a power-loss transaction across two files.
+Workflow and CLI tests: 99 passed, 2 ignored. Scoped four-package clippy passes
+with warnings denied; five existing external GPUI deprecation warnings remain.
+
+Commit `ecd11e0` publishes native RoomEQ bundles through a durable recovery journal
+with bounded immutable root/member validation. Python retains validated private
+resource snapshots and refuses pending native transactions. Fallback attempts stay
+private until a winner is selected; export aliases and resource collisions are
+refused before canonical publication. Focused tests: bundle 33, export 13, CLI 44,
+Python bundle 20, all passed. An external export can still become visible before
+its native counterpart if the process stops between their commits. Durable
+combined restart recovery is being implemented; cross-path visibility atomicity
+is not established.
+
+## Native playback boundary
+
+The isolated SOTF audit checkout now refuses invalid and mismatched retained
+processing rates before graph mutation. Legacy graphs retain explicit caller rate
+and unknown processing-rate provenance. Native graph/routing/PCM tests pass 82/82;
+chain-application tests pass 11/11. This checks processing-rate payload integrity,
+not full graph/resource-bound activation or executed hardware playback.
+
+Dependency prerequisites are isolated DAW commits `ebca52f` (preserve the supported
+six-model analog catalog) and `be72ee0` (capture logging re-export and mutable stop
+adapter), and math commit `ea9da7f` (exact, allocation-preserving LR4/LR8 reset).
+The math reset regression suite passes 6/6 and strict scoped clippy passes. Native
+tests also use an exact copy of the pre-existing local wavelet implementation,
+SHA-256 `828bac663768b9c9243f11e358aa0f0a3321036dcbcd591e9801dd6aa0a05d97`,
+which remains uncommitted and outside these audit-owned fixes. No original
+worktree edits were changed. Task-specific math paths are supplied through Cargo
+command configuration and excluded from repository changes. Full activation,
+rate/layout/resource receipts and associated capture remain acceptance work.

@@ -1,5 +1,14 @@
 # Unreleased
 
+- Add explicit speaker/headphone source, target, rig compatibility and per-machine
+  device profiles, with verified Equalizer APO serialization and preset provenance.
+- Publish native RoomEQ bundles through recoverable staging, validate immutable
+  resource hashes, and keep fallback attempts private until selection.
+- Reject nonfinite optimizer candidates and invalid bounds, malformed joint-sub
+  measurements, incompatible shared-EQ grids, and invalid or nonfinite FIR
+  designs before accepting correction results.
+- Reject incomplete or ambiguous independent-reference approvals and invalid
+  observed error magnitudes before perceptual evidence can pass its gate.
 - Add an optimizer tilt stage: `optimizer.tilt_stage` appends an
   optimizer-driven low-shelf plus high-shelf pair at the end of the DSP
   chain (new `pk-ls-hs` layout) to fit broadband bass/treble tilt. The pair

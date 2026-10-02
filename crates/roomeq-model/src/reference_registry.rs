@@ -40,7 +40,7 @@ pub struct VerifiedReferenceEvidence {
     pub domain: String,
     /// Metric the observed error is expressed in (non-blank).
     pub error_metric: String,
-    /// Observed error in `error_metric` (must be finite).
+    /// Observed error magnitude in `error_metric` (finite and non-negative).
     pub observed_error: f64,
     /// Predeclared tolerance in `error_metric` (finite, non-negative).
     pub error_tolerance: f64,
@@ -93,15 +93,28 @@ impl ApprovedReferenceRegistry {
     ///
     /// Returns `blocked_external` when no entry carries the identity: either
     /// no implementation is approved yet or the claimant names an unknown one.
+    /// Blank identities and multiple approvals for one identity are also refused.
     pub fn find_entry(&self, implementation_id: &str) -> Result<&ApprovedReferenceEntry, String> {
-        self.entries
+        if implementation_id.trim().is_empty() {
+            return Err(format!(
+                "{BLOCKED_EXTERNAL_PREFIX}: reference implementation identity is blank"
+            ));
+        }
+        let mut matching = self
+            .entries
             .iter()
-            .find(|entry| entry.implementation_id == implementation_id)
-            .ok_or_else(|| {
-                format!(
-                    "{BLOCKED_EXTERNAL_PREFIX}: no approved reference implementation '{implementation_id}'"
-                )
-            })
+            .filter(|entry| entry.implementation_id == implementation_id);
+        let entry = matching.next().ok_or_else(|| {
+            format!(
+                "{BLOCKED_EXTERNAL_PREFIX}: no approved reference implementation '{implementation_id}'"
+            )
+        })?;
+        if matching.next().is_some() {
+            return Err(String::from(
+                "reference implementation identity has ambiguous approvals",
+            ));
+        }
+        Ok(entry)
     }
 
     /// Verify observed agreement against the registry and the claim context.
@@ -130,6 +143,20 @@ impl ApprovedReferenceRegistry {
             ));
         }
         let entry = self.find_entry(&evidence.implementation_id)?;
+        for (field, approved) in [
+            ("implementation hash", entry.implementation_hash.as_str()),
+            ("vectors", entry.vectors_id.as_str()),
+            ("model family", entry.model_family.as_str()),
+            ("edition", entry.edition.as_str()),
+            ("calibration", entry.calibration_id.as_str()),
+            ("domain", entry.domain.as_str()),
+        ] {
+            if approved.trim().is_empty() {
+                return Err(format!(
+                    "{BLOCKED_EXTERNAL_PREFIX}: reference approval needs a nonblank {field}"
+                ));
+            }
+        }
         let tolerance = entry
             .error_tolerance
             .filter(|value| value.is_finite() && *value >= 0.0)
@@ -201,9 +228,9 @@ impl ApprovedReferenceRegistry {
                 "{BLOCKED_EXTERNAL_PREFIX}: reference evidence needs a named error metric"
             ));
         }
-        if !evidence.observed_error.is_finite() {
+        if !evidence.observed_error.is_finite() || evidence.observed_error < 0.0 {
             return Err(String::from(
-                "reference evidence observed error is not finite: no agreement demonstrated",
+                "reference evidence observed error must be finite and non-negative: no agreement demonstrated",
             ));
         }
         if !evidence.error_tolerance.is_finite() || evidence.error_tolerance < 0.0 {
@@ -393,6 +420,69 @@ mod reference_registry_tests {
                 )
                 .is_err()
         );
+    }
+
+    fn verify_claim(
+        registry: &ApprovedReferenceRegistry,
+        claim: &VerifiedReferenceEvidence,
+    ) -> Result<(), String> {
+        registry.verify_evidence(
+            claim,
+            &claim.model_family,
+            &claim.edition,
+            &claim.calibration_id,
+            &claim.domain,
+        )
+    }
+
+    #[test]
+    fn matching_blank_identity_fields_do_not_authorize_promotion() {
+        for field in [
+            "implementation_id",
+            "implementation_hash",
+            "vectors_id",
+            "model_family",
+            "edition",
+            "calibration_id",
+            "domain",
+        ] {
+            let mut approved = serde_json::to_value(entry()).unwrap();
+            let mut claim = serde_json::to_value(evidence()).unwrap();
+            approved[field] = serde_json::json!(" ");
+            claim[field] = serde_json::json!(" ");
+            let registry = ApprovedReferenceRegistry {
+                entries: vec![serde_json::from_value(approved).unwrap()],
+            };
+            let claim = serde_json::from_value(claim).unwrap();
+            assert!(
+                verify_claim(&registry, &claim).is_err(),
+                "accepted blank {field}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_approval_identity_is_ambiguous_in_every_order() {
+        let mut conflicting = entry();
+        conflicting.error_tolerance = Some(1.0);
+        for entries in [
+            vec![entry(), conflicting.clone()],
+            vec![conflicting, entry()],
+        ] {
+            assert!(verify_claim(&ApprovedReferenceRegistry { entries }, &evidence()).is_err());
+        }
+    }
+
+    #[test]
+    fn invalid_error_magnitudes_cannot_demonstrate_agreement() {
+        for observed_error in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut claim = evidence();
+            claim.observed_error = observed_error;
+            assert!(verify_claim(&registry(), &claim).is_err());
+        }
+        let mut exact = evidence();
+        exact.observed_error = 0.0;
+        assert!(verify_claim(&registry(), &exact).is_ok());
     }
 
     #[test]

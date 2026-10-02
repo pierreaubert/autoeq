@@ -1066,3 +1066,30 @@ Raw successful logs: `/Users/pierre/autoeq-integrated-cli-8b6648e.log` and
 `/Users/pierre/autoeq-integrated-cli-clippy-8b6648e.log`. The initial failing
 test and an intermediate test-only enum spelling compile error are retained
 in separate local diagnostic records.
+
+## Existing microphone curves: offline parser compatibility
+
+A freshly built capture CLI at `39b1c52` accepts all twelve selected physical
+subdirectory text curves from the user-provided microphone directory. Each
+fixture explicitly declares a synthetic machine binding, orientation,
+response convention and fixed-gain attestation. Every result reports
+`hardware_opened=false`, no absolute RMS/SPL anchor and the exact input curve
+hash. Calibration files remain unchanged. This validates parser compatibility;
+it does not establish physical microphone identity, orientation, convention,
+fixed gain or pressure calibration. Binary SWMIC files and top-level synthetic
+examples are outside this check.
+
+The fresh build uses a scratch-only lock (`97f477d7`); the original capture
+lock (`c9fb2fc1`) remains unchanged and cannot currently resolve with locked
+offline metadata. Dependency metadata is scoped to `aarch64-apple-darwin`;
+unfiltered offline metadata lacks an uncached Linux dependency. Source,
+lock/config, toolchain and dependency snapshots match before/after. Root
+independently rehashed seven Git/path roots (14,661 files and four symlinks)
+and verified the build, binary, logs and all twelve output/curve hashes.
+The 284 external package snapshots match; root did not separately rehash
+registry source bytes. The earlier false-gain-attestation refusals remain
+a separate negative guard witness and are not parser successes.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a04-real-calibration-preflight-positive-20261003/final-summary.json`,
+SHA-256 `39735480bd0df54d63ce612b76961cc9b01fa485e487c2df014547838cc5ec04`;
+root review: `/Users/pierre/a04-calibration-independent-review.json`.

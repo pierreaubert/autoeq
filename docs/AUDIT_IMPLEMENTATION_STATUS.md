@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Foundation committed; integrated 124-case numerical run and all-package build/test evidence remain |
+| A00 QA/build coverage | Partial | Six Python numerical cases pass with source provenance; full Rust numerical run and all-package build/test evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -22,7 +22,7 @@ cannot replace them.
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
-| A08 recoverable jobs | Partial | Durable validated warm starts committed; exact population/adaptation/RNG continuation still requires implementation and equivalence evidence |
+| A08 recoverable jobs | Partial | Full DE continuation implemented and equivalence-tested locally; math revision published, portable AutoEQ pin and final integration gate in progress |
 | A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
@@ -432,3 +432,52 @@ Clippy passes; the Player no-engine witness passes 1/1. Only the intended SHA-25
 dependency edge is committed to each lock; audit-only dependency overrides are
 excluded. A receipt proves processing-thread commit, with no physical callback
 emission or hardware capture claim.
+
+
+## Strict Python numerical acceptance and build declarations
+
+Commit `eda4198` computes both required error metrics for all six Python QA
+records, rejects nonfinite data before comparisons, preserves the scorer's
+zero-complex-reference refusal and validates the held-out CSV frequency grid.
+It preserves every golden file and numerical tolerance. Contract tests pass
+31/31. The full pinned Python gate passes 6/6, including exact result cardinality,
+requirements matching, inventory identities and unchanged source/dependency
+provenance before and after execution. The two source provenance hashes are
+`1125eaf6c3491723c5af40122a6d46daadb55d2b209dcab74e3d145bd634b386`.
+
+The environment is Python 3.14.8, NumPy 2.5.2 and SciPy 1.18.1. Retained evidence
+is `/Volumes/home_tmp/tmp/autoeq-audit-evidence/python-qa-20261002/autoeq-qa-python-results.json`.
+This Python run used the then-current A08 source overlay and previously recorded
+local math/report dependencies. It does not establish the full Rust numerical
+or all-package gate; those are running from an isolated frozen source copy.
+
+Commit `ce74cd3` removes obsolete Plotly Cargo features from weekly CI and
+README commands, enables required CLI/QA features in cross-platform recipes,
+and documents all 11 binaries and current report assets. Just parses the recipes;
+22 Cargo command declarations match the manifest; weekly GitHub/Gitea job bodies
+match; partition contract tests pass 18/18. Cross-platform Docker execution and
+clean-package installation remain separate checks.
+
+## Fresh peak-based SPL anchors
+
+Companion capture commit `87350a5` derives fresh persisted anchors from the
+captured peak, matching AutoEQ's forward and inverse peak-level conversions.
+Sampled sine and zero-mean pulse-train witnesses verify distinct crest factors
+and both conversion directions. The saved recording configuration also retains
+the reference reading. Focused calibration tests pass 4/4, saved configuration
+passes 1/1, and strict capture production Clippy passes. RMS remains separately
+recorded. Legacy offsets have no derivation marker and require explicit
+recalibration; no automatic migration or executed hardware evidence is claimed.
+
+## Exact DE continuation dependency publication
+
+With explicit user approval, the clean math branch
+`feat/audit-exact-de-continuation` was published to public GitHub at
+`acdea21f853629a13b7f88f8baef51eb0394754c`. It contains the reviewed crossover
+reset and full DE population, adaptation, archive, accounting and RNG checkpoint
+changes. Math tests pass 251/251 with one ignored; strict math Clippy passes.
+AutoEQ's local JSON save/load and interrupted/uninterrupted production witnesses
+match exactly, and changed target/budget identities refuse before objective
+scoring. The public dependency pin and final AutoEQ integration verification are
+in progress. Exact continuation is scoped to the same validated build/environment;
+these results make no cross-machine equivalence promise.

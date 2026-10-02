@@ -211,25 +211,34 @@ cargo install just
 
 ```bash
 just                  # List available commands
-just prod             # Build all release binaries
-just prod-autoeq      # Build autoeq only
-just prod-roomeq      # Build roomeq only
+just prod             # Build CLI commands and RoomEQ QA commands
+just prod-autoeq      # Build speaker/headphone CLI commands
+just prod-roomeq      # Build roomeq, conversion and RoomEQ QA commands
 just dev              # Build debug binaries
 ```
 
-The optional `plotly_static` feature writes deterministic PNG charts in-process
-through SVG rasterization. It has no browser, WebDriver, display-server, or
-runtime network dependency:
+Reports embed the checked-in HTML/WASM assets from
+`crates/autoeq-report-wasm/dist/`. Ordinary CLI builds use those assets;
+`just report-dist` rebuilds the 2D bundle with the WASM target and
+`wasm-bindgen` version specified in the Justfile. The GPUI report bundle has
+its own `just report-dist-gpui` recipe and nightly toolchain requirement.
 
-```bash
-cargo build -p autoeq --features plotly_static
-```
+### Cargo features and binaries
+
+| Feature | Binaries |
+| --- | --- |
+| `cli` | `autoeq`, `benchmark-autoeq-speaker`, `autoeq-download-speakers`, `roomeq`, `convert-recording` |
+| `qa` (includes `cli`) | All CLI binaries, `roomeq-fuzzer`, `roomeq-qa-quality`, `roomeq-qa-coverage`, `roomeq-qa-features`, `roomeq-qa-synthetic`, `roomeq-qa-acoustic` |
+| Default | Library compatibility API |
+
+QA commands that use recordings or generated fixtures require a workspace
+checkout: those data directories are excluded from the published package.
 
 ### Testing
 
 ```bash
 # Check all targets
-cargo check --lib --bins --tests --examples
+cargo check --workspace --all-targets --all-features
 
 # Run all tests
 just test
@@ -306,7 +315,7 @@ just bench-autoeq-speaker
 ```bash
 just fmt              # Format code
 just lint             # Run clippy with warnings as errors
-cargo check --lib --bins --tests --examples
+cargo check --workspace --all-targets --all-features
 cargo clippy --all -- -D warnings
 ```
 

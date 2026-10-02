@@ -10,6 +10,7 @@
 //! [`super::optimize_filters`] and the parallel `AlgorithmInfo` table.
 
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode};
 
 /// Algorithm classification (mirrors the previous `AlgorithmType`).
@@ -65,6 +66,21 @@ pub trait FilterOptimizer: Send + Sync {
     /// used unless the implementation explicitly guarantees it.
     fn supports_initial_candidate(&self) -> bool {
         false
+    }
+
+    /// Describe the solver settings needed to compare objective-evaluation budgets.
+    ///
+    /// Implementations return `None` when they cannot report their configured
+    /// initial batch and generation or evaluation limits. Benchmark callers
+    /// should refuse matched-budget runs without this profile.
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        let _ = (lower_bounds, upper_bounds, params);
+        None
     }
 
     /// Optimize filter parameters.

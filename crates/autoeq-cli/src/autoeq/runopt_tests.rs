@@ -1,6 +1,9 @@
 #[cfg(test)]
 mod tests {
-    use crate::autoeq_command::runopt::perform_optimization_with_backend;
+    use crate::autoeq_command::runopt::{
+        perform_optimization_with_backend, perform_optimization_with_backend_and_candidate,
+        perform_optimization_with_candidate,
+    };
     use autoeq::OptimParams;
     use autoeq::PeqModel;
     use autoeq::cli::Args;
@@ -100,6 +103,103 @@ mod tests {
             }
             Ok((LOCAL_STATUS.to_string(), self.local_loss))
         }
+    }
+
+    struct CapturingBackend {
+        initial: std::sync::Arc<std::sync::Mutex<Option<Vec<f64>>>>,
+    }
+
+    impl OptimizerBackend for CapturingBackend {
+        fn optimize_filters(
+            &self,
+            x: &mut [f64],
+            _lower_bounds: &[f64],
+            _upper_bounds: &[f64],
+            _objective: ObjectiveData,
+            _params: &OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            *self
+                .initial
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(x.to_vec());
+            Ok((GLOBAL_STATUS.to_string(), 1.0))
+        }
+
+        fn optimize_filters_with_callback(
+            &self,
+            x: &mut [f64],
+            lower_bounds: &[f64],
+            upper_bounds: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+            _callback: autoeq::optim::OptimProgressCallback,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.optimize_filters(x, lower_bounds, upper_bounds, objective, params)
+        }
+
+        fn optimize_filters_with_algo_override(
+            &self,
+            x: &mut [f64],
+            lower_bounds: &[f64],
+            upper_bounds: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+            _algo_override: Option<&str>,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.optimize_filters(x, lower_bounds, upper_bounds, objective, params)
+        }
+    }
+
+    #[test]
+    fn explicit_candidate_reaches_the_optimizer_as_its_initial_vector() {
+        let params = test_params(false);
+        let objective = test_objective_data();
+        let (lower, upper) = autoeq::workflow::setup_bounds(&params);
+        let mut candidate = autoeq::workflow::initial_guess(&params, &lower, &upper);
+        candidate[2] = 1.25;
+        let captured = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let backend = CapturingBackend {
+            initial: std::sync::Arc::clone(&captured),
+        };
+
+        let result = perform_optimization_with_backend_and_candidate(
+            &params,
+            &objective,
+            None,
+            Some(&candidate),
+            &backend,
+        )
+        .expect("valid explicit candidate should reach the optimizer");
+
+        assert_eq!(
+            captured
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .as_deref(),
+            Some(candidate.as_slice()),
+            "the optimizer must receive the saved vector, not a newly generated guess"
+        );
+        assert_eq!(result.params, candidate);
+    }
+
+    #[test]
+    fn warm_start_rejects_backend_that_ignores_initial_candidate() {
+        let mut params = test_params(false);
+        params.algo = "mh:de".into();
+        let objective = test_objective_data();
+        let (lower, upper) = autoeq::workflow::setup_bounds(&params);
+        let candidate = autoeq::workflow::initial_guess(&params, &lower, &upper);
+
+        let error = match perform_optimization_with_candidate(&params, &objective, None, &candidate)
+        {
+            Ok(_) => panic!("MH must not silently ignore a requested warm start"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("does not use the supplied initial candidate")
+        );
     }
 
     #[test]
@@ -231,6 +331,79 @@ mod tests {
         assert!(
             gap.is_finite() && gap >= 0.0,
             "round-trip gap must be a finite non-negative drift, got {gap:?}"
+        );
+    }
+
+    #[test]
+    fn cli_progress_callback_saves_only_a_valid_improved_candidate() {
+        let params = test_params(false);
+        let objective = test_objective_data();
+        let (lower, upper) = autoeq::workflow::setup_bounds(&params);
+        let constraint_spec = autoeq::optim::OwnedConstraintSpec::from_params(&params)
+            .expect("test constraints should be valid");
+        let candidate = autoeq::workflow::initial_guess(&params, &lower, &upper);
+        let finalized = autoeq::optim::finalize_candidate(
+            "test-progress",
+            &candidate,
+            &objective,
+            &constraint_spec.as_spec(),
+        )
+        .expect("test initial candidate should be feasible");
+        let directory = tempfile::tempdir().expect("temporary checkpoint directory");
+        let path = directory.path().join("optimizer_state.json");
+        let identity = super::super::CliCheckpointIdentity {
+            measurement: "measurement".into(),
+            config: "configuration".into(),
+            normalization: "normalized-measurement".into(),
+            sample_rate: params.sample_rate,
+            lower_bounds: lower,
+            upper_bounds: upper,
+            algorithm: "autoeq:de".into(),
+            algorithm_version: autoeq::optim::OPTIMIZER_IMPLEMENTATION_VERSION.into(),
+            budget: 100,
+            seed: params.seed,
+        };
+        let best_loss = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let mut callback = super::super::cli_checkpoint_callback(
+            path.clone(),
+            identity.clone(),
+            objective.clone(),
+            constraint_spec,
+            best_loss,
+        );
+        let update = autoeq::optim::setup::ProgressUpdate {
+            iteration: 7,
+            max_iterations: 100,
+            loss: finalized.loss,
+            score: None,
+            convergence: 0.0,
+            params: finalized.params,
+            biquads: Vec::new(),
+            filter_response: Vec::new(),
+        };
+
+        callback(&update).expect("valid progress candidate should be saved");
+        let saved = autoeq::workflow::resume::load_optimizer_state(&path)
+            .expect("checkpoint should load")
+            .expect("checkpoint should exist");
+        assert_eq!(saved.iteration, 7);
+        assert_eq!(
+            saved.lower_bounds.as_deref(),
+            Some(identity.lower_bounds.as_slice())
+        );
+        saved
+            .check_warm_start_compatible(&identity.as_identity())
+            .expect("saved progress candidate should match current identity");
+
+        let mut tied_update = update;
+        tied_update.iteration = 9;
+        callback(&tied_update).expect("a tied candidate should be ignored safely");
+        let saved_again = autoeq::workflow::resume::load_optimizer_state(&path)
+            .expect("checkpoint should still load")
+            .expect("checkpoint should remain present");
+        assert_eq!(
+            saved_again.iteration, 7,
+            "tied candidate must not replace best"
         );
     }
 

@@ -58,6 +58,15 @@ pub trait FilterOptimizer: Send + Sync {
     /// What this backend can handle natively.
     fn capabilities(&self) -> ConstraintCapabilities;
 
+    /// Whether the high-level optimization path supports using a saved
+    /// candidate to seed this backend.
+    ///
+    /// Backends default to false so a saved candidate is never assumed to be
+    /// used unless the implementation explicitly guarantees it.
+    fn supports_initial_candidate(&self) -> bool {
+        false
+    }
+
     /// Optimize filter parameters.
     ///
     /// `x` is the in/out parameter vector — on success the best-found

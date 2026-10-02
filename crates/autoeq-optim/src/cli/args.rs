@@ -30,6 +30,11 @@ pub struct Args {
     #[arg(long, value_name = "PATH")]
     pub product_config: Option<PathBuf>,
 
+    /// Print the versioned product-renderer capability report as JSON and exit.
+    /// This query must be used alone; it does not load measurements or devices.
+    #[arg(long, default_value_t = false)]
+    pub product_renderer_capabilities: bool,
+
     /// The sample rate for the IIR filters.
     #[arg(short, long, default_value_t = 48000.0)]
     pub sample_rate: f64,
@@ -325,6 +330,7 @@ impl Args {
             curve: None,
             target: None,
             product_config: None,
+            product_renderer_capabilities: false,
             output: None,
             resume_state: None,
             checkpoint_state: None,
@@ -509,6 +515,18 @@ mod tests {
         assert_eq!(parsed.product_config, Some("run.json".into()));
         assert!(parsed.curve.is_none());
         assert!(parsed.target.is_none());
+    }
+
+    #[test]
+    fn product_renderer_capability_query_is_additive_and_optional() {
+        let defaults = Args::speaker_defaults();
+        assert!(!defaults.product_renderer_capabilities);
+
+        let parsed = Args::try_parse_from(["prog", "--product-renderer-capabilities"])
+            .expect("renderer capability query should parse");
+        assert!(parsed.product_renderer_capabilities);
+        assert!(parsed.product_config.is_none());
+        assert!(parsed.curve.is_none());
     }
 
     #[test]

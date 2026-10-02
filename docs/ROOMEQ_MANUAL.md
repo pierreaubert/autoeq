@@ -932,6 +932,35 @@ directory. The assets directory holds every run-generated file:
 - `manifest.json` (run status and exact asset ownership) and `roomeq.log`
   (run summary lines; detailed logs remain on stderr via `RUST_LOG`).
 
+### Bundle validation and recovery
+
+New native bundles include `artifact_bundle_manifest.json` with the producer,
+producer version, graph schema version, generation ID, exact saved-JSON hash,
+and the size and SHA-256 of every immutable asset. The run log and run-status
+manifest remain mutable and have separate ownership. Curve JSON companions
+preserve full precision, normalization range, noise-floor and coherence data
+alongside the CSV files used by existing consumers.
+
+`roomeq_workflow::load_output_bundle` checks the root and asset hashes before
+restoring external data. It recovers an interrupted publication using the
+sibling transaction journal. The Python backend adapter in
+`scripts/src/loaders.py` checks integrity and refuses an outstanding transaction
+until the native loader has recovered it. New bundles carry an explicit bundle
+schema marker and fail if their integrity manifest is missing or unsupported.
+Legacy bundles keep their existing loading behavior.
+
+Optimization and fallback attempts use private staging directories. The selected
+attempt is published only after it succeeds. External export files are staged and
+preflighted before publication, with rollback on ordinary publication failures.
+Combined native/external recovery after process interruption is still incomplete;
+a consumer may see a new external file before its matching native bundle.
+
+Publication stages a complete generation and retains the previous generation
+until the root JSON is committed. Unix builds flush files and directory
+entries. Directory-entry durability on other platforms depends on the OS.
+Concurrent readers can encounter a brief unavailable support directory during
+the canonical directory swap; use the supported loader and retry after recovery.
+
 ### HTML report format
 
 The report's waveform availability distinguishes an imported room IR from a reconstructed
@@ -1503,6 +1532,21 @@ RoomEQ feature remains representable.
 | **Roon (`roon`)** | Roon DSP Engine IIR/FIR playback | Serial Roon-supported IIR/FIR stages within Roon's limits | Roon's supported stage set, channel model, latency, and file-handling limits apply; arbitrary RoomEQ matrices, route graphs, or plugin types are not guaranteed. |
 | **REW (`rew`)** | Importing one channel of IIR EQ into REW or another compatible tool | One channel of gain plus supported biquad filters, with an explicit preamp | Exactly one channel. No delay, FIR, crossover, bass routing, matrix, or other graph stage. |
 | **Normalized coefficients (`coefficients`)** | Integrating RoomEQ filters into custom DSP | Any number of serial channels, gain, delay, and the 12 canonical RoomEQ biquad types | No FIR, crossover, matrix, bass routing, or plugin graph. The host must apply `preamp_gain_db`, `delay_ms`, section order, and the documented coefficient convention. |
+
+### Query export compatibility
+
+The backend API `roomeq_export::query_export_capabilities` returns one
+serializable capability record for each of the eight formats. Use
+`query_export_capability_at_sample_rate` to check a selected format at the
+intended playback rate. The query validates the graph and runs the actual
+renderer, returning stable reason codes for refusals.
+
+Records include the checked rate, required convolution resources, whether
+resources were verified, and whether the graph is ready to export. A graph
+containing a runtime sub-output limiter is refused by every external format
+until that backend can preserve its protection behavior. Convolution resources
+require verification before packaging. Consumer PCM and acoustic verification
+retain their separate evidence requirements.
 
 ### Practical Target Selection
 

@@ -339,7 +339,18 @@ pub fn optimize_joint_sub_array(
     {
         return Err(invalid("nonfinite LFE or redirected gain"));
     }
+    let mut unique_outputs = std::collections::BTreeSet::new();
+    if request
+        .physical_outputs
+        .iter()
+        .any(|output| output.trim().is_empty() || !unique_outputs.insert(output))
+    {
+        return Err(invalid(
+            "physical output identities must be nonempty and unique",
+        ));
+    }
     for curve in request.measurements.iter().flatten() {
+        curve.validate("joint multi-sub measurement")?;
         if curve.freq.len() < 2
             || curve.spl.len() != curve.freq.len()
             || !crate::topology::curve_has_usable_phase(curve)
@@ -630,14 +641,20 @@ pub fn optimize_joint_sub_array(
 ///
 /// The same dB correction applies at every seat, so relative seat-to-seat
 /// differences are unchanged: a shared filter cannot remove spatial
-/// variation, it only shapes the common residual.
+/// variation, it only shapes the common residual. Every seat must have the
+/// same frequency grid; callers must explicitly resample differing grids.
+///
+/// # Errors
+///
+/// Rejects malformed curves, mismatched grids, nonfinite EQ, and overflow.
 pub fn apply_shared_eq_to_residual(per_seat: &[Curve], shared_eq_db: &[f64]) -> Result<Vec<Curve>> {
     if per_seat.is_empty() {
         return Err(AutoeqError::InvalidMeasurement {
             message: "shared residual EQ needs at least one seat".to_string(),
         });
     }
-    let bins = per_seat[0].spl.len();
+    let grid = &per_seat[0].freq;
+    let bins = grid.len();
     if shared_eq_db.len() != bins || shared_eq_db.iter().any(|v| !v.is_finite()) {
         return Err(AutoeqError::InvalidMeasurement {
             message: "shared EQ must match the seat grid with finite values".to_string(),
@@ -646,14 +663,22 @@ pub fn apply_shared_eq_to_residual(per_seat: &[Curve], shared_eq_db: &[f64]) -> 
     per_seat
         .iter()
         .map(|seat| {
-            if seat.spl.len() != bins {
+            seat.validate("shared residual EQ seat")?;
+            if &seat.freq != grid {
                 return Err(AutoeqError::InvalidMeasurement {
-                    message: "seat grids disagree for shared residual EQ".to_string(),
+                    message:
+                        "seat grids disagree for shared residual EQ; resample explicitly first"
+                            .to_string(),
                 });
             }
             let mut corrected = seat.clone();
             for (spl, eq) in corrected.spl.iter_mut().zip(shared_eq_db.iter()) {
                 *spl += *eq;
+                if !spl.is_finite() {
+                    return Err(AutoeqError::InvalidMeasurement {
+                        message: "shared residual EQ overflowed a seat level".to_string(),
+                    });
+                }
             }
             Ok(corrected)
         })
@@ -1002,6 +1027,49 @@ mod tests {
             min_db: -12.0,
             max_db: 12.0,
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shared_residual_eq_rejects_misaligned_and_invalid_curves() {
+        let reference = sub_curve(80.0, 0.0);
+        let mut shifted = reference.clone();
+        shifted.freq[1] = 65.0;
+        let error =
+            apply_shared_eq_to_residual(&[reference.clone(), shifted], &[0.0; 3]).unwrap_err();
+        assert!(error.to_string().contains("resample explicitly"));
+        for mutation in 0..4 {
+            let mut malformed = reference.clone();
+            match mutation {
+                0 => malformed.freq[1] = malformed.freq[0],
+                1 => malformed.spl[1] = f64::NAN,
+                2 => malformed.phase = Some(array![0.0]),
+                _ => malformed.spl = array![80.0],
+            }
+            assert!(apply_shared_eq_to_residual(&[malformed], &[0.0; 3]).is_err());
+        }
+        let mut huge = reference;
+        huge.spl[0] = f64::MAX;
+        assert!(apply_shared_eq_to_residual(&[huge], &[f64::MAX, 0.0, 0.0]).is_err());
+    }
+
+    #[test]
+    fn joint_invalid_measurement_and_output_identity_refused_before_search() {
+        let mut config = tiny_config();
+        config.algorithm = "must-not-run".into();
+        for mutation in 0..4 {
+            let mut request = two_sub_two_seat_request();
+            match mutation {
+                0 => request.measurements[0][0].freq[1] = 30.0,
+                1 => request.measurements[0][0].spl[1] = f64::NAN,
+                2 => request.physical_outputs[1] = request.physical_outputs[0].clone(),
+                _ => request.physical_outputs[1] = " ".into(),
+            }
+            let error = optimize_joint_sub_array(&request, &config, 48_000.0).unwrap_err();
+            assert!(
+                !error.to_string().contains("optimization failed"),
+                "{error}"
+            );
         }
     }
 

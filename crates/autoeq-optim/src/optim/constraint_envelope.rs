@@ -788,6 +788,11 @@ pub fn constrain_candidate(
     spec: &ConstraintSpec<'_>,
 ) -> Result<ConstrainedCandidate, String> {
     spec.validate()?;
+    if let Some(index) = x.iter().position(|value| !value.is_finite()) {
+        return Err(format!(
+            "candidate `{candidate_id}` has a nonfinite parameter at index {index}"
+        ));
+    }
     if !is_peq_layout_loss(data.loss_type) {
         return Ok(ConstrainedCandidate {
             candidate_id: String::from(candidate_id),
@@ -1390,6 +1395,28 @@ mod constraint_envelope_tests {
             50,
             Some(3),
         )
+    }
+
+    #[test]
+    fn all_candidate_layouts_reject_nonfinite_parameters_without_envelopes() {
+        for loss_type in [
+            LossType::SpeakerFlat,
+            LossType::DriversFlat,
+            LossType::MultiSubFlat,
+        ] {
+            let mut data = flat_objective(log_grid());
+            data.loss_type = loss_type;
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let error = constrain_candidate(
+                    "invalid",
+                    &[3.0, 1.0, value],
+                    &data,
+                    &ConstraintSpec::unconstrained(),
+                )
+                .unwrap_err();
+                assert!(error.contains("nonfinite parameter at index 2"), "{error}");
+            }
+        }
     }
 
     #[test]

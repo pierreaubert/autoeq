@@ -443,7 +443,10 @@ mod tests {
     #[test]
     fn mixed_crossover_returns_required_path_free_sidecar() {
         for phase in ["linear", "kirkeby"] {
-            let curve = curve();
+            // Analytic zero-phase fixture for the requested excess-phase design;
+            // missing phase is refused by the prepared FIR entry-point tests.
+            let mut curve = curve();
+            curve.phase = Some(ndarray::Array1::zeros(curve.freq.len()));
             let mixed_config = MixedModeConfig {
                 crossover_freq: 500.0,
                 fir_band: "low".to_string(),

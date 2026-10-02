@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "default_evaluation_budget": 128,
+  "default_time_budget_millis": 10000,
+  "population_size": 8,
+  "filter_count": 4,
+  "seed_set": [1, 7, 42, 424242, 8675309],
+  "sample_rate_hz": 48000.0,
+  "filter_limits": {
+    "min_frequency_hz": 20.0,
+    "max_frequency_hz": 20000.0,
+    "min_q": 0.5,
+    "max_q": 6.0,
+    "min_gain_db": -9.0,
+    "max_gain_db": 6.0
+  },
+  "cases": [
+    {
+      "id": "analytic_headphone_peq",
+      "domain": "headphone",
+      "kind": "analytic_peq",
+      "source": "Deterministic synthetic PEQ plant and log-frequency residual declared in this manifest.",
+      "license": "GPL-3.0-or-later (project-generated test fixture)",
+      "source_paths": [],
+      "normalization": "Synthetic plant is measured relative to a flat neutral target; no SPL calibration is implied.",
+      "frequency_min_hz": 20.0,
+      "frequency_max_hz": 20000.0,
+      "frequency_points": 241,
+      "plant_filters_hz_q_gain_db": [
+        [80.0, 0.9, -3.4],
+        [240.0, 1.4, 5.0],
+        [2600.0, 2.1, -4.0],
+        [8500.0, 1.2, 2.5]
+      ],
+      "tilt_db_per_octave": -0.65,
+      "ripple_amplitude_db": 1.2,
+      "ripple_cycles_per_octave": 1.7,
+      "right_channel_offset_db": 0.35,
+      "capture_devices": []
+    },
+    {
+      "id": "asr_beyerdynamic_dt1990pro",
+      "domain": "headphone",
+      "kind": "measured_headphone_csv",
+      "source": "Audio Science Review LLC, Beyerdynamic DT 1990 Pro headphone frequency-response measurement.",
+      "source_url": "https://www.audiosciencereview.com/",
+      "license": "CC BY-NC-SA 4.0; copyright Audio Science Review LLC; see adjacent LICENSE.txt.",
+      "source_paths": [
+        "data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic DT1990 Pro Headphone Frequency Response Measurement.csv",
+        "data_tests/headphones/asr/beyerdynamic_dt1990pro/LICENSE.txt"
+      ],
+      "normalization": "Each ear is normalized independently by linear interpolation in log-frequency at 425 Hz; measurements are scored against a neutral relative target.",
+      "frequency_min_hz": 20.0,
+      "frequency_max_hz": 20000.0,
+      "frequency_points": null,
+      "plant_filters_hz_q_gain_db": [],
+      "tilt_db_per_octave": 0.0,
+      "ripple_amplitude_db": 0.0,
+      "ripple_cycles_per_octave": 0.0,
+      "right_channel_offset_db": 0.0,
+      "capture_devices": [
+        { "role": "left_ear_coupler", "device": "not recorded", "clock_domain": "not recorded", "calibration": "not recorded" },
+        { "role": "right_ear_coupler", "device": "not recorded", "clock_domain": "not recorded", "calibration": "not recorded" },
+        { "role": "measurement_interface", "device": "not recorded", "clock_domain": "not recorded", "calibration": "not recorded" }
+      ]
+    },
+    {
+      "id": "measured_stereo_8361a",
+      "domain": "speaker",
+      "kind": "measured_room_csv",
+      "source": "Contributor-supplied stereo room capture declared in data_tests/roomeq/acoustic_corpus/PROVENANCE.md.",
+      "license": "LicenseRef-SOTF-Project-Test-Data; retained as repository test data, not a separate redistribution grant.",
+      "source_paths": [
+        "data_tests/roomeq/measured/2.0_8361a/L.csv",
+        "data_tests/roomeq/measured/2.0_8361a/R.csv",
+        "data_tests/roomeq/measured/2.0_8361a/L_heldout_1.csv",
+        "data_tests/roomeq/measured/2.0_8361a/L_heldout_2.csv",
+        "data_tests/roomeq/measured/2.0_8361a/R_heldout_1.csv",
+        "data_tests/roomeq/measured/2.0_8361a/R_heldout_2.csv",
+        "data_tests/roomeq/acoustic_corpus/PROVENANCE.md"
+      ],
+      "normalization": "Each response is normalized independently at 425 Hz because absolute calibration is not recorded; optimization uses 20–450 Hz magnitude only. Phase columns are not used.",
+      "frequency_min_hz": 20.0,
+      "frequency_max_hz": 450.0,
+      "frequency_points": null,
+      "plant_filters_hz_q_gain_db": [],
+      "tilt_db_per_octave": 0.0,
+      "ripple_amplitude_db": 0.0,
+      "ripple_cycles_per_octave": 0.0,
+      "right_channel_offset_db": 0.0,
+      "capture_devices": [
+        { "role": "left_microphone", "device": "not recorded", "clock_domain": "not recorded", "calibration": "not recorded" },
+        { "role": "right_microphone", "device": "not recorded", "clock_domain": "not recorded", "calibration": "not recorded" },
+        { "role": "measurement_interface", "device": "not recorded", "clock_domain": "not recorded", "calibration": "not recorded" }
+      ]
+    }
+  ]
+}

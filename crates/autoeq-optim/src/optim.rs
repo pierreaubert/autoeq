@@ -53,6 +53,8 @@ pub mod pareto;
 pub mod prepared_objective;
 /// Algorithm registry — string name → backend.
 pub mod registry;
+/// Hard objective-evaluation budgets and cooperative cancellation.
+pub mod run_control;
 /// Shared bounded scalar-objective optimizer dispatch.
 pub mod scalar;
 /// Shared optimization setup (bounds, initial guess, objective data)

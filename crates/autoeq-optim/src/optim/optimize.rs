@@ -1,6 +1,7 @@
 use super::constraint_envelope::finalize_candidate;
 use super::objective_data::ObjectiveData;
 use super::objective_data::run_autoeq_de_with_epa_callback;
+use super::run_control::OptimizerRunControl;
 use super::types::OptimProgressCallback;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -259,6 +260,95 @@ pub fn optimize_filters_detailed(
         upper_bounds,
         params.maxeval,
         params.seed,
+    )
+}
+
+/// Optimize with a hard candidate-evaluation budget and cooperative cancellation.
+///
+/// The control gate applies to search-time candidate scores across all
+/// registered built-in backends. Final constraint realization uses an
+/// uncontrolled snapshot so an exhausted search budget cannot invalidate its
+/// best candidate. `params.maxeval` is set to the control's budget for the
+/// backend invocation.
+///
+/// # Errors
+///
+/// Returns an error when the algorithm is unknown, has no budget profile, or
+/// the budget cannot fill its initial complete solver batch.
+pub fn optimize_filters_with_run_control(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+    run_control: &OptimizerRunControl,
+) -> Result<(String, f64), (String, f64)> {
+    let backend = super::registry::resolve(&params.algo)
+        .ok_or_else(|| (format!("Unknown algorithm: {}", params.algo), f64::INFINITY))?;
+    let mut controlled_params = params.clone();
+    controlled_params.maxeval = run_control.evaluation_budget();
+    let profile = backend
+        .evaluation_budget_profile(lower_bounds, upper_bounds, &controlled_params)
+        .ok_or_else(|| {
+            (
+                format!(
+                    "{} does not report a matched objective-evaluation budget profile",
+                    backend.name()
+                ),
+                f64::INFINITY,
+            )
+        })?;
+    if profile.requested_evaluations != run_control.evaluation_budget() {
+        return Err((
+            format!(
+                "{} budget profile reports {} evaluations for a control cap of {}",
+                backend.name(),
+                profile.requested_evaluations,
+                run_control.evaluation_budget()
+            ),
+            f64::INFINITY,
+        ));
+    }
+    if run_control.evaluation_budget() < profile.minimum_complete_batch {
+        return Err((
+            format!(
+                "{} requires at least {} objective evaluations for its initial complete batch; requested budget is {}",
+                backend.name(),
+                profile.minimum_complete_batch,
+                run_control.evaluation_budget()
+            ),
+            f64::INFINITY,
+        ));
+    }
+
+    let validation_snapshot = objective_data.with_validation_tracking(run_control.clone());
+    let controlled_objective = objective_data.with_run_control(run_control.clone());
+    let control_for_callback = run_control.clone();
+    let cancellation_callback: OptimProgressCallback = Box::new(move |_, _, _| {
+        if control_for_callback.stop_requested() {
+            crate::de::CallbackAction::Stop
+        } else {
+            crate::de::CallbackAction::Continue
+        }
+    });
+    let callback = backend
+        .capabilities()
+        .iteration_callback
+        .then_some(cancellation_callback);
+    let result = backend.optimize(
+        x,
+        lower_bounds,
+        upper_bounds,
+        controlled_objective,
+        &controlled_params,
+        callback,
+    );
+    finalize_dispatch_winner(
+        backend.name(),
+        x,
+        &validation_snapshot,
+        &controlled_params,
+        result,
     )
 }
 

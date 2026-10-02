@@ -1189,3 +1189,37 @@ gate hashes; 907 external package snapshots match without a second root rehash
 of registry bytes. This is scoped local backend acceptance. Evidence:
 `/Volumes/home_tmp/tmp/sotf-a08-native-provenance-qa-20261003/`; root review:
 `/Users/pierre/a08-native-provenance-independent-review.json`.
+
+
+## Strict cross-mode parity completeness
+
+Commit `6d5cacc`, integrated as `c0a014e7`, requires every declared main channel
+and every pair of production modes to provide a valid comparison in each
+strict parity band. Expected channels come from the loaded configurations,
+so a channel absent from every artifact cannot disappear from the denominator.
+Missing curves, mismatched dimensions, nonfinite samples, invalid frequency
+grids, insufficient samples or incomplete band coverage make the comparison
+unavailable and the band fail. The report includes available/expected counts
+and channel/mode diagnostics. Level matching, median/max budgets, fixtures and
+optimizer settings are unchanged.
+
+The frozen three-file candidate passes 5 focused regressions and the full
+RoomEQ QA library suite (188 passed, 7 ignored), strict production Clippy,
+scoped formatting and diff checks. Source, lock/config, toolchain and resolved
+metadata/dependency inventories match before/after. Root independently rehashed
+five Git/path trees (9,183 files and four symlinks) and verified all five raw
+gate records and byte equality of the integrated source. The 333 host-filtered
+external dependency snapshots match; root did not rehash registry bytes.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a09-parity-completeness-20261003/`;
+root review: `/Users/pierre/a09-parity-independent-review.json`.
+The first five tests passed under system Python 3.9, then the evidence runner
+failed because `hashlib.file_digest` was unavailable. That attempt is preserved
+in the sibling `-initial-python39` directory; final evidence uses Python 3.14.8
+and a fresh before inventory.
+
+This closes a checker completeness gap. It does not resolve the retained
+Genelec bass-parity failure (4.54 dB median / 9.65 dB maximum) or its 19.59 dB
+sampled electrical-gain failure against the original 12 dB limit. Those acoustic
+failures and the remaining A09 mode/model/rate matrix remain open. No expensive
+Genelec reoptimization, hardware activation or UI changes were performed for
+this checker fix.

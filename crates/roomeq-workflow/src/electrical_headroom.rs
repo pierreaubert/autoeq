@@ -603,8 +603,10 @@ mod tests {
         let mut result = crate::test_fixtures::single_channel_room_result("L");
         result.channels.get_mut("L").unwrap().plugins =
             vec![roomeq_engine::output::create_gain_plugin(6.0)];
-        let mut policy = roomeq_model::FinalizationConfig::default();
-        policy.default_input_peak = 0.125;
+        let mut policy = roomeq_model::FinalizationConfig {
+            default_input_peak: 0.125,
+            ..Default::default()
+        };
         policy.input_peak_limits.insert("L".into(), 0.25);
         let output = assess_final_graph(
             &result.to_dsp_chain_output(),

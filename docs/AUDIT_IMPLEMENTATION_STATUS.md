@@ -138,6 +138,38 @@ Scoped clippy passed with warnings denied. Retained local run metadata records
 the report/manifest/lockfile hashes, command, host/toolchain and resolved math
 dependencies; it does not claim a before/after source freeze for this run.
 
+## Typed optimizer stop and budget evidence
+
+Isolated commit `bddcef17`, integrated as `4b1427e9`, distinguishes explicit
+user cancellation, deadlines, evaluation limits, backend failure and invalid
+results. Unknown legacy success strings retain finite candidates as best-effort
+without claiming convergence. The detailed controlled API reports typed
+preflight refusal and actual search-score admissions; finalization counts stay
+separate. Benchmark reports take a final snapshot after the timer stops, so a
+late deadline remains visible.
+
+Fresh DE costs N+1 initial scores, including x0, then N per generation. With
+population 48, a complete first generation requires 97 evaluations: an actual
+97-score fit passes and a 96-score request refuses before scoring. The updated
+same-build save/load/resume witness matches uninterrupted output and rejects a
+changed schedule fingerprint before scoring or replacing the saved state.
+
+Frozen scoped gates: optimizer 365/365; benchmark 8/8; deadline/race 3/3;
+persisted resume 1/1; engine timeout adapter 1/1; both schema baselines match.
+Strict Clippy passes the optimizer, QA, workflow and model production libraries
+and the selected optimizer/QA/workflow test targets. Whole-engine Clippy has
+11 untouched existing lints; combined model tests have one existing headroom
+lint. Those failed gates are retained and are not reported as passing.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a07-termination-evidence/final-gate/commands.json`,
+SHA-256 `aa8223ca21b4f6b9bee053750ebc2c223f0a0acfa034d618865f77fe17ea0f4c`.
+Root verified all ten raw command logs and independently rehashed 11,392 source
+entries across the six resolved Git/local roots, including symlink targets and
+their file contents. Before/after inventories and lock/package identities match;
+registry package bytes are outside that source inventory. The integrated twelve
+files match the tested commit. No full timing matrix or derived preset was added,
+and the older 180-run status labels are not evidence for the corrected semantics.
+
 ## Calibrated joint-bass search
 
 The baseline already implements calibrated finite gain/delay proposals in

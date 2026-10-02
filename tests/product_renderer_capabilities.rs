@@ -16,7 +16,7 @@ fn renderer_capability_query_emits_json_without_product_inputs() {
     );
     let report: serde_json::Value = serde_json::from_slice(&output.stdout)
         .expect("capability query should write a JSON document to stdout");
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
     let renderers = report["renderers"].as_array().unwrap();
     assert_eq!(renderers.len(), 3);
     let apo = renderers
@@ -32,13 +32,45 @@ fn renderer_capability_query_emits_json_without_product_inputs() {
             .any(|feature| feature == "strict_emitted_text_round_trip_check")
     );
     assert!(
-        apo["known_limitations"]
+        apo["verified_features"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|limitation| {
-                limitation == "profiled_apo_refuses_shelves_with_mismatched_transfer_semantics"
-            })
+            .any(|feature| feature == "source_derived_apo_shelf_coefficient_and_transfer_check")
+    );
+    let shelf_contract = &apo["profiled_apo_shelf_contract"];
+    assert_eq!(
+        shelf_contract["emitted_filter_types"],
+        serde_json::json!(["LSC", "HSC"])
+    );
+    assert_eq!(shelf_contract["slope_db_per_octave"], 12);
+    assert_eq!(
+        shelf_contract["frequency_convention"],
+        "center_frequency_fc"
+    );
+    assert_eq!(shelf_contract["q_encoded"], false);
+    assert_eq!(
+        shelf_contract["equalizer_apo_source_revision"],
+        "bbfcc3e5024cbb9d61ba75fc88d78605cc4c9687"
+    );
+    assert_eq!(
+        shelf_contract["minimum_consumer_version_assumption"],
+        "1.2.1"
+    );
+    assert_eq!(shelf_contract["max_scaled_coefficient_delta_epsilon"], 16);
+    assert_eq!(shelf_contract["max_sampled_transfer_delta_db"], 1.0e-10);
+    assert_eq!(
+        shelf_contract["coefficient_comparison"],
+        "max_abs_delta <= 16*f64::EPSILON*max(1,max_abs(source_coefficients,core_coefficients))"
+    );
+    assert_eq!(shelf_contract["consumer_runtime_checked"], false);
+    assert!(
+        !apo["known_limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|limitation| limitation
+                == "profiled_apo_refuses_shelves_with_mismatched_transfer_semantics")
     );
 }
 

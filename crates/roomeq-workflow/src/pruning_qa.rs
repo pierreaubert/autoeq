@@ -390,114 +390,201 @@ fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
     for (multi_sub, grouped) in [(false, false), (true, false), (true, true)] {
         let mut frozen_reference = None;
         let mut frozen_graph = None;
-        for report_only in [true, false] {
-            let mut config = config(2, report_only);
-            config.optimizer.parallel_threads = Some(1);
-            config.optimizer.max_iter = 100;
-            config.optimizer.min_db = -0.1;
-            config.optimizer.max_db = 0.1;
-            // Two correlated programme inputs have declared quarter-scale peaks;
-            // the unchanged 0 dBFS output ceiling still applies to their sum.
-            config.optimizer.finalization.default_input_peak = 0.25;
-            let source = || {
-                MeasurementSource::InMemoryMultiple(
-                    (0..2)
-                        .map(|seat| {
-                            let mut curve = measurement(seat);
-                            curve.spl *= 0.05;
-                            curve.phase = Some(Array1::zeros(curve.freq.len()));
-                            curve
-                        })
-                        .collect(),
-                )
-            };
-            config.speakers = HashMap::from([
-                (String::from("left"), SpeakerConfig::Single(source())),
-                (String::from("right"), SpeakerConfig::Single(source())),
-                (String::from("sub"), SpeakerConfig::Single(source())),
-            ]);
-            if multi_sub {
-                let sub_source = || {
-                    let MeasurementSource::InMemoryMultiple(mut curves) = source() else {
-                        unreachable!()
-                    };
-                    for curve in &mut curves {
-                        // Two coherent half-pressure subs have the same uncorrected
-                        // combined level as the single-sub fixture.
-                        curve.spl -= 20.0 * 2.0_f64.log10();
-                    }
-                    MeasurementSource::InMemoryMultiple(curves)
+        let mut config = config(2, true);
+        config.optimizer.filter_audibility = None;
+        config.optimizer.parallel_threads = Some(1);
+        config.optimizer.max_iter = 100;
+        config.optimizer.min_db = -6.0;
+        config.optimizer.max_db = 6.0;
+        // Two correlated programme inputs have declared quarter-scale peaks;
+        // the unchanged 0 dBFS output ceiling still applies to their sum.
+        config.optimizer.finalization.default_input_peak = 0.25;
+        config.optimizer.finalization.min_improvement_lower_bound_db =
+            roomeq_model::FinalizationConfig::default().min_improvement_lower_bound_db;
+        let source = |peak_hz: f64| {
+            MeasurementSource::InMemoryMultiple(
+                (0..2)
+                    .map(|seat| {
+                        // Keep each role's correction inside its passband:
+                        // mains at 220 Hz, subs at 80 Hz. Identity mains cannot
+                        // certify the worst-channel benefit of a sub-only EQ.
+                        let mut curve = measurement(seat);
+                        curve.spl = curve.freq.mapv(|frequency| {
+                            (6.0 + seat as f64)
+                                * (-((frequency / peak_hz).log2() / 0.5).powi(2)).exp()
+                        });
+                        curve.phase = Some(Array1::zeros(curve.freq.len()));
+                        curve
+                    })
+                    .collect(),
+            )
+        };
+        config.speakers = HashMap::from([
+            (String::from("left"), SpeakerConfig::Single(source(220.0))),
+            (String::from("right"), SpeakerConfig::Single(source(220.0))),
+            (String::from("sub"), SpeakerConfig::Single(source(80.0))),
+        ]);
+        if multi_sub {
+            let sub_source = || {
+                let MeasurementSource::InMemoryMultiple(mut curves) = source(80.0) else {
+                    unreachable!()
                 };
-                config.speakers.remove("sub");
-                for index in 0..2 {
-                    config
-                        .speakers
-                        .insert(format!("sub-{index}"), SpeakerConfig::Single(sub_source()));
+                for curve in &mut curves {
+                    // Two coherent half-pressure subs have the same uncorrected
+                    // combined level as the single-sub fixture.
+                    curve.spl -= 20.0 * 2.0_f64.log10();
                 }
-                if grouped {
-                    let subwoofers = (0..2)
-                        .map(|index| {
-                            let SpeakerConfig::Single(source) =
-                                config.speakers.remove(&format!("sub-{index}")).unwrap()
-                            else {
-                                unreachable!()
-                            };
-                            source
-                        })
-                        .collect();
-                    config.speakers.insert(
-                        String::from("sub"),
-                        SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
-                            name: String::from("subs"),
-                            speaker_name: None,
-                            subwoofers,
-                            allpass_optimization: false,
-                            joint_optimization: false,
-                        }),
-                    );
-                }
+                MeasurementSource::InMemoryMultiple(curves)
+            };
+            config.speakers.remove("sub");
+            for index in 0..2 {
+                config
+                    .speakers
+                    .insert(format!("sub-{index}"), SpeakerConfig::Single(sub_source()));
             }
-            config.system = Some(roomeq_model::SystemConfig {
-                model: roomeq_model::SystemModel::Stereo,
-                speakers: HashMap::from([
-                    (String::from("L"), String::from("left")),
-                    (String::from("R"), String::from("right")),
-                ]),
-                subwoofers: Some(roomeq_model::SubwooferSystemConfig {
-                    config: if multi_sub {
-                        roomeq_model::SubwooferStrategy::Mso
-                    } else {
-                        roomeq_model::SubwooferStrategy::Single
-                    },
-                    crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
+            if grouped {
+                let subwoofers = (0..2)
+                    .map(|index| {
+                        let SpeakerConfig::Single(source) =
+                            config.speakers.remove(&format!("sub-{index}")).unwrap()
+                        else {
+                            unreachable!()
+                        };
+                        source
+                    })
+                    .collect();
+                config.speakers.insert(
+                    String::from("sub"),
+                    SpeakerConfig::MultiSub(roomeq_model::MultiSubGroup {
+                        name: String::from("subs"),
+                        speaker_name: None,
+                        subwoofers,
+                        allpass_optimization: false,
+                        joint_optimization: false,
+                    }),
+                );
+            }
+        }
+        config.system = Some(roomeq_model::SystemConfig {
+            model: roomeq_model::SystemModel::Stereo,
+            speakers: HashMap::from([
+                (String::from("L"), String::from("left")),
+                (String::from("R"), String::from("right")),
+            ]),
+            subwoofers: Some(roomeq_model::SubwooferSystemConfig {
+                config: if multi_sub {
+                    roomeq_model::SubwooferStrategy::Mso
+                } else {
+                    roomeq_model::SubwooferStrategy::Single
+                },
+                crossover: Some(roomeq_model::SubwooferCrossoverRef::PerSub(vec![
                     String::from("bass"); if multi_sub { 2 } else { 1 }
                 ])),
-                    routing: Default::default(),
-                    outputs: (0..if multi_sub { 2 } else { 1 })
-                        .map(|index| roomeq_model::SubwooferOutput {
-                            id: format!("sub-{index}"),
-                            speaker: if multi_sub && !grouped {
-                                format!("sub-{index}")
-                            } else {
-                                String::from("sub")
-                            },
-                        })
-                        .collect(),
-                }),
+                routing: Default::default(),
+                outputs: (0..if multi_sub { 2 } else { 1 })
+                    .map(|index| roomeq_model::SubwooferOutput {
+                        id: format!("sub-{index}"),
+                        speaker: if multi_sub && !grouped {
+                            format!("sub-{index}")
+                        } else {
+                            String::from("sub")
+                        },
+                    })
+                    .collect(),
+            }),
+            ..Default::default()
+        });
+        config.crossovers = Some(HashMap::from([(
+            String::from("bass"),
+            roomeq_model::CrossoverConfig {
+                crossover_type: String::from("LR24"),
+                frequency: Some(80.0),
+                frequency_range: None,
+                frequencies: None,
+            },
+        )]));
+        let directory = tempfile::tempdir().unwrap();
+        let mut base_result =
+            crate::optimize_room(&config, 48000.0, None, Some(directory.path())).unwrap();
+        let base_acceptance = base_result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("the optimizer must produce real F0 acceptance evidence");
+        assert!(
+            base_acceptance.accepted
+                && base_acceptance.metrics.improvement_db > 0.0
+                && base_acceptance.metrics.max_abs_correction_db > 0.0,
+            "the seeded planted correction must pass real acoustic acceptance before pruning: {base_acceptance:#?}\nchannel_results={:#?}\nstages={:#?}",
+            base_result.channel_results,
+            base_result.metadata.stage_outcomes
+        );
+
+        // Plant one exact identity PEQ after optimization. It has no acoustic
+        // effect, so removing it is a neutral test candidate while the
+        // accepted 6 dB room-peak correction remains in the frozen graph.
+        let neutral_filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            80.0,
+            48000.0,
+            1.0,
+            0.0,
+        );
+        let mut neutral_plugin =
+            roomeq_engine::output::create_eq_plugin(std::slice::from_ref(&neutral_filter));
+        neutral_plugin.parameters["room_eq_stage"] = serde_json::json!("pre_route");
+        base_result
+            .channels
+            .get_mut("L")
+            .expect("routed left chain")
+            .plugins
+            .push(neutral_plugin);
+        base_result
+            .channel_results
+            .get_mut("L")
+            .expect("routed left result")
+            .biquads
+            .push(neutral_filter);
+        let captures = crate::room_optimization::seat_replay::capture_training(&config).unwrap();
+        let held_out = HashMap::new();
+
+        for report_only in [true, false] {
+            let mut row_config = config.clone();
+            row_config.optimizer.filter_audibility = Some(FilterAudibilityConfig {
+                report_only,
+                allow_enforcement_with_experimental_proxy: !report_only,
                 ..Default::default()
             });
-            config.crossovers = Some(HashMap::from([(
-                String::from("bass"),
-                roomeq_model::CrossoverConfig {
-                    crossover_type: String::from("LR24"),
-                    frequency: Some(80.0),
-                    frequency_range: None,
-                    frequencies: None,
-                },
-            )]));
-            let directory = tempfile::tempdir().unwrap();
-            let result =
-                crate::optimize_room(&config, 48000.0, None, Some(directory.path())).unwrap();
+            let mut result = base_result.clone();
+            crate::room_optimization::rebuild_routed_pruning_test_candidate(
+                &mut result,
+                &row_config,
+                &held_out,
+                48000.0,
+                directory.path(),
+            )
+            .unwrap();
+            let acceptance = result
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .expect("the frozen graph must have real acceptance evidence");
+            assert!(
+                acceptance.accepted
+                    && acceptance.metrics.improvement_db > 0.0
+                    && acceptance.metrics.max_abs_correction_db > 0.0,
+                "the frozen routed F0 must pass real acoustic acceptance before pruning: {acceptance:#?}\nchannel_results={:#?}\nstages={:#?}",
+                result.channel_results,
+                result.metadata.stage_outcomes
+            );
+            crate::room_optimization::apply_routed_pruning_for_test(
+                &mut result,
+                &captures,
+                &held_out,
+                &row_config,
+                48000.0,
+                directory.path(),
+            );
             let graph = result.to_dsp_chain_output();
             let metadata = graph.metadata.as_ref().unwrap();
             let report = &metadata
@@ -539,6 +626,29 @@ fn qa_roomeq_pruning_conditions_exported_routed_matrix() {
                 report.removed_filter_indices.is_empty(),
                 report_only,
                 "{verdicts:#?}"
+            );
+            let neutral_index = verdicts
+                .iter()
+                .position(|verdict| {
+                    verdict.center_hz == 80.0
+                        && verdict.q == 1.0
+                        && verdict.gain_db.abs() <= f64::EPSILON
+                })
+                .expect("the planted neutral PEQ must be adjudicated");
+            assert_eq!(
+                verdicts[neutral_index].acceptance.outcome,
+                if report_only {
+                    roomeq_model::ReportOutcome::CandidateRemoval
+                } else {
+                    roomeq_model::ReportOutcome::AcceptedRemoval
+                },
+                "the zero-gain PEQ removal must pass the normal pruning validation: {:?}; multi_sub={multi_sub}, grouped={grouped}, report_only={report_only}",
+                verdicts[neutral_index]
+            );
+            assert_eq!(
+                report.removed_filter_indices.contains(&neutral_index),
+                !report_only,
+                "only enforcement removes the planted neutral PEQ"
             );
             if report_only {
                 frozen_graph = Some(serde_json::to_value(&graph).unwrap());

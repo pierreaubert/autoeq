@@ -489,6 +489,8 @@ pub(super) async fn save_profiled_apo_to_file(
         if line.starts_with("Preamp:") {
             lines.push(format!("Preamp: {preamp_db:.1} dB"));
             replaced_preamp = true;
+        } else if let Some(shelf_line) = profiled_apo_shelf_line(line)? {
+            lines.push(shelf_line);
         } else {
             lines.push(line.to_owned());
         }
@@ -507,9 +509,10 @@ pub(super) async fn save_profiled_apo_to_file(
     .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
 
     let manifest_path = file_path.with_extension("product-provenance.json");
+    let shelf_contract = autoeq::workflow::profiled_apo_shelf_contract();
     let manifest = serde_json::json!({
         "schema": "autoeq.product-run-provenance",
-        "schema_version": 2,
+        "schema_version": 3,
         "request": context.request,
         "source_record": &context.prepared.source_record,
         "target_record": &context.prepared.target_profile.record,
@@ -526,20 +529,25 @@ pub(super) async fn save_profiled_apo_to_file(
             "max_filter_transfer_delta_db": context.max_filter_transfer_delta_db,
             "verified_output": "Equalizer APO text preset in the checked profiled subset",
             "emitted_text_verification": {
-                "method": "strict_local_subset_parse_and_transfer_comparison_v1",
+                "method": "strict_local_subset_parse_transfer_and_source_shelf_check_v2",
                 "sample_rate_hz": emitted_text.sample_rate_hz,
                 "max_transfer_delta_db": emitted_text.max_transfer_delta_db,
+                "source_shelf_contract": shelf_contract,
+                "max_shelf_scaled_coefficient_delta": emitted_text.max_shelf_scaled_coefficient_delta,
+                "max_shelf_source_transfer_delta_db": emitted_text.max_shelf_source_transfer_delta_db,
                 "channel_scope": "inherited_from_including_equalizer_apo_configuration",
                 "playback_device_binding": "not_encoded_or_verified",
                 "runtime_installation_checked": false,
                 "consumer_parser_used": false
             }
         },
-        "realized_filters": emitted_text.filters.iter().map(|filter| serde_json::json!({
-            "type": filter.filter_type.short_name(),
-            "frequency_hz": filter.freq,
+        "realized_filters": emitted_text.emitted_filters.iter().map(|filter| serde_json::json!({
+            "type": filter.kind,
+            "frequency_hz": filter.frequency_hz,
             "q": filter.q,
-            "gain_db": filter.db_gain
+            "gain_db": filter.gain_db,
+            "slope_db_per_octave": filter.slope_db_per_octave,
+            "frequency_convention": filter.frequency_convention,
         })).collect::<Vec<_>>()
     });
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
@@ -574,4 +582,43 @@ pub(super) async fn save_profiled_apo_to_file(
         manifest_path.display()
     );
     Ok(())
+}
+
+fn profiled_apo_shelf_line(line: &str) -> Result<Option<String>, std::io::Error> {
+    let fields = line.split_whitespace().collect::<Vec<_>>();
+    if fields.len() < 4 || fields[0] != "Filter" || fields[2] != "ON" {
+        return Ok(None);
+    }
+    let token = match fields[3] {
+        "LS" => "LSC",
+        "HS" => "HSC",
+        _ => return Ok(None),
+    };
+    let valid_index = fields[1]
+        .strip_suffix(':')
+        .and_then(|value| value.parse::<usize>().ok())
+        .is_some_and(|value| value > 0);
+    let valid_frequency = fields
+        .get(5)
+        .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()));
+    if fields.len() != 12
+        || !valid_index
+        || fields[4] != "Fc"
+        || fields[6] != "Hz"
+        || fields[7] != "Gain"
+        || fields[9] != "dB"
+        || fields[10] != "Q"
+        || !valid_frequency
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "legacy APO formatter emitted an unexpected shelf line",
+        ));
+    }
+    Ok(Some(format!(
+        "Filter {}: ON {token} 12 dB Fc {} Hz Gain {} dB",
+        fields[1].trim_end_matches(':'),
+        fields[5],
+        fields[8]
+    )))
 }

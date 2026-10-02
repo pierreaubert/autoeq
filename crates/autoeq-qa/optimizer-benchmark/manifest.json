@@ -68,7 +68,7 @@
       "id": "measured_stereo_8361a",
       "domain": "speaker",
       "kind": "measured_room_csv",
-      "source": "Contributor-supplied stereo room capture declared in data_tests/roomeq/acoustic_corpus/PROVENANCE.md.",
+      "source": "Contributor-supplied L/R base room curves; the four held-out curves are deterministic perturbations produced by scripts/generate_roomeq_held_out.py. They test robustness to derived curve changes and do not establish independent measured-seat generalization. See data_tests/roomeq/acoustic_corpus/PROVENANCE.md.",
       "license": "LicenseRef-SOTF-Project-Test-Data; retained as repository test data, not a separate redistribution grant.",
       "source_paths": [
         "data_tests/roomeq/measured/2.0_8361a/L.csv",
@@ -77,7 +77,8 @@
         "data_tests/roomeq/measured/2.0_8361a/L_heldout_2.csv",
         "data_tests/roomeq/measured/2.0_8361a/R_heldout_1.csv",
         "data_tests/roomeq/measured/2.0_8361a/R_heldout_2.csv",
-        "data_tests/roomeq/acoustic_corpus/PROVENANCE.md"
+        "data_tests/roomeq/acoustic_corpus/PROVENANCE.md",
+        "scripts/generate_roomeq_held_out.py"
       ],
       "normalization": "Each response is normalized independently at 425 Hz because absolute calibration is not recorded; optimization uses 20–450 Hz magnitude only. Phase columns are not used.",
       "frequency_min_hz": 20.0,

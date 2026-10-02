@@ -335,6 +335,77 @@ mod tests {
     }
 
     #[test]
+    fn optimization_result_retains_the_selected_boxes_and_objective_envelopes() {
+        let params = test_params(false);
+        let mut objective = test_objective_data();
+        let boost = vec![(20.0, 8.0), (20_000.0, 3.0)];
+        let cut = vec![(20.0, -8.0), (20_000.0, -3.0)];
+        objective.max_boost_envelope = Some(boost.clone());
+        objective.min_cut_envelope = Some(cut.clone());
+        let (mut lower, mut upper) = autoeq::workflow::setup_bounds(&params);
+        lower[0] -= 0.125;
+        upper[0] += 0.125;
+
+        let result = perform_optimization_with_backend(
+            &params,
+            &objective,
+            Some((lower.clone(), upper.clone())),
+            &MockOptimizerBackend::ok(GLOBAL_STATUS, 1.0),
+        )
+        .expect("valid selected bounds should reach the optimizer");
+
+        assert_eq!(result.effective_envelope.lower_bounds, lower);
+        assert_eq!(result.effective_envelope.upper_bounds, upper);
+        assert_eq!(
+            result.effective_envelope.constraints.global_max_q,
+            params.max_q
+        );
+        assert_eq!(result.effective_envelope.max_boost_envelope, Some(boost));
+        assert_eq!(result.effective_envelope.min_cut_envelope, Some(cut));
+        assert_eq!(
+            result.effective_envelope.composite_frequencies_hz,
+            objective.freqs.as_slice().unwrap()
+        );
+        assert_eq!(
+            result.effective_envelope.composite_band_hz,
+            [objective.min_freq, objective.max_freq]
+        );
+    }
+
+    #[test]
+    fn optimization_rejects_malformed_effective_envelope_before_search() {
+        let params = test_params(false);
+        let objective = test_objective_data();
+        let (mut lower, upper) = autoeq::workflow::setup_bounds(&params);
+        lower[0] = f64::NAN;
+        let error = perform_optimization_with_backend(
+            &params,
+            &objective,
+            Some((lower, upper)),
+            &MockOptimizerBackend::ok(GLOBAL_STATUS, 1.0),
+        )
+        .err()
+        .expect("non-finite selected bounds must fail before optimizer dispatch");
+        assert!(
+            error
+                .to_string()
+                .contains("bounds at parameter 0 are invalid")
+        );
+
+        let mut malformed_objective = test_objective_data();
+        malformed_objective.max_boost_envelope = Some(vec![(100.0, f64::INFINITY)]);
+        let error = perform_optimization_with_backend(
+            &params,
+            &malformed_objective,
+            None,
+            &MockOptimizerBackend::ok(GLOBAL_STATUS, 1.0),
+        )
+        .err()
+        .expect("invalid objective envelope knots must fail before optimizer dispatch");
+        assert!(error.to_string().contains("non-finite bound"));
+    }
+
+    #[test]
     fn cli_progress_callback_saves_only_a_valid_improved_candidate() {
         let params = test_params(false);
         let objective = test_objective_data();

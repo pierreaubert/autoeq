@@ -17,7 +17,7 @@ cannot replace them.
 | A00 QA/build coverage | Partial | Foundation committed; integrated 124-case numerical run and all-package build/test evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
-| A03 capture/backend handoff | Partial | Producer/consumer and lossless legacy import committed; repeated/partial selection and hardware cancellation evidence remain |
+| A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; schema refresh and hardware cancellation evidence remain |
 | A04 measurement/live analysis | Partial | Bounded raw level/RTA and independent device selectors implemented; calibrated live units, distortion/linearity and device validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
@@ -25,7 +25,7 @@ cannot replace them.
 | A08 recoverable jobs | Partial | Durable validated warm starts committed; exact population/adaptation/RNG continuation still requires implementation and equivalence evidence |
 | A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
-| A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; combined external/native restart recovery, frozen playback API and broader consumer witnesses remain |
+| A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery and broader consumer witnesses remain |
 | A12 applied playback/verification | Partial | Existing native graph lowering and A/B session contracts inventoried; exact graph/rate/resource activation, device stress and associated measured capture remain |
 | A13 rendering/accessibility | Deferred | Begin after backend work |
 | A14 perceptual/listening evidence | Partial | Independent references/domain registry and relevant blinded listening evidence |
@@ -189,11 +189,11 @@ Routing lowering reuses AutoEQ's physical-routing resolver; the A/B model hashes
 chain configuration and supports explicit level-match measurements. These are
 existing backend primitives rather than evidence of completed deployment.
 
-The graph builder currently ignores its sample-rate argument. This review has
-not supplied a bound activation receipt, a new PCM witness or device/capture
-evidence. Later resource consumers must verify the exact convolution bytes they
-load, and activation must bind the realized graph, rate/layout and hardware
-assignment before any applied-playback claim. UI implementation remains deferred.
+At the initial review, the graph builder ignored its sample-rate argument. The
+subsequent native boundary work below validates retained rates and prepares
+frozen native processors. Actual activation must still bind the realized graph,
+rate/layout and hardware assignment before any applied-playback claim. UI
+implementation remains deferred.
 
 ## Verified-byte capture and routed pruning review
 
@@ -354,3 +354,38 @@ Rust, 6 Python), 140 Rust test targets and zero missing goldens. Runner/paramete
 CI contract tests pass 32/32, and the GitHub/Gitea workflow bodies match. This is
 manifest and runner validation; execution of the integrated numerical matrix
 remains pending the implementation source freeze.
+
+
+## Repeated and partial capture selection
+
+Companion capture commit `7a4bfd7` and AutoEQ commit `22b1c0f` retain independent
+repeat takes with stable identities and require explicit selection for repeated
+or partial sessions. Selection chooses one completed take per source/microphone
+pair and preserves the raw parent status and exact journal identity. Unselected
+takes can retain raw data without a derived response. Legacy complete one-repeat
+imports remain supported; cancelled or failed sessions require explicit selection.
+
+Focused capture tests passed 32/32, CLI tests 1/1, core tests 6/6 and handoff tests
+10/10. The workflow library passed 1007 tests with 7 ignored; strict workflow
+Clippy passed. A later focused legacy-selection check passed after the A08 math
+API override. Per-machine device, channel, gain and calibration assignments remain
+parameters. Schema baselines and actual hardware cancellation evidence are pending.
+
+## Frozen native preparation verification
+
+The SOTF audit checkout's device-free preparation path binds the immutable source
+graph and captured FIR bytes to the native graph, exact processing rate, ordered
+channel identities, algorithmic latency and a separate alignment-delay budget.
+It refuses unsupported processors, bypassed nodes, unmanifested bundles and
+ambiguous layouts. Per-channel FIRs use isolated branches, signed gains preserve
+polarity, and explicitly bound mono input avoids the compatibility builder's
+stereo default.
+
+All 90 native RoomEQ tests pass. New PCM witnesses compare stereo and mono
+processing at 44.1/48/96 kHz after original source paths are removed or replaced;
+negative controls cover rate, reversed channel order, resource and latency limits,
+and unsupported alignment effects. This run uses isolated DAW/capture/AutoEQ
+sources and command-only math overrides, including the in-progress A08 API.
+Strict production Clippy and final application/capture integration checks remain
+pending because the companion engine activation-receipt API is being edited.
+No audio device was opened, and no hardware or acoustic acceptance is claimed.

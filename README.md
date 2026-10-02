@@ -221,7 +221,9 @@ Reports embed the checked-in HTML/WASM assets from
 `crates/autoeq-report-wasm/dist/`. Ordinary CLI builds use those assets;
 `just report-dist` rebuilds the 2D bundle with the WASM target and
 `wasm-bindgen` version specified in the Justfile. The GPUI report bundle has
-its own `just report-dist-gpui` recipe and nightly toolchain requirement.
+its own `just report-dist-gpui` recipe and nightly toolchain requirement. Both
+recipes use Cargo’s resolved target directory, including `CARGO_TARGET_DIR`
+and `.cargo/config.toml`, and require Python 3 to read Cargo metadata.
 
 ### Cargo features and binaries
 

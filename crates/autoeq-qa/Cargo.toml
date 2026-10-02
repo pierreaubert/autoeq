@@ -13,6 +13,10 @@ categories = ["science", "development-tools::testing"]
 name = "autoeq_qa"
 path = "src/lib.rs"
 
+[[bin]]
+name = "optimizer-benchmark"
+path = "src/bin/optimizer_benchmark.rs"
+
 [lints]
 workspace = true
 
@@ -35,9 +39,13 @@ roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
 roomeq-workflow = { workspace = true }
 num-complex = { workspace = true }
+ndarray = { workspace = true }
+clap = { workspace = true }
+csv = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
-ndarray = { workspace = true }
 rustfft = { workspace = true }

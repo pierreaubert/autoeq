@@ -8,6 +8,7 @@
 use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref};
 use math_audio_optimisation::{CmaEsConfig, CmaEsIntermediate, ParallelConfig, cma_es};
 use ndarray::Array1;
@@ -31,6 +32,29 @@ impl FilterOptimizer for AutoeqCmaEsBackend {
 
     fn supports_initial_candidate(&self) -> bool {
         true
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let lambda = params.population.max(4);
+        let minimum = lambda.saturating_add(1);
+        let solver_limit = params.maxeval.max(minimum);
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            Some(solver_limit),
+            minimum,
+            minimum,
+            Some(lambda),
+            Some(lambda),
+            Some(solver_limit.saturating_sub(1) / lambda),
+        ))
     }
 
     fn library(&self) -> &'static str {

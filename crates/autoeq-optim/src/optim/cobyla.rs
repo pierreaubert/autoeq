@@ -17,6 +17,7 @@ use super::backend::{
 };
 use super::constraints_install::{build_crossover_monotonicity_constraint, install_constraints};
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref};
 use math_audio_optimisation::cobyla::{
     CobylaConfig, CobylaConstraint, CobylaConstraintFn, CobylaRhoBegin, CobylaStopTols, cobyla,
@@ -41,6 +42,24 @@ impl FilterOptimizer for AutoeqCobylaBackend {
     }
     fn supports_initial_candidate(&self) -> bool {
         true
+    }
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        (lower_bounds.len() == upper_bounds.len()).then(|| {
+            OptimizerBudgetProfile::new(
+                params.maxeval,
+                Some(params.maxeval.max(1)),
+                1,
+                1,
+                None,
+                None,
+                None,
+            )
+        })
     }
     fn library(&self) -> &'static str {
         "AutoEQ"

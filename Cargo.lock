@@ -407,6 +407,8 @@ dependencies = [
  "autoeq-optim",
  "autoeq-plot",
  "autoeq-workflow",
+ "clap",
+ "csv",
  "ndarray",
  "num-complex",
  "roomeq-analysis",
@@ -421,6 +423,8 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

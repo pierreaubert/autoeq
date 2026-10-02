@@ -1,5 +1,6 @@
 use super::super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
 use super::super::params::OptimParams as BackendOptimParams;
+use super::super::run_control::OptimizerBudgetProfile;
 use super::super::{ObjectiveData, OptimProgressCallback, PenaltyMode};
 use super::optimize::optimize_filters_autoeq;
 use super::optimize::optimize_filters_autoeq_with_callback;
@@ -25,6 +26,34 @@ impl FilterOptimizer for AutoeqDeBackend {
 
     fn supports_initial_candidate(&self) -> bool {
         true
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &BackendOptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let (_, population_size, generation_limit) = super::misc::derive_de_budget(
+            lower_bounds,
+            upper_bounds,
+            params.population,
+            params.maxeval,
+        );
+        let solver_limit = population_size
+            .saturating_add(generation_limit.saturating_mul(population_size));
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            Some(solver_limit),
+            population_size.saturating_mul(2),
+            population_size,
+            Some(population_size),
+            Some(population_size),
+            Some(generation_limit),
+        ))
     }
 
     fn library(&self) -> &'static str {

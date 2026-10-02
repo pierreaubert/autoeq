@@ -10,6 +10,7 @@ use super::compute::compute_ceiling_violation_into;
 use super::constraint_envelope::{ConstraintSpec, OwnedConstraintSpec, judge_pareto_members};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{
     ObjectiveData, OptimProgressCallback, PenaltyMode, compute_base_fitness,
     compute_fitness_penalties_ref, compute_pareto_objectives,
@@ -49,6 +50,28 @@ impl FilterOptimizer for AutoeqNsgaBackend {
 
     fn supports_initial_candidate(&self) -> bool {
         true
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let population_size = params.population.max(16);
+        let solver_limit = params.maxeval.max(population_size);
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            Some(solver_limit),
+            population_size,
+            population_size,
+            Some(population_size),
+            Some(population_size),
+            Some(solver_limit / population_size),
+        ))
     }
 
     fn library(&self) -> &'static str {

@@ -9,6 +9,7 @@ use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
 use super::constraint_envelope::{OwnedConstraintSpec, judge_pareto_members};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{
     ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref,
     compute_pareto_objectives,
@@ -39,6 +40,37 @@ impl FilterOptimizer for AutoeqBoBackend {
 
     fn supports_initial_candidate(&self) -> bool {
         true
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let bounds = lower_bounds
+            .iter()
+            .zip(upper_bounds)
+            .map(|(&lower, &upper)| (lower, upper))
+            .collect::<Vec<_>>();
+        let budget = bo_budget(&bounds, params);
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            Some(budget.solver_limit),
+            budget.initial_samples,
+            budget.initial_samples,
+            Some(budget.batch_size),
+            None,
+            Some(
+                budget
+                    .solver_limit
+                    .saturating_sub(budget.initial_samples)
+                    .div_ceil(budget.batch_size),
+            ),
+        ))
     }
 
     fn library(&self) -> &'static str {
@@ -253,31 +285,17 @@ fn bo_config(
     params: &OptimParams,
     callback: Option<OptimProgressCallback>,
 ) -> BayesOptConfig {
-    let free_dims = bounds.iter().filter(|(lo, hi)| hi > lo).count().max(1);
-    let batch_size = if params.bo_batch_size == 0 {
-        if params.no_parallel {
-            1
-        } else {
-            params.parallel_threads.clamp(1, 16)
-        }
-    } else {
-        params.bo_batch_size
-    };
-    let initial_samples = if params.bo_initial_samples == 0 {
-        (2 * free_dims + 1).max(batch_size * 2).max(8)
-    } else {
-        params.bo_initial_samples
-    };
+    let budget = bo_budget(&bounds, params);
     let acquisition = parse_acquisition(&params.bo_acquisition);
     let mut user_cb = callback;
 
     BayesOptConfig {
         bounds,
         x0: Some(x0),
-        initial_samples,
-        batch_size,
-        maxeval: params.maxeval.max(initial_samples),
-        candidate_pool_size: (64 * free_dims).max(512),
+        initial_samples: budget.initial_samples,
+        batch_size: budget.batch_size,
+        maxeval: budget.solver_limit,
+        candidate_pool_size: (64 * budget.free_dimensions).max(512),
         posterior_std_threshold: params.bo_posterior_std_threshold.max(0.0),
         seed: params.seed,
         acquisition,
@@ -294,6 +312,37 @@ fn bo_config(
                 as math_audio_optimisation::BayesOptCallback
         }),
         ..Default::default()
+    }
+}
+
+struct BoBudget {
+    free_dimensions: usize,
+    initial_samples: usize,
+    batch_size: usize,
+    solver_limit: usize,
+}
+
+fn bo_budget(bounds: &[(f64, f64)], params: &OptimParams) -> BoBudget {
+    let free_dims = bounds.iter().filter(|(lo, hi)| hi > lo).count().max(1);
+    let batch_size = if params.bo_batch_size == 0 {
+        if params.no_parallel {
+            1
+        } else {
+            params.parallel_threads.clamp(1, 16)
+        }
+    } else {
+        params.bo_batch_size.max(1)
+    };
+    let initial_samples = if params.bo_initial_samples == 0 {
+        (2 * free_dims + 1).max(batch_size * 2).max(8)
+    } else {
+        params.bo_initial_samples
+    };
+    BoBudget {
+        free_dimensions: free_dims,
+        initial_samples,
+        batch_size,
+        solver_limit: params.maxeval.max(initial_samples),
     }
 }
 

@@ -149,6 +149,38 @@ impl ObjectiveData {
             .get_or_init(|| super::prepared_objective::PreparedObjective::new(self))
     }
 
+    pub(crate) fn with_run_control(
+        &self,
+        run_control: super::run_control::OptimizerRunControl,
+    ) -> Self {
+        self.with_evaluation_tracking(run_control, super::run_control::EvaluationStage::Search)
+    }
+
+    pub(crate) fn with_validation_tracking(
+        &self,
+        run_control: super::run_control::OptimizerRunControl,
+    ) -> Self {
+        self.with_evaluation_tracking(run_control, super::run_control::EvaluationStage::Validation)
+    }
+
+    fn with_evaluation_tracking(
+        &self,
+        run_control: super::run_control::OptimizerRunControl,
+        stage: super::run_control::EvaluationStage,
+    ) -> Self {
+        // Do not share a source cache that may already have been initialized:
+        // every controlled run gets candidate-independent data tied to this
+        // ObjectiveData and its own accounting gate.
+        let prepared = std::sync::OnceLock::new();
+        let mut prepared_objective =
+            super::prepared_objective::PreparedObjective::new(self).with_run_control(run_control);
+        prepared_objective.evaluation_stage = stage;
+        let _ = prepared.set(prepared_objective);
+        let mut controlled = self.clone();
+        controlled.prepared = Arc::new(prepared);
+        controlled
+    }
+
     /// Build the [`Objective`] strategy that corresponds to the configured
     /// [`LossType`] and payload fields.
     pub fn build_objective(&self) -> Arc<dyn Objective> {

@@ -2,7 +2,7 @@
 
 use anyhow::Context;
 use roomeq_export::{
-    ConvolutionResource, ExportFormat, ExportPackage, build_export_package,
+    ConvolutionResource, ExportFormat, ExportPackage, ExportPackageMember, build_export_package,
     checked_convolution_resource_references, render_dsp_graph,
 };
 use roomeq_model::DspGraph;
@@ -183,14 +183,63 @@ pub fn export_dsp_chain_with_convolution_sidecars(
     sample_rate: f64,
     source_dir: &Path,
 ) -> anyhow::Result<()> {
-    let destination_dir = path.parent().unwrap_or_else(|| Path::new("."));
-    let main_file_name = path
+    let file_name = path
+        .file_name()
+        .context("external export path must include a file name")?;
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let staging = tempfile::Builder::new()
+        .prefix(".roomeq-export-")
+        .tempdir_in(parent)
+        .with_context(|| {
+            format!(
+                "failed to stage external export beside '{}'",
+                path.display()
+            )
+        })?;
+    let staged_path = staging.path().join(file_name);
+    export_dsp_chain_with_convolution_sidecars_to_staging(
+        graph,
+        format,
+        &staged_path,
+        sample_rate,
+        source_dir,
+        path,
+    )?;
+    publish_staged_export_package_with(&staged_path, path, || Ok(()))
+}
+
+/// Render an export into a staging directory using the final directory's names.
+///
+/// This lets callers prepare every package member without changing a prior
+/// external export. `staging_path` and `destination_path` must use the same
+/// file name so relative package references remain valid after publication.
+///
+/// # Errors
+/// Returns an error when graph rendering, resource loading, or staging fails.
+pub fn export_dsp_chain_with_convolution_sidecars_to_staging(
+    graph: &DspGraph,
+    format: ExportFormat,
+    staging_path: &Path,
+    sample_rate: f64,
+    source_dir: &Path,
+    destination_path: &Path,
+) -> anyhow::Result<()> {
+    let destination_dir = staging_path.parent().unwrap_or_else(|| Path::new("."));
+    let naming_dir = destination_path.parent().unwrap_or_else(|| Path::new("."));
+    let main_file_name = destination_path
         .file_name()
         .map(PathBuf::from)
         .context("external export path must include a file name")?;
+    anyhow::ensure!(
+        staging_path.file_name() == Some(main_file_name.as_os_str()),
+        "staged and destination export paths must use the same file name"
+    );
     let resources = load_convolution_resources(graph, source_dir)?;
-    let occupied_names = occupied_member_names(destination_dir)?;
-    let reusable_names = reusable_member_names(destination_dir, &resources, &occupied_names)?;
+    let occupied_names = occupied_member_names(naming_dir)?;
+    let reusable_names = reusable_member_names(naming_dir, &resources, &occupied_names)?;
     let package = build_export_package(
         graph,
         format,
@@ -200,7 +249,123 @@ pub fn export_dsp_chain_with_convolution_sidecars(
         &occupied_names,
         &reusable_names,
     )?;
-    persist_export_package(&package, destination_dir)
+    let _rollback = persist_export_package(&package, destination_dir, Some(&main_file_name))?;
+    Ok(())
+}
+
+/// Publish a staged external package, then run the native-bundle commit.
+///
+/// If the native commit fails, this restores the previous main export and
+/// removes sidecars created by this publication. Existing identical sidecars
+/// remain in place. This synchronous rollback is not crash-atomic across the
+/// external export and native bundle: interruption between their commits can
+/// leave a newer external package beside the prior native graph.
+///
+/// # Errors
+/// Returns an error when the staged package is invalid, installation fails,
+/// or the native commit fails.
+pub fn publish_staged_export_package_with(
+    staged_main_path: &Path,
+    destination_main_path: &Path,
+    publish_native: impl FnOnce() -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let staged_package = read_staged_export_package(staged_main_path)?;
+    let destination_dir = destination_main_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let main_name = destination_main_path
+        .file_name()
+        .context("external export path must include a file name")?;
+    anyhow::ensure!(
+        staged_main_path.file_name() == Some(main_name),
+        "staged and destination export paths must use the same file name"
+    );
+
+    let rollback =
+        persist_export_package(&staged_package, destination_dir, Some(Path::new(main_name)))?;
+    if let Err(native_error) = publish_native() {
+        return match rollback.restore() {
+            Ok(()) => Err(native_error
+                .context("native bundle publication failed; external export was restored")),
+            Err(rollback_error) => Err(anyhow::anyhow!(
+                "native bundle publication failed ({native_error:#}); restoring the external export also failed ({rollback_error:#})"
+            )),
+        };
+    }
+    Ok(())
+}
+
+fn read_staged_export_package(staged_main_path: &Path) -> anyhow::Result<ExportPackage> {
+    const MAX_EXPORT_MEMBER_BYTES: u64 = 256 * 1024 * 1024;
+    const MAX_EXPORT_PACKAGE_BYTES: u64 = 512 * 1024 * 1024;
+    const MAX_EXPORT_PACKAGE_FILES: usize = 50_000;
+
+    let directory = staged_main_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let main_name = staged_main_path
+        .file_name()
+        .context("staged external export path must include a file name")?;
+    let mut members = Vec::new();
+    let mut total_bytes = 0_u64;
+    for entry in std::fs::read_dir(directory).with_context(|| {
+        format!(
+            "failed to read staged export directory '{}'",
+            directory.display()
+        )
+    })? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        anyhow::ensure!(
+            file_type.is_file(),
+            "staged export package may contain files only"
+        );
+        let name = entry.file_name();
+        let name = name
+            .to_str()
+            .context("staged export member name is not valid UTF-8")?;
+        let metadata = entry.metadata()?;
+        anyhow::ensure!(
+            metadata.len() <= MAX_EXPORT_MEMBER_BYTES,
+            "staged export member '{}' exceeds the size limit",
+            name
+        );
+        let file = std::fs::File::open(entry.path())?;
+        let opened_metadata = file.metadata()?;
+        anyhow::ensure!(
+            opened_metadata.is_file() && opened_metadata.len() == metadata.len(),
+            "staged export member '{}' changed while being opened",
+            name
+        );
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(MAX_EXPORT_MEMBER_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        anyhow::ensure!(
+            bytes.len() as u64 == metadata.len() && bytes.len() as u64 <= MAX_EXPORT_MEMBER_BYTES,
+            "staged export member '{}' changed size while being read",
+            name
+        );
+        total_bytes = total_bytes.saturating_add(bytes.len() as u64);
+        anyhow::ensure!(
+            total_bytes <= MAX_EXPORT_PACKAGE_BYTES,
+            "staged export package exceeds the total size limit"
+        );
+        members.push(ExportPackageMember::new(name, bytes)?);
+        anyhow::ensure!(
+            members.len() <= MAX_EXPORT_PACKAGE_FILES,
+            "staged export package contains too many files"
+        );
+    }
+    anyhow::ensure!(
+        members
+            .iter()
+            .any(|member| member.relative_path == Path::new(main_name)),
+        "staged external export '{}' is missing",
+        staged_main_path.display()
+    );
+    ExportPackage::new(members)
 }
 
 /// Compatibility adapter for callers that only want convolution sidecars and
@@ -219,7 +384,7 @@ pub fn package_convolution_sidecars(
         &occupied_names,
         &reusable_names,
     )?;
-    persist_export_package(&ExportPackage::new(members)?, destination_dir)?;
+    let _rollback = persist_export_package(&ExportPackage::new(members)?, destination_dir, None)?;
     Ok(graph)
 }
 
@@ -227,28 +392,60 @@ fn load_convolution_resources(
     graph: &DspGraph,
     source_dir: &Path,
 ) -> anyhow::Result<Vec<ConvolutionResource>> {
-    checked_convolution_resource_references(graph)?
-        .into_iter()
-        .map(|reference| {
-            let path = Path::new(&reference);
-            let path = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                source_dir.join(path)
-            };
-            let bytes = std::fs::read(&path).with_context(|| {
-                format!(
-                    "convolution resource '{}' was not found at '{}'",
-                    reference,
-                    path.display()
-                )
-            })?;
-            Ok(ConvolutionResource {
+    const MAX_RESOURCE_BYTES: u64 = 256 * 1024 * 1024;
+    const MAX_RESOURCE_SET_BYTES: u64 = 512 * 1024 * 1024;
+
+    let mut resources = Vec::new();
+    let mut total_bytes = 0_u64;
+    for reference in checked_convolution_resource_references(graph)? {
+        let path = Path::new(&reference);
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            source_dir.join(path)
+        };
+        let metadata = std::fs::symlink_metadata(&path).with_context(|| {
+            format!(
+                "convolution resource '{}' was not found at '{}'",
                 reference,
-                bytes: Arc::from(bytes),
-            })
-        })
-        .collect()
+                path.display()
+            )
+        })?;
+        anyhow::ensure!(
+            metadata.is_file() && !metadata.file_type().is_symlink(),
+            "convolution resource '{}' is not a regular file",
+            path.display()
+        );
+        anyhow::ensure!(
+            metadata.len() <= MAX_RESOURCE_BYTES,
+            "convolution resource '{}' exceeds the size limit",
+            path.display()
+        );
+        let file = std::fs::File::open(&path)?;
+        let opened_metadata = file.metadata()?;
+        anyhow::ensure!(
+            opened_metadata.is_file() && opened_metadata.len() == metadata.len(),
+            "convolution resource '{}' changed while being opened",
+            path.display()
+        );
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(MAX_RESOURCE_BYTES + 1).read_to_end(&mut bytes)?;
+        anyhow::ensure!(
+            bytes.len() as u64 == metadata.len() && bytes.len() as u64 <= MAX_RESOURCE_BYTES,
+            "convolution resource '{}' changed size while being read",
+            path.display()
+        );
+        total_bytes = total_bytes.saturating_add(bytes.len() as u64);
+        anyhow::ensure!(
+            total_bytes <= MAX_RESOURCE_SET_BYTES,
+            "convolution resource set exceeds the total size limit"
+        );
+        resources.push(ConvolutionResource {
+            reference,
+            bytes: Arc::from(bytes),
+        });
+    }
+    Ok(resources)
 }
 
 fn reusable_member_names(
@@ -368,7 +565,86 @@ fn log_backend_delay(report: &roomeq_export::CamillaDspDelayRealization) {
     }
 }
 
-fn persist_export_package(package: &ExportPackage, destination_dir: &Path) -> anyhow::Result<()> {
+#[derive(Debug)]
+struct ExportPackageRollback {
+    main_path: Option<PathBuf>,
+    previous_main: Option<Vec<u8>>,
+    published_main: Option<Vec<u8>>,
+    created_sidecars: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl ExportPackageRollback {
+    fn restore(self) -> anyhow::Result<()> {
+        let mut errors = Vec::new();
+        if let Some(main_path) = self.main_path {
+            match (self.previous_main, self.published_main) {
+                (Some(previous), Some(published)) => match file_matches(&main_path, &published) {
+                    Ok(true) => {
+                        if let Err(error) =
+                            autoeq_artifacts::write_file_atomically(&main_path, &previous)
+                        {
+                            errors.push(format!(
+                                "could not restore '{}': {error}",
+                                main_path.display()
+                            ));
+                        }
+                    }
+                    Ok(false) => errors.push(format!(
+                        "external export '{}' changed before rollback",
+                        main_path.display()
+                    )),
+                    Err(error) => errors.push(error.to_string()),
+                },
+                (None, Some(published)) => match file_matches(&main_path, &published) {
+                    Ok(true) => {
+                        if let Err(error) = std::fs::remove_file(&main_path) {
+                            errors.push(format!(
+                                "could not remove new export '{}': {error}",
+                                main_path.display()
+                            ));
+                        }
+                    }
+                    Ok(false) => errors.push(format!(
+                        "new external export '{}' changed before rollback",
+                        main_path.display()
+                    )),
+                    Err(error) => errors.push(error.to_string()),
+                },
+                _ => {}
+            }
+        }
+        for (path, bytes) in self.created_sidecars.into_iter().rev() {
+            match file_matches(&path, &bytes) {
+                Ok(true) => {
+                    if let Err(error) = std::fs::remove_file(&path) {
+                        errors.push(format!(
+                            "could not remove new export sidecar '{}': {error}",
+                            path.display()
+                        ));
+                    }
+                }
+                Ok(false) => errors.push(format!(
+                    "new export sidecar '{}' changed before rollback",
+                    path.display()
+                )),
+                Err(error) => errors.push(error.to_string()),
+            }
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            anyhow::bail!("{}", errors.join("; "))
+        }
+    }
+}
+
+fn persist_export_package(
+    package: &ExportPackage,
+    destination_dir: &Path,
+    main_member_name: Option<&Path>,
+) -> anyhow::Result<ExportPackageRollback> {
+    const MAX_EXPORT_MEMBER_BYTES: u64 = 256 * 1024 * 1024;
+
     // Validate the entire set before opening even its first destination file.
     package.validate_integrity()?;
     if let Some(report) = package.camilladsp_delay_realization()? {
@@ -380,18 +656,153 @@ fn persist_export_package(package: &ExportPackage, destination_dir: &Path) -> an
             destination_dir.display()
         )
     })?;
+    let mut main_member = None;
+    let mut sidecars = Vec::new();
     for member in &package.members {
-        let path = destination_dir.join(&member.relative_path);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
+        let relative = Path::new(&member.relative_path);
+        let path = autoeq_artifacts::safe_artifact_path(destination_dir, relative)?;
+        ensure_no_symlink_parent(destination_dir, relative)?;
+        anyhow::ensure!(
+            member.bytes.len() as u64 <= MAX_EXPORT_MEMBER_BYTES,
+            "export package member '{}' exceeds the size limit",
+            member.relative_path.display()
+        );
+        if main_member_name == Some(relative) {
+            main_member = Some((member, path));
+        } else {
+            sidecars.push((member, path));
         }
-        std::fs::write(&path, &member.bytes).with_context(|| {
+    }
+    if let Some(main_name) = main_member_name {
+        anyhow::ensure!(
+            main_member.is_some(),
+            "export package is missing main member '{}'",
+            main_name.display()
+        );
+    }
+
+    let previous_main = if let Some((_, path)) = &main_member {
+        read_regular_file_bounded(path, MAX_EXPORT_MEMBER_BYTES)?
+    } else {
+        None
+    };
+    let mut prepared_sidecars = Vec::with_capacity(sidecars.len());
+    for (member, path) in sidecars {
+        match read_regular_file_bounded(&path, MAX_EXPORT_MEMBER_BYTES)? {
+            Some(existing) if existing == member.bytes.as_ref() => {}
+            Some(_) => anyhow::bail!(
+                "export package sidecar '{}' already exists with different bytes",
+                path.display()
+            ),
+            None => prepared_sidecars.push((member, path)),
+        }
+    }
+    for (member, path) in &prepared_sidecars {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "failed to create export package directory for '{}'",
+                    member.relative_path.display()
+                )
+            })?;
+        }
+    }
+    if let Some((member, path)) = &main_member
+        && let Some(parent) = path.parent()
+    {
+        std::fs::create_dir_all(parent).with_context(|| {
             format!(
-                "failed to persist export package member '{}' (sha256 {})",
-                path.display(),
-                member.sha256
+                "failed to create export package directory for '{}'",
+                member.relative_path.display()
             )
         })?;
+    }
+
+    let mut rollback = ExportPackageRollback {
+        main_path: main_member.as_ref().map(|(_, path)| path.clone()),
+        previous_main,
+        published_main: None,
+        created_sidecars: Vec::new(),
+    };
+    for (member, path) in prepared_sidecars {
+        if let Err(error) = autoeq_artifacts::write_file_atomically(&path, &member.bytes) {
+            return match rollback.restore() {
+                Ok(()) => Err(error).with_context(|| {
+                    format!("failed to persist export sidecar '{}'", path.display())
+                }),
+                Err(rollback_error) => anyhow::bail!(
+                    "failed to persist export sidecar '{}' ({error}); rollback failed ({rollback_error})",
+                    path.display()
+                ),
+            };
+        }
+        rollback
+            .created_sidecars
+            .push((path, member.bytes.to_vec()));
+    }
+    if let Some((member, path)) = main_member {
+        if let Err(error) = autoeq_artifacts::write_file_atomically(&path, &member.bytes) {
+            return match rollback.restore() {
+                Ok(()) => Err(error)
+                    .with_context(|| format!("failed to persist export main '{}'", path.display())),
+                Err(rollback_error) => anyhow::bail!(
+                    "failed to persist export main '{}' ({error}); rollback failed ({rollback_error})",
+                    path.display()
+                ),
+            };
+        }
+        rollback.published_main = Some(member.bytes.to_vec());
+    }
+    Ok(rollback)
+}
+
+fn read_regular_file_bounded(path: &Path, maximum_bytes: u64) -> anyhow::Result<Option<Vec<u8>>> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    anyhow::ensure!(
+        metadata.file_type().is_file(),
+        "export destination '{}' is not a regular file",
+        path.display()
+    );
+    anyhow::ensure!(
+        metadata.len() <= maximum_bytes,
+        "export destination '{}' exceeds the size limit",
+        path.display()
+    );
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(maximum_bytes + 1).read_to_end(&mut bytes)?;
+    anyhow::ensure!(
+        bytes.len() as u64 == metadata.len() && bytes.len() as u64 <= maximum_bytes,
+        "export destination '{}' changed size while being read",
+        path.display()
+    );
+    Ok(Some(bytes))
+}
+
+fn file_matches(path: &Path, expected: &[u8]) -> anyhow::Result<bool> {
+    Ok(read_regular_file_bounded(path, 256 * 1024 * 1024)?.is_some_and(|bytes| bytes == expected))
+}
+
+fn ensure_no_symlink_parent(root: &Path, relative: &Path) -> anyhow::Result<()> {
+    let Some(parent) = relative.parent() else {
+        return Ok(());
+    };
+    let mut current = root.to_path_buf();
+    for component in parent.components() {
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => anyhow::ensure!(
+                metadata.is_dir() && !metadata.file_type().is_symlink(),
+                "export package parent '{}' is not a real directory",
+                current.display()
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => return Err(error.into()),
+        }
     }
     Ok(())
 }
@@ -663,7 +1074,7 @@ mod tests {
         .unwrap();
         // Keep the recorded identity, but replace a later member's actual bytes.
         package.members[1].bytes = b"stale or replaced impulse".to_vec().into();
-        let error = persist_export_package(&package, destination.path()).unwrap_err();
+        let error = persist_export_package(&package, destination.path(), None).unwrap_err();
         assert!(
             error.to_string().contains("content hash mismatch"),
             "{error}"
@@ -682,9 +1093,76 @@ mod tests {
         let package = ExportPackage {
             members: vec![member],
         };
-        assert!(persist_export_package(&package, &destination).is_err());
+        assert!(persist_export_package(&package, &destination, None).is_err());
         assert!(!destination.exists());
         assert!(!directory.path().join("escaped.wav").exists());
+    }
+
+    #[test]
+    fn staged_export_is_rolled_back_when_native_publication_fails() {
+        use roomeq_export::ExportPackageMember;
+
+        let parent = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir_in(parent.path()).unwrap();
+        let destination = parent.path().join("deployed");
+        std::fs::create_dir_all(&destination).unwrap();
+        let staged_main = staging.path().join("room.yml");
+        let staged_package = ExportPackage::new(vec![
+            ExportPackageMember::new("room.yml", b"new config".to_vec()).unwrap(),
+            ExportPackageMember::new("impulse_002.wav", b"new impulse".to_vec()).unwrap(),
+        ])
+        .unwrap();
+        let _stage_rollback =
+            persist_export_package(&staged_package, staging.path(), Some(Path::new("room.yml")))
+                .unwrap();
+        let destination_main = destination.join("room.yml");
+        std::fs::write(&destination_main, b"prior config").unwrap();
+
+        let error = publish_staged_export_package_with(&staged_main, &destination_main, || {
+            anyhow::bail!("native bundle commit failed")
+        })
+        .unwrap_err();
+
+        assert!(
+            error.to_string().contains("external export was restored"),
+            "{error:#}"
+        );
+        assert_eq!(std::fs::read(destination_main).unwrap(), b"prior config");
+        assert!(!destination.join("impulse_002.wav").exists());
+    }
+
+    #[test]
+    fn external_export_sidecar_conflict_preserves_prior_main() {
+        use roomeq_export::ExportPackageMember;
+
+        let parent = tempfile::tempdir().unwrap();
+        let staging = tempfile::tempdir_in(parent.path()).unwrap();
+        let destination = parent.path().join("deployed");
+        std::fs::create_dir_all(&destination).unwrap();
+        let package = ExportPackage::new(vec![
+            ExportPackageMember::new("room.yml", b"new config".to_vec()).unwrap(),
+            ExportPackageMember::new("impulse.wav", b"new impulse".to_vec()).unwrap(),
+        ])
+        .unwrap();
+        let _stage_rollback =
+            persist_export_package(&package, staging.path(), Some(Path::new("room.yml"))).unwrap();
+        let destination_main = destination.join("room.yml");
+        std::fs::write(&destination_main, b"prior config").unwrap();
+        std::fs::write(destination.join("impulse.wav"), b"unrelated bytes").unwrap();
+
+        let error = publish_staged_export_package_with(
+            &staging.path().join("room.yml"),
+            &destination_main,
+            || panic!("native commit must not run after sidecar preflight fails"),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("different bytes"), "{error:#}");
+        assert_eq!(std::fs::read(destination_main).unwrap(), b"prior config");
+        assert_eq!(
+            std::fs::read(destination.join("impulse.wav")).unwrap(),
+            b"unrelated bytes"
+        );
     }
     use roomeq_model::{ChannelDspChain, PluginConfigWrapper, default_config_version};
     use serde_json::json;
@@ -693,6 +1171,7 @@ mod tests {
     fn graph_with_plugins(plugins: Vec<PluginConfigWrapper>) -> DspGraph {
         DspGraph {
             version: default_config_version(),
+            artifact_bundle_schema_version: None,
             deployed_source_curves: Default::default(),
             global_plugins: Vec::new(),
             channels: HashMap::from([(

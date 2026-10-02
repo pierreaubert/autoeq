@@ -15,6 +15,45 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
+    fn test_effective_envelope(
+        args: &Args,
+        max_boost_envelope: Option<Vec<(f64, f64)>>,
+        min_cut_envelope: Option<Vec<(f64, f64)>>,
+    ) -> crate::autoeq_command::runopt::EffectiveOptimizationEnvelope {
+        use autoeq::OptimParams;
+        use autoeq::optim::{ObjectiveDataBuilder, setup::setup_bounds};
+        use ndarray::Array1;
+
+        let params = OptimParams::from(args);
+        let frequencies = Array1::from_vec(vec![params.min_freq, 500.0, params.max_freq]);
+        let zeros = Array1::zeros(frequencies.len());
+        let mut builder = ObjectiveDataBuilder::new(
+            frequencies,
+            zeros.clone(),
+            zeros,
+            params.sample_rate,
+            params.peq_model,
+            params.loss,
+        )
+        .min_spacing_oct(params.min_spacing_oct)
+        .max_db(params.max_db)
+        .min_db(params.min_db)
+        .freq_range(params.min_freq, params.max_freq)
+        .smoothing(false, 3);
+        if let Some(knots) = max_boost_envelope {
+            builder = builder.max_boost_envelope(knots);
+        }
+        if let Some(knots) = min_cut_envelope {
+            builder = builder.min_cut_envelope(knots);
+        }
+        let objective = builder.build().expect("test objective should be valid");
+        let (lower, upper) = setup_bounds(&params);
+        crate::autoeq_command::runopt::EffectiveOptimizationEnvelope::capture(
+            &params, &objective, &lower, &upper,
+        )
+        .expect("test optimization envelope should be valid")
+    }
+
     #[tokio::test]
     async fn test_save_peq_to_file_apo_format() {
         let temp_dir = TempDir::new().unwrap();
@@ -277,7 +316,7 @@ mod tests {
             renderer: ProductRenderer::EqualizerApo,
             sample_rate_hz: 48_000.0,
             maximum_filter_count: 4,
-            supported_peq_models: vec!["pk".into()],
+            supported_peq_models: vec!["pk".into(), "free".into()],
             supported_filter_types: vec!["PK".into(), "LSC".into(), "HSC".into()],
             frequency_hz: DeviceRange {
                 minimum: 20.0,
@@ -316,8 +355,16 @@ mod tests {
         let filter = Biquad::new(BiquadFilterType::Peak, 500.49, 48_000.0, 1.236, -3.456);
         let realized_filters = profile.apo_serialized_filters(48_000.0, &[filter]).unwrap();
         let realized_preamp = profile.apo_serialized_preamp_db().unwrap();
-        let args = Args::parse_from(["autoeq-test", "--loss", "speaker-flat"]);
+        let args = Args::parse_from([
+            "autoeq-test",
+            "--loss",
+            "speaker-flat",
+            "--num-filters",
+            "1",
+        ]);
         let output_path = temp_dir.path().join("result");
+        let source_parameters = vec![500.49_f64.log10(), 1.236, -3.456];
+        let effective_envelope = test_effective_envelope(&args, None, None);
 
         save_profiled_apo_to_file(
             &args,
@@ -329,6 +376,8 @@ mod tests {
                 request: &request,
                 prepared: &prepared,
                 compatibility: &prepared.target_compatibility,
+                source_parameters: &source_parameters,
+                effective_envelope: &effective_envelope,
                 max_filter_transfer_delta_db: 0.0,
                 verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
             },
@@ -373,13 +422,19 @@ mod tests {
             autoeq::workflow::verify_apo_preset_binding(&edited_preset, &sidecar_bytes).is_err()
         );
 
-        let shelves = [
-            Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 0.71, 3.0),
-            Biquad::new(BiquadFilterType::Highshelf, 10_000.0, 48_000.0, 1.37, -3.0),
-        ];
-        save_profiled_apo_to_file(
+        // A source value on the Q bound rounds outside the optimizer box.
+        // The device allows Q=1.24, so only the retained run envelope can
+        // refuse this otherwise valid device-profile output.
+        let q_source = vec![500.49_f64.log10(), 1.235, -3.456];
+        let q_filter = Biquad::new(BiquadFilterType::Peak, 500.49, 48_000.0, 1.235, -3.456);
+        let q_filters = profile
+            .apo_serialized_filters(48_000.0, &[q_filter])
+            .unwrap();
+        let mut q_envelope = effective_envelope.clone();
+        q_envelope.upper_bounds[1] = 1.235;
+        let error = save_profiled_apo_to_file(
             &args,
-            &shelves,
+            &q_filters,
             realized_preamp,
             &output_path,
             &LossType::SpeakerFlat,
@@ -387,6 +442,390 @@ mod tests {
                 request: &request,
                 prepared: &prepared,
                 compatibility: &prepared.target_compatibility,
+                source_parameters: &q_source,
+                effective_envelope: &q_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("rounded Q outside the optimizer box must be refused");
+        assert!(
+            error
+                .to_string()
+                .contains("exceeds the retained optimizer bound")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // A value just below the same Q boundary rounds inward and publishes.
+        let positive_dir = temp_dir.path().join("positive-q");
+        fs::create_dir(&positive_dir).unwrap();
+        let q_positive_source = vec![500.49_f64.log10(), 1.234, -3.456];
+        let q_positive_filter =
+            Biquad::new(BiquadFilterType::Peak, 500.49, 48_000.0, 1.234, -3.456);
+        let q_positive_filters = profile
+            .apo_serialized_filters(48_000.0, &[q_positive_filter])
+            .unwrap();
+        save_profiled_apo_to_file(
+            &args,
+            &q_positive_filters,
+            realized_preamp,
+            &positive_dir.join("result"),
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &q_positive_source,
+                effective_envelope: &q_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect("serialized Q=1.23 remains inside the retained Q=1.235 bound");
+        assert!(positive_dir.join("iir-autoeq-flat.txt").exists());
+
+        // Device Q limits can be wider than the run's global constraint. The
+        // rounded emitted Q must stay within the retained global maximum.
+        let mut global_q_envelope = effective_envelope.clone();
+        global_q_envelope.constraints.global_max_q = 1.2351;
+        let error = save_profiled_apo_to_file(
+            &args,
+            &q_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &q_source,
+                effective_envelope: &global_q_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("rounded Q beyond the retained global-Q constraint must be refused");
+        assert!(
+            error
+                .to_string()
+                .contains("global/local Q constraint repair")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // The same rule applies to a local frequency-dependent Q cap even
+        // when the global and per-parameter bounds allow the emitted value.
+        let mut local_q_envelope = effective_envelope.clone();
+        local_q_envelope.constraints.local_q_knots = Some(vec![(20.0, 1.2351), (20_000.0, 1.2351)]);
+        let error = save_profiled_apo_to_file(
+            &args,
+            &q_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &q_source,
+                effective_envelope: &local_q_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("rounded Q beyond the retained local-Q constraint must be refused");
+        assert!(
+            error
+                .to_string()
+                .contains("global/local Q constraint repair")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // A corrupted run snapshot is refused before replacing either file.
+        let mut malformed_envelope = effective_envelope.clone();
+        malformed_envelope.upper_bounds.pop();
+        let error = save_profiled_apo_to_file(
+            &args,
+            &realized_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &source_parameters,
+                effective_envelope: &malformed_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("malformed optimizer envelope must be refused before publication");
+        assert!(
+            error
+                .to_string()
+                .contains("does not match the retained optimizer bounds")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // The owned constraint snapshot is validated even when there is no
+        // gain envelope that would otherwise call the composite checker.
+        let mut malformed_constraints = effective_envelope.clone();
+        malformed_constraints.constraints.subdivisions_per_bin = 0;
+        let error = save_profiled_apo_to_file(
+            &args,
+            &realized_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &source_parameters,
+                effective_envelope: &malformed_constraints,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("invalid constraint subdivisions must be refused before publication");
+        assert!(
+            error
+                .to_string()
+                .contains("at least one subdivision per bin")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // Integer-Hz quantization must also remain inside the original
+        // logarithmic frequency box; the device's wider range is insufficient.
+        let frequency_source = vec![20.4_f64.log10(), 1.0, -3.456];
+        let frequency_filter = Biquad::new(BiquadFilterType::Peak, 20.4, 48_000.0, 1.0, -3.456);
+        let frequency_filters = profile
+            .apo_serialized_filters(48_000.0, &[frequency_filter])
+            .unwrap();
+        let mut frequency_envelope = effective_envelope.clone();
+        frequency_envelope.lower_bounds[0] = 20.4_f64.log10();
+        let error = save_profiled_apo_to_file(
+            &args,
+            &frequency_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &frequency_source,
+                effective_envelope: &frequency_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("20.4 Hz rounded to 20 Hz must leave the source frequency box");
+        assert!(error.to_string().contains("serialized APO parameter 0"));
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // Decimal gain rounding is checked against both the source box and
+        // the objective's per-filter boost/cut envelope.
+        let boost_source = vec![500.49_f64.log10(), 1.0, 2.006];
+        let boost_filter = Biquad::new(BiquadFilterType::Peak, 500.49, 48_000.0, 1.0, 2.006);
+        let boost_filters = profile
+            .apo_serialized_filters(48_000.0, &[boost_filter])
+            .unwrap();
+        let boost_envelope =
+            test_effective_envelope(&args, Some(vec![(20.0, 2.006), (20_000.0, 2.006)]), None);
+        let error = save_profiled_apo_to_file(
+            &args,
+            &boost_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &boost_source,
+                effective_envelope: &boost_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("rounded boost beyond the objective per-filter envelope must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("per-filter boost/cut envelope repair")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        let cut_source = vec![500.49_f64.log10(), 1.0, -2.006];
+        let cut_filter = Biquad::new(BiquadFilterType::Peak, 500.49, 48_000.0, 1.0, -2.006);
+        let cut_filters = profile
+            .apo_serialized_filters(48_000.0, &[cut_filter])
+            .unwrap();
+        let cut_envelope =
+            test_effective_envelope(&args, None, Some(vec![(20.0, -2.006), (20_000.0, -2.006)]));
+        let error = save_profiled_apo_to_file(
+            &args,
+            &cut_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &cut_source,
+                effective_envelope: &cut_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("rounded cut beyond the objective per-filter envelope must fail");
+        assert!(
+            error
+                .to_string()
+                .contains("per-filter boost/cut envelope repair")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // A source candidate may satisfy each per-filter ceiling while its
+        // rounded pair breaches the retained composite ceiling.
+        let pair_args = Args::parse_from([
+            "autoeq-test",
+            "--loss",
+            "speaker-flat",
+            "--num-filters",
+            "2",
+        ]);
+        let pair_source = vec![
+            500.0_f64.log10(),
+            1.0,
+            1.0054,
+            500.0_f64.log10(),
+            1.0,
+            1.0054,
+        ];
+        let pair_filters = [
+            Biquad::new(BiquadFilterType::Peak, 500.0, 48_000.0, 1.0, 1.0054),
+            Biquad::new(BiquadFilterType::Peak, 500.0, 48_000.0, 1.0, 1.0054),
+        ];
+        let pair_serialized = profile
+            .apo_serialized_filters(48_000.0, &pair_filters)
+            .unwrap();
+        let pair_envelope = test_effective_envelope(
+            &pair_args,
+            Some(vec![(20.0, 2.011), (20_000.0, 2.011)]),
+            None,
+        );
+        let error = save_profiled_apo_to_file(
+            &pair_args,
+            &pair_serialized,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &pair_source,
+                effective_envelope: &pair_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("rounded stacked filters must be rejected beyond the composite ceiling");
+        assert!(error.to_string().contains("composite gain envelope"));
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        // Same-type filters cannot be silently reordered between the source
+        // optimizer vector and the actual output passed to publication.
+        let ordered_source = vec![500.0_f64.log10(), 1.0, 0.5, 1_000.0_f64.log10(), 1.0, -0.5];
+        let ordered_filters = [
+            Biquad::new(BiquadFilterType::Peak, 500.0, 48_000.0, 1.0, 0.5),
+            Biquad::new(BiquadFilterType::Peak, 1_000.0, 48_000.0, 1.0, -0.5),
+        ];
+        let reversed_filters = profile
+            .apo_serialized_filters(
+                48_000.0,
+                &[ordered_filters[1].clone(), ordered_filters[0].clone()],
+            )
+            .unwrap();
+        let order_envelope = test_effective_envelope(&pair_args, None, None);
+        let error = save_profiled_apo_to_file(
+            &pair_args,
+            &reversed_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &ordered_source,
+                effective_envelope: &order_envelope,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("same-type output filters must preserve optimizer order");
+        assert!(error.to_string().contains("values or order differ"));
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
+        let shelves = [
+            Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 1.0, 3.0),
+            Biquad::new(BiquadFilterType::Highshelf, 10_000.0, 48_000.0, 1.37, -3.0),
+        ];
+        let shelf_args = Args::parse_from([
+            "autoeq-test",
+            "--loss",
+            "speaker-flat",
+            "--num-filters",
+            "2",
+            "--peq-model",
+            "free",
+        ]);
+        let source_shelf_peq = shelves
+            .iter()
+            .cloned()
+            .map(|filter| (1.0, filter))
+            .collect::<Vec<_>>();
+        let source_shelf_parameters =
+            autoeq::x2peq::peq2x(&source_shelf_peq, autoeq::PeqModel::Free);
+        let shelf_envelope = test_effective_envelope(&shelf_args, None, None);
+        let shelf_filters = profile.apo_serialized_filters(48_000.0, &shelves).unwrap();
+        save_profiled_apo_to_file(
+            &shelf_args,
+            &shelf_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                source_parameters: &source_shelf_parameters,
+                effective_envelope: &shelf_envelope,
                 max_filter_transfer_delta_db: 0.0,
                 verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
             },
@@ -411,7 +850,19 @@ mod tests {
             .unwrap();
         let shelf_manifest: serde_json::Value =
             serde_json::from_slice(&shelf_sidecar_bytes).unwrap();
-        assert_eq!(shelf_manifest["schema_version"], 3);
+        assert_eq!(shelf_manifest["schema_version"], 4);
+        assert_eq!(
+            shelf_manifest["effective_optimizer_envelope"]["model"],
+            "free"
+        );
+        assert_eq!(
+            shelf_manifest["effective_optimizer_envelope"]["source_candidate_parameters"][3],
+            3.0
+        );
+        assert_eq!(
+            shelf_manifest["effective_optimizer_envelope"]["shelf_q_semantics"],
+            "optimizer_source_q_is_checked_against_its_box; APO text emits no shelf Q and uses the verified 12 dB_per_octave S1 mapping"
+        );
         assert_eq!(shelf_manifest["realized_filters"][0]["type"], "LSC");
         assert_eq!(
             shelf_manifest["realized_filters"][0]["q"],
@@ -475,6 +926,8 @@ mod tests {
                 request: &request,
                 prepared: &prepared,
                 compatibility: &prepared.target_compatibility,
+                source_parameters: &source_parameters,
+                effective_envelope: &effective_envelope,
                 max_filter_transfer_delta_db: 0.0,
                 verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
             },
@@ -490,7 +943,7 @@ mod tests {
         assert_eq!(fs::read(&provenance_path).unwrap(), shelf_sidecar_bytes);
 
         let provenance: serde_json::Value = serde_json::from_slice(&sidecar_bytes).unwrap();
-        assert_eq!(provenance["schema_version"], 3);
+        assert_eq!(provenance["schema_version"], 4);
         assert_eq!(provenance["target_compatibility"]["status"], "unknown");
         assert_eq!(provenance["apo_serialization"]["realized_preamp_db"], -3.6);
         assert_eq!(
@@ -535,6 +988,8 @@ mod tests {
                 request: &injected_request,
                 prepared: &prepared,
                 compatibility: &prepared.target_compatibility,
+                source_parameters: &source_parameters,
+                effective_envelope: &effective_envelope,
                 max_filter_transfer_delta_db: 0.0,
                 verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
             },

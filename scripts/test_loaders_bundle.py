@@ -299,6 +299,14 @@ class BundleLoaderTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "publication is incomplete"):
                 load_roomeq_json(path)
 
+    def test_pending_external_export_transaction_refuses_partial_python_load(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = self._write_slim(Path(directory))
+            journal = path.with_name(f".{path.name}.external-export-journal.json")
+            journal.write_text("{}")
+            with self.assertRaisesRegex(RuntimeError, "native/export publication is incomplete"):
+                load_roomeq_json(path)
+
     def test_external_curves_reinject_with_phase_and_ir(self):
         with tempfile.TemporaryDirectory() as directory:
             data = load_roomeq_json(self._write_slim(Path(directory)))

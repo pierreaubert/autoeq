@@ -1281,15 +1281,24 @@ fn publish_attempt_output_bundle(
     staged_export_path: Option<&std::path::Path>,
     export_destination_path: Option<&std::path::Path>,
 ) -> Result<()> {
-    let publish_native = || {
-        bundle::publish_output_bundle_from(attempt_path, output_path)
-            .map_err(|error| anyhow!(error.to_string()))
-    };
     match (staged_export_path, export_destination_path) {
         (Some(staged), Some(destination)) => {
-            roomeq_workflow::publish_staged_export_package_with(staged, destination, publish_native)
+            roomeq_workflow::publish_staged_export_package_with_native_bundle(
+                staged,
+                destination,
+                output_path,
+                attempt_path,
+                || {
+                    bundle::publish_output_bundle_from_during_external_transaction_with_source_recovery(
+                        attempt_path,
+                        output_path,
+                    )
+                    .map_err(|error| anyhow!(error.to_string()))
+                },
+            )
         }
-        (None, None) => publish_native(),
+        (None, None) => bundle::publish_output_bundle_from(attempt_path, output_path)
+            .map_err(|error| anyhow!(error.to_string())),
         _ => Err(anyhow!(
             "staged and destination export paths must be provided together"
         )),
@@ -2798,6 +2807,21 @@ mod tests {
     fn missing_required_config_and_output_fails() {
         let args = Args::try_parse_from(["roomeq"]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn native_only_attempt_publication_does_not_require_external_export_intent() {
+        let parent = tempfile::tempdir().unwrap();
+        let output = parent.path().join("dsp.json");
+        save_bundle("previous", &output);
+        let attempt = tempfile::tempdir_in(parent.path()).unwrap();
+        let attempt_output = attempt.path().join("dsp.json");
+        save_bundle("candidate", &attempt_output);
+
+        publish_attempt_output_bundle(&attempt_output, &output, None, None).unwrap();
+
+        let published = super::bundle::load_output_bundle(&output).unwrap();
+        assert_eq!(published.version, "candidate");
     }
 
     #[test]

@@ -13162,6 +13162,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "DSP chain output (AudioEngine PluginConfig format)",
   "properties": {
+    "artifact_bundle_schema_version": {
+      "description": "Required artifact-bundle manifest schema for newly published bundles.\nAbsent on legacy graphs, which may still use embedded measurements.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "channels": {
       "additionalProperties": {
         "$ref": "#/$defs/ChannelDspChain"

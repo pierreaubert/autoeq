@@ -149,6 +149,7 @@ roomeq-export = { workspace = true }
 roomeq-quality = { workspace = true }
 roomeq-qa = { workspace = true, optional = true }
 roomeq-cli = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
 roomeq-analysis = { workspace = true }
 roomeq-synthetic = { workspace = true }
 roomeq-workflow = { workspace = true }
@@ -159,7 +160,7 @@ math-optimisation = { workspace = true }
 
 [features]
 default = []
-cli = ["dep:autoeq-cli", "dep:roomeq-cli"]
+cli = ["dep:autoeq-cli", "dep:roomeq-cli", "dep:tokio"]
 qa = ["cli", "dep:roomeq-qa"]
 
 [target.'cfg(target_os = "macos")'.dependencies]

@@ -21,6 +21,8 @@ use log::{info, warn};
 use schemars::schema_for;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Use the library types
 use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
@@ -711,6 +713,16 @@ struct Args {
 }
 
 pub fn run_command() -> Result<()> {
+    run_command_with_shutdown(Arc::new(AtomicBool::new(false)))
+}
+
+/// Run the RoomEQ CLI while observing a caller-owned Ctrl-C/shutdown flag.
+///
+/// The optimization pipeline checks the flag at observer and publication
+/// boundaries. A cancellation observed before candidate publication returns an
+/// error and preserves the existing canonical bundle. A flag set after bundle
+/// publication has begun does not interrupt or roll back that transaction.
+pub fn run_command_with_shutdown(shutdown: Arc<AtomicBool>) -> Result<()> {
     // Initialize logger safely
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -876,6 +888,7 @@ pub fn run_command() -> Result<()> {
                 stimulus_hash: args.stimulus_hash,
                 seats: args.verification_seats,
             },
+            shutdown,
         );
     }
     if args.export_format.is_some() || args.verification_bundle.is_some() {
@@ -890,6 +903,8 @@ pub fn run_command() -> Result<()> {
         output_path,
         args.override_config,
         args.fallback_overrides,
+        shutdown,
+        execute_fallback_candidate,
     )
 }
 
@@ -899,6 +914,37 @@ enum FallbackAttemptOutcome {
     Accepted,
     Unchanged,
     NotShippable,
+}
+
+struct FallbackCandidateRequest {
+    sample_rate: f64,
+    freq_samples: usize,
+    config_path: PathBuf,
+    output_path: PathBuf,
+    override_config: Option<PathBuf>,
+    shutdown: Arc<AtomicBool>,
+}
+
+fn execute_fallback_candidate(request: FallbackCandidateRequest) -> Result<()> {
+    execute_optimization_candidate(
+        request.sample_rate,
+        request.freq_samples,
+        request.config_path,
+        request.output_path,
+        request.override_config,
+        None,
+        None,
+        None,
+        BundleOptions {
+            prediction_manifest: None,
+            dest_dir: None,
+            baseline_graph: None,
+            calibration_id: None,
+            stimulus_hash: None,
+            seats: None,
+        },
+        request.shutdown,
+    )
 }
 
 /// Winner selection over complete attempt outcomes: the first accepted
@@ -938,14 +984,19 @@ fn read_saved_outcome(output_path: &std::path::Path) -> FallbackAttemptOutcome {
 /// private attempt directory until all overrides finish. No attempt mutates
 /// the canonical bundle before a winner is selected.
 #[allow(clippy::too_many_arguments)]
-fn execute_with_fallback(
+fn execute_with_fallback<F>(
     sample_rate: f64,
     freq_samples: usize,
     config_path: PathBuf,
     output_path: PathBuf,
     override_config: Option<PathBuf>,
     fallback_overrides: Vec<PathBuf>,
-) -> Result<()> {
+    shutdown: Arc<AtomicBool>,
+    mut run_candidate: F,
+) -> Result<()>
+where
+    F: FnMut(FallbackCandidateRequest) -> Result<()>,
+{
     let mut attempts: Vec<Option<PathBuf>> = vec![override_config];
     attempts.extend(fallback_overrides.into_iter().map(Some));
     attempts.dedup();
@@ -971,6 +1022,9 @@ fn execute_with_fallback(
     let mut rejected_diagnostics: Vec<(tempfile::TempDir, PathBuf)> = Vec::new();
     let mut outcomes: Vec<FallbackAttemptOutcome> = Vec::with_capacity(attempts.len());
     for (index, attempt_override) in attempts.iter().enumerate() {
+        if shutdown.load(Ordering::Acquire) {
+            anyhow::bail!("RoomEQ optimization cancelled before fallback attempt");
+        }
         info!(
             "Fallback attempt {}/{}: override {}",
             index + 1,
@@ -982,24 +1036,14 @@ fn execute_with_fallback(
             .tempdir_in(parent)
             .with_context(|| format!("Failed to stage fallback attempt beside {output_path:?}"))?;
         let attempt_path = attempt_dir.path().join(file_name);
-        let attempt_result = execute_optimization_candidate(
+        let attempt_result = run_candidate(FallbackCandidateRequest {
             sample_rate,
             freq_samples,
-            config_path.clone(),
-            attempt_path.clone(),
-            attempt_override.clone(),
-            None,
-            None,
-            None,
-            BundleOptions {
-                prediction_manifest: None,
-                dest_dir: None,
-                baseline_graph: None,
-                calibration_id: None,
-                stimulus_hash: None,
-                seats: None,
-            },
-        );
+            config_path: config_path.clone(),
+            output_path: attempt_path.clone(),
+            override_config: attempt_override.clone(),
+            shutdown: Arc::clone(&shutdown),
+        });
         if !attempt_path.is_file() {
             let error = attempt_result.err().unwrap_or_else(|| {
                 anyhow!("fallback attempt completed without publishing its candidate bundle")
@@ -1044,6 +1088,9 @@ fn execute_with_fallback(
                         outcome_of(attempt_override)
                     )],
                 );
+                if shutdown.load(Ordering::Acquire) {
+                    anyhow::bail!("RoomEQ optimization cancelled before fallback publication");
+                }
                 if let Err(error) = bundle::publish_output_bundle_from(&attempt_path, &output_path)
                 {
                     let retained = attempt_dir.keep();
@@ -1102,6 +1149,9 @@ fn execute_with_fallback(
             winner + 1,
             attempts.len()
         );
+        if shutdown.load(Ordering::Acquire) {
+            anyhow::bail!("RoomEQ optimization cancelled before unchanged fallback publication");
+        }
         if let Err(error) = bundle::publish_output_bundle_from(&unchanged_path, &output_path) {
             let retained = unchanged_dir.keep();
             let mut diagnostics =
@@ -1160,8 +1210,11 @@ fn retain_attempt_diagnostics(attempts: Vec<(tempfile::TempDir, PathBuf)>) -> Ve
 }
 
 /// Pipeline observer that logs to stderr.
-fn create_progress_observer() -> Box<dyn PipelineObserver> {
-    Box::new(|event: &PipelineEvent| {
+fn create_progress_observer(shutdown: Arc<AtomicBool>) -> Box<dyn PipelineObserver> {
+    Box::new(move |event: &PipelineEvent| {
+        if shutdown.load(Ordering::Acquire) {
+            return PipelineControl::Stop;
+        }
         // Status messages (no real iteration data) — log the message directly
         if let Some(msg) = &event.message {
             info!("  {}", msg);
@@ -1441,6 +1494,7 @@ fn execute_optimization(
     export_format: Option<ExportFormat>,
     export_path: Option<PathBuf>,
     bundle_options: BundleOptions,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     let (output_path, final_export_path) =
         resolve_optimization_destinations(&output_path, export_format, export_path.as_deref())?;
@@ -1477,6 +1531,7 @@ fn execute_optimization(
         staged_export_path.clone(),
         final_export_path.clone(),
         bundle_options,
+        Arc::clone(&shutdown),
     ) {
         if attempt_output.is_file() {
             let retained_dir = attempt_dir.keep();
@@ -1486,6 +1541,9 @@ fn execute_optimization(
             )));
         }
         return Err(error);
+    }
+    if shutdown.load(Ordering::Acquire) {
+        anyhow::bail!("RoomEQ optimization cancelled before candidate publication");
     }
     let publish_result = publish_attempt_output_bundle(
         &attempt_output,
@@ -1573,6 +1631,7 @@ fn execute_optimization_candidate(
     staged_export_path: Option<PathBuf>,
     export_destination_path: Option<PathBuf>,
     bundle_options: BundleOptions,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     let has_override = override_config_path.is_some();
     // Load room configuration
@@ -1604,7 +1663,7 @@ fn execute_optimization_candidate(
     let artifact_store = FsArtifactStore::new();
 
     // Run optimization using the library
-    let observer = create_progress_observer();
+    let observer = create_progress_observer(Arc::clone(&shutdown));
     let result = RoomPipeline::new(RoomPipelineRequest {
         config: &room_config,
         sample_rate,
@@ -1615,6 +1674,10 @@ fn execute_optimization_candidate(
     .run_with_store(&artifact_store, Some(observer))
     .map_err(|e| anyhow!("{}", e))
     .with_context(|| "Room optimization failed")?;
+
+    if shutdown.load(Ordering::Acquire) {
+        anyhow::bail!("RoomEQ optimization cancelled before candidate finalization");
+    }
 
     // Log summary: averages plus worst-channel, primary-seat and
     // objective/confidence evidence.
@@ -2599,6 +2662,8 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
 mod tests {
     use clap::{CommandFactory, Parser};
     use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
     fn test_graph(version: &str) -> roomeq_model::DspGraph {
         use roomeq_model::ChannelDspChain;
@@ -3280,6 +3345,100 @@ mod tests {
         let path = write_dry_run_config(&dir, &config);
         let error = run_dry_run(path, None, 64, None).expect_err("zero budget must fail");
         assert!(format!("{error:#}").contains("max_iter"), "{error:#}");
+    }
+
+    #[test]
+    fn cancelled_pipeline_does_not_publish_or_replace_candidate_bundle() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        let config_path = write_dry_run_config(&dir, &config);
+        let output_path = dir.path().join("room-output.json");
+        let previous_bytes = b"previous approved bundle";
+        std::fs::write(&output_path, previous_bytes).expect("write prior bundle");
+        // The observer sees this latched flag on its first pipeline event and
+        // returns PipelineControl::Stop while the optimization wrapper is
+        // still operating on its private attempt directory.
+        let shutdown = Arc::new(AtomicBool::new(true));
+
+        let error = super::execute_optimization(
+            48_000.0,
+            64,
+            config_path,
+            output_path.clone(),
+            None,
+            None,
+            None,
+            super::BundleOptions {
+                prediction_manifest: None,
+                dest_dir: None,
+                baseline_graph: None,
+                calibration_id: None,
+                stimulus_hash: None,
+                seats: None,
+            },
+            shutdown,
+        )
+        .expect_err("observer stop should cancel RoomEQ before publication");
+
+        assert!(format!("{error:#}").to_ascii_lowercase().contains("stop"));
+        assert_eq!(
+            std::fs::read(&output_path).expect("prior bundle remains"),
+            previous_bytes
+        );
+        let entries = std::fs::read_dir(dir.path())
+            .expect("list attempt parent")
+            .map(|entry| entry.expect("read entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries.len(),
+            2,
+            "temporary candidate artifacts are removed"
+        );
+    }
+
+    #[test]
+    fn fallback_cancellation_at_publication_keeps_prior_bundle() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        let config_path = write_dry_run_config(&dir, &config);
+        let output_path = dir.path().join("room-output.json");
+        let previous_bytes = b"previous approved bundle";
+        std::fs::write(&output_path, previous_bytes).expect("write prior bundle");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let candidate_shutdown = Arc::clone(&shutdown);
+
+        let error = super::execute_with_fallback(
+            48_000.0,
+            64,
+            config_path,
+            output_path.clone(),
+            None,
+            Vec::new(),
+            shutdown,
+            move |request| {
+                std::fs::write(
+                    &request.output_path,
+                    br#"{"metadata":{"correction_acceptance":{"outcome":"accepted"}}}"#,
+                )?;
+                candidate_shutdown.store(true, std::sync::atomic::Ordering::Release);
+                Ok(())
+            },
+        )
+        .expect_err("stop at accepted-candidate publication boundary");
+
+        assert!(
+            format!("{error:#}").contains("before fallback publication"),
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read(&output_path).expect("prior bundle remains"),
+            previous_bytes
+        );
+        let entries = std::fs::read_dir(dir.path())
+            .expect("list attempt parent")
+            .map(|entry| entry.expect("read entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2, "cancelled fallback staging is removed");
     }
 
     #[test]

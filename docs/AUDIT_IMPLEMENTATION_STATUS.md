@@ -21,8 +21,8 @@ cannot replace them.
 | A04 measurement/live analysis | Partial | Live calibration and local method/metric CSV evidence implemented; public dependency integration, numerical distortion/linearity and hardware validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
-| A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
-| A08 recoverable jobs | Partial | Exact DE continuation and public dependency pin committed; focused production integration passes, broader cancellation/recovery and final matrix acceptance remain |
+| A07 optimizer quality | Partial | Fresh 540-cell matrix at three budgets verified; broader representative cases and derived presets remain |
+| A08 recoverable jobs | Partial | Exact DE continuation pinned; scoped CLI cancellation and native provenance verified; pause, broader recovery and hardware checks remain |
 | A09 realized correction | Partial | Kautz multirate witnesses pass; fresh Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
@@ -1093,3 +1093,99 @@ a separate negative guard witness and are not parser successes.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a04-real-calibration-preflight-positive-20261003/final-summary.json`,
 SHA-256 `39735480bd0df54d63ce612b76961cc9b01fa485e487c2df014547838cc5ec04`;
 root review: `/Users/pierre/a04-calibration-independent-review.json`.
+
+
+## Fresh optimizer matrix at three budgets
+
+At source `4a66478`, a fresh development-profile build completed three full
+matrices: 12 registered backends × 3 fixed cases × 5 seeds, with search caps
+128, 512 and 2048 and a 10-second cooperative cutoff. All 540 cells retained
+finite feasible candidates, stayed within the declared encoded frequency/Q/gain
+boxes, and completed their selected worst-measurement comparison. The typed
+termination counts are:
+
+| Search cap | Evaluation limit | Timed out | Non-converged |
+| --- | ---: | ---: | ---: |
+| 128 | 180 | 0 | 0 |
+| 512 | 165 | 15 | 0 |
+| 2048 | 157 | 15 | 8 |
+
+All timeouts were Bayesian-optimization cells; they returned best-effort
+candidates. None of these records establishes convergence. Refused score
+requests after the hard cap are retained separately from admitted evaluations;
+search, finalization and report-scoring totals were independently checked.
+Other backend compilation and QA ran concurrently, so recorded development
+runtime distributions do not establish isolated product performance or justify
+Fast/Balanced/Thorough presets. The cases remain the same analytic plant,
+historical headphone curve and 8361A curves with derived perturbations.
+
+An independent Python implementation of the [W3C peaking-filter equations](https://www.w3.org/TR/2021/NOTE-audio-eq-cookbook-20210608/)
+evaluated complex cascades and reproduced all 540 sampled min/max/RMS transfer
+summaries within `1.535e-8` dB of the report, below the predeclared `1e-6` dB
+numerical allowance. Center-gain, reciprocal boost/cut and gain-sign controls
+also pass. This covers four Pk sections at 48 kHz on the scored grids; it does
+not establish continuous-frequency extrema, phase, PCM playback or other
+filter models. Reported objective losses still originate from production.
+
+Source, lock/config, host-filtered Cargo metadata and dependency snapshots
+match before/after. Root independently rehashed five Git/path trees (9,183
+files and four symlinks with resolved contents), the runner, logs, binary and
+reports. The 333 external package snapshots match; root did not separately
+rehash their bytes. Initial verifier assumptions about empty refusal fields
+and timeout spelling were corrected with failed helpers retained; reports
+were unchanged. Evidence: `/Volumes/home_tmp/tmp/autoeq-a07-current-budget-matrix-20261003/`;
+root review: `/Users/pierre/a07-matrix-independent-review.json`.
+
+## Joined CLI cancellation and retained native provenance
+
+Cancellation commit `ee6d491`, integrated as `db3c5199`, latches shutdown for
+queued and active benchmark work, closes optimizer scoring admission and joins
+started blocking workers before final partial-result cleanup. Writer and worker
+failures request shutdown, drain active work and return errors. Refinement
+retains its validated global/local rollback behavior. Per-row CSV flushes can
+occur while workers run; the final cleanup waits for them. The RoomEQ CLI
+passes Ctrl-C through a caller-owned flag, observes it at pipeline and candidate
+publication boundaries, and preserves a prior canonical bundle when cancellation
+is observed before publication begins. An already-started publication transaction
+is allowed to finish. Optional Tokio is confined to the root `cli` feature;
+the lockfile is unchanged.
+
+The isolated frozen package passes 82 AutoEQ CLI and 72 RoomEQ CLI tests, strict
+production Clippy, compatibility-binary checks, formatting and diff checks.
+Real DE scorer cancellation, injected worker/writer faults, a prelatched RoomEQ
+observer and an injected fallback publication boundary are covered. Active
+OS-signal RoomEQ search and hardware cancellation are still unverified. Root
+independently rehashed six Git/path roots (11,390 files and four symlinks) and
+checked seven raw gate records. All dependency snapshots match; 618 registry
+trees were not separately rehashed by root. Evidence: `/private/tmp/autoeq-a08-cancel-evidence/`;
+root review: `/Users/pierre/a08-cancellation-independent-review.json`.
+
+The fresh combined gate at integrated `db3c5199` retains the newer effective-
+envelope regressions and passes 84 AutoEQ CLI tests, 72 RoomEQ CLI tests,
+strict library/binary Clippy, both compatibility-binary checks, formatting and
+diff checks. Source, lock/config, host-filtered metadata and dependencies match
+before/after. Root rehashed five Git/path roots (9,183 files and four symlinks)
+and confirmed all seven integrated implementation files match the reviewed
+candidate. The 333 host-resolved external package snapshots match; root did not
+separately rehash their bytes. Evidence:
+`/Volumes/home_tmp/tmp/autoeq-a08-integrated-cancellation-20261003/`; root review:
+`/Users/pierre/a08-integrated-independent-review.json`.
+
+Native commit `bd8bc6a2b` retains the producing optimization-run descriptor in
+speaker result conversions and progress results. Descriptor-free multidriver,
+multisub, DBA and synthetic paths leave it absent. A legacy stopping-reason
+string is not promoted to typed convergence. Its five-file source patch passes
+20 focused speaker tests, 793 player tests (2 ignored), strict player Clippy and
+one mechanical TUI fixture. The required struct-size script still fails on the
+existing `PhoneTranslations` (32 fields) and `LevelMeterTranslations` (38 fields);
+no UI behavior or size allowlist was changed.
+
+Native QA uses a scratch-only manifest/lock with clean math `42a47e3`, which
+provides the required reset and detailed wavelet APIs. Original manifests and
+locks remain unchanged; public publication of that math candidate is pending.
+Before/after inputs match. Root independently rehashed thirteen Git/path trees
+(22,383 files and six symlinks), verified the five tested source files and raw
+gate hashes; 907 external package snapshots match without a second root rehash
+of registry bytes. This is scoped local backend acceptance. Evidence:
+`/Volumes/home_tmp/tmp/sotf-a08-native-provenance-qa-20261003/`; root review:
+`/Users/pierre/a08-native-provenance-independent-review.json`.

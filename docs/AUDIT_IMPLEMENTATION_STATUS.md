@@ -328,3 +328,29 @@ which remains uncommitted and outside these audit-owned fixes. No original
 worktree edits were changed. Task-specific math paths are supplied through Cargo
 command configuration and excluded from repository changes. Full activation,
 rate/layout/resource receipts and associated capture remain acceptance work.
+
+
+## Frozen convolution processor
+
+Companion DAW commit `95e9feb` adds control-thread construction from validated,
+exact-rate channel-major samples. It reuses the existing convolver routing and
+memory limits, rejects unequal channel lengths/nonfinite coefficients, and refuses
+later file replacement or sample-rate changes for a frozen instance. The factory
+accepts an explicit `frozen_ir` payload and rejects competing file paths, unknown
+payload fields and inconsistent rates. The realtime process path is unchanged.
+
+All 57 convolution library tests pass, including independent direct-convolution
+PCM comparisons at 44.1/48/96 kHz with irregular blocks, UPC/NUPC and zero-latency
+heads. The focused factory test also passes, and strict convolution library/test
+Clippy passes with warnings denied. These gates use the isolated DAW branch and
+command-only math dependency overrides; the DAW audit dependency-resolution
+lockfile is excluded from this commit. The preparation API retains frozen samples
+in its native graph configuration; generic parameter/preset snapshots do not yet
+promise to reproduce the in-memory resource. Hardware activation and capture
+remain separate acceptance evidence.
+
+The latest QA inventory check resolves all 124 declared numerical cases (118
+Rust, 6 Python), 140 Rust test targets and zero missing goldens. Runner/parameter/
+CI contract tests pass 32/32, and the GitHub/Gitea workflow bodies match. This is
+manifest and runner validation; execution of the integrated numerical matrix
+remains pending the implementation source freeze.

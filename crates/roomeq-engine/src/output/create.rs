@@ -279,6 +279,7 @@ pub fn create_dsp_chain_output(
 
     DspChainOutput {
         version: roomeq_model::default_config_version(),
+        artifact_bundle_schema_version: None,
         global_plugins,
         channels,
         deployed_source_curves: HashMap::new(),

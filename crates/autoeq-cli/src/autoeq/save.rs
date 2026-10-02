@@ -1,3 +1,4 @@
+use super::apo_profile_verifier::verify_emitted_apo_text;
 use autoeq::iir;
 use autoeq::optim::pareto::ParetoFilter;
 use std::{error::Error, path::Path};
@@ -44,6 +45,7 @@ pub(super) struct ProductExportContext<'a> {
     pub(super) prepared: &'a autoeq::workflow::PreparedProduct,
     pub(super) compatibility: &'a autoeq::workflow::TargetCompatibility,
     pub(super) max_filter_transfer_delta_db: f64,
+    pub(super) verification_frequencies_hz: &'a [f64],
 }
 
 async fn read_existing_product_file_bounded(
@@ -96,6 +98,7 @@ async fn write_staged_file(path: &Path, contents: &[u8]) -> Result<(), Box<dyn E
 /// Stage and validate both outputs before publishing either one. The preset
 /// is atomically replaced first; if sidecar publication then fails, restore the
 /// previous preset only when the destination still contains our new bytes.
+#[cfg(test)]
 async fn publish_profiled_pair_with_hook<F>(
     preset_path: &Path,
     preset_bytes: &[u8],
@@ -104,6 +107,29 @@ async fn publish_profiled_pair_with_hook<F>(
     before_sidecar_publish: F,
 ) -> Result<(), Box<dyn Error>>
 where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    publish_profiled_pair_with_hooks(
+        preset_path,
+        preset_bytes,
+        sidecar_path,
+        sidecar_bytes,
+        |_| Ok(()),
+        before_sidecar_publish,
+    )
+    .await
+}
+
+async fn publish_profiled_pair_with_hooks<V, F>(
+    preset_path: &Path,
+    preset_bytes: &[u8],
+    sidecar_path: &Path,
+    sidecar_bytes: &[u8],
+    verify_staged_preset: V,
+    before_sidecar_publish: F,
+) -> Result<(), Box<dyn Error>>
+where
+    V: FnOnce(&[u8]) -> std::io::Result<()>,
     F: FnOnce() -> std::io::Result<()>,
 {
     let parent = preset_path
@@ -125,6 +151,7 @@ where
     write_staged_file(&staged_sidecar, sidecar_bytes).await?;
     let staged_preset_bytes = fs::read(&staged_preset).await?;
     let staged_sidecar_bytes = fs::read(&staged_sidecar).await?;
+    verify_staged_preset(&staged_preset_bytes)?;
     autoeq::workflow::verify_apo_preset_binding(&staged_preset_bytes, &staged_sidecar_bytes)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
 
@@ -162,12 +189,14 @@ async fn publish_profiled_pair(
     preset_bytes: &[u8],
     sidecar_path: &Path,
     sidecar_bytes: &[u8],
+    verify_staged_preset: impl FnOnce(&[u8]) -> std::io::Result<()>,
 ) -> Result<(), Box<dyn Error>> {
-    publish_profiled_pair_with_hook(
+    publish_profiled_pair_with_hooks(
         preset_path,
         preset_bytes,
         sidecar_path,
         sidecar_bytes,
+        verify_staged_preset,
         || Ok(()),
     )
     .await
@@ -405,10 +434,26 @@ pub(super) async fn save_profiled_apo_to_file(
     if !preamp_db.is_finite() {
         return Err("profiled APO preamp must be finite".into());
     }
+    if preamp_db > 0.0 {
+        return Err("profiled APO output supports non-positive preamp values only".into());
+    }
     if !context.max_filter_transfer_delta_db.is_finite()
         || context.max_filter_transfer_delta_db < 0.0
     {
         return Err("profiled APO transfer delta must be finite and non-negative".into());
+    }
+    let profile = &context.request.device_profile;
+    profile
+        .validate_filters(args.sample_rate, filters)
+        .map_err(std::io::Error::other)?;
+    let expected_filters = profile
+        .apo_serialized_filters(args.sample_rate, filters)
+        .map_err(std::io::Error::other)?;
+    let expected_preamp_db = profile
+        .apo_serialized_preamp_db()
+        .map_err(std::io::Error::other)?;
+    if preamp_db != expected_preamp_db {
+        return Err("profiled APO preamp does not match the serialized device profile".into());
     }
     let filename = match loss_type {
         autoeq::LossType::SpeakerFlat
@@ -452,11 +497,19 @@ pub(super) async fn save_profiled_apo_to_file(
         return Err("APO serializer did not emit a preamp line".into());
     }
     let preset_bytes = format!("{}\n", lines.join("\n")).into_bytes();
+    let emitted_text = verify_emitted_apo_text(
+        &preset_bytes,
+        args.sample_rate,
+        &expected_filters,
+        expected_preamp_db,
+        context.verification_frequencies_hz,
+    )
+    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
 
     let manifest_path = file_path.with_extension("product-provenance.json");
     let manifest = serde_json::json!({
         "schema": "autoeq.product-run-provenance",
-        "schema_version": 1,
+        "schema_version": 2,
         "request": context.request,
         "source_record": &context.prepared.source_record,
         "target_record": &context.prepared.target_profile.record,
@@ -468,12 +521,21 @@ pub(super) async fn save_profiled_apo_to_file(
             "q_decimal_places": 2,
             "gain_decimal_places": 2,
             "preamp_decimal_places": 1,
-            "realized_preamp_db": preamp_db,
+            "realized_preamp_db": emitted_text.preamp_db,
             "preset_sha256": autoeq_artifacts::sha256_hex(&preset_bytes),
             "max_filter_transfer_delta_db": context.max_filter_transfer_delta_db,
-            "verified_output": "Equalizer APO text preset only"
+            "verified_output": "Equalizer APO text preset in the checked profiled subset",
+            "emitted_text_verification": {
+                "method": "strict_local_subset_parse_and_transfer_comparison_v1",
+                "sample_rate_hz": emitted_text.sample_rate_hz,
+                "max_transfer_delta_db": emitted_text.max_transfer_delta_db,
+                "channel_scope": "inherited_from_including_equalizer_apo_configuration",
+                "playback_device_binding": "not_encoded_or_verified",
+                "runtime_installation_checked": false,
+                "consumer_parser_used": false
+            }
         },
-        "realized_filters": filters.iter().map(|filter| serde_json::json!({
+        "realized_filters": emitted_text.filters.iter().map(|filter| serde_json::json!({
             "type": filter.filter_type.short_name(),
             "frequency_hz": filter.freq,
             "q": filter.q,
@@ -483,7 +545,24 @@ pub(super) async fn save_profiled_apo_to_file(
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
     autoeq::workflow::verify_apo_preset_binding(&preset_bytes, &manifest_bytes)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    publish_profiled_pair(&file_path, &preset_bytes, &manifest_path, &manifest_bytes).await?;
+    publish_profiled_pair(
+        &file_path,
+        &preset_bytes,
+        &manifest_path,
+        &manifest_bytes,
+        |staged_preset| {
+            verify_emitted_apo_text(
+                staged_preset,
+                args.sample_rate,
+                &expected_filters,
+                expected_preamp_db,
+                context.verification_frequencies_hz,
+            )
+            .map(|_| ())
+            .map_err(std::io::Error::other)
+        },
+    )
+    .await?;
     crate::qa_println!(
         args,
         "🕶 Profiled APO preset saved to: {}",

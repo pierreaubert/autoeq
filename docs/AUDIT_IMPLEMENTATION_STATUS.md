@@ -882,6 +882,34 @@ These commits remain isolated; the capture root branch has not been moved to
 an unpublished math API dependency. Public dependency integration and actual
 numerical distortion/linearity and hardware evidence remain open.
 
+### ESS numerical defect diagnostic
+
+A separate frozen public-API probe at math `9873489` uses a known quadratic
+signal model, its linear control, and a known post-filter. Independent analytic
+and exact-bin steady-sine calculations predict 10% direct THD and 8.7–10.0%
+after the filter. The public ESS result instead reports about 22.5–29.7%.
+Before the current amplitude-weighted Hann divisor, H2 agrees with the analytic
+transfer within 0.00094 dB. That divisor inflates H2 by 7.8–8.6 dB. The
+unsegmented H1 denominator also differs from the known fundamental by up to
+9.76%; removing the divisor alone does not repair THD.
+
+Physical tone comparison requires Hn at n times the drive frequency and an
+isolated fundamental at the drive frequency. Reference-band and Nyquist
+support must be explicit per order. For the probe's 100–16,000 Hz reference,
+full H2–H5 support ends at 3,200 Hz drive; finite out-of-band placeholders do
+not establish measured zero distortion. The quadratic probe does not validate
+cubic-through-fifth-order extraction or immunity to full-sweep aliasing.
+
+Evidence: `/private/tmp/a04-ess-diagnostic/run-manifest.json`, SHA-256
+`714bafaa7205234f790ed24dd8128e5e6108457ecb093769f19d9c59e7bbf650`.
+The public API run and derivation scripts exit zero; this is a successful
+defect reproduction, not numerical acceptance. Root verified 29 artifact
+hashes, matched before/after snapshots, and independently rehashed the current
+860 tracked math paths plus scratch source/lock. Registry dependencies were
+not covered by that byte inventory. No production kernel or hardware changed.
+The follow-up will correct scaling, isolate H1 and version the availability
+contract before numerical acceptance is claimed.
+
 ## Genelec bass-bus failure decomposition
 
 A read-only diagnostic uses the retained `210592af` IIR replay. Its ten unit

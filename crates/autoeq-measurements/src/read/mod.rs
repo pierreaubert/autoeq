@@ -29,6 +29,7 @@ mod speaker_suggestions;
 
 // Re-export commonly used functions
 pub use clamp::clamp_positive_only;
+pub use directory::cache_root;
 pub use directory::data_dir_for;
 pub use directory::data_dir_for_cache_root;
 pub use directory::headphone_cache_dir;

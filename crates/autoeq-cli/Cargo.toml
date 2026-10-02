@@ -15,6 +15,7 @@ default = []
 
 [dependencies]
 anyhow = { workspace = true }
+autoeq-artifacts = { workspace = true }
 autoeq-plot = { workspace = true }
 autoeq-workflow = { workspace = true }
 chrono = { workspace = true }

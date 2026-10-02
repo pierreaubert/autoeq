@@ -285,6 +285,7 @@ name = "autoeq-cli"
 version = "0.5.2"
 dependencies = [
  "anyhow",
+ "autoeq-artifacts",
  "autoeq-plot",
  "autoeq-workflow",
  "chrono",
@@ -483,6 +484,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "urlencoding",
 ]
 
 [[package]]

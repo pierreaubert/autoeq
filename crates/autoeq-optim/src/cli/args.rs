@@ -25,6 +25,11 @@ pub struct Args {
     #[arg(short, long)]
     pub target: Option<PathBuf>,
 
+    /// Product workflow JSON describing source, independent target support,
+    /// and an explicit playback device profile.
+    #[arg(long, value_name = "PATH")]
+    pub product_config: Option<PathBuf>,
+
     /// The sample rate for the IIR filters.
     #[arg(short, long, default_value_t = 48000.0)]
     pub sample_rate: f64,
@@ -309,6 +314,7 @@ impl Args {
             // File paths/flags default to None/false
             curve: None,
             target: None,
+            product_config: None,
             output: None,
             resume_state: None,
             checkpoint_state: None,
@@ -457,6 +463,7 @@ mod tests {
         let defaults = Args::speaker_defaults();
         assert!(defaults.resume_state.is_none());
         assert!(defaults.checkpoint_state.is_none());
+        assert!(defaults.product_config.is_none());
 
         let parsed = Args::try_parse_from([
             "prog",
@@ -468,6 +475,15 @@ mod tests {
         .expect("warm-start paths should be parsed");
         assert_eq!(parsed.resume_state, Some("prior.json".into()));
         assert_eq!(parsed.checkpoint_state, Some("next.json".into()));
+    }
+
+    #[test]
+    fn product_config_path_is_additive_and_optional() {
+        let parsed = Args::try_parse_from(["prog", "--product-config", "run.json"])
+            .expect("product workflow config should be accepted");
+        assert_eq!(parsed.product_config, Some("run.json".into()));
+        assert!(parsed.curve.is_none());
+        assert!(parsed.target.is_none());
     }
 
     #[test]

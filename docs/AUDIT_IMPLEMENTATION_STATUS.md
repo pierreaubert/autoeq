@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Frozen Rust run passed 117/118 records and all 140 test targets; one reporting mismatch corrected, fresh 124-case and all-package evidence pending |
+| A00 QA/build coverage | Partial | Fresh detached public-pin run passes 118 Rust and 6 Python records plus all 140 Rust targets; fresh all-package and installation evidence pending |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -505,8 +505,8 @@ Digital silence has zero pressure and unknown logarithmic SPL.
 
 Independent tone, Parseval, endpoint/band integration, calibration sign/reference,
 anchor amplitude, mismatch and invalid-frame witnesses pass 24/24. Strict capture
-library Clippy passes. Ignored lockfile bytes were restored. CLI parameter wiring
-and hardware validation remain; no audio was emitted or recorded.
+library Clippy passes. Ignored lockfile bytes were restored. At that checkpoint,
+CLI parameter wiring and hardware validation remained; no audio was emitted or recorded.
 
 Companion capture commit `39b1c52` wires optional profile and machine-settings
 JSON into the live CLI. Bounded files and relative curve paths are validated
@@ -612,3 +612,23 @@ Evidence is retained in
 SHA-256 `116473dd22341a10e2d9fda5f37c3b4ecf55b2ad36371aaa1ecb17a9bd25b75a`.
 Original fixtures, golden data and acceptance limits are unchanged. Diagnosis
 of the Genelec failure continues; A09 remains partial.
+
+## Process interruption and exact continuation
+
+The device-free CLI built from clean `d40619c` passes an actual subprocess
+interruption check. A seeded analytic two-filter run with a 6000-evaluation
+budget is interrupted after a persisted nonterminal generation by SIGINT and,
+separately, SIGKILL. Each run loads its checkpoint in a new process and produces
+the same entire finalized DE checkpoint as the uninterrupted baseline, including
+population, archive, adaptation, RNG and accounting fields. Source commit,
+lockfile, executable and curve identities are unchanged before and after.
+
+Separate process checks refuse changed seed, changed budget and malformed JSON
+without replacing the valid saved checkpoint or publishing a preset. These
+results cover interruption after a saved generation on the same executable;
+they do not prove every filesystem crash window, graceful cancellation,
+cross-build continuation or RoomEQ multi-channel resume.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/exact-process-20261002`.
+Executable SHA-256:
+`186c5b4d428c55e2027f0241aa52e72e8c17805c9ea48aed9c31a407cf655ddd`.

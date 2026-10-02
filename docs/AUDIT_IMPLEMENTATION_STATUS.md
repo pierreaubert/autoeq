@@ -988,3 +988,38 @@ This is a local parser and source-derived numerical check; the APO consumer
 and device were not run. A separate rounded-parameter escape from the original
 optimizer envelope remains under investigation.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-apo-roundtrip-evidence-20261002/final-gate-run-manifest.json`.
+
+## Native PCM witness for the retained bass-bus graph
+
+An offline replay instantiates the retained `210592af` IIR canary through the
+native compatibility builder and DAW processors: 105 nodes, 122 edges, ten
+inputs and ten outputs at 48 kHz. Four half-second stimuli (quiet/full-scale
+DC steps and coherent 20/90 Hz tones) run at block sizes 7, 127 and 512. All
+output buffers are filled with finite samples, and the complete PCM hashes
+match across block sizes for each stimulus. Sub1 stays below its declared
+−1 dB sample-peak ceiling in all twelve replays, using the predeclared 1e-6
+float arithmetic allowance. Some main-channel peaks exceed unity; this
+witness only checks the declared Sub1 ceiling.
+
+The quiet DC terminal mean is 0.00953375268727541. Multiplying the independent
+DC route sum by the actual float32 input amplitude predicts
+0.00953375310867908, a signed difference of −4.2140367063903117e-10. This is
+a numerical observation with no newly selected acceptance tolerance. The
+nonlinear limiter bounds the selected full-scale stimuli; the unchanged
+12 dB linear-gain budget and bass acoustic parity still fail.
+
+The replay and strict scratch-only Clippy both exit zero. Before/after/repeated
+after-Clippy inventories match byte-for-byte across eleven Cargo-resolved
+Git/local repositories (20,127 source paths); root independently rehashed
+20,132 entries including explicit lock/config files. Registry cache bytes
+are excluded. This uses AutoEQ `0700f3a`, local math candidate `42a47e3`,
+capture `39b1c52`, DAW `2619efd` and native player `0d477`; the inventory
+records the other resolved Git identities. It does not establish a public
+clean install, bundle activation, other sample rates, complete transient
+coverage, true-peak, physical SPL or measured protection. No device was opened.
+
+Failed preliminary lock/dependency/scratch compilation attempts remain in the
+evidence directory. Final command records are reconstructed from tool-call
+arguments and observed exits; process-start argv/time was not instrumented.
+Evidence: `/private/tmp/autoeq-a09-native-pcm/run-manifest.json`, SHA-256
+`d198996bf6d8955b0431561b427b987b9c8532d8e557bab6a93195b834f3204a`.

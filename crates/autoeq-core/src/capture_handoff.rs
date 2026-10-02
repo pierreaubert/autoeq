@@ -95,11 +95,21 @@ fn known(value: &str) -> bool {
 
 /// Check a filename against the portable, single-component capture contract.
 pub fn portable_capture_filename(value: &str) -> bool {
-    let stem = value.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let stem = value
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(['.', ' '])
+        .to_ascii_uppercase();
     let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
-        || (stem.len() == 4
-            && (stem.starts_with("COM") || stem.starts_with("LPT"))
-            && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+        || ["COM", "LPT"].iter().any(|prefix| {
+            stem.strip_prefix(prefix).is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+        });
     !reserved
         && !value.is_empty()
         && value != "."
@@ -336,6 +346,8 @@ mod tests {
     fn filenames_remain_valid_when_capture_bundles_move_between_platforms() {
         for invalid in [
             "CON.wav",
+            "CON .wav",
+            "COM¹.csv",
             "lpt9.csv",
             "response?.csv",
             "raw*.wav",

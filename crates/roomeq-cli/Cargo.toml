@@ -25,7 +25,7 @@ math-rir = { workspace = true }
 math-dsp = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }

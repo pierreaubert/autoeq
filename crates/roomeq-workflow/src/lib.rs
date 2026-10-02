@@ -2,6 +2,7 @@
 
 pub mod arrival;
 pub mod cea2034;
+pub mod capture_handoff;
 pub mod channel;
 pub mod channel_acoustics;
 pub mod channel_measurements;

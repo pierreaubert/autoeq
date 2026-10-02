@@ -1280,3 +1280,34 @@ Evidence: `/Volumes/home_tmp/tmp/math-audio-a08-pause-evidence/`; root review:
 `/Users/pierre/a08-pause-independent-review.json`.
 Public publication approval is pending. AutoEQ production pause integration,
 full recovery matrix and physical storage crash recovery remain open.
+
+
+## Normalized coefficient JSON consumer PCM witness
+
+Test-only commit `7c66d93`, integrated as `b300b0a6`, consumes exact normalized
+biquad JSON bytes through an independent direct-form recurrence. A 1 kHz +6 dB
+peak with -3 dB preamp and five-sample delay is checked at 44.1, 48 and 96 kHz
+using impulse onset and steady-tone complex gain/phase. The 48 kHz point is
+also bound to the checked-in Wolfram EX01 golden. Impulse and tone output are
+identical across whole-buffer and varied block partitions. Coefficient
+corruption moves the PCM result beyond the predeclared tolerance; unsupported
+convention and reordered section indices are refused. The latter is a schema
+index check, not a claim of transfer sensitivity to commuting LTI sections.
+
+The final corrected candidate passes the focused test, full export library
+(147 passed, 9 ignored), strict test-inclusive Clippy, formatting and diff
+checks. Before/after source, lock, metadata, dependencies, HEAD and status match.
+Root independently rehashed all 367 reachable package trees (24,096 entries)
+and both local Git trees (4,632 entries), and verified final source/diff and raw
+log hashes. Metadata represents Cargo's complete resolved graph, including
+other platforms; it was not host-filtered. The existing dirty math wavelet
+source was included in both inventories and was unchanged. The integrated
+test file equals the frozen candidate.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a11-biquad-pcm-audit-evidence/final-review-correction/`;
+root review: `/Users/pierre/a11-biquad-pcm-independent-review.json`.
+
+This validates a normalized coefficient interchange contract with an
+independent test consumer. Installed third-party application parsing/PCM for
+all advertised formats, hardware deployment and the remaining interruption
+matrix are still open. No production exporter, manifest/lock, hardware or UI
+behavior changed.

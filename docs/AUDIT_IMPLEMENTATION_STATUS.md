@@ -18,7 +18,7 @@ cannot replace them.
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Machine-bound calibrated live PSD, band SPL and CLI profile wiring committed; distortion/linearity and hardware validation remain |
+| A04 measurement/live analysis | Partial | Live calibration and local method/metric CSV evidence implemented; public dependency integration, numerical distortion/linearity and hardware validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
@@ -855,3 +855,47 @@ Commit `cd31451a` documents each implemented metric's validation limits in
 [PERCEPTUAL_METRIC_STATUS.md](PERCEPTUAL_METRIC_STATUS.md). No approved
 independent reference entry or listening result was added. The evidence applies
 to the tested source slice; it does not relabel the earlier full workspace run.
+
+
+## Capture method and harmonic availability
+
+Local companion math commit `9873489` and capture commit `e32eb2a` preserve
+analysis method and metric availability in CSV and capture CLI JSON. The
+original eight numeric positions remain stable; H2-H5 and versioned metadata
+use named fields after optional capture-quality columns. Legacy inputs retain
+unknown availability. Generic transfer FFT does not claim THD or harmonics
+from compatibility zeros. Contradictory metadata and misaligned placeholders
+refuse before an existing output is truncated.
+
+The CLI supplies ESS timing only for fixed-rate logarithmic sweep parameters;
+piecewise octave sweeps keep the generic path. Computed means finite output
+aligned to the grid, not independent acquisition or calibration certification.
+The focused matched package passes 92 math analysis tests, five capture tests
+and strict math/capture Clippy. Independent rehashing covers all seven resolved
+local/Git source repositories (14,666 paths). The added selector check passes
+separately at the two companion commits; its inventory scope is the two tracked
+local repositories, not the whole resolved dependency graph.
+
+Evidence: `/private/tmp/a04-analysis-evidence/h2h5-final-gate-manifest.json`
+and `/private/tmp/a04-analysis-evidence/selector-e32-987-final`.
+These commits remain isolated; the capture root branch has not been moved to
+an unpublished math API dependency. Public dependency integration and actual
+numerical distortion/linearity and hardware evidence remain open.
+
+## Genelec bass-bus failure decomposition
+
+A read-only diagnostic uses the retained `210592af` IIR replay. Its ten unit
+inputs sum into Sub1 through the serialized pre-route trims and LR24 low-pass
+routes. Independent DC decomposition gives amplitude 9.533752655850128,
+or 19.585277607593767 dB. The saved assessment reports
+19.585277607589788 dB at DC, a difference of 3.979039320256561e-12 dB;
+its maximum filter-section boost is zero. This identifies the structural bass
+sum contributing to the retained failure.
+
+The calculation models the implicit LFE pre-chain as unity and excludes the
+nonlinear limiter's amplitude action. It does not replay the full frequency
+response or establish a viable correction. A common 7.585 dB static reduction
+would reach the unchanged 12 dB registry ceiling for that DC sum, but still
+requires all existing acoustic and output-quality checks. No threshold,
+fixture, graph or production source changed; A09 acoustic acceptance remains
+failed. Evidence: `/Volumes/home_tmp/tmp/autoeq-a09-bass-sum-diagnostic-20261002`.

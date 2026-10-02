@@ -717,6 +717,11 @@ def load_roomeq_json(filepath: Path) -> dict:
         raise RuntimeError(
             f"RoomEQ bundle publication is incomplete; recover it with the native bundle loader: {journal}"
         )
+    export_journal = filepath.with_name(f".{filepath.name}.external-export-journal.json")
+    if export_journal.exists():
+        raise RuntimeError(
+            f"RoomEQ native/export publication is incomplete; recover it with the native bundle loader: {export_journal}"
+        )
     if not filepath.exists():
         print(f"Error: File not found: {filepath}")
         sys.exit(1)

@@ -1925,6 +1925,28 @@ fn recover_pending_bundle(output_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Recover pending native-bundle and coupled external-export publications.
+///
+/// The native bundle is resolved first because its root digest decides whether
+/// the external package should be rolled back or completed.
+pub fn recover_output_bundle_transactions(output_path: &Path) -> io::Result<()> {
+    recover_pending_bundle(output_path)?;
+    crate::export::recover_pending_external_export_transaction(output_path)
+        .map_err(|error| io_invalid(format!("external export recovery failed: {error:#}")))
+}
+
+/// Return the bounded SHA-256 identity of a native root file, or `None` when
+/// the root does not exist.
+pub fn native_output_sha256(output_path: &Path) -> io::Result<Option<String>> {
+    let bytes = match read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph")
+    {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    Ok(Some(sha256_hex(&bytes)))
+}
+
 /// Save a DSP output as a small JSON plus sibling assets directory.
 ///
 /// Publication uses unique staging, a durable journal, and atomic root JSON
@@ -1936,6 +1958,7 @@ pub fn save_output_bundle(
     output: &mut DspGraph,
     output_path: &Path,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    recover_output_bundle_transactions(output_path)?;
     save_output_bundle_using(
         output,
         output_path,
@@ -1985,6 +2008,7 @@ pub fn save_output_bundle_with_resources_and_prepare(
     source_assets: &Path,
     prepare: &mut impl FnMut(&mut DspGraph, &Path) -> Result<(), Box<dyn std::error::Error>>,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    recover_output_bundle_transactions(output_path)?;
     let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
     let mut write_root = |path: &Path, bytes: &[u8]| write_file_atomically(path, bytes);
     let mut write_journal = |path: &Path, bytes: &[u8]| write_file_atomically(path, bytes);
@@ -2019,6 +2043,27 @@ pub fn publish_output_bundle_from(
     source_output_path: &Path,
     destination_output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    recover_output_bundle_transactions(source_output_path)?;
+    recover_output_bundle_transactions(destination_output_path)?;
+    publish_output_bundle_from_with_hook(source_output_path, destination_output_path, |_, _| Ok(()))
+}
+
+/// Publish the native half of a coupled transaction without first resolving
+/// its external journal. The caller must already have resolved any previous
+/// publication and durably recorded the new external intent.
+///
+/// This API is intended for the workflow export adapter. Ordinary consumers
+/// should call [`publish_output_bundle_from`], which recovers both journals.
+pub fn publish_output_bundle_from_during_external_transaction_with_source_recovery(
+    source_output_path: &Path,
+    destination_output_path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    recover_output_bundle_transactions(source_output_path)?;
+    recover_pending_bundle(destination_output_path)?;
+    crate::export::validate_pending_external_export_source(
+        destination_output_path,
+        source_output_path,
+    )?;
     publish_output_bundle_from_with_hook(source_output_path, destination_output_path, |_, _| Ok(()))
 }
 
@@ -2816,7 +2861,7 @@ fn load_output_bundle_frozen_with_hooks(
     after_manifest_check: impl FnOnce(&Path) -> io::Result<()>,
     after_snapshot_capture: impl FnOnce(&Path) -> io::Result<()>,
 ) -> Result<FrozenOutputBundle, Box<dyn std::error::Error>> {
-    recover_pending_bundle(output_path)?;
+    recover_output_bundle_transactions(output_path)?;
     let root_bytes = read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph")?;
     let assets_dir = assets_dir_for(output_path);
     match std::fs::symlink_metadata(&assets_dir) {

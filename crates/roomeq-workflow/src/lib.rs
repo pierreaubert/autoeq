@@ -50,7 +50,7 @@ pub use eq_resources::{prepare_eq_resources, prepare_eq_target};
 pub use export::{
     export_dsp_chain, export_dsp_chain_with_convolution_sidecars,
     export_dsp_chain_with_convolution_sidecars_to_staging, package_convolution_sidecars,
-    publish_staged_export_package_with,
+    publish_staged_export_package_with, publish_staged_export_package_with_native_bundle,
 };
 pub use group_measurements::load_multisub_seat_measurements;
 pub use group_processing::{
@@ -68,9 +68,12 @@ pub use output_bundle::{
     FrozenBundleResource, FrozenOutputBundle, MEASUREMENTS_INDEX_FILENAME,
     OutputBundleVerification, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
     candidate_asset_dirs, load_output_bundle, load_output_bundle_frozen,
-    manifest_path_for as bundle_manifest_path_for, publish_output_bundle_from,
-    read_convolution_bytes, resolve_convolution_path, run_log_path_for, save_output_bundle,
-    save_output_bundle_with_resources, save_output_bundle_with_resources_and_prepare,
+    manifest_path_for as bundle_manifest_path_for, native_output_sha256,
+    publish_output_bundle_from,
+    publish_output_bundle_from_during_external_transaction_with_source_recovery,
+    read_convolution_bytes, recover_output_bundle_transactions, resolve_convolution_path,
+    run_log_path_for, save_output_bundle, save_output_bundle_with_resources,
+    save_output_bundle_with_resources_and_prepare,
 };
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
 pub use room_optimization::{

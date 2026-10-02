@@ -181,7 +181,7 @@
       "rust": 118,
       "python": 6
     },
-    "expected_rust_test_target_count": 139,
+    "expected_rust_test_target_count": 140,
     "auxiliary_python_files": [
       "negative_controls_tailpy.py"
     ],
@@ -201,6 +201,7 @@
       "negative_controls_optima",
       "negative_controls_optimb",
       "negative_controls_optimc",
+      "optimizer_benchmark",
       "negative_controls_qqsa",
       "negative_controls_raa",
       "negative_controls_rab",

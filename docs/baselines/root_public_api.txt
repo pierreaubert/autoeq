@@ -1,6 +1,6 @@
 # Generated from the current root facade with scripts.check_crate_partition.extract_root_public_api.
 # Update this snapshot together with intentional src/lib.rs API changes.
-pub use autoeq_core::{MeasurementProvenance, ProvenanceCaptureKind, capture_provenance};
+pub use autoeq_core::{ MeasurementProvenance, ProvenanceCaptureKind, capture_handoff, capture_provenance, };
 pub use autoeq_workflow::qa_println;
 pub use math_audio_iir_fir as iir;
 pub use math_audio_optimisation as de;

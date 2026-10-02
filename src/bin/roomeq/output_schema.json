@@ -10521,6 +10521,13 @@
             "null"
           ]
         },
+        "capture_handoff_file": {
+          "description": "Required acquisition inventory for newly exported capture configurations.\nThe canonical filename is `capture-handoff.json`; missing or changed\ninventories are refused before correction. Absent on legacy imports.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "channel_names": {
           "description": "Channel names in order (e.g. [\"L\", \"R\", \"C\", \"LFE\", \"SL\", \"SR\"])",
           "items": {

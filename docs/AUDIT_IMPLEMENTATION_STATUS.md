@@ -28,9 +28,9 @@ cannot replace them.
 | A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
 | A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
 | A13 rendering/accessibility | Deferred | Begin after backend work |
-| A14 perceptual/listening evidence | Partial | Independent references/domain registry and relevant blinded listening evidence |
+| A14 perceptual/listening evidence | Partial | Exact stimulus-hash disjointness and metric validity limits committed; independent references/domain registry and relevant blinded listening evidence remain |
 | A15 spatial/adaptive studies | Partial | Typed held-out evidence and recommendation constraints committed; independent measured studies and adaptive outcomes remain |
-| A16 persistent regression corpus | In implementation | Numerical runner foundation first; capability mapping, held-out cases, historical canaries and release evidence remain |
+| A16 persistent regression corpus | Partial | Four typed public workflow contracts and CI retention committed; independent measured evidence, historical canary acceptance and release evidence remain |
 
 ## Verified backend changes
 
@@ -816,3 +816,42 @@ tested isolated commit `b43b0c97`. This check uses a local subset parser, not
 the Equalizer APO consumer or a running device. Matching shelf mapping and
 consumer/reference comparisons remain acceptance work.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-shelf-evidence`.
+
+
+## Public workflow regression contracts
+
+Commit `e5463bd9` integrates four typed public workflow checks for CTC, DBA,
+supporting filters and multiway crossover behavior. All four inputs are
+`synthetic_analytic`. The release runner exercises four positive cases and four
+refusal cases, binds artifact and source identities, and persists failures.
+Observed result labels are checked independently against the case declaration.
+CI clears the two owned result files before running and retains available
+evidence even when the gate fails.
+
+The matched repeat passes the release runner, four QA-contract tests, eight
+registry-filter tests, scoped strict Clippy, both CI YAML parses and parity
+checks. An independent check rehashed 11,392 paths in the six resolved source
+repositories. Paired release numerical references RE23 (CTC) and RE18 (DBA)
+also pass. These checks establish software and analytic numerical contracts;
+they do not establish measured seat performance, listening outcomes or a
+successful remote CI artifact upload. Gitea server version alone does not
+identify its runner version or action-patching configuration.
+Evidence: `/private/tmp/autoeq-a16-public-workflows-evidence-20261002/reproducible-repeat-reviewed`
+and its sibling `independent-goldens-reviewed` directory. Earlier packages
+classified as diagnostic/unverified do not supply matching-source acceptance.
+
+## Perceptual metric scope and programme independence
+
+Commit `ae9217b5` rejects a programme holdout when its identity or declared
+rendered-stimulus hash overlaps the tuning set. A renamed copy now refuses.
+Distinct declared hashes pass this exact-overlap gate; related excerpts or
+transforms still require independent source-lineage review.
+
+The negative control fails before the fix. The final quality library suite
+passes 238 tests with one existing ignored test, and scoped strict Clippy,
+rustfmt and diff checks pass with matching source/dependency inventories.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a14-holdout-evidence-20261002`.
+Commit `cd31451a` documents each implemented metric's validation limits in
+[PERCEPTUAL_METRIC_STATUS.md](PERCEPTUAL_METRIC_STATUS.md). No approved
+independent reference entry or listening result was added. The evidence applies
+to the tested source slice; it does not relabel the earlier full workspace run.

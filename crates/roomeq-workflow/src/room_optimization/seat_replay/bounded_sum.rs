@@ -82,6 +82,10 @@ fn measured_rolloff_db_per_oct(
 
 /// Apply identical electrical processing to measured transfer and an explicit
 /// acoustic magnitude bound. The bound supplies no measured or invented phase.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Replay binds a named output and seat to declared support and its processing closure"
+)]
 pub(super) fn process_branch(
     output: &str,
     raw: &Curve,
@@ -235,9 +239,11 @@ pub(super) fn sum_branches(branches: &[Branch], low_limit: f64, high_limit: f64)
         .fold(f64::INFINITY, f64::min);
     // The test-only convenience wrapper uses zero as "native support";
     // production replay always supplies a positive configured lower bound.
-    let low = (low_limit.is_finite() && low_limit > 0.0)
-        .then_some(low_limit)
-        .unwrap_or(measured_low);
+    let low = if low_limit.is_finite() && low_limit > 0.0 {
+        low_limit
+    } else {
+        measured_low
+    };
     // A missing low-frequency branch cannot redefine the assessment band.
     // Upper-band omission bounds do not establish a lower-band acoustic bound.
     for branch in branches {
@@ -273,9 +279,11 @@ pub(super) fn sum_branches(branches: &[Branch], low_limit: f64, high_limit: f64)
         .fold(0.0, f64::max);
     // Likewise, an infinite upper limit means native support for the small
     // curve-summing helper. Real replay passes a finite observation limit.
-    let high = (high_limit.is_finite() && high_limit > 0.0)
-        .then_some(high_limit)
-        .unwrap_or(measured_high);
+    let high = if high_limit.is_finite() && high_limit > 0.0 {
+        high_limit
+    } else {
+        measured_high
+    };
     let mut grid: Vec<_> = branches
         .iter()
         .flat_map(|b| b.measured.freq.iter().copied())

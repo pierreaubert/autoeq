@@ -434,6 +434,7 @@ pub fn load_measurement_with_policy(
 /// - `Single` → returns `vec![curve]`
 /// - `Multiple` → loads all curves, interpolates to first curve's frequency grid
 /// - `InMemory` → returns `vec![curve]`
+///
 /// Disjoint declared support is refused because this return type has no mask;
 /// use [`load_source_individual_with_support`] for those sources.
 pub fn load_source_individual(source: &MeasurementSource) -> Result<Vec<Curve>, Box<dyn Error>> {

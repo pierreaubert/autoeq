@@ -513,9 +513,8 @@ mod report_t60_tests {
         let omega = 2.0 * std::f64::consts::PI * 2_000.0 / rate;
         let decay = (-1.0 / (0.001 * rate)).exp();
         for (start, gain) in [(480, 1.0), (720, 0.5)] {
-            for index in start..ir.len() {
-                let offset = index - start;
-                ir[index] += gain * decay.powi(offset as i32) * (offset as f64 * omega).cos();
+            for (offset, sample) in ir.iter_mut().skip(start).enumerate() {
+                *sample += gain * decay.powi(offset as i32) * (offset as f64 * omega).cos();
             }
         }
         let (_direct, events) = reflection_events(&ir, rate).expect("direct sound available");

@@ -14,15 +14,15 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Six Python numerical cases pass with source provenance; full Rust numerical run and all-package build/test evidence remain |
+| A00 QA/build coverage | Partial | Frozen Rust run passed 117/118 records and all 140 test targets; one reporting mismatch corrected, fresh 124-case and all-package evidence pending |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Bounded raw level/RTA and independent device selectors implemented; calibrated live units, distortion/linearity and device validation remain |
+| A04 measurement/live analysis | Partial | Machine-bound calibrated live PSD and band SPL API committed; CLI profile wiring, distortion/linearity and hardware validation remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts and verified APO profile export committed; reference comparisons and remaining renderer profiles pending; UI deferred |
 | A07 optimizer quality | Partial | Fixed-budget 180-run benchmark completed; broader representative cases and derived presets remain |
-| A08 recoverable jobs | Partial | Full DE continuation implemented and equivalence-tested locally; math revision published, portable AutoEQ pin and final integration gate in progress |
+| A08 recoverable jobs | Partial | Exact DE continuation and public dependency pin committed; focused production integration passes, broader cancellation/recovery and final matrix acceptance remain |
 | A09 realized correction | Partial | Production FIR and shared-grid validation implemented; full mode/rate/complex/time-domain witnesses remain |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
@@ -478,6 +478,54 @@ reset and full DE population, adaptation, archive, accounting and RNG checkpoint
 changes. Math tests pass 251/251 with one ignored; strict math Clippy passes.
 AutoEQ's local JSON save/load and interrupted/uninterrupted production witnesses
 match exactly, and changed target/budget identities refuse before objective
-scoring. The public dependency pin and final AutoEQ integration verification are
-in progress. Exact continuation is scoped to the same validated build/environment;
+scoring. AutoEQ commit `210592a` pins that exact public math revision, exposes
+separate exact-state flags and rejects incompatible modes. CLI tests pass 4/4,
+the workflow persisted JSON split/resume witness passes, and strict optimizer,
+workflow and CLI Clippy passes. Stale executable/source identities also refuse
+before objective scoring or saving another barrier; CLI diagnostic scoring occurs
+after solver acceptance. Exact continuation is scoped to the same validated build/environment;
 these results make no cross-machine equivalence promise.
+
+
+## Calibrated live analysis API
+
+Capture commit `257f2fc` adds immutable bounded calibration profiles with retained
+curve identities, explicit response convention/reference frequency and optional
+unweighted RMS pressure anchors. Device, host API, channel, rate, sample format,
+gain attestation and microphone orientation are caller parameters. No microphone
+calibration is inferred from a device name or fixture directory.
+
+A planned symmetric-Hann one-sided PSD includes DC and Nyquist and integrates
+bin energy over the requested band. Relative response calibration applies once;
+absolute pressure requires the RMS anchor. Raw levels retain their dBFS meaning.
+Frame and summary version 2 record calibration identities and withholding reasons.
+Mismatch, missing response support, gaps, clipping and nonfinite input withhold
+calibrated values; mismatch preserves the requested band and its typed reason.
+Digital silence has zero pressure and unknown logarithmic SPL.
+
+Independent tone, Parseval, endpoint/band integration, calibration sign/reference,
+anchor amplitude, mismatch and invalid-frame witnesses pass 24/24. Strict capture
+library Clippy passes. Ignored lockfile bytes were restored. CLI parameter wiring
+and hardware validation remain; no audio was emitted or recorded.
+
+## Frozen numerical gate review
+
+The first headless-compatible frozen source run passed all 140 Rust test targets,
+117/118 required Rust numerical records, and 6/6 Python records. The sole failed
+record was RE16: its test correctly allowed a 0.0219803584 quadrature-to-analytic
+approximation gap under a separate 0.1 budget, then incorrectly reported that gap
+under the formula-agreement tolerance of 2e-7.
+
+Commit `9e8d2d9` retains the approximation diagnostic and its unchanged assertion
+separately, includes the constant-field transcription error, and reports observed
+relative errors. The corrected case reports maximum absolute formula error
+6.90609229e-8 and passes. Corrupting either the analytic reference or the midpoint
+reference still fails its respective original guard without emitting a passing
+record. Strict case Clippy passes; golden files and every tolerance are unchanged.
+A fresh matched 124-case gate is required for final numerical acceptance.
+
+Commit `dd17164` makes both report distribution recipes read Cargo’s resolved
+target directory before building and binding the generated WASM. Actual Just
+execution with temporary tool witnesses verifies default and custom paths with
+spaces for both recipes, copied output identities and refusal on metadata failure.
+This is recipe verification; it does not claim a fresh WASM distribution build.

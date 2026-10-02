@@ -985,8 +985,8 @@ metadata, Git/local dependencies, registry package bytes and toolchain records
 match before/after. Independent rehashing covers all six Git/local repositories
 (11,392 entries). The six integrated files match tested commit `4097f103`.
 This is a local parser and source-derived numerical check; the APO consumer
-and device were not run. A separate rounded-parameter escape from the original
-optimizer envelope remains under investigation.
+and device were not run. The rounded-parameter escape from the original
+optimizer envelope is corrected by the subsequent slice below.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-apo-roundtrip-evidence-20261002/final-gate-run-manifest.json`.
 
 ## Native PCM witness for the retained bass-bus graph
@@ -1023,3 +1023,31 @@ evidence directory. Final command records are reconstructed from tool-call
 arguments and observed exits; process-start argv/time was not instrumented.
 Evidence: `/private/tmp/autoeq-a09-native-pcm/run-manifest.json`, SHA-256
 `d198996bf6d8955b0431561b427b987b9c8532d8e557bab6a93195b834f3204a`.
+
+## Profiled export preserves the optimizer envelope
+
+Commit `613aeb57` retains the actual per-run parameter bounds, global/local Q
+constraints and objective gain envelopes. Profiled APO export validates both
+the source candidate and rounded emitted filters against that snapshot.
+Device limits remain a separate check. A device may permit Q=1.24 while the
+optimizer caps Q at 1.235; that rounded output now refuses before replacing
+the preset or sidecar. Frequency, gain, local-Q and composite-envelope escapes,
+reordered filters and malformed snapshots also refuse. Only inverse-logarithm
+floating-point noise receives an explicit 16-epsilon frequency allowance;
+serialization has no extra Q or gain tolerance. The verified fixed-slope shelf
+mapping retains source Q for optimizer validation and records emitted Q as
+absent. Product provenance schema 4 records the effective bounds and grid hash.
+
+Frozen CLI library tests pass 75/75, workflow tests 48/48 and actual capability
+subprocess tests 2/2; strict scoped CLI/workflow Clippy passes. Source,
+lock/config, Cargo metadata, toolchain and all resolved dependency snapshots
+match before/after. Root independently rehashed six Git/local trees (11,390
+ordinary files and four symlinks with resolved contents) and verified raw
+gate/script hashes. The package additionally hashes 618 non-Git package roots;
+root did not independently rehash those registry bytes. The five integrated
+files match tested commit `c0860988`. This is scoped export acceptance; wider
+speaker/headphone reference and hardware consumer checks remain open.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-effective-envelope-evidence-20261002/final-gate-run-manifest.json`,
+SHA-256 `5d1db9d5f1d342cabd891f53301856fcf88d53a5511dff24dc415615c66007d5`;
+root review: `/Users/pierre/a06-envelope-independent-review.json`.

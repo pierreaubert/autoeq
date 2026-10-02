@@ -11,6 +11,8 @@ import json
 import sys
 from pathlib import Path
 
+from qa_support.metrics import maximum_error_metrics, require_finite_numbers
+
 CASE_ID = "autoeq-qa.py02-band-statistics.v1"
 TOL_ABS = 1e-9
 
@@ -34,18 +36,32 @@ def main():
     ref = json.loads(GOLDEN.read_text())
     if ref.get("case") != CASE_ID or ref.get("schema_version") != 1:
         fail("golden case identity mismatch")
+    if len(ref["grid_hz"]) != len(ref["spl_db"]):
+        fail("golden grid/SPL length mismatch")
+    try:
+        require_finite_numbers(
+            [*ref["grid_hz"], *ref["spl_db"], ref["band_lo_hz"],
+             ref["band_hi_hz"], ref["band_mean_db"]],
+            "golden band-statistics data",
+        )
+    except ValueError as error:
+        fail(f"invalid finite golden input: {error}")
     got = band_mean(ref["grid_hz"], ref["spl_db"], ref["band_lo_hz"], ref["band_hi_hz"])
     expected = ref["band_mean_db"]
     if got is None:
         fail("band_mean returned None for a non-empty band")
-    err = abs(got - expected)
-    if err > TOL_ABS:
-        fail(f"band_mean={got:.12f} expected={expected:.12f} abs_err={err:.3e}")
+    try:
+        max_abs_err, max_rel_err = maximum_error_metrics([(got, expected)])
+    except ValueError as error:
+        fail(f"invalid finite comparison: {error}")
+    if max_abs_err > TOL_ABS:
+        fail(f"band_mean={got:.12f} expected={expected:.12f} abs_err={max_abs_err:.3e}")
     if band_mean(ref["grid_hz"], ref["spl_db"], 6000.0, 7000.0) is not None:
         fail("empty band must return None")
     print(json.dumps({
         "QA_RESULT": True, "case": CASE_ID, "pass": True,
-        "max_abs_error": err, "tolerance": TOL_ABS,
+        "max_abs_error": max_abs_err, "max_rel_error": max_rel_err,
+        "tolerance": TOL_ABS,
         "tolerance_kind": "abs", "provenance": "wolfram-engine-15.0.0",
     }))
 

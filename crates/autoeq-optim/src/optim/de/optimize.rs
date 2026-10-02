@@ -13,11 +13,36 @@ use crate::constraints::{
 };
 use crate::de::init_sobol::init_halton;
 use crate::de::{
-    CallbackAction, DEConfigBuilder, DEIntermediate, Init, Mutation, ParallelConfig, Strategy,
-    differential_evolution,
+    CallbackAction, DECheckpoint, DEConfigBuilder, DEIntermediate, DifferentialEvolution, Init,
+    Mutation, ParallelConfig, Strategy, differential_evolution,
 };
 use crate::initial_guess::{SmartInitConfig, create_smart_initial_guesses};
 use ndarray::Array1;
+
+/// Persistence callback used by exact DE continuation.
+pub type DECheckpointSaveCallback =
+    Box<dyn FnMut(&DECheckpoint) -> std::result::Result<(), String> + Send>;
+
+/// Exact continuation inputs and generation-barrier persistence callback.
+pub struct DEExactContinuation {
+    /// Previously saved DE state; None starts a new exact-checkpointed run.
+    pub checkpoint: Option<DECheckpoint>,
+    /// Caller identity for the objective and opaque callback semantics.
+    pub run_identity: String,
+    /// Saves each complete barrier state; errors stop optimization.
+    pub save_callback: DECheckpointSaveCallback,
+}
+
+impl std::fmt::Debug for DEExactContinuation {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DEExactContinuation")
+            .field("checkpoint", &self.checkpoint)
+            .field("run_identity", &self.run_identity)
+            .field("save_callback", &"<generation-barrier callback>")
+            .finish()
+    }
+}
 
 /// Optimize filter parameters using AutoEQ custom algorithms
 pub fn optimize_filters_autoeq(
@@ -79,7 +104,73 @@ pub fn optimize_filters_autoeq_with_callback_and_initial(
     _autoeq_name: &str,
     params: &crate::OptimParams,
     initial_candidate: Option<&[f64]>,
+    callback: Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send>,
+) -> Result<(String, f64), (String, f64)> {
+    optimize_filters_autoeq_with_callback_and_initial_and_exact(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        _autoeq_name,
+        params,
+        initial_candidate,
+        callback,
+        None,
+    )
+}
+
+/// AutoEQ DE optimization with safe-barrier exact-state persistence.
+///
+/// This mode is deliberately separate from candidate warm starts. It always
+/// uses a deterministic seed and validates the state against the full DE
+/// configuration before any objective evaluation.
+///
+/// # Errors
+///
+/// Returns an error tuple when bounds, configuration, or the saved checkpoint
+/// are invalid, the exact run identity differs, or checkpoint persistence
+/// fails. The error value is set to positive infinity.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the explicit optimizer inputs and exact-continuation control stay visible at the production boundary"
+)]
+pub fn optimize_filters_autoeq_with_exact_checkpoint(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    autoeq_name: &str,
+    params: &crate::OptimParams,
+    callback: Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send>,
+    continuation: DEExactContinuation,
+) -> Result<(String, f64), (String, f64)> {
+    optimize_filters_autoeq_with_callback_and_initial_and_exact(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        autoeq_name,
+        params,
+        None,
+        callback,
+        Some(continuation),
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the legacy typed callback plus optional initial candidate are preserved while exact state is additive"
+)]
+fn optimize_filters_autoeq_with_callback_and_initial_and_exact(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    _autoeq_name: &str,
+    params: &crate::OptimParams,
+    initial_candidate: Option<&[f64]>,
     mut callback: Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send>,
+    mut exact: Option<DEExactContinuation>,
 ) -> Result<(String, f64), (String, f64)> {
     let explicit_initial_candidate = if let Some(candidate) = initial_candidate {
         if candidate.is_empty()
@@ -403,8 +494,27 @@ pub fn optimize_filters_autoeq_with_callback_and_initial(
         );
     }
 
-    let result = differential_evolution(&base_objective_fn, &setup.bounds, config)
-        .map_err(|e| (format!("DE optimization failed: {:?}", e), f64::INFINITY))?;
+    if exact.is_some() && explicit_initial_candidate.is_some() {
+        return Err((
+            "exact DE continuation cannot be combined with a warm-start candidate".to_owned(),
+            f64::INFINITY,
+        ));
+    }
+    let result = if let Some(continuation) = exact.as_mut() {
+        let lower = Array1::from_iter(setup.bounds.iter().map(|(lower, _)| *lower));
+        let upper = Array1::from_iter(setup.bounds.iter().map(|(_, upper)| *upper));
+        let mut solver = DifferentialEvolution::new(&base_objective_fn, lower, upper)
+            .map_err(|error| (format!("DE initialization failed: {error}"), f64::INFINITY))?;
+        *solver.config_mut() = config;
+        solver.solve_with_checkpoint(
+            continuation.checkpoint.as_ref(),
+            &continuation.run_identity,
+            Some(&mut *continuation.save_callback),
+        )
+    } else {
+        differential_evolution(&base_objective_fn, &setup.bounds, config)
+    }
+    .map_err(|error| (format!("DE optimization failed: {error:?}"), f64::INFINITY))?;
     process_de_results(x, result, "AutoDE")
 }
 

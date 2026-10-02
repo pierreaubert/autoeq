@@ -123,7 +123,7 @@ wide = "0.6.1"
 # must resolve from public sources; local checkouts only via [patch]).
 math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
 math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-optimisation = { git = "https://github.com/pierreaubert/math-audio", rev = "acdea21f853629a13b7f88f8baef51eb0394754c", version = "0.5" }
 math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
 sofa-reader = "0.2"
 

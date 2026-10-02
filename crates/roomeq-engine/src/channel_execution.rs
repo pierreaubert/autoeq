@@ -199,6 +199,7 @@ pub fn execute_prepared_channel(
                     curve: &execution.preprocessed.curve_for_optim,
                     target: &execution.target,
                     preference_filters: &preference_filters,
+                    excursion_filters: &execution.preprocessed.excursion_filters,
                     mixed_config,
                     optimizer: &execution.optimizer,
                     eq_resources,
@@ -489,7 +490,7 @@ fn warn_if_optimizer_bounds_exceed_data(
 #[cfg(test)]
 mod tests {
     use ndarray::Array1;
-    use roomeq_model::SubOptimizerConfig;
+    use roomeq_model::{ExcursionProtectionConfig, FirConfig, MixedModeConfig, SubOptimizerConfig};
 
     use super::*;
 
@@ -855,6 +856,170 @@ mod tests {
         let bounded =
             build_clamped_optimizer("LFE", &config, &curve, &curve, 20.0, 130.0, None, false);
         assert_eq!(bounded.max_freq, 130.0);
+    }
+
+    #[test]
+    fn hybrid_mixed_crossover_serializes_and_realizes_excursion_protection() {
+        const SAMPLE_RATE: f64 = 48_000.0;
+        const IR_FILE: &str = "hybrid_low_band.wav";
+
+        let raw_curve = Curve {
+            freq: Array1::logspace(10.0, 20.0_f64.log10(), 1_600.0_f64.log10(), 161),
+            spl: Array1::from_elem(161, 80.0),
+            phase: Some(Array1::zeros(161)),
+            ..Curve::default()
+        };
+        let prepared =
+            PreparedChannelInput::from_measurements(crate::PreparedChannelMeasurements::new(
+                raw_curve.clone(),
+                vec![raw_curve.clone()],
+                false,
+            ));
+        let mut config = RoomConfig::default();
+        config.optimizer.processing_mode = ProcessingMode::Hybrid;
+        config.optimizer.min_freq = 20.0;
+        config.optimizer.max_freq = 1_600.0;
+        config.optimizer.num_filters = 1;
+        config.optimizer.max_iter = 4;
+        config.optimizer.population = 6;
+        config.optimizer.refine = false;
+        config.optimizer.seed = Some(7);
+        config.optimizer.parallel_threads = Some(1);
+        config.optimizer.fir = Some(FirConfig {
+            taps: 64,
+            phase: "linear".into(),
+            ..FirConfig::default()
+        });
+        config.optimizer.mixed_config = Some(MixedModeConfig {
+            crossover_freq: 500.0,
+            fir_band: "low".into(),
+            ..MixedModeConfig::default()
+        });
+        config.optimizer.excursion_protection = Some(ExcursionProtectionConfig {
+            enabled: true,
+            auto_detect_f3: false,
+            manual_f3_hz: Some(60.0),
+            ..ExcursionProtectionConfig::default()
+        });
+
+        let execution =
+            prepare_channel_execution("left", &prepared, &config, SAMPLE_RATE, None).unwrap();
+        assert!(
+            !execution.preprocessed.excursion_filters.is_empty(),
+            "fixture must generate an excursion-protection filter"
+        );
+        let result = execute_prepared_channel(
+            "left",
+            &prepared,
+            &config,
+            SAMPLE_RATE,
+            &execution,
+            prepared.eq_resources(),
+            Some(ConvolutionSidecarReference::new(IR_FILE).unwrap()),
+            None,
+        )
+        .unwrap();
+        let taps = result.fir_coeffs.clone().expect("Hybrid emits FIR taps");
+        let serialized_chain: roomeq_model::ChannelDspChain = serde_json::from_slice(
+            &serde_json::to_vec(&result.channel).expect("serialize public result chain"),
+        )
+        .expect("deserialize public result chain");
+        let protection_index = serialized_chain
+            .plugins
+            .iter()
+            .position(|plugin| {
+                plugin.plugin_type == "eq" && plugin.parameters["label"] == "excursion_protection"
+            })
+            .expect("serialized Hybrid chain includes excursion protection");
+        let crossover_index = serialized_chain
+            .plugins
+            .iter()
+            .position(|plugin| plugin.plugin_type == "band_split")
+            .expect("serialized Hybrid chain includes its crossover");
+        assert!(
+            protection_index < crossover_index,
+            "excursion protection must precede the crossover and correction branches"
+        );
+
+        struct InlineIr(Vec<f64>);
+        impl crate::dsp_realization::ConvolutionIrProvider for InlineIr {
+            fn taps(&mut self, ir_file: &str, sample_rate: u32) -> autoeq_core::Result<&[f64]> {
+                assert_eq!(ir_file, IR_FILE);
+                assert_eq!(sample_rate, SAMPLE_RATE as u32);
+                Ok(&self.0)
+            }
+        }
+
+        let frequencies = ndarray::array![20.0, 30.0, 80.0, 300.0, 1_000.0];
+        let mut protected_ir = InlineIr(taps.clone());
+        let protected_response = crate::dsp_realization::RealizedDsp::new(
+            &serialized_chain,
+            SAMPLE_RATE,
+            &mut protected_ir,
+        )
+        .unwrap()
+        .complex_response(&frequencies)
+        .unwrap();
+
+        let mut unprotected_chain = serialized_chain.clone();
+        unprotected_chain
+            .plugins
+            .retain(|plugin| plugin.parameters["label"] != "excursion_protection");
+        let mut unprotected_ir = InlineIr(taps);
+        let unprotected_response = crate::dsp_realization::RealizedDsp::new(
+            &unprotected_chain,
+            SAMPLE_RATE,
+            &mut unprotected_ir,
+        )
+        .unwrap()
+        .complex_response(&frequencies)
+        .unwrap();
+        let expected_protection = autoeq_core::response::compute_peq_complex_response(
+            &execution.preprocessed.excursion_filters,
+            &frequencies,
+            SAMPLE_RATE,
+        );
+        for ((protected, unprotected), expected) in protected_response
+            .iter()
+            .zip(&unprotected_response)
+            .zip(&expected_protection)
+        {
+            let ratio = protected / unprotected;
+            assert!(
+                (ratio - expected).norm() < 1e-8,
+                "serialized full-chain response must include the exact pre-correction filter once"
+            );
+        }
+        assert!(
+            (protected_response[0] / unprotected_response[0]).norm() < 0.25,
+            "the serialized protection must attenuate the measured 20 Hz transfer"
+        );
+
+        let mut replay_ir = InlineIr(result.fir_coeffs.clone().unwrap());
+        let replayed_curve = crate::dsp_realization::RealizedDsp::new(
+            &serialized_chain,
+            SAMPLE_RATE,
+            &mut replay_ir,
+        )
+        .unwrap()
+        .apply_to_curve(&raw_curve)
+        .unwrap();
+        assert_eq!(replayed_curve.freq, result.raw_post_eq_curve.freq);
+        for (replayed, reported) in replayed_curve.spl.iter().zip(&result.raw_post_eq_curve.spl) {
+            assert!(
+                (replayed - reported).abs() < 1e-7,
+                "Hybrid's reported output must replay from the same raw input and serialized chain"
+            );
+        }
+        assert!(replayed_curve.spl.iter().all(|level| level.is_finite()));
+        assert!(
+            replayed_curve
+                .phase
+                .as_ref()
+                .unwrap()
+                .iter()
+                .all(|phase| phase.is_finite())
+        );
     }
 
     #[test]

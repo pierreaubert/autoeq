@@ -8,6 +8,12 @@ use std::error::Error;
 pub(super) type CandidateProgressCallback =
     Box<dyn FnMut(&autoeq::optim::setup::ProgressUpdate) -> Result<(), String> + Send + 'static>;
 
+struct OptimizationInvocationOptions {
+    progress_callback: Option<CandidateProgressCallback>,
+    direct_de_warm_start: bool,
+    exact_checkpoint: Option<autoeq::optim::setup::ExactDECheckpointOptions>,
+}
+
 /// Struct to hold optimization results including convergence status
 pub(super) struct OptimizationResult {
     pub(super) params: Vec<f64>,
@@ -55,9 +61,12 @@ pub(super) fn perform_optimization_with_candidate(
         objective_data,
         bounds,
         Some(initial_candidate),
-        None,
         &RealOptimizerBackend::new(),
-        true,
+        OptimizationInvocationOptions {
+            progress_callback: None,
+            direct_de_warm_start: true,
+            exact_checkpoint: None,
+        },
     )
 }
 
@@ -95,9 +104,40 @@ pub(super) fn perform_optimization_with_progress_callback(
         objective_data,
         bounds,
         initial_candidate,
-        Some(callback),
         &RealOptimizerBackend::new(),
-        true,
+        OptimizationInvocationOptions {
+            progress_callback: Some(callback),
+            direct_de_warm_start: true,
+            exact_checkpoint: None,
+        },
+    )
+}
+
+/// Run exact AutoEQ DE continuation with a full-state persistence callback.
+///
+/// This path defers baseline scoring until the math layer validates saved state.
+pub(super) fn perform_optimization_with_exact_checkpoint(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    continuation: autoeq::optim::setup::ExactDECheckpointOptions,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    if params.refine {
+        return Err(std::io::Error::other(
+            "exact DE continuation does not support a follow-up local-refinement stage",
+        )
+        .into());
+    }
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        None,
+        None,
+        &RealOptimizerBackend::new(),
+        OptimizationInvocationOptions {
+            progress_callback: None,
+            direct_de_warm_start: false,
+            exact_checkpoint: Some(continuation),
+        },
     )
 }
 
@@ -128,9 +168,12 @@ pub(super) fn perform_optimization_with_backend_and_candidate(
         objective_data,
         bounds,
         initial_candidate,
-        None,
         backend,
-        false,
+        OptimizationInvocationOptions {
+            progress_callback: None,
+            direct_de_warm_start: false,
+            exact_checkpoint: None,
+        },
     )
 }
 
@@ -139,10 +182,14 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
     objective_data: &ObjectiveData,
     bounds: Option<(Vec<f64>, Vec<f64>)>,
     initial_candidate: Option<&[f64]>,
-    progress_callback: Option<CandidateProgressCallback>,
     backend: &dyn OptimizerBackend,
-    direct_de_warm_start: bool,
+    options: OptimizationInvocationOptions,
 ) -> Result<OptimizationResult, Box<dyn Error>> {
+    let OptimizationInvocationOptions {
+        progress_callback,
+        direct_de_warm_start,
+        exact_checkpoint,
+    } = options;
     let resolved_backend = autoeq::optim::backend::resolve(&params.algo)
         .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
     if initial_candidate.is_some() && !resolved_backend.supports_initial_candidate() {
@@ -211,10 +258,35 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         autoeq::workflow::initial_guess(params, &lower_bounds, &upper_bounds)
     };
 
-    // Calculate pre-optimization objective value
-    let pre_objective = Some(optim::compute_fitness_penalties_ref(&x, objective_data));
+    // Exact-resume validation must happen before scoring the requested objective.
+    let pre_objective = if exact_checkpoint.is_some() {
+        None
+    } else {
+        Some(optim::compute_fitness_penalties_ref(&x, objective_data))
+    };
 
-    let global_result = if let Some(mut progress_callback) = progress_callback {
+    let global_result = if let Some(continuation) = exact_checkpoint {
+        if initial_candidate.is_some() {
+            return Err(std::io::Error::other(
+                "exact continuation cannot be combined with a warm-start candidate",
+            )
+            .into());
+        }
+        let mut global_params = params.clone();
+        global_params.refine = false;
+        let output =
+            autoeq::optim::setup::perform_optimization_with_run_descriptor_and_exact_checkpoint(
+                &global_params,
+                objective_data,
+                continuation,
+                Box::new(|_| autoeq::de::CallbackAction::Continue),
+            )?;
+        x.clone_from_slice(&output.parameters);
+        Ok((
+            output.descriptor.stopping_reason,
+            optim::compute_fitness_penalties_ref(&x, objective_data),
+        ))
+    } else if let Some(mut progress_callback) = progress_callback {
         use std::sync::{Arc, Mutex};
 
         let callback_error = Arc::new(Mutex::new(None));

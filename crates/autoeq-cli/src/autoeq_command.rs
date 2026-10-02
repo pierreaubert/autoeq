@@ -262,6 +262,62 @@ impl CliCheckpointIdentity {
             budget: self.budget,
         }
     }
+
+    fn exact_run_identity(&self) -> String {
+        let serialized = serde_json::to_string(&(
+            "autoeq-exact-de-state-v1",
+            &self.measurement,
+            &self.config,
+            &self.normalization,
+            self.sample_rate,
+            &self.lower_bounds,
+            &self.upper_bounds,
+            &self.algorithm,
+            &self.algorithm_version,
+            self.budget,
+            self.seed,
+            autoeq::de::DE_CHECKPOINT_IMPLEMENTATION_ID,
+        ))
+        .expect("exact checkpoint identity fields are serializable");
+        autoeq::workflow::resume::config_identity_digest([serialized.as_str()])
+    }
+}
+
+fn validate_checkpoint_mode(args: &autoeq::cli::Args) -> Result<()> {
+    let uses_exact_state = args.resume_exact.is_some() || args.checkpoint_exact.is_some();
+    if !uses_exact_state {
+        return Ok(());
+    }
+    if args.resume_state.is_some() || args.checkpoint_state.is_some() {
+        return Err(anyhow!(
+            "exact continuation flags cannot be combined with warm-start candidate flags"
+        ));
+    }
+    if args.refine {
+        return Err(anyhow!(
+            "exact DE continuation does not support a follow-up local-refinement stage"
+        ));
+    }
+    if args.seed.is_none() {
+        return Err(anyhow!("exact DE continuation requires an explicit --seed"));
+    }
+    if matches!(
+        args.loss,
+        autoeq::LossType::DriversFlat | autoeq::LossType::MultiSubFlat
+    ) {
+        return Err(anyhow!(
+            "exact DE continuation is not supported for multi-driver or multi-sub optimization"
+        ));
+    }
+    let backend = autoeq::optim::backend::resolve(&args.algo)
+        .ok_or_else(|| anyhow!("unknown optimizer backend: {}", args.algo))?;
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return Err(anyhow!(
+            "exact continuation is supported only for AutoEQ DE; resolved {}",
+            backend.name()
+        ));
+    }
+    Ok(())
 }
 
 fn cli_candidate_within_bounds(candidate: &[f64], lower: &[f64], upper: &[f64]) -> bool {
@@ -345,6 +401,7 @@ fn cli_checkpoint_callback(
 
 async fn run(args: autoeq::cli::Args) -> Result<()> {
     validate_product_config_dispatch(&args)?;
+    validate_checkpoint_mode(&args)?;
     // Check if this is multi-driver mode
     if args.loss == autoeq::LossType::DriversFlat {
         if args.resume_state.is_some() || args.checkpoint_state.is_some() {
@@ -405,18 +462,6 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     .map_err(|e| anyhow!("{}", e))
     .context("Failed to setup objective data")?;
 
-    // Compute pre-optimization metrics
-    let pre_metrics = prescore::compute_pre_optimization_metrics(
-        &args,
-        &objective_data,
-        use_cea,
-        &deviation_curve,
-        &spin_data,
-    )
-    .await
-    .map_err(|e| anyhow!("{}", e))
-    .context("Failed to compute pre-optimization metrics")?;
-
     // Checkpoint identity binds both the prepared measurement and all current
     // settings/data that can change search or correction behavior.
     let measurement_identity = input_curve.content_hash()?;
@@ -457,6 +502,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         seed: optim_params.seed,
     };
     let identity = checkpoint_identity.as_identity();
+    let exact_run_identity = checkpoint_identity.exact_run_identity();
     let warm_state = match args.resume_state.as_ref() {
         Some(path) => {
             let state = autoeq::workflow::resume::load_optimizer_state(path)
@@ -470,6 +516,23 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             state
                 .check_warm_start_compatible(&identity)
                 .map_err(|reason| anyhow!("warm-start checkpoint rejected: {reason}"))?;
+            Some(state)
+        }
+        None => None,
+    };
+    let exact_state = match args.resume_exact.as_ref() {
+        Some(path) => {
+            let state = autoeq::workflow::exact_resume::load_exact_optimizer_state(path)
+                .map_err(|error| anyhow!("failed to load exact DE checkpoint: {error}"))?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "requested exact DE checkpoint {} does not exist",
+                        path.display()
+                    )
+                })?;
+            state
+                .check_compatible(&exact_run_identity)
+                .map_err(|reason| anyhow!("exact DE checkpoint rejected: {reason}"))?;
             Some(state)
         }
         None => None,
@@ -554,7 +617,32 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     } else {
         info!("🚀 Starting optimization...");
     }
-    let opt_result = if let Some(path) = args
+    let exact_checkpoint_path = args
+        .checkpoint_exact
+        .clone()
+        .or_else(|| args.resume_exact.clone());
+    let opt_result = if let Some(path) = exact_checkpoint_path {
+        let identity_for_save = exact_run_identity.clone();
+        let checkpoint_for_resume = exact_state.as_ref().map(|state| state.checkpoint.clone());
+        let save_callback = Box::new(move |checkpoint: &autoeq::de::DECheckpoint| {
+            let state = autoeq::workflow::exact_resume::ExactOptimizerState::from_checkpoint(
+                checkpoint.clone(),
+                &identity_for_save,
+            )?;
+            autoeq::workflow::exact_resume::save_exact_optimizer_state(&state, &path)
+                .map_err(|error| error.to_string())
+        });
+        let continuation = autoeq::optim::setup::ExactDECheckpointOptions {
+            checkpoint: checkpoint_for_resume,
+            run_identity: exact_run_identity.clone(),
+            save_callback,
+        };
+        runopt::perform_optimization_with_exact_checkpoint(
+            &optim_params,
+            &objective_data,
+            continuation,
+        )
+    } else if let Some(path) = args
         .checkpoint_state
         .as_ref()
         .filter(|_| supports_candidate_progress)
@@ -631,6 +719,19 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             evidence.status
         );
     }
+
+    // Exact-state validation includes the executable build and solver state,
+    // so defer diagnostic scoring until optimization has returned successfully.
+    let pre_metrics = prescore::compute_pre_optimization_metrics(
+        &args,
+        &objective_data,
+        use_cea,
+        &deviation_curve,
+        &spin_data,
+    )
+    .await
+    .map_err(|e| anyhow!("{}", e))
+    .context("Failed to compute pre-optimization metrics")?;
 
     // Compute post-optimization metrics
     let post_metrics = postscore::compute_post_optimization_metrics(
@@ -980,7 +1081,7 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
 mod tests {
     use super::{
         cli_product_identity, max_finite_filter_transfer_delta_db, max_finite_response_delta_db,
-        validate_product_config_dispatch,
+        validate_checkpoint_mode, validate_product_config_dispatch,
     };
     use autoeq::cli::Args;
     use clap::Parser;
@@ -1119,6 +1220,56 @@ mod tests {
         assert_ne!(
             original,
             cli_product_identity(&request, &source, &target, &changed_compatibility).unwrap()
+        );
+    }
+
+    fn exact_cli_args() -> Args {
+        let mut args = Args::speaker_defaults();
+        args.algo = "autoeq:de".to_owned();
+        args.seed = Some(42);
+        args.resume_exact = Some(PathBuf::from("exact-state.json"));
+        args
+    }
+
+    #[test]
+    fn exact_cli_gate_refuses_incompatible_resume_modes() {
+        validate_checkpoint_mode(&exact_cli_args())
+            .expect("seeded AutoEQ DE exact resume is a supported mode");
+
+        let mut missing_seed = exact_cli_args();
+        missing_seed.seed = None;
+        assert!(
+            validate_checkpoint_mode(&missing_seed)
+                .expect_err("exact continuation requires an explicit seed")
+                .to_string()
+                .contains("explicit --seed")
+        );
+
+        let mut local_refine = exact_cli_args();
+        local_refine.refine = true;
+        assert!(
+            validate_checkpoint_mode(&local_refine)
+                .expect_err("exact continuation cannot include a refinement pass")
+                .to_string()
+                .contains("local-refinement")
+        );
+
+        let mut other_backend = exact_cli_args();
+        other_backend.algo = "autoeq:bo".to_owned();
+        assert!(
+            validate_checkpoint_mode(&other_backend)
+                .expect_err("only the AutoEQ DE backend has exact state")
+                .to_string()
+                .contains("AutoEQ DE")
+        );
+
+        let mut warm_candidate = exact_cli_args();
+        warm_candidate.resume_state = Some(PathBuf::from("candidate.json"));
+        assert!(
+            validate_checkpoint_mode(&warm_candidate)
+                .expect_err("exact continuation cannot be combined with candidate reuse")
+                .to_string()
+                .contains("warm-start candidate flags")
         );
     }
 

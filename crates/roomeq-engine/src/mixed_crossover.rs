@@ -24,6 +24,8 @@ pub struct MixedCrossoverRequest<'a> {
     pub curve: &'a Curve,
     pub target: &'a TargetContext,
     pub preference_filters: &'a [Biquad],
+    /// Excursion protection applied to the optimization curve and serialized before the crossover.
+    pub excursion_filters: &'a [Biquad],
     pub mixed_config: &'a MixedModeConfig,
     pub optimizer: &'a OptimizerConfig,
     pub eq_resources: &'a EqResources,
@@ -195,6 +197,12 @@ pub fn process_mixed_crossover(
         fir_bulk_delay_ms,
         None,
     );
+    if !request.excursion_filters.is_empty() {
+        channel.plugins.insert(
+            0,
+            output::create_labeled_eq_plugin(request.excursion_filters, "excursion_protection"),
+        );
+    }
     // Kirkeby centers its inverse IFFT at taps/2, regardless of requested
     // excess phase. Preserve that reference for correction-strength blending.
     if let Some(fir) = fir_config.fir.as_ref()
@@ -482,6 +490,7 @@ mod tests {
                 curve: &curve,
                 target: &target,
                 preference_filters: &[],
+                excursion_filters: &[],
                 mixed_config: &mixed_config,
                 optimizer: &optimizer,
                 eq_resources: &EqResources::default(),
@@ -576,6 +585,7 @@ mod tests {
             curve: &curve,
             target: &target,
             preference_filters: &[],
+            excursion_filters: &[],
             mixed_config: &mixed_config,
             optimizer: &optimizer,
             eq_resources: &EqResources::default(),

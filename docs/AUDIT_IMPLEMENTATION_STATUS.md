@@ -586,8 +586,8 @@ only the 17 package source identities. Locked offline metadata and both native
 report library checks pass in an isolated checkout with no GPUI sibling.
 The GPUI WASM library check passes with the build-only
 `RUSTC_BOOTSTRAP=wasm_thread` override; plain stable rejects that upstream
-dependency's nightly feature. A fresh default-toolchain WASM distribution and
-registry package preparation remain open. The local math DSP patch remains a
+dependency's nightly feature. A subsequent isolated stable/nightly distribution build passes as recorded
+below; browser behavior and registry package preparation remain open. The local math DSP patch remains a
 separate clean-installation prerequisite.
 
 A fresh detached `210592a` canary preserves its source, lock, dependency and
@@ -730,3 +730,28 @@ and strict library/test Clippy passes. AutoEQ measured-IR consumer tests pass
 reviewed math checkout. AutoEQ source and lock remain unchanged. Public
 publication and subsequent removal of the local dependency patch remain open.
 Consumer evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/a00-wavelet-consumer-20261002-53819ed`.
+
+
+## Actual report distribution builds
+
+An isolated checkout at `e988fc2` runs both existing distribution recipes:
+`just report-dist` on stable Rust 1.99.0 and `just report-dist-gpui` on installed
+nightly 1.101.0 (2026-09-30). The matching wasm-bindgen CLI 0.2.128 is installed
+in a temporary tool directory; the user's existing CLI is preserved. Both
+recipes pass, and their copied distribution bytes equal the generated bindings.
+JavaScript syntax checks pass and Node validates both WASM module structures.
+The report package inventory includes all four JavaScript/WASM distribution
+files. These checks do not execute browser rendering or fallback behavior.
+
+Before/after dependency inventories, locked metadata, Cargo configuration and
+lock bytes match. The isolated source checkout changes only recipe-generated
+package/distribution assets. The public GPUI pin is `d52e2bc`; workspace metadata
+still includes the recorded local math DSP/IIR checkout and its pre-existing
+wavelet edit. Clean public installation remains a separate gate.
+
+Generated assets and logs are retained for review at
+`/Volumes/home_tmp/tmp/autoeq-audit-evidence/report-dist-20261002-e988fc2`.
+They have not been copied into the main implementation branch. The generated
+2D module is 637,238 bytes and the GPUI module is 10,154,052 bytes; these are
+file sizes, not runtime memory or performance measurements. Application UI
+implementation remains deferred.

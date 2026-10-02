@@ -330,6 +330,7 @@ mod tests {
                 prepared: &prepared,
                 compatibility: &prepared.target_compatibility,
                 max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
             },
         )
         .await
@@ -371,7 +372,30 @@ mod tests {
         assert!(
             autoeq::workflow::verify_apo_preset_binding(&edited_preset, &sidecar_bytes).is_err()
         );
+
+        let shelf = Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 0.71, 3.0);
+        let shelf_refusal = save_profiled_apo_to_file(
+            &args,
+            &[shelf],
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("direct profile save must refuse shelf semantic mismatch before writing");
+        assert!(shelf_refusal.to_string().contains("fixed-slope shelves"));
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+
         let provenance: serde_json::Value = serde_json::from_slice(&sidecar_bytes).unwrap();
+        assert_eq!(provenance["schema_version"], 2);
         assert_eq!(provenance["target_compatibility"]["status"], "unknown");
         assert_eq!(provenance["apo_serialization"]["realized_preamp_db"], -3.6);
         assert_eq!(
@@ -381,10 +405,50 @@ mod tests {
         assert_eq!(provenance["realized_filters"][0]["frequency_hz"], 500.0);
         assert_eq!(provenance["realized_filters"][0]["q"], 1.24);
         assert_eq!(provenance["realized_filters"][0]["gain_db"], -3.46);
+        assert_eq!(
+            provenance["apo_serialization"]["emitted_text_verification"]["sample_rate_hz"],
+            48_000.0
+        );
+        assert_eq!(
+            provenance["apo_serialization"]["emitted_text_verification"]["max_transfer_delta_db"],
+            0.0
+        );
+        assert_eq!(
+            provenance["apo_serialization"]["emitted_text_verification"]["channel_scope"],
+            "inherited_from_including_equalizer_apo_configuration"
+        );
+        assert_eq!(
+            provenance["apo_serialization"]["emitted_text_verification"]["consumer_parser_used"],
+            false
+        );
         assert!(!temp_dir.path().join("iir-autoeq-flat.tmreq").exists());
         assert!(!temp_dir.path().join("iir-autoeq-flat.aupreset").exists());
 
         assert_eq!(prepared.source_record.curve.freq.len(), 4);
+
+        // Profile fields become APO comments. An embedded command must be
+        // rejected before either previously published file changes.
+        let mut injected_request = request.clone();
+        injected_request.device_profile.id = "profile\nInclude: injected.txt".into();
+        let error = save_profiled_apo_to_file(
+            &args,
+            &realized_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &injected_request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("comment-injected APO commands cannot be verified or published");
+        assert!(error.to_string().contains("unsupported command"));
+        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
     }
 
     #[tokio::test]

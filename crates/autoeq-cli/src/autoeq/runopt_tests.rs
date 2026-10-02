@@ -2,7 +2,7 @@
 mod tests {
     use crate::autoeq_command::runopt::{
         perform_optimization_with_backend, perform_optimization_with_backend_and_candidate,
-        perform_optimization_with_candidate,
+        perform_optimization_with_candidate, perform_optimization_with_exact_checkpoint,
     };
     use autoeq::OptimParams;
     use autoeq::PeqModel;
@@ -420,5 +420,202 @@ mod tests {
         assert_eq!(result.post_objective, Some(1.0));
         assert!(!result.optimizer_evidence[0].selected_for_output);
         assert!(result.optimizer_evidence[1].selected_for_output);
+    }
+
+    #[test]
+    fn exact_resume_identity_rejection_precedes_any_objective_score() {
+        let mut params = test_params(false);
+        params.algo = "autoeq:de".to_owned();
+        params.population = 8;
+        params.maxeval = 1_000;
+        params.seed = Some(12_345);
+        params.no_parallel = true;
+        params.parallel_threads = 1;
+        params.refine = false;
+
+        let source_objective = test_objective_data();
+        let checkpoint = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let checkpoint_for_callback = std::sync::Arc::clone(&checkpoint);
+        let save_and_stop: autoeq::optim::de::DECheckpointSaveCallback = Box::new(move |state| {
+            if state.generation >= 1 && state.terminal.is_none() {
+                *checkpoint_for_callback
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(state.clone());
+                return Err("test interruption after generation barrier".to_owned());
+            }
+            Ok(())
+        });
+        let _ = autoeq::optim::setup::perform_optimization_with_run_descriptor_and_exact_checkpoint(
+            &params,
+            &source_objective,
+            autoeq::optim::setup::ExactDECheckpointOptions {
+                checkpoint: None,
+                run_identity: "saved-measurement-v1".to_owned(),
+                save_callback: save_and_stop,
+            },
+            Box::new(|_| autoeq::de::CallbackAction::Continue),
+        );
+        let checkpoint = checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .expect("test solver reached and saved a generation barrier");
+
+        let requested_objective = test_objective_data();
+        let error = match perform_optimization_with_exact_checkpoint(
+            &params,
+            &requested_objective,
+            autoeq::optim::setup::ExactDECheckpointOptions {
+                checkpoint: Some(checkpoint),
+                run_identity: "changed-measurement-v1".to_owned(),
+                save_callback: Box::new(|_| Ok(())),
+            },
+        ) {
+            Ok(_) => panic!("changed identity must reject saved exact state"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("identity"));
+        assert!(
+            requested_objective.prepared.get().is_none(),
+            "CLI exact-resume path must reject stale identity before scoring"
+        );
+    }
+
+    #[test]
+    fn exact_resume_rejects_same_outer_identity_with_stale_math_build_or_source_before_scoring() {
+        let mut params = test_params(false);
+        params.algo = "autoeq:de".to_owned();
+        params.population = 8;
+        params.maxeval = 1_000;
+        params.seed = Some(12_345);
+        params.no_parallel = true;
+        params.parallel_threads = 1;
+        params.refine = false;
+
+        let source_objective = test_objective_data();
+        let captured_checkpoint = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let checkpoint_for_callback = std::sync::Arc::clone(&captured_checkpoint);
+        let stop_after_barrier: autoeq::optim::de::DECheckpointSaveCallback =
+            Box::new(move |checkpoint| {
+                if checkpoint.generation >= 1 && checkpoint.terminal.is_none() {
+                    *checkpoint_for_callback
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                        Some(checkpoint.clone());
+                    return Err("intentional first-run stop".to_owned());
+                }
+                Ok(())
+            });
+        let _ = autoeq::optim::setup::perform_optimization_with_run_descriptor_and_exact_checkpoint(
+            &params,
+            &source_objective,
+            autoeq::optim::setup::ExactDECheckpointOptions {
+                checkpoint: None,
+                run_identity: "same-run-identity".to_owned(),
+                save_callback: stop_after_barrier,
+            },
+            Box::new(|_| autoeq::de::CallbackAction::Continue),
+        );
+        let checkpoint = captured_checkpoint
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .expect("first run saved a complete DE barrier");
+
+        let temporary = tempfile::tempdir().expect("temporary exact-state directory");
+        for (identity_field, expected_error) in [
+            ("build", "executable build mismatch"),
+            ("source", "solver source mismatch"),
+        ] {
+            let mut stale_checkpoint = checkpoint.clone();
+            if identity_field == "build" {
+                stale_checkpoint.build_identity.push_str("-stale");
+            } else {
+                stale_checkpoint.solver_source_identity.push_str("-stale");
+            }
+            let state = autoeq::workflow::exact_resume::ExactOptimizerState::from_checkpoint(
+                stale_checkpoint,
+                "same-run-identity",
+            )
+            .expect("outer state keeps the same run identity");
+            let path = temporary.path().join(format!("{identity_field}.json"));
+            autoeq::workflow::exact_resume::save_exact_optimizer_state(&state, &path)
+                .expect("persist stale math identity fixture");
+            let loaded = autoeq::workflow::exact_resume::load_exact_optimizer_state(&path)
+                .expect("load persisted exact state")
+                .expect("exact state exists");
+            loaded
+                .check_compatible("same-run-identity")
+                .expect("outer measurement/config identity matches");
+
+            let requested_objective = test_objective_data();
+            let save_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let save_called_by_callback = std::sync::Arc::clone(&save_called);
+            let error = match perform_optimization_with_exact_checkpoint(
+                &params,
+                &requested_objective,
+                autoeq::optim::setup::ExactDECheckpointOptions {
+                    checkpoint: Some(loaded.checkpoint),
+                    run_identity: "same-run-identity".to_owned(),
+                    save_callback: Box::new(move |_| {
+                        save_called_by_callback.store(true, std::sync::atomic::Ordering::SeqCst);
+                        Ok(())
+                    }),
+                },
+            ) {
+                Ok(_) => panic!("stale math identity must reject exact resume"),
+                Err(error) => error,
+            };
+            assert!(error.to_string().contains(expected_error), "{error}");
+            assert!(
+                requested_objective.prepared.get().is_none(),
+                "math checkpoint rejection must happen before objective scoring"
+            );
+            assert!(
+                !save_called.load(std::sync::atomic::Ordering::SeqCst),
+                "math checkpoint rejection must happen before persisting another barrier"
+            );
+        }
+    }
+
+    #[test]
+    fn exact_resume_rejects_refinement_before_scoring_or_checkpoint_save() {
+        let mut params = test_params(false);
+        params.algo = "autoeq:de".to_owned();
+        params.population = 8;
+        params.maxeval = 1_000;
+        params.seed = Some(12_345);
+        params.no_parallel = true;
+        params.parallel_threads = 1;
+        params.refine = true;
+        let objective = test_objective_data();
+        let save_called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let save_called_by_callback = std::sync::Arc::clone(&save_called);
+
+        let error = match perform_optimization_with_exact_checkpoint(
+            &params,
+            &objective,
+            autoeq::optim::setup::ExactDECheckpointOptions {
+                checkpoint: None,
+                run_identity: "exact-run".to_owned(),
+                save_callback: Box::new(move |_| {
+                    save_called_by_callback.store(true, std::sync::atomic::Ordering::SeqCst);
+                    Ok(())
+                }),
+            },
+        ) {
+            Ok(_) => panic!("exact continuation must reject local refinement"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("local-refinement"));
+        assert!(
+            objective.prepared.get().is_none(),
+            "refinement rejection must happen before objective scoring"
+        );
+        assert!(
+            !save_called.load(std::sync::atomic::Ordering::SeqCst),
+            "refinement rejection must happen before checkpoint persistence"
+        );
     }
 }

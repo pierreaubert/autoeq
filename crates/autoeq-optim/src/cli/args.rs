@@ -99,6 +99,16 @@ pub struct Args {
     #[arg(long, value_name = "PATH")]
     pub checkpoint_state: Option<PathBuf>,
 
+    /// Resume the complete seeded AutoEQ DE optimizer state from this file.
+    /// Exact continuation requires the same measurement, config, seed, executable,
+    /// and numeric runtime environment.
+    #[arg(long, value_name = "PATH")]
+    pub resume_exact: Option<PathBuf>,
+
+    /// Atomically save complete AutoEQ DE state after each safe generation barrier.
+    #[arg(long, value_name = "PATH")]
+    pub checkpoint_exact: Option<PathBuf>,
+
     /// Whether to run a local refinement after global optimization
     #[arg(long, default_value_t = false)]
     pub refine: bool,
@@ -318,6 +328,8 @@ impl Args {
             output: None,
             resume_state: None,
             checkpoint_state: None,
+            resume_exact: None,
+            checkpoint_exact: None,
             speaker: None,
             version: None,
             measurement: None,
@@ -463,6 +475,8 @@ mod tests {
         let defaults = Args::speaker_defaults();
         assert!(defaults.resume_state.is_none());
         assert!(defaults.checkpoint_state.is_none());
+        assert!(defaults.resume_exact.is_none());
+        assert!(defaults.checkpoint_exact.is_none());
         assert!(defaults.product_config.is_none());
 
         let parsed = Args::try_parse_from([
@@ -475,6 +489,17 @@ mod tests {
         .expect("warm-start paths should be parsed");
         assert_eq!(parsed.resume_state, Some("prior.json".into()));
         assert_eq!(parsed.checkpoint_state, Some("next.json".into()));
+
+        let parsed = Args::try_parse_from([
+            "prog",
+            "--resume-exact",
+            "exact-prior.json",
+            "--checkpoint-exact",
+            "exact-next.json",
+        ])
+        .expect("exact-state paths should be parsed");
+        assert_eq!(parsed.resume_exact, Some("exact-prior.json".into()));
+        assert_eq!(parsed.checkpoint_exact, Some("exact-next.json".into()));
     }
 
     #[test]

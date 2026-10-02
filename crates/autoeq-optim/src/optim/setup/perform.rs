@@ -2,7 +2,9 @@ use super::super::constraint_envelope::{
     OwnedConstraintSpec, finalize_candidate, project_gains_onto_envelopes,
 };
 use super::super::de::{
-    optimize_filters_autoeq_with_callback, optimize_filters_autoeq_with_callback_and_initial,
+    DECheckpointSaveCallback, optimize_filters_autoeq_with_callback,
+    optimize_filters_autoeq_with_callback_and_initial,
+    optimize_filters_autoeq_with_exact_checkpoint,
 };
 use super::super::run_descriptor::OptimizationRunResult;
 use super::super::{ObjectiveData, optimize_filters_with_algo_override};
@@ -17,6 +19,27 @@ use crate::read;
 use crate::x2peq::x2peq;
 use ndarray::Array1;
 use std::error::Error;
+
+/// State and save callback for exact DE continuation.
+pub struct ExactDECheckpointOptions {
+    /// Saved state to restore, or None to start a newly checkpointed run.
+    pub checkpoint: Option<crate::de::DECheckpoint>,
+    /// Identity for the measurement, objective, normalization, and config.
+    pub run_identity: String,
+    /// Atomically saves each generation barrier; errors stop the optimizer.
+    pub save_callback: DECheckpointSaveCallback,
+}
+
+impl std::fmt::Debug for ExactDECheckpointOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExactDECheckpointOptions")
+            .field("checkpoint", &self.checkpoint)
+            .field("run_identity", &self.run_identity)
+            .field("save_callback", &"<generation-barrier callback>")
+            .finish()
+    }
+}
 
 /// Run global (and optional local refine) optimization and return the parameter vector.
 pub fn perform_optimization(
@@ -38,7 +61,7 @@ pub fn perform_optimization_with_run_descriptor(
     objective_data: &ObjectiveData,
     callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
 ) -> Result<OptimizationRunResult, Box<dyn Error>> {
-    perform_optimization_with_optional_candidate(params, objective_data, None, callback)
+    perform_optimization_with_optional_candidate(params, objective_data, None, callback, None)
 }
 
 /// Run optimization from a validated warm-start candidate.
@@ -63,6 +86,63 @@ pub fn perform_optimization_with_run_descriptor_and_candidate(
         objective_data,
         Some(initial_candidate),
         callback,
+        None,
+    )
+}
+
+/// Run exact DE continuation and retain its serializable run descriptor.
+///
+/// Exact state is supported for seeded AutoEQ DE runs without local
+/// refinement or multi-driver or multi-sub objectives. Candidate warm starts
+/// continue to use the separate candidate API.
+///
+/// # Errors
+///
+/// Returns an error when the selected optimizer is not AutoEQ DE, the seed is
+/// absent, local refinement or a multi-driver objective is requested, the
+/// saved checkpoint identity or configuration is invalid, or checkpoint
+/// persistence fails.
+pub fn perform_optimization_with_run_descriptor_and_exact_checkpoint(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    continuation: ExactDECheckpointOptions,
+    callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
+) -> Result<OptimizationRunResult, Box<dyn Error>> {
+    if params.refine {
+        return Err(std::io::Error::other(
+            "exact DE continuation does not support a follow-up local-refinement stage",
+        )
+        .into());
+    }
+    if params.seed.is_none() {
+        return Err(
+            std::io::Error::other("exact DE continuation requires an explicit --seed").into(),
+        );
+    }
+    let backend = super::super::backend::resolve(&params.algo)
+        .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return Err(std::io::Error::other(format!(
+            "exact continuation is supported only for AutoEQ DE; resolved {}",
+            backend.name()
+        ))
+        .into());
+    }
+    if matches!(
+        objective_data.loss_type,
+        crate::LossType::DriversFlat | crate::LossType::MultiSubFlat
+    ) {
+        return Err(std::io::Error::other(
+            "exact DE continuation is not supported for multi-driver or multi-sub optimization",
+        )
+        .into());
+    }
+    perform_optimization_with_optional_candidate(
+        params,
+        objective_data,
+        None,
+        callback,
+        Some(continuation),
     )
 }
 
@@ -71,6 +151,7 @@ fn perform_optimization_with_optional_candidate(
     objective_data: &ObjectiveData,
     initial_candidate: Option<&[f64]>,
     callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
+    exact_continuation: Option<ExactDECheckpointOptions>,
 ) -> Result<OptimizationRunResult, Box<dyn Error>> {
     let (lower_bounds, upper_bounds) = setup_bounds(params);
     let mut descriptor = super::super::run_descriptor::OptimizationRunDescriptor::started(
@@ -122,7 +203,28 @@ fn perform_optimization_with_optional_candidate(
     .0;
     validate_initial_candidate(&x, &lower_bounds, &upper_bounds)?;
 
-    let result = if resolves_to_backend(&params.algo, "autoeq:de") {
+    let result = if let Some(continuation) = exact_continuation {
+        if initial_candidate.is_some() {
+            return Err(std::io::Error::other(
+                "exact continuation cannot be combined with a warm-start candidate",
+            )
+            .into());
+        }
+        optimize_filters_autoeq_with_exact_checkpoint(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data.clone(),
+            &params.algo,
+            params,
+            callback,
+            super::super::de::DEExactContinuation {
+                checkpoint: continuation.checkpoint,
+                run_identity: continuation.run_identity,
+                save_callback: continuation.save_callback,
+            },
+        )
+    } else if resolves_to_backend(&params.algo, "autoeq:de") {
         if initial_candidate.is_some() {
             let explicit_initial_candidate = x.clone();
             optimize_filters_autoeq_with_callback_and_initial(
@@ -439,6 +541,7 @@ where
         objective_data,
         initial_candidate,
         Box::new(de_callback),
+        None,
     )?;
 
     let final_history = Arc::try_unwrap(history)

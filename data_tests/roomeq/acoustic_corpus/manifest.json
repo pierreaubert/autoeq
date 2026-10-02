@@ -23,22 +23,26 @@
         {
           "channel": "L",
           "path": "../generate/fem/medium_multi_seat/left_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "L",
           "path": "../generate/fem/medium_multi_seat/left_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/medium_multi_seat/right_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/medium_multi_seat/right_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         }
       ],
       "robustness": {
@@ -87,19 +91,23 @@
       "held_out": [
         {
           "channel": "L",
-          "path": "../measured/2.0_8361a/L_heldout_1.csv"
+          "path": "../measured/2.0_8361a/L_heldout_1.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "L",
-          "path": "../measured/2.0_8361a/L_heldout_2.csv"
+          "path": "../measured/2.0_8361a/L_heldout_2.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_8361a/R_heldout_1.csv"
+          "path": "../measured/2.0_8361a/R_heldout_1.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_8361a/R_heldout_2.csv"
+          "path": "../measured/2.0_8361a/R_heldout_2.csv",
+          "evidence_class": "deterministic_perturbation"
         }
       ]
     },
@@ -126,32 +134,38 @@
         {
           "channel": "L",
           "path": "../generate/fem/medium_stereo_2_1/left_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "L",
           "path": "../generate/fem/medium_stereo_2_1/left_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/medium_stereo_2_1/right_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/medium_stereo_2_1/right_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/medium_stereo_2_1/subwoofer_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/medium_stereo_2_1/subwoofer_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         }
       ],
       "robustness": {
@@ -188,32 +202,38 @@
         {
           "channel": "L",
           "path": "../generate/fem/large_multi_seat_2_1/left_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "L",
           "path": "../generate/fem/large_multi_seat_2_1/left_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/large_multi_seat_2_1/right_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/large_multi_seat_2_1/right_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/large_multi_seat_2_1/subwoofer_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/large_multi_seat_2_1/subwoofer_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         }
       ],
       "gate_mode": "enforce",
@@ -251,19 +271,23 @@
       "held_out": [
         {
           "channel": "L",
-          "path": "../measured/2.0_d3v/L_heldout_1.csv"
+          "path": "../measured/2.0_d3v/L_heldout_1.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "L",
-          "path": "../measured/2.0_d3v/L_heldout_2.csv"
+          "path": "../measured/2.0_d3v/L_heldout_2.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_d3v/R_heldout_1.csv"
+          "path": "../measured/2.0_d3v/R_heldout_1.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_d3v/R_heldout_2.csv"
+          "path": "../measured/2.0_d3v/R_heldout_2.csv",
+          "evidence_class": "deterministic_perturbation"
         }
       ],
       "robustness": {
@@ -300,19 +324,23 @@
       "held_out": [
         {
           "channel": "L",
-          "path": "../measured/2.0_t7v_2024/L_heldout_1.csv"
+          "path": "../measured/2.0_t7v_2024/L_heldout_1.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "L",
-          "path": "../measured/2.0_t7v_2024/L_heldout_2.csv"
+          "path": "../measured/2.0_t7v_2024/L_heldout_2.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_t7v_2024/R_heldout_1.csv"
+          "path": "../measured/2.0_t7v_2024/R_heldout_1.csv",
+          "evidence_class": "deterministic_perturbation"
         },
         {
           "channel": "R",
-          "path": "../measured/2.0_t7v_2024/R_heldout_2.csv"
+          "path": "../measured/2.0_t7v_2024/R_heldout_2.csv",
+          "evidence_class": "deterministic_perturbation"
         }
       ],
       "robustness": {
@@ -350,42 +378,50 @@
         {
           "channel": "L",
           "path": "../generate/fem/small_stereo_2_2_mso/left_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "L",
           "path": "../generate/fem/small_stereo_2_2_mso/left_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/small_stereo_2_2_mso/right_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/small_stereo_2_2_mso/right_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/small_stereo_2_2_mso/sub1_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/small_stereo_2_2_mso/sub1_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub2",
           "path": "../generate/fem/small_stereo_2_2_mso/sub2_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub2",
           "path": "../generate/fem/small_stereo_2_2_mso/sub2_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         }
       ],
       "robustness": {
@@ -426,62 +462,74 @@
         {
           "channel": "L",
           "path": "../generate/fem/medium_surround_5_1/left_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "L",
           "path": "../generate/fem/medium_surround_5_1/left_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/medium_surround_5_1/right_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "R",
           "path": "../generate/fem/medium_surround_5_1/right_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "C",
           "path": "../generate/fem/medium_surround_5_1/center_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "C",
           "path": "../generate/fem/medium_surround_5_1/center_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "SL",
           "path": "../generate/fem/medium_surround_5_1/surround_left_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "SL",
           "path": "../generate/fem/medium_surround_5_1/surround_left_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "SR",
           "path": "../generate/fem/medium_surround_5_1/surround_right_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "SR",
           "path": "../generate/fem/medium_surround_5_1/surround_right_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/medium_surround_5_1/subwoofer_heldout_1.csv",
-          "seat_id": "synthetic-heldout-1"
+          "seat_id": "synthetic-heldout-1",
+          "evidence_class": "fem_generated"
         },
         {
           "channel": "Sub1",
           "path": "../generate/fem/medium_surround_5_1/subwoofer_heldout_2.csv",
-          "seat_id": "synthetic-heldout-2"
+          "seat_id": "synthetic-heldout-2",
+          "evidence_class": "fem_generated"
         }
       ],
       "robustness": {

@@ -29,7 +29,7 @@ cannot replace them.
 | A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
 | A13 rendering/accessibility | Deferred | Begin after backend work |
 | A14 perceptual/listening evidence | Partial | Independent references/domain registry and relevant blinded listening evidence |
-| A15 spatial/adaptive studies | Open | Separate held-out measured studies with explicit implement/constrain/decline outcomes |
+| A15 spatial/adaptive studies | Partial | Typed held-out evidence and recommendation constraints committed; independent measured studies and adaptive outcomes remain |
 | A16 persistent regression corpus | In implementation | Numerical runner foundation first; capability mapping, held-out cases, historical canaries and release evidence remain |
 
 ## Verified backend changes
@@ -755,3 +755,37 @@ They have not been copied into the main implementation branch. The generated
 2D module is 637,238 bytes and the GPUI module is 10,154,052 bytes; these are
 file sizes, not runtime memory or performance measurements. Application UI
 implementation remains deferred.
+
+
+## Held-out evidence and candidate recommendation
+
+Commit `56961e38` classifies every checked-in held-out row: 12 deterministic
+perturbations of measured responses and 36 FEM positions. Neither class is an
+independent measured seat. Unknown or mixed classes cannot authorize measured
+generalization. Declared independent seats need explicit unique seat identities,
+distinct canonical files per channel, complete channel coverage and enforced
+quality policy. Those checks establish corpus-contract eligibility; they do not
+certify how a physical measurement was acquired or calibrated.
+
+The report retains numeric candidate preference separately from recommendation.
+Every candidate must pass the existing absolute quality gate before promotion;
+FEM and synthetic promotions remain restricted to their declared evidence domain.
+Held-out responses are loaded after optimization and are not training inputs.
+The generator retains evidence classes without changing fixture CSVs.
+
+Matched affected library suites pass: quality 237 with 1 ignored and QA 181
+with 7 ignored. Strict affected-library Clippy, generator AST parsing and diff
+checks pass. Source, lock/config, fixtures, metadata and actual selected Git/local
+dependency contents match across the final suites. Local DSP/IIR dependencies
+still include the pre-existing wavelet edit; this is not a clean public install.
+Evidence: `/private/tmp/autoeq-a15-heldout-evidence-fff9`.
+
+A clean production acoustic-report run at `56961e38` also verifies the new fields
+on the unchanged `measured_stereo_8361a` PR scenario and optimizer budget.
+It reports `deterministic_perturbation_robustness_only`, `numeric_preference: true`,
+`recommended: false` and `candidate_quality_gate_failed`. Current and candidate
+both fail `unexplained_bass_output_loss` and `unexplained_useful_output_loss`.
+The raw acoustic QA exits 1; that remains failed acoustic acceptance. The software
+report contract passes, with source and dependency inventories unchanged.
+No budget, threshold, golden, fixture, hardware or listening evidence changed.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/heldout-cli-frozen-20261002-56961e38`.

@@ -569,6 +569,7 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
     let graph = DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels,
         metadata: Some(metadata),
@@ -1835,6 +1836,7 @@ fn multisub_allpass_is_phase_only() {
     let output = DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels: HashMap::from([(
             "left".to_string(),
@@ -2108,6 +2110,7 @@ fn multisub_delay_precision_contract() {
     let output = DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels: HashMap::from([(
             "left".to_string(),
@@ -2231,6 +2234,7 @@ fn camilladsp_rejects_shared_global_eq() {
     let graph = DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: vec![PluginConfigWrapper {
             plugin_type: "eq".to_string(),
             parameters: json!({"filters": [{

@@ -235,6 +235,7 @@ pub enum OptimizerTermination {
     EvaluationLimit,
     NonConverged,
     UserStopped,
+    TimedOut,
     BackendFailure,
     InvalidResult,
 }
@@ -342,6 +343,18 @@ pub struct OptimizerRunEvidence {
     pub selected_for_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restart_history: Vec<OptimizerRestartEvidence>,
+}
+
+impl OptimizerRunEvidence {
+    /// Whether the reported objective and recorded bound checks retain a valid candidate.
+    ///
+    /// This does not imply convergence, deployment acceptance, or that a stop
+    /// request did not occur.
+    pub fn has_valid_candidate(&self) -> bool {
+        self.objective.is_some_and(f64::is_finite)
+            && self.max_constraint_violation.is_finite()
+            && self.max_constraint_violation <= 1e-9
+    }
 }
 
 /// Serialisable summary of GD-Opt results for report plumbing (GD-4).

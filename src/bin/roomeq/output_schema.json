@@ -9167,6 +9167,7 @@
         "evaluation_limit",
         "non_converged",
         "user_stopped",
+        "timed_out",
         "backend_failure",
         "invalid_result"
       ],

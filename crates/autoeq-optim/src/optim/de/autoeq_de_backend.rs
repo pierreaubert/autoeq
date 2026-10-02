@@ -43,13 +43,17 @@ impl FilterOptimizer for AutoeqDeBackend {
             params.population,
             params.maxeval,
         );
-        let solver_limit = population_size
-            .saturating_add(generation_limit.saturating_mul(population_size));
+        // Every fresh solver start scores the initial population and then
+        // replaces its best member with a separately scored x0. Exact resume
+        // bypasses both scores and is exposed through its dedicated API.
+        let initial_batch = population_size.saturating_add(1);
+        let solver_limit =
+            initial_batch.saturating_add(generation_limit.saturating_mul(population_size));
         Some(OptimizerBudgetProfile::new(
             params.maxeval,
             Some(solver_limit),
-            population_size.saturating_mul(2),
-            population_size,
+            population_size.saturating_mul(2).saturating_add(1),
+            initial_batch,
             Some(population_size),
             Some(population_size),
             Some(generation_limit),

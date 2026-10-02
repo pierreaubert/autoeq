@@ -82,10 +82,16 @@ fn bounded_cell_reports_resolved_backend_and_actual_evaluations() {
 
 #[test]
 fn analytic_de_fit_improves_the_realized_objective_over_identity() {
-    let cell = run_optimizer_benchmark_cell("analytic_headphone_peq", "autoeq:de", 7, 128)
+    let cell = run_optimizer_benchmark_cell("analytic_headphone_peq", "autoeq:de", 7, 97)
         .expect("one deterministic DE fit");
 
     assert!(cell.feasible, "DE result was refused: {:?}", cell.refusal);
+    assert_eq!(cell.evaluation_counts.search_started, 97);
+    assert_eq!(cell.evaluation_counts.search_completed, 97);
+    assert_eq!(
+        cell.termination,
+        Some(autoeq_optim::optim::OptimizerTermination::EvaluationLimit)
+    );
     let worst_baseline = cell
         .training
         .iter()
@@ -109,6 +115,24 @@ fn analytic_de_fit_improves_the_realized_objective_over_identity() {
 }
 
 #[test]
+fn de_budget_below_one_complete_fresh_search_unit_is_refused_before_scoring() {
+    let cell = run_optimizer_benchmark_cell("analytic_headphone_peq", "autoeq:de", 7, 96)
+        .expect("preflight refusal is a reported cell");
+
+    assert_eq!(cell.evaluation_counts.search_started, 0);
+    assert!(!cell.feasible);
+    assert_eq!(
+        cell.termination,
+        Some(autoeq_optim::optim::OptimizerTermination::EvaluationLimit)
+    );
+    assert!(
+        cell.refusal
+            .as_deref()
+            .is_some_and(|reason| reason.contains("requires at least 97"))
+    );
+}
+
+#[test]
 fn cell_deadline_closes_search_and_reports_timeout() {
     let cell = run_optimizer_benchmark_cell_with_time_budget(
         "analytic_headphone_peq",
@@ -120,6 +144,24 @@ fn cell_deadline_closes_search_and_reports_timeout() {
     .expect("one cell with a short deadline");
 
     assert!(cell.timed_out, "optimizer completed inside a 1 ms cutoff");
+    assert_eq!(
+        cell.termination,
+        Some(autoeq_optim::optim::OptimizerTermination::TimedOut)
+    );
+    assert!(
+        cell.feasible,
+        "timeout should retain a finite finalized candidate: {cell:?}"
+    );
+    assert!(
+        cell.parameters
+            .as_ref()
+            .is_some_and(|values| { values.iter().all(|value| value.is_finite()) })
+    );
+    assert!(cell.realized.is_some());
+    assert!(!cell.user_cancelled);
+    let serialized = serde_json::to_value(&cell).expect("cell report serializes");
+    assert_eq!(serialized["timed_out"], true);
+    assert_eq!(serialized["user_cancelled"], false);
     assert!(cell.evaluation_counts.search_started <= 128);
     assert!(
         cell.refusal
@@ -192,6 +234,48 @@ fn every_registered_backend_reports_a_complete_batch_profile() {
             backend.name(),
             profile.minimum_complete_batch,
             first_complete_unit
+        );
+    }
+}
+
+#[test]
+fn fresh_de_profile_counts_x0_and_refuses_incomplete_search_units() {
+    use autoeq_optim::optim::registry;
+
+    let backend = registry::resolve("autoeq:de").expect("DE backend is registered");
+    let mut args = Args::parse_from(["autoeq"]);
+    args.num_filters = 4;
+    args.sample_rate = 48_000.0;
+    args.min_freq = 20.0;
+    args.max_freq = 20_000.0;
+    args.min_q = 0.5;
+    args.max_q = 6.0;
+    args.min_db = -9.0;
+    args.max_db = 6.0;
+    args.population = 48;
+    args.no_parallel = true;
+    args.parallel_threads = 1;
+
+    for (budget, expected_generations) in [(48, 1), (49, 1), (96, 1), (97, 1), (128, 1)] {
+        args.maxeval = budget;
+        let params = OptimParams::from(&args);
+        let lower = vec![-1.0; 12];
+        let upper = vec![1.0; 12];
+        let profile = backend
+            .evaluation_budget_profile(&lower, &upper, &params)
+            .expect("DE profile is available");
+
+        assert_eq!(profile.requested_evaluations, budget);
+        assert_eq!(profile.population_size, Some(48));
+        assert_eq!(profile.initial_batch_size, 49, "budget {budget}");
+        assert_eq!(profile.generation_batch_size, Some(48), "budget {budget}");
+        assert_eq!(profile.generation_limit, Some(expected_generations));
+        assert_eq!(profile.solver_evaluation_limit, Some(97));
+        assert_eq!(profile.minimum_complete_batch, 97);
+        assert_eq!(
+            profile.minimum_complete_batch <= budget,
+            budget >= 97,
+            "budget {budget} must be refused unless one complete fresh DE unit fits"
         );
     }
 }

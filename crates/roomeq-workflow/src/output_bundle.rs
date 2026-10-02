@@ -18,9 +18,11 @@
 //! The Python viewer (`scripts/src/loaders.py`) re-injects them from the
 //! sibling directory, so plots are unchanged while `dsp.json` stays small.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 
 pub use autoeq_artifacts::FsArtifactStore;
 use autoeq_artifacts::{
@@ -31,13 +33,95 @@ use sha2::{Digest, Sha256};
 use roomeq_export::checked_convolution_resource_references;
 use roomeq_model::{
     ChannelEarlyLateCurves, ChannelResonanceDecays, ChannelWaterfall, ChannelWavelet, CurveData,
-    DspGraph, IrWaveform, MeasuredRoomAcoustics,
+    DspGraph, IrWaveform, MeasuredRoomAcoustics, decision_ledger::GraphIdentity,
 };
 
 /// Name of the run log written inside the assets directory.
 pub const RUN_LOG_FILENAME: &str = "roomeq.log";
 /// Name of the run manifest written inside the assets directory.
 pub const RUN_MANIFEST_FILENAME: &str = "manifest.json";
+
+/// Describes whether a loaded bundle has a verified content manifest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputBundleVerification {
+    /// A supported manifest bound the slim graph and every listed member.
+    ManifestVerified,
+    /// A legacy graph loaded without a supported content manifest.
+    LegacyUnverified,
+}
+
+/// One convolution asset captured and verified while loading a native bundle.
+#[derive(Debug, Clone)]
+pub struct FrozenBundleResource {
+    relative_path: String,
+    sha256: String,
+    bytes: Arc<[u8]>,
+}
+
+impl FrozenBundleResource {
+    /// Return the portable graph-relative path bound to this resource.
+    pub fn relative_path(&self) -> &str {
+        &self.relative_path
+    }
+
+    /// Return the SHA-256 digest declared by the graph and checked against captured bytes.
+    pub fn sha256(&self) -> &str {
+        &self.sha256
+    }
+
+    /// Return the exact immutable bytes checked during bundle loading.
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+}
+
+/// A loaded graph with immutable identities and convolution bytes from one verified snapshot.
+#[derive(Debug)]
+pub struct FrozenOutputBundle {
+    output: DspGraph,
+    slim_graph_bytes: Arc<[u8]>,
+    raw_graph_sha256: String,
+    slim_graph_identity: GraphIdentity,
+    verification: OutputBundleVerification,
+    resources: BTreeMap<String, FrozenBundleResource>,
+}
+
+impl FrozenOutputBundle {
+    /// Return the hydrated graph loaded from the captured slim JSON bytes.
+    pub fn output(&self) -> &DspGraph {
+        &self.output
+    }
+
+    /// Return the exact slim graph bytes checked against the manifest.
+    pub fn slim_graph_bytes(&self) -> &[u8] {
+        &self.slim_graph_bytes
+    }
+
+    /// Return the SHA-256 digest of the exact slim graph bytes.
+    pub fn raw_graph_sha256(&self) -> &str {
+        &self.raw_graph_sha256
+    }
+
+    /// Return the canonical graph identity used by final ledger bindings.
+    pub fn slim_graph_identity(&self) -> &GraphIdentity {
+        &self.slim_graph_identity
+    }
+
+    /// Return whether the loaded bundle had a verifiable content manifest.
+    pub fn verification(&self) -> OutputBundleVerification {
+        self.verification
+    }
+
+    /// Return a captured convolution resource by its graph-relative path.
+    pub fn resource(&self, relative_path: &str) -> Option<&FrozenBundleResource> {
+        self.resources.get(relative_path)
+    }
+
+    /// Iterate over all captured convolution resources in path order.
+    pub fn resources(&self) -> impl Iterator<Item = &FrozenBundleResource> {
+        self.resources.values()
+    }
+}
 
 /// Sibling assets directory for a native output path.
 ///
@@ -109,8 +193,14 @@ pub fn resolve_convolution_path(reference: &str, output_path: &Path) -> PathBuf 
         .join(direct)
 }
 
-/// Read convolution bytes, checking the output parent first and the sibling
-/// assets directory second.
+/// Read legacy convolution bytes from a path derived from the graph reference.
+///
+/// This compatibility helper performs an unbound filesystem read and does not
+/// verify a bundle manifest. Strict native consumers must use
+/// [`FrozenOutputBundle::resource`] from [`load_output_bundle_frozen`].
+///
+/// # Errors
+/// Returns the underlying filesystem error when neither candidate path can be read.
 pub fn read_convolution_bytes(reference: &str, output_path: &Path) -> std::io::Result<Vec<u8>> {
     let direct = Path::new(reference);
     if direct.is_absolute() {
@@ -655,6 +745,8 @@ struct BundleManifest {
     files: BTreeMap<String, BundleFileRecord>,
 }
 
+type CapturedBundleFiles = BTreeMap<String, Arc<[u8]>>;
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct BundleTransactionJournal {
     schema_version: u32,
@@ -757,13 +849,14 @@ fn read_bounded_file(path: &Path, maximum_bytes: u64, label: &str) -> io::Result
     Ok(bytes)
 }
 
-fn read_bundle_member_bytes(
+fn read_bundle_member_bytes<'a>(
     assets: &Path,
     relative: &Path,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&'a CapturedBundleFiles>,
     maximum_bytes: u64,
     label: &str,
-) -> io::Result<Vec<u8>> {
+) -> io::Result<Cow<'a, [u8]>> {
     autoeq_artifacts::validate_relative_artifact_path(relative)?;
     let path = if let Some(manifest) = manifest {
         let key = relative
@@ -778,6 +871,22 @@ fn read_bundle_member_bytes(
         if expected.size_bytes > maximum_bytes {
             return Err(io_invalid(format!("{label} exceeds its size limit")));
         }
+        if let Some(captured_files) = captured_files {
+            let bytes = captured_files.get(&key).ok_or_else(|| {
+                io_invalid(format!(
+                    "{label} is missing from the captured bundle snapshot"
+                ))
+            })?;
+            if bytes.len() as u64 != expected.size_bytes || sha256_hex(bytes) != expected.sha256 {
+                return Err(io_invalid(format!(
+                    "{label} failed artifact bundle integrity validation"
+                )));
+            }
+            if bytes.len() as u64 > maximum_bytes {
+                return Err(io_invalid(format!("{label} exceeds its size limit")));
+            }
+            return Ok(Cow::Borrowed(bytes));
+        }
         let path = checked_bundle_member(assets, relative)?;
         let bytes = read_bounded_file(&path, expected.size_bytes, label)?;
         if bytes.len() as u64 != expected.size_bytes || sha256_hex(&bytes) != expected.sha256 {
@@ -785,24 +894,32 @@ fn read_bundle_member_bytes(
                 "{label} failed artifact bundle integrity validation"
             )));
         }
-        return Ok(bytes);
+        return Ok(Cow::Owned(bytes));
     } else {
         safe_artifact_path(assets, relative)?
     };
-    read_bounded_file(&path, maximum_bytes, label)
+    Ok(Cow::Owned(read_bounded_file(&path, maximum_bytes, label)?))
 }
 
-fn read_bundle_path_bytes(
+fn read_bundle_path_bytes<'a>(
     assets: &Path,
     path: &Path,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&'a CapturedBundleFiles>,
     maximum_bytes: u64,
     label: &str,
-) -> io::Result<Vec<u8>> {
+) -> io::Result<Cow<'a, [u8]>> {
     let relative = path
         .strip_prefix(assets)
         .map_err(|_| io_invalid("artifact member path escapes its support directory"))?;
-    read_bundle_member_bytes(assets, relative, manifest, maximum_bytes, label)
+    read_bundle_member_bytes(
+        assets,
+        relative,
+        manifest,
+        captured_files,
+        maximum_bytes,
+        label,
+    )
 }
 
 fn checked_bundle_member(root: &Path, relative: &Path) -> io::Result<PathBuf> {
@@ -1338,6 +1455,7 @@ fn validate_manifested_convolution_resources(
     output: &DspGraph,
     assets: &Path,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&CapturedBundleFiles>,
 ) -> io::Result<()> {
     let references = checked_convolution_resource_references(output)
         .map_err(|error| io_invalid(format!("invalid convolution references: {error}")))?;
@@ -1396,10 +1514,11 @@ fn validate_manifested_convolution_resources(
             assets,
             &relative,
             Some(manifest),
+            captured_files,
             MAX_BUNDLE_MEMBER_BYTES,
             "convolution resource",
         )?;
-        if sha256_hex(&bytes) != *expected {
+        if sha256_hex(bytes.as_ref()) != *expected {
             return Err(io_invalid(format!(
                 "manifested convolution resource failed integrity validation: {reference}"
             )));
@@ -1580,6 +1699,52 @@ fn load_manifest(assets: &Path) -> io::Result<Option<BundleManifest>> {
         }
     }
     Ok(Some(manifest))
+}
+
+fn capture_manifested_bundle_files(
+    assets: &Path,
+    manifest: &BundleManifest,
+) -> io::Result<CapturedBundleFiles> {
+    let mut captured = BTreeMap::new();
+    for (name, expected) in &manifest.files {
+        let relative = PathBuf::from(name);
+        let path = checked_bundle_member(assets, &relative)?;
+        let metadata = std::fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io_invalid(format!(
+                "artifact bundle member is not a regular file: {name}"
+            )));
+        }
+        if expected.size_bytes > MAX_BUNDLE_MEMBER_BYTES {
+            return Err(io_invalid(format!(
+                "artifact bundle member exceeds its size limit: {name}"
+            )));
+        }
+        let file = std::fs::File::open(&path)?;
+        let mut bytes = Vec::with_capacity(expected.size_bytes as usize);
+        file.take(expected.size_bytes.saturating_add(1))
+            .read_to_end(&mut bytes)?;
+        if bytes.len() as u64 != expected.size_bytes || sha256_hex(&bytes) != expected.sha256 {
+            return Err(io_invalid(format!(
+                "{} failed artifact bundle integrity validation",
+                manifested_member_label(name)
+            )));
+        }
+        captured.insert(name.clone(), Arc::<[u8]>::from(bytes));
+    }
+    Ok(captured)
+}
+
+fn manifested_member_label(name: &str) -> &'static str {
+    if name == MEASUREMENTS_INDEX_FILENAME {
+        "measurement index"
+    } else if name.ends_with(".csv.json") {
+        "curve metadata sidecar"
+    } else if name.ends_with(".csv") {
+        "curve CSV sidecar"
+    } else {
+        "bundle sidecar"
+    }
 }
 
 fn transaction_directory(parent: &Path, name: &str) -> io::Result<PathBuf> {
@@ -2317,6 +2482,7 @@ fn indexed_member_path(
     assets: &Path,
     relative_text: &str,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&CapturedBundleFiles>,
 ) -> io::Result<PathBuf> {
     let relative = PathBuf::from(relative_text);
     autoeq_artifacts::validate_relative_artifact_path(&relative)?;
@@ -2330,10 +2496,38 @@ fn indexed_member_path(
                 "measurement index references unhashed bundle member: {relative_text}"
             )));
         }
+        if let Some(captured_files) = captured_files {
+            if !captured_files.contains_key(&key) {
+                return Err(io_invalid(format!(
+                    "measurement index references uncaptured bundle member: {relative_text}"
+                )));
+            }
+            return Ok(assets.join(relative));
+        }
         checked_bundle_member(assets, &relative)
     } else {
         safe_artifact_path(assets, &relative)
     }
+}
+
+fn indexed_member_is_available(
+    assets: &Path,
+    relative_text: &str,
+    manifest: Option<&BundleManifest>,
+    captured_files: Option<&CapturedBundleFiles>,
+) -> io::Result<bool> {
+    if let Some(manifest) = manifest {
+        let key = relative_text.replace('\\', "/");
+        if !manifest.files.contains_key(&key) {
+            return Err(io_invalid(format!(
+                "measurement index references unhashed bundle member: {relative_text}"
+            )));
+        }
+        if let Some(captured_files) = captured_files {
+            return Ok(captured_files.contains_key(&key));
+        }
+    }
+    Ok(indexed_member_path(assets, relative_text, manifest, captured_files)?.is_file())
 }
 
 fn read_indexed_curve(
@@ -2342,6 +2536,7 @@ fn read_indexed_curve(
     kind: &str,
     csv_path: &Path,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&CapturedBundleFiles>,
 ) -> io::Result<CurveData> {
     let has_metadata = fields.contains_key(&format!("{kind}_metadata"));
     let curve = if let Some(metadata) = fields.get(&format!("{kind}_metadata")) {
@@ -2353,20 +2548,22 @@ fn read_indexed_curve(
             assets,
             &relative,
             manifest,
+            captured_files,
             MAX_BUNDLE_MEMBER_BYTES,
             "curve metadata sidecar",
         )?;
-        serde_json::from_slice::<CurveData>(&bytes)
+        serde_json::from_slice::<CurveData>(bytes.as_ref())
             .map_err(|error| io_invalid(format!("invalid curve metadata sidecar: {error}")))?
     } else {
         let bytes = read_bundle_path_bytes(
             assets,
             csv_path,
             manifest,
+            captured_files,
             MAX_BUNDLE_MEMBER_BYTES,
             "curve CSV sidecar",
         )?;
-        read_curve_csv_bytes(&bytes, &csv_path.display().to_string())
+        read_curve_csv_bytes(bytes.as_ref(), &csv_path.display().to_string())
             .map_err(|error| io_invalid(format!("invalid curve CSV sidecar: {error}")))?
     };
     if manifest.is_some() || has_metadata {
@@ -2423,21 +2620,24 @@ fn read_ir_member(
     assets: &Path,
     path: &Path,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&CapturedBundleFiles>,
 ) -> Result<IrWaveform, Box<dyn std::error::Error>> {
     let bytes = read_bundle_path_bytes(
         assets,
         path,
         manifest,
+        captured_files,
         MAX_BUNDLE_MEMBER_BYTES,
         "IR CSV sidecar",
     )?;
-    read_ir_csv_bytes(&bytes, &path.display().to_string())
+    read_ir_csv_bytes(bytes.as_ref(), &path.display().to_string())
 }
 
 fn read_json_member<T>(
     assets: &Path,
     path: &Path,
     manifest: Option<&BundleManifest>,
+    captured_files: Option<&CapturedBundleFiles>,
 ) -> Result<T, Box<dyn std::error::Error>>
 where
     T: serde::de::DeserializeOwned,
@@ -2446,10 +2646,11 @@ where
         assets,
         path,
         manifest,
+        captured_files,
         MAX_BUNDLE_MEMBER_BYTES,
         "bundle sidecar",
     )?;
-    read_json_blob_bytes(&bytes)
+    read_json_blob_bytes(bytes.as_ref())
 }
 
 fn optional_sidecar<T>(
@@ -2463,20 +2664,158 @@ fn optional_sidecar<T>(
     }
 }
 
+fn slim_graph_identity_and_validate_ledger(output: &DspGraph) -> io::Result<GraphIdentity> {
+    let mut slim_graph = output.clone();
+    let ledger = slim_graph.correction_decisions.take();
+    let identity = crate::final_ledger::canonical_graph_identity(&slim_graph);
+    if let Some(ledger) = ledger {
+        crate::final_ledger::verify_final_binding(&ledger, &identity).map_err(io_invalid)?;
+        let payload = serde_json::to_value(&slim_graph)
+            .map_err(|error| io_invalid(format!("slim graph does not serialize: {error}")))?;
+        if ledger
+            .payload_binding
+            .as_ref()
+            .is_some_and(|binding| !binding.matches(&payload, &identity.fingerprint))
+        {
+            return Err(io_invalid(
+                "decision ledger payload binding does not match the slim graph",
+            ));
+        }
+        if ledger
+            .acceptance_evidence
+            .as_ref()
+            .is_some_and(|evidence| !evidence.matches(&identity.fingerprint))
+        {
+            return Err(io_invalid(
+                "acceptance evidence does not match the canonical slim graph identity",
+            ));
+        }
+    }
+    Ok(identity)
+}
+
+fn frozen_convolution_resources(
+    output: &DspGraph,
+    manifest: Option<&BundleManifest>,
+    captured_files: &CapturedBundleFiles,
+) -> io::Result<BTreeMap<String, FrozenBundleResource>> {
+    let Some(manifest) = manifest else {
+        return Ok(BTreeMap::new());
+    };
+    let references = checked_convolution_resource_references(output)
+        .map_err(|error| io_invalid(format!("invalid convolution references: {error}")))?;
+    let inventory = output
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.final_convolution_sha256.as_ref());
+    let mut resources = BTreeMap::new();
+    for reference in references {
+        let key = reference.replace('\\', "/");
+        let record = manifest.files.get(&key).ok_or_else(|| {
+            io_invalid(format!(
+                "manifested graph convolution reference is not a bundled file: {reference}"
+            ))
+        })?;
+        let expected = inventory
+            .and_then(|inventory| inventory.get(&reference))
+            .and_then(Option::as_ref)
+            .ok_or_else(|| {
+                io_invalid(format!(
+                    "manifested convolution reference has no SHA-256 binding: {reference}"
+                ))
+            })?;
+        if expected != &record.sha256 {
+            return Err(io_invalid(format!(
+                "manifested convolution reference and final SHA-256 inventory disagree: {reference}"
+            )));
+        }
+        let bytes = captured_files.get(&key).ok_or_else(|| {
+            io_invalid(format!(
+                "manifested convolution resource is missing from the captured snapshot: {reference}"
+            ))
+        })?;
+        if bytes.len() as u64 != record.size_bytes || sha256_hex(bytes) != *expected {
+            return Err(io_invalid(format!(
+                "manifested convolution resource failed integrity validation: {reference}"
+            )));
+        }
+        resources.insert(
+            reference.clone(),
+            FrozenBundleResource {
+                relative_path: reference,
+                sha256: expected.clone(),
+                bytes: Arc::clone(bytes),
+            },
+        );
+    }
+    Ok(resources)
+}
+
+fn frozen_output_bundle(
+    output: DspGraph,
+    slim_graph_bytes: Vec<u8>,
+    slim_graph_identity: GraphIdentity,
+    verification: OutputBundleVerification,
+    resources: BTreeMap<String, FrozenBundleResource>,
+) -> FrozenOutputBundle {
+    let raw_graph_sha256 = sha256_hex(&slim_graph_bytes);
+    FrozenOutputBundle {
+        output,
+        slim_graph_bytes: Arc::from(slim_graph_bytes),
+        raw_graph_sha256,
+        slim_graph_identity,
+        verification,
+        resources,
+    }
+}
+
 /// Load a native output, re-injecting measurement blobs extracted into the
 /// sibling `<stem>_files` directory.
 ///
 /// Legacy outputs with embedded curves load unchanged: only fields that are
 /// absent from the JSON are restored from `measurements_index.json`, and
 /// missing asset files are skipped rather than treated as errors.
+///
+/// New manifested bundles are parsed from the same captured bytes that were
+/// checked against their manifest. Use [`load_output_bundle_frozen`] when a
+/// native consumer must retain graph identity and convolution bytes.
+///
+/// # Errors
+/// Returns an error when graph JSON, a required manifest, or a listed bundle
+/// member is invalid or fails integrity validation.
 pub fn load_output_bundle(output_path: &Path) -> Result<DspGraph, Box<dyn std::error::Error>> {
-    load_output_bundle_with_hook(output_path, |_| Ok(()))
+    Ok(load_output_bundle_frozen(output_path)?.output)
 }
 
+#[cfg(test)]
 fn load_output_bundle_with_hook(
     output_path: &Path,
     after_manifest_check: impl FnOnce(&Path) -> io::Result<()>,
 ) -> Result<DspGraph, Box<dyn std::error::Error>> {
+    Ok(load_output_bundle_frozen_with_hooks(output_path, after_manifest_check, |_| Ok(()))?.output)
+}
+
+/// Load one immutable snapshot of a native graph and its manifested resources.
+///
+/// The returned graph is hydrated for existing report consumers. Its canonical
+/// identity and resource map remain bound to the slim graph bytes before
+/// hydration. Legacy outputs load with [`OutputBundleVerification::LegacyUnverified`]
+/// and do not expose trusted convolution resources.
+///
+/// # Errors
+/// Returns an error when the graph, ledger, evidence, manifest, or any listed
+/// resource is invalid or changes before the immutable snapshot is captured.
+pub fn load_output_bundle_frozen(
+    output_path: &Path,
+) -> Result<FrozenOutputBundle, Box<dyn std::error::Error>> {
+    load_output_bundle_frozen_with_hooks(output_path, |_| Ok(()), |_| Ok(()))
+}
+
+fn load_output_bundle_frozen_with_hooks(
+    output_path: &Path,
+    after_manifest_check: impl FnOnce(&Path) -> io::Result<()>,
+    after_snapshot_capture: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<FrozenOutputBundle, Box<dyn std::error::Error>> {
     recover_pending_bundle(output_path)?;
     let root_bytes = read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph")?;
     let assets_dir = assets_dir_for(output_path);
@@ -2495,6 +2834,11 @@ fn load_output_bundle_with_hook(
         return Err(io_invalid("native output graph failed bundle integrity validation").into());
     }
     after_manifest_check(&assets_dir)?;
+    let captured_files = match manifest.as_ref() {
+        Some(manifest) => capture_manifested_bundle_files(&assets_dir, manifest)?,
+        None => CapturedBundleFiles::new(),
+    };
+    after_snapshot_capture(&assets_dir)?;
     let root_value: serde_json::Value = serde_json::from_slice(&root_bytes)?;
     match root_value.get("artifact_bundle_schema_version") {
         None | Some(serde_json::Value::Null) => {}
@@ -2514,36 +2858,76 @@ fn load_output_bundle_with_hook(
         }
     }
     let mut output: DspGraph = serde_json::from_slice(&root_bytes)?;
-    if output.artifact_bundle_schema_version.is_some() {
+    if manifest.is_some() || output.artifact_bundle_schema_version.is_some() {
         output.validate().map_err(io_invalid)?;
     }
-    validate_manifested_convolution_resources(&output, &assets_dir, manifest.as_ref())?;
+    let slim_graph_identity = if manifest.is_some() {
+        slim_graph_identity_and_validate_ledger(&output)?
+    } else {
+        let mut slim_graph = output.clone();
+        slim_graph.correction_decisions = None;
+        crate::final_ledger::canonical_graph_identity(&slim_graph)
+    };
+    validate_manifested_convolution_resources(
+        &output,
+        &assets_dir,
+        manifest.as_ref(),
+        Some(&captured_files),
+    )?;
+    let resources = frozen_convolution_resources(&output, manifest.as_ref(), &captured_files)?;
+    let verification = if manifest.is_some() {
+        OutputBundleVerification::ManifestVerified
+    } else {
+        OutputBundleVerification::LegacyUnverified
+    };
     let index_path = assets_dir.join(MEASUREMENTS_INDEX_FILENAME);
-    match std::fs::symlink_metadata(&index_path) {
-        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {
-            if manifest
-                .as_ref()
-                .is_some_and(|manifest| !manifest.files.contains_key(MEASUREMENTS_INDEX_FILENAME))
-            {
-                return Err(
-                    io_invalid("measurement index is not bound by the bundle manifest").into(),
-                );
+    if manifest.is_some() {
+        if !captured_files.contains_key(MEASUREMENTS_INDEX_FILENAME) {
+            match std::fs::symlink_metadata(&index_path) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                    return Ok(frozen_output_bundle(
+                        output,
+                        root_bytes,
+                        slim_graph_identity,
+                        verification,
+                        resources,
+                    ));
+                }
+                Ok(_) => {
+                    return Err(io_invalid(
+                        "measurement index is not bound by the bundle manifest",
+                    )
+                    .into());
+                }
+                Err(error) => return Err(error.into()),
             }
         }
-        Ok(_) => return Err(io_invalid("measurement index is not a regular file").into()),
-        // Measurement-free resource bundles legitimately have no index. If
-        // one was listed, `load_manifest` already failed before reaching here.
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(output),
-        Err(error) => return Err(error.into()),
+    } else {
+        match std::fs::symlink_metadata(&index_path) {
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err(io_invalid("measurement index is not a regular file").into()),
+            // Legacy outputs may omit the measurement index entirely.
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                return Ok(frozen_output_bundle(
+                    output,
+                    root_bytes,
+                    slim_graph_identity,
+                    verification,
+                    resources,
+                ));
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
     let index_bytes = read_bundle_member_bytes(
         &assets_dir,
         Path::new(MEASUREMENTS_INDEX_FILENAME),
         manifest.as_ref(),
+        Some(&captured_files),
         MAX_BUNDLE_MANIFEST_BYTES,
         "measurement index",
     )?;
-    let index: serde_json::Value = serde_json::from_slice(&index_bytes)?;
+    let index: serde_json::Value = serde_json::from_slice(index_bytes.as_ref())?;
     let channels = index
         .get("channels")
         .and_then(|value| value.as_object())
@@ -2577,8 +2961,14 @@ fn load_output_bundle_with_hook(
                 }
                 continue;
             };
-            let path = indexed_member_path(&assets_dir, file, manifest.as_ref())?;
-            if !path.is_file() {
+            let path =
+                indexed_member_path(&assets_dir, file, manifest.as_ref(), Some(&captured_files))?;
+            if !indexed_member_is_available(
+                &assets_dir,
+                file,
+                manifest.as_ref(),
+                Some(&captured_files),
+            )? {
                 if manifest.is_some() {
                     return Err(
                         io_invalid(format!("missing measurement bundle member: {file}")).into(),
@@ -2588,8 +2978,14 @@ fn load_output_bundle_with_hook(
             }
             match kind.as_str() {
                 "initial_curve" if chain.initial_curve.is_none() => {
-                    let curve =
-                        read_indexed_curve(&assets_dir, fields, kind, &path, manifest.as_ref());
+                    let curve = read_indexed_curve(
+                        &assets_dir,
+                        fields,
+                        kind,
+                        &path,
+                        manifest.as_ref(),
+                        Some(&captured_files),
+                    );
                     chain.initial_curve = if manifest.is_some() {
                         Some(curve?)
                     } else {
@@ -2597,8 +2993,14 @@ fn load_output_bundle_with_hook(
                     };
                 }
                 "final_curve" if chain.final_curve.is_none() => {
-                    let curve =
-                        read_indexed_curve(&assets_dir, fields, kind, &path, manifest.as_ref());
+                    let curve = read_indexed_curve(
+                        &assets_dir,
+                        fields,
+                        kind,
+                        &path,
+                        manifest.as_ref(),
+                        Some(&captured_files),
+                    );
                     chain.final_curve = if manifest.is_some() {
                         Some(curve?)
                     } else {
@@ -2606,8 +3008,14 @@ fn load_output_bundle_with_hook(
                     };
                 }
                 "eq_response" if chain.eq_response.is_none() => {
-                    let curve =
-                        read_indexed_curve(&assets_dir, fields, kind, &path, manifest.as_ref());
+                    let curve = read_indexed_curve(
+                        &assets_dir,
+                        fields,
+                        kind,
+                        &path,
+                        manifest.as_ref(),
+                        Some(&captured_files),
+                    );
                     chain.eq_response = if manifest.is_some() {
                         Some(curve?)
                     } else {
@@ -2615,8 +3023,14 @@ fn load_output_bundle_with_hook(
                     };
                 }
                 "target_curve" if chain.target_curve.is_none() => {
-                    let curve =
-                        read_indexed_curve(&assets_dir, fields, kind, &path, manifest.as_ref());
+                    let curve = read_indexed_curve(
+                        &assets_dir,
+                        fields,
+                        kind,
+                        &path,
+                        manifest.as_ref(),
+                        Some(&captured_files),
+                    );
                     chain.target_curve = if manifest.is_some() {
                         Some(curve?)
                     } else {
@@ -2625,13 +3039,23 @@ fn load_output_bundle_with_hook(
                 }
                 "pre_ir" if chain.pre_ir.is_none() => {
                     chain.pre_ir = optional_sidecar(
-                        read_ir_member(&assets_dir, &path, manifest.as_ref()),
+                        read_ir_member(
+                            &assets_dir,
+                            &path,
+                            manifest.as_ref(),
+                            Some(&captured_files),
+                        ),
                         manifest.is_some(),
                     )?;
                 }
                 "post_ir" if chain.post_ir.is_none() => {
                     chain.post_ir = optional_sidecar(
-                        read_ir_member(&assets_dir, &path, manifest.as_ref()),
+                        read_ir_member(
+                            &assets_dir,
+                            &path,
+                            manifest.as_ref(),
+                            Some(&captured_files),
+                        ),
                         manifest.is_some(),
                     )?;
                 }
@@ -2641,13 +3065,19 @@ fn load_output_bundle_with_hook(
                             &assets_dir,
                             &path,
                             manifest.as_ref(),
+                            Some(&captured_files),
                         ),
                         manifest.is_some(),
                     )?;
                 }
                 "waterfall" if chain.waterfall.is_none() => {
                     chain.waterfall = optional_sidecar(
-                        read_json_member::<ChannelWaterfall>(&assets_dir, &path, manifest.as_ref()),
+                        read_json_member::<ChannelWaterfall>(
+                            &assets_dir,
+                            &path,
+                            manifest.as_ref(),
+                            Some(&captured_files),
+                        ),
                         manifest.is_some(),
                     )?;
                 }
@@ -2657,13 +3087,19 @@ fn load_output_bundle_with_hook(
                             &assets_dir,
                             &path,
                             manifest.as_ref(),
+                            Some(&captured_files),
                         ),
                         manifest.is_some(),
                     )?;
                 }
                 "wavelet" if chain.wavelet.is_none() => {
                     chain.wavelet = optional_sidecar(
-                        read_json_member::<ChannelWavelet>(&assets_dir, &path, manifest.as_ref()),
+                        read_json_member::<ChannelWavelet>(
+                            &assets_dir,
+                            &path,
+                            manifest.as_ref(),
+                            Some(&captured_files),
+                        ),
                         manifest.is_some(),
                     )?;
                 }
@@ -2681,6 +3117,7 @@ fn load_output_bundle_with_hook(
                                 &assets_dir,
                                 &path,
                                 manifest.as_ref(),
+                                Some(&captured_files),
                             ),
                             manifest.is_some(),
                         )?;
@@ -2693,8 +3130,14 @@ fn load_output_bundle_with_hook(
                         && let Some(driver) = drivers.get_mut(driver_index)
                         && driver.initial_curve.is_none()
                     {
-                        let curve =
-                            read_indexed_curve(&assets_dir, fields, kind, &path, manifest.as_ref());
+                        let curve = read_indexed_curve(
+                            &assets_dir,
+                            fields,
+                            kind,
+                            &path,
+                            manifest.as_ref(),
+                            Some(&captured_files),
+                        );
                         driver.initial_curve = if manifest.is_some() {
                             Some(curve?)
                         } else {
@@ -2721,8 +3164,14 @@ fn load_output_bundle_with_hook(
                 }
                 continue;
             };
-            let path = indexed_member_path(&assets_dir, file, manifest.as_ref())?;
-            if !path.is_file() {
+            let path =
+                indexed_member_path(&assets_dir, file, manifest.as_ref(), Some(&captured_files))?;
+            if !indexed_member_is_available(
+                &assets_dir,
+                file,
+                manifest.as_ref(),
+                Some(&captured_files),
+            )? {
                 if manifest.is_some() {
                     return Err(
                         io_invalid(format!("missing measurement bundle member: {file}")).into(),
@@ -2752,6 +3201,7 @@ fn load_output_bundle_with_hook(
                 "deployed_source_curves",
                 &path,
                 manifest.as_ref(),
+                Some(&captured_files),
             );
             if manifest.is_some() {
                 output.deployed_source_curves.insert(name.clone(), curve?);
@@ -2760,7 +3210,13 @@ fn load_output_bundle_with_hook(
             }
         }
     }
-    Ok(output)
+    Ok(frozen_output_bundle(
+        output,
+        root_bytes,
+        slim_graph_identity,
+        verification,
+        resources,
+    ))
 }
 
 #[cfg(test)]
@@ -3373,6 +3829,188 @@ mod tests {
     }
 
     #[test]
+    fn frozen_bundle_exposes_manifest_bound_graph_identity_and_resource_bytes() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let output_path = dir.path().join("dsp.json");
+        let source_assets = dir.path().join("run-assets");
+        std::fs::create_dir_all(&source_assets).expect("source assets");
+        let fir_bytes = b"frozen FIR bytes";
+        std::fs::write(source_assets.join("impulse.wav"), fir_bytes).expect("write FIR");
+        let fir_hash = sha256_hex(fir_bytes);
+        let mut output = convolution_graph("impulse.wav", &fir_hash);
+        output.channels.get_mut("L").unwrap().initial_curve =
+            Some(curve(vec![30.25, 50.5, 100.75], vec![80.0, 81.0, 79.0]));
+        save_output_bundle_with_resources(&mut output, &output_path, &source_assets)
+            .expect("save resource bundle");
+        let reference = output.channels["L"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .expect("rewritten resource reference")
+            .to_owned();
+
+        let frozen = load_output_bundle_frozen(&output_path).expect("load frozen bundle");
+        assert_eq!(
+            frozen.verification(),
+            OutputBundleVerification::ManifestVerified
+        );
+        assert_eq!(
+            frozen.raw_graph_sha256(),
+            sha256_hex(frozen.slim_graph_bytes())
+        );
+        let slim_graph: DspGraph =
+            serde_json::from_slice(frozen.slim_graph_bytes()).expect("parse captured slim graph");
+        assert_eq!(
+            frozen.slim_graph_identity(),
+            &slim_graph_identity_and_validate_ledger(&slim_graph).expect("slim identity")
+        );
+        let restored_curve = frozen.output().channels["L"]
+            .initial_curve
+            .as_ref()
+            .expect("hydrated curve");
+        assert_eq!(restored_curve.freq, vec![30.25, 50.5, 100.75]);
+        assert_eq!(restored_curve.spl, vec![80.0, 81.0, 79.0]);
+        let resource = frozen.resource(&reference).expect("frozen FIR resource");
+        assert_eq!(resource.relative_path(), reference);
+        assert_eq!(resource.sha256(), fir_hash);
+        assert_eq!(resource.bytes(), fir_bytes);
+    }
+
+    #[test]
+    fn frozen_loader_parses_the_exact_bytes_captured_before_path_replacement() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let output_path = dir.path().join("dsp.json");
+        let source_assets = dir.path().join("run-assets");
+        std::fs::create_dir_all(&source_assets).expect("source assets");
+        let fir_bytes = b"captured FIR bytes";
+        std::fs::write(source_assets.join("impulse.wav"), fir_bytes).expect("write FIR");
+        let fir_hash = sha256_hex(fir_bytes);
+        let expected_curve = curve(vec![30.25, 50.5, 100.75], vec![80.0, 81.0, 79.0]);
+        let mut output = convolution_graph("impulse.wav", &fir_hash);
+        output.channels.get_mut("L").unwrap().initial_curve = Some(expected_curve.clone());
+        save_output_bundle_with_resources(&mut output, &output_path, &source_assets)
+            .expect("save resource bundle");
+
+        let assets = assets_dir_for(&output_path);
+        let index: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(assets.join(MEASUREMENTS_INDEX_FILENAME)).expect("read index"),
+        )
+        .expect("parse index");
+        let metadata_name = index["channels"]["L"]["initial_curve_metadata"]
+            .as_str()
+            .expect("curve metadata path")
+            .to_owned();
+        let fir_name = output.channels["L"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .expect("rewritten resource reference")
+            .to_owned();
+
+        let frozen = load_output_bundle_frozen_with_hooks(
+            &output_path,
+            |_| Ok(()),
+            |assets| {
+                std::fs::write(assets.join(MEASUREMENTS_INDEX_FILENAME), b"{}")
+                    .expect("replace measurement index");
+                std::fs::write(assets.join(&metadata_name), b"{}").expect("replace metadata");
+                std::fs::write(assets.join("L__initial.csv"), b"changed CSV").expect("replace CSV");
+                std::fs::write(assets.join(&fir_name), b"changed FIR").expect("replace FIR");
+                Ok(())
+            },
+        )
+        .expect("parse the captured bundle snapshot");
+
+        let restored_curve = frozen.output().channels["L"]
+            .initial_curve
+            .as_ref()
+            .expect("hydrated curve");
+        assert_eq!(restored_curve.freq, expected_curve.freq);
+        assert_eq!(restored_curve.spl, expected_curve.spl);
+        assert_eq!(
+            frozen.resource(&fir_name).expect("captured FIR").bytes(),
+            fir_bytes
+        );
+        assert_eq!(
+            std::fs::read(assets.join(&fir_name)).unwrap(),
+            b"changed FIR"
+        );
+    }
+
+    #[test]
+    fn frozen_slim_identity_rejects_stale_ledger_payload_and_evidence() {
+        let mut graph = DspGraph::new("1");
+        graph.artifact_bundle_schema_version = Some(BUNDLE_MANIFEST_SCHEMA_VERSION);
+        graph.add_channel("L", Vec::new());
+        crate::final_ledger::finalize_output_ledger(
+            &mut graph,
+            &[],
+            &crate::final_ledger::ReconciliationEvents::default(),
+        )
+        .expect("finalize ledger");
+        let identity = slim_graph_identity_and_validate_ledger(&graph).expect("valid ledger");
+        graph
+            .correction_decisions
+            .as_mut()
+            .unwrap()
+            .acceptance_evidence =
+            Some(roomeq_model::acceptance_evidence::AcceptanceEvidence::new(
+                serde_json::json!({"diagnostic": "bound to the slim graph"}),
+                &identity.fingerprint,
+            ));
+        assert_eq!(
+            slim_graph_identity_and_validate_ledger(&graph).expect("valid evidence"),
+            identity
+        );
+
+        let mut bad_payload = graph.clone();
+        bad_payload
+            .correction_decisions
+            .as_mut()
+            .unwrap()
+            .payload_binding
+            .as_mut()
+            .unwrap()
+            .sha256 = "0".repeat(64);
+        let error = slim_graph_identity_and_validate_ledger(&bad_payload).unwrap_err();
+        assert!(error.to_string().contains("payload binding"), "{error}");
+
+        let mut bad_evidence = graph;
+        let ledger = bad_evidence.correction_decisions.as_mut().unwrap();
+        ledger.payload_binding = None;
+        ledger.acceptance_evidence =
+            Some(roomeq_model::acceptance_evidence::AcceptanceEvidence::new(
+                serde_json::json!({"diagnostic": "bound to another graph"}),
+                "different-graph",
+            ));
+        let error = slim_graph_identity_and_validate_ledger(&bad_evidence).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("acceptance evidence does not match the canonical slim graph"),
+            "identity was {}: {error}",
+            identity.fingerprint
+        );
+    }
+
+    #[test]
+    fn frozen_loader_marks_unmanifested_legacy_graph_unverified() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let output_path = dir.path().join("legacy.json");
+        let mut graph = DspGraph::new("legacy");
+        graph.add_channel("L", Vec::new());
+        std::fs::write(
+            &output_path,
+            serde_json::to_vec_pretty(&graph).expect("serialize graph"),
+        )
+        .expect("write legacy output");
+
+        let frozen = load_output_bundle_frozen(&output_path).expect("load legacy output");
+
+        assert_eq!(
+            frozen.verification(),
+            OutputBundleVerification::LegacyUnverified
+        );
+        assert!(frozen.resources().next().is_none());
+    }
+
+    #[test]
     fn resource_save_failures_leave_the_previous_bundle_unchanged() {
         let dir = tempfile::tempdir().expect("temp dir");
         let output_path = dir.path().join("dsp.json");
@@ -3790,6 +4428,43 @@ mod tests {
             error
                 .to_string()
                 .contains("unsupported artifact bundle schema marker")
+        );
+    }
+
+    #[test]
+    fn manifested_graph_without_marker_still_runs_native_graph_validation() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let output_path = dir.path().join("dsp.json");
+        let mut output = DspGraph::new("1");
+        output.add_channel("L", Vec::new());
+        save_output_bundle(&mut output, &output_path).expect("save bundle");
+
+        let mut root: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&output_path).expect("read root"))
+                .expect("parse root");
+        root["artifact_bundle_schema_version"] = serde_json::Value::Null;
+        root["channels"] = serde_json::json!({});
+        let root_bytes = serde_json::to_vec(&root).expect("serialize malformed graph");
+        std::fs::write(&output_path, &root_bytes).expect("replace root");
+        let assets = assets_dir_for(&output_path);
+        let manifest: BundleManifest = serde_json::from_slice(
+            &std::fs::read(assets.join(ARTIFACT_BUNDLE_MANIFEST_FILENAME)).expect("read manifest"),
+        )
+        .expect("parse manifest");
+        write_bundle_manifest(
+            &assets,
+            &manifest.generation,
+            &manifest.graph_schema_version,
+            &sha256_hex(&root_bytes),
+        )
+        .expect("rebind malformed root to manifest");
+
+        let error = load_output_bundle_frozen(&output_path).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("DSP graph requires at least one channel"),
+            "{error}"
         );
     }
 

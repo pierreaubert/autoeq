@@ -130,9 +130,6 @@ recording-gui *args:
 
 [group('lint')]
 lint:
-	# The optional plotly dependency embeds templates from an external cache path
-	# that is not available in all checkout environments. Keep lint hermetic and
-	# lint the default production surface; plotly builds remain covered by CI.
 	{{cargo}} clippy --all -- -D warnings
 
 [group('lint')]
@@ -165,10 +162,10 @@ dist-autoeq:
 dist-roomeq:
 	{{cargo}} build --profile dist --features cli --bin roomeq
 
-# Plotly-gated bins (skipped by `--workspace` because of required-features).
+# AutoEQ QA fuzzer is gated by the workspace `qa` feature.
 [group('dist')]
 dist-plot-bins:
-	{{cargo}} build --profile dist --bin roomeq-fuzzer --features qa,plotly
+	{{cargo}} build --profile dist --bin roomeq-fuzzer --features qa
 
 # ----------------------------------------------------------------------
 # CLEAN
@@ -225,7 +222,7 @@ publish-autoeq:
 
 [group('demo')]
 demo-headphone-loss:
-	{{cargo}} run --release --example headphone_loss_demo --features="plotly" -- \
+	{{cargo}} run --release --example headphone_loss_demo -- \
 	--spl "./data_tests/headphones/asr/bowerwilkins_p7/Bowers & Wilkins P7.csv" \
 	--target "./data_tests/targets/harman-over-ear-2018.csv"
 
@@ -233,4 +230,4 @@ demo-headphone-loss:
 # QA
 # ----------------------------------------------------------------------
 
-qa : qa-autoeq-all qa-roomeq-all qa-export-all
+qa : qa-autoeq-all qa-roomeq-all qa-export-all qa-wolfram-validation

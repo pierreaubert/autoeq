@@ -16,12 +16,36 @@
     ],
     "autoeq-optim": [
       "autoeq-core",
-      "autoeq-measurements"
+      "autoeq-measurements",
+      "roomeq-model"
     ],
     "autoeq-plot": [
       "autoeq-core",
       "autoeq-measurements",
-      "autoeq-optim"
+      "autoeq-optim",
+      "autoeq-report-wasm"
+    ],
+    "autoeq-qa": [
+      "autoeq-artifacts",
+      "autoeq-cli",
+      "autoeq-core",
+      "autoeq-fir",
+      "autoeq-measurements",
+      "autoeq-optim",
+      "autoeq-plot",
+      "autoeq-workflow",
+      "roomeq-analysis",
+      "roomeq-cli",
+      "roomeq-engine",
+      "roomeq-export",
+      "roomeq-model",
+      "roomeq-qa",
+      "roomeq-quality",
+      "roomeq-synthetic",
+      "roomeq-workflow"
+    ],
+    "autoeq-report-gpui": [
+      "autoeq-report-wasm"
     ],
     "autoeq-workflow": [
       "autoeq-core",
@@ -32,6 +56,7 @@
       "autoeq-plot",
       "autoeq-workflow"
     ],
+    "autoeq-report-wasm": [],
     "autoeq-report-wasm-shell": [
       "autoeq-report-wasm"
     ],
@@ -44,34 +69,36 @@
     ],
     "roomeq-quality": [
       "autoeq-core",
-      "roomeq-analysis",
       "roomeq-model"
     ],
-    "roomeq-qa": [
-      "autoeq-optim",
-      "autoeq-measurements",
-      "roomeq-analysis",
-      "roomeq-engine",
-      "roomeq-model",
-      "roomeq-quality",
-      "roomeq-synthetic",
-      "roomeq-workflow"
-    ],
     "roomeq-cli": [
+      "autoeq-optim",
       "roomeq-engine",
+      "roomeq-export",
       "roomeq-model",
       "roomeq-workflow"
     ],
     "roomeq-engine": [
       "autoeq-core",
       "autoeq-fir",
+      "autoeq-measurements",
       "autoeq-optim",
       "roomeq-analysis",
       "roomeq-model",
       "roomeq-quality"
     ],
     "roomeq-export": [
+      "roomeq-engine",
       "roomeq-model"
+    ],
+    "roomeq-qa": [
+      "autoeq-core",
+      "autoeq-optim",
+      "roomeq-engine",
+      "roomeq-model",
+      "roomeq-quality",
+      "roomeq-synthetic",
+      "roomeq-workflow"
     ],
     "roomeq-synthetic": [
       "autoeq-core",
@@ -79,16 +106,37 @@
     ],
     "roomeq-workflow": [
       "autoeq-artifacts",
+      "autoeq-core",
       "autoeq-measurements",
+      "roomeq-analysis",
       "roomeq-engine",
       "roomeq-export",
-      "roomeq-model"
+      "roomeq-model",
+      "roomeq-quality"
     ]
+  },
+  "allowed_dev_dependencies": {
+    "roomeq-export": [
+      "roomeq-workflow"
+    ],
+    "roomeq-qa": [
+      "autoeq-measurements",
+      "roomeq-analysis"
+    ]
+  },
+  "allowed_build_dependencies": {},
+  "required_external_dependencies": {
+    "autoeq-artifacts": {
+      "normal": [
+        "sha2",
+        "tempfile"
+      ]
+    }
   },
   "temporary_exceptions": [],
   "metric_budgets": {
-    "root_rust_loc": 578,
-    "root_roomeq_rust_loc": 290,
+    "root_rust_loc": 581,
+    "root_roomeq_rust_loc": 292,
     "root_binary_rust_loc": 184,
     "root_unit_tests": 2
   },
@@ -101,24 +149,65 @@
     "output": "src/bin/roomeq/output_schema.json"
   },
   "focused_tests": {
-    "autoeq": "cargo test -p autoeq --lib",
-    "autoeq-artifacts": "cargo test -p autoeq-artifacts --lib",
-    "autoeq-cli": "cargo test -p autoeq-cli --lib",
-    "autoeq-core": "cargo test -p autoeq-core --lib",
-    "autoeq-fir": "cargo test -p autoeq-fir --lib",
-    "autoeq-measurements": "cargo test -p autoeq-measurements --lib",
-    "autoeq-optim": "cargo test -p autoeq-optim --lib",
-    "autoeq-plot": "cargo test -p autoeq-plot --lib",
-    "autoeq-report-wasm-shell": "cargo test -p autoeq-report-wasm-shell --lib",
-    "autoeq-workflow": "cargo test -p autoeq-workflow --lib",
-    "roomeq-analysis": "cargo test -p roomeq-analysis --lib",
-    "roomeq-cli": "cargo test -p roomeq-cli --lib",
-    "roomeq-engine": "cargo test -p roomeq-engine --lib",
-    "roomeq-export": "cargo test -p roomeq-export --lib",
-    "roomeq-model": "cargo test -p roomeq-model --lib",
-    "roomeq-quality": "cargo test -p roomeq-quality --lib",
-    "roomeq-qa": "cargo test -p roomeq-qa --lib",
-    "roomeq-synthetic": "cargo test -p roomeq-synthetic --lib",
-    "roomeq-workflow": "cargo test -p roomeq-workflow --lib"
+    "autoeq": "cargo test -p autoeq --locked --lib --all-features",
+    "autoeq-artifacts": "cargo test -p autoeq-artifacts --locked --lib --all-features",
+    "autoeq-cli": "cargo test -p autoeq-cli --locked --lib --all-features",
+    "autoeq-core": "cargo test -p autoeq-core --locked --lib --all-features",
+    "autoeq-fir": "cargo test -p autoeq-fir --locked --lib --all-features",
+    "autoeq-measurements": "cargo test -p autoeq-measurements --locked --lib --all-features",
+    "autoeq-optim": "cargo test -p autoeq-optim --locked --lib --all-features",
+    "autoeq-plot": "cargo test -p autoeq-plot --locked --lib --all-features",
+    "autoeq-qa": "cargo test -p autoeq-qa --locked --lib --all-features",
+    "autoeq-report-gpui": "cargo test -p autoeq-report-gpui --locked --lib --all-features",
+    "autoeq-report-wasm": "cargo test -p autoeq-report-wasm --locked --lib --all-features",
+    "autoeq-report-wasm-shell": "cargo test -p autoeq-report-wasm-shell --locked --all-features",
+    "autoeq-workflow": "cargo test -p autoeq-workflow --locked --lib --all-features",
+    "roomeq-analysis": "cargo test -p roomeq-analysis --locked --lib --all-features",
+    "roomeq-cli": "cargo test -p roomeq-cli --locked --lib --all-features",
+    "roomeq-engine": "cargo test -p roomeq-engine --locked --lib --all-features",
+    "roomeq-export": "cargo test -p roomeq-export --locked --lib --all-features",
+    "roomeq-model": "cargo test -p roomeq-model --locked --lib --all-features",
+    "roomeq-qa": "cargo test -p roomeq-qa --locked --lib --all-features",
+    "roomeq-quality": "cargo test -p roomeq-quality --locked --lib --all-features",
+    "roomeq-synthetic": "cargo test -p roomeq-synthetic --locked --lib --all-features",
+    "roomeq-workflow": "cargo test -p roomeq-workflow --locked --lib --all-features"
+  },
+  "workspace_package_count": 22,
+  "numerical_qa": {
+    "package": "autoeq-qa",
+    "manifest": "crates/autoeq-qa/validation-manifest.toml",
+    "expected_case_count": 124,
+    "expected_runner_counts": {
+      "rust": 118,
+      "python": 6
+    },
+    "expected_rust_test_target_count": 139,
+    "auxiliary_python_files": [
+      "negative_controls_tailpy.py"
+    ],
+    "evidence_directory": "target/qa",
+    "additional_rust_test_targets": [
+      "negative_controls",
+      "negative_controls_app",
+      "negative_controls_core1",
+      "negative_controls_core2",
+      "negative_controls_enga",
+      "negative_controls_engb",
+      "negative_controls_engc",
+      "negative_controls_engd",
+      "negative_controls_expquala",
+      "negative_controls_meas",
+      "negative_controls_model",
+      "negative_controls_optima",
+      "negative_controls_optimb",
+      "negative_controls_optimc",
+      "negative_controls_qqsa",
+      "negative_controls_raa",
+      "negative_controls_rab",
+      "negative_controls_rac",
+      "negative_controls_rw1",
+      "negative_controls_rw2",
+      "qa_contract"
+    ]
   }
 }

@@ -58,7 +58,7 @@ qa-roomeq-nightly:
 	{{cargo}} run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
 	{{cargo}} run --features qa --bin roomeq-qa-features --no-default-features --release
 	{{cargo}} run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
-	{{cargo}} run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 200 --seed 42 --skip-kautz-modal
+	{{cargo}} run --bin roomeq-fuzzer --release --features=qa -- -n 200 --seed 42 --skip-kautz-modal
 
 [group('qa-roomeq')]
 qa-roomeq-weekly:
@@ -68,7 +68,7 @@ qa-roomeq-weekly:
         {{cargo}} run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
         {{cargo}} run --features qa --bin roomeq-qa-features --no-default-features --release
         {{cargo}} run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
-        {{cargo}} run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 1000 --seed 42 --skip-kautz-modal
+        {{cargo}} run --bin roomeq-fuzzer --release --features=qa -- -n 1000 --seed 42 --skip-kautz-modal
 
 [group('qa-roomeq')]
 qa-roomeq-all: qa-roomeq-weekly

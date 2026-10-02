@@ -7,7 +7,7 @@ use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::option_override::OptionOverride;
 use super::parse_maxeval;
 use super::parse_seed_runs;
-use super::run::{compare_cross_mode_band, deployed_final_curve};
+use super::run::{compare_cross_mode_band, deployed_final_curve, expected_parity_main_channels};
 use super::types::TestResult;
 use super::validate::{
     TargetTiltValidationOptions, validate_option_effect, validate_phase_alignment,
@@ -1288,5 +1288,48 @@ fn cross_mode_rms_aligns_distinct_supported_grids() {
     };
     assert!(
         level_matched_rms_curve_difference_db(&reference, &shifted, 100.0, 500.0).unwrap() < 1e-12
+    );
+}
+
+#[test]
+fn cross_mode_expected_channels_use_declared_logical_topology_roles() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../data_tests/roomeq/measured/5.1.4_genelec/recordings.json");
+    let config: RoomConfig = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let expected = expected_parity_main_channels(&config);
+    assert_eq!(
+        expected,
+        ["C", "L", "R", "SL", "SR", "TBL", "TBR", "TFL", "TFR"]
+            .into_iter()
+            .map(String::from)
+            .collect()
+    );
+    assert!(!expected.contains("front_left_large"));
+    // Coverage still comes from configuration when an output is missing.
+    let channels = expected
+        .into_iter()
+        .map(|name| (name, vec![Some(curve_with_slope(0.0)); 4]))
+        .collect::<Vec<_>>();
+    let modes = ["IIR", "FIR", "Hybrid", "MixedPhase"];
+    let comparison = compare_cross_mode_band(&channels, &modes, 100.0, 500.0);
+    assert_eq!(comparison.expected_comparisons, 54);
+    assert!(comparison.passes(0.0, Some(0.0)));
+    let mut missing = channels;
+    missing
+        .iter_mut()
+        .find(|(name, _)| name == "L")
+        .unwrap()
+        .1
+        .clear();
+    assert!(!compare_cross_mode_band(&missing, &modes, 100.0, 500.0).passes(3.0, Some(4.25)));
+
+    let mut generic = config;
+    generic.system = None;
+    generic
+        .speakers
+        .retain(|name, _| name == "front_left_large");
+    assert_eq!(
+        expected_parity_main_channels(&generic),
+        ["front_left_large".to_string()].into_iter().collect()
     );
 }

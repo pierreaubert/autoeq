@@ -510,6 +510,21 @@ impl CrossModeBandComparison {
     }
 }
 
+pub(super) fn expected_parity_main_channels(
+    config: &RoomConfig,
+) -> std::collections::BTreeSet<String> {
+    // Topology workflows publish logical roles, not measurement keys.
+    let names: Vec<_> = match &config.system {
+        Some(system) => system.speakers.keys().collect(),
+        None => config.speakers.keys().collect(),
+    };
+    names
+        .into_iter()
+        .filter(|channel| !super::misc::is_lfe_or_sub_channel(channel))
+        .cloned()
+        .collect()
+}
+
 pub(super) fn compare_cross_mode_band(
     channel_curves: &[(String, Vec<Option<Curve>>)],
     mode_names: &[&str],
@@ -604,13 +619,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             );
         } else {
             clamp_strict_measured_maxeval(&mut config, maxeval);
-            expected_main_channels.extend(
-                config
-                    .speakers
-                    .keys()
-                    .filter(|channel| !super::misc::is_lfe_or_sub_channel(channel))
-                    .cloned(),
-            );
+            expected_main_channels.extend(expected_parity_main_channels(&config));
         }
         // Strict measured regressions exercise the checked-in production
         // fixture unchanged except for clamping optimizer.max_iter. Filter

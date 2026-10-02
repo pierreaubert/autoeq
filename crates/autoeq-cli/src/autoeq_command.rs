@@ -20,6 +20,7 @@ use autoeq_plot as plot;
 use clap::Parser;
 use log::warn;
 use log::{error, info};
+use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -71,6 +72,13 @@ pub async fn run_command() -> Result<()> {
 
     let mut args = autoeq::cli::Args::parse();
 
+    if args.product_renderer_capabilities {
+        let raw_args = std::env::args_os().skip(1).collect::<Vec<_>>();
+        let capabilities = product_renderer_capabilities_json(&raw_args)?;
+        println!("{capabilities}");
+        return Ok(());
+    }
+
     // Apply preset (if specified) before processing other flags
     args.apply_preset();
 
@@ -99,6 +107,17 @@ pub async fn run_command() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn product_renderer_capabilities_json(arguments: &[OsString]) -> Result<String> {
+    const QUERY_FLAG: &str = "--product-renderer-capabilities";
+    if arguments.len() != 1 || arguments[0].as_os_str() != OsStr::new(QUERY_FLAG) {
+        return Err(anyhow!(
+            "{QUERY_FLAG} must be used alone; it cannot be combined with optimization, input, or export arguments"
+        ));
+    }
+    serde_json::to_string(&autoeq::workflow::product_renderer_capabilities())
+        .context("Failed to serialize product renderer capabilities")
 }
 
 fn cli_config_identity(
@@ -1081,11 +1100,13 @@ async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
 mod tests {
     use super::{
         cli_product_identity, max_finite_filter_transfer_delta_db, max_finite_response_delta_db,
-        validate_checkpoint_mode, validate_product_config_dispatch,
+        product_renderer_capabilities_json, validate_checkpoint_mode,
+        validate_product_config_dispatch,
     };
     use autoeq::cli::Args;
     use clap::Parser;
     use ndarray::Array1;
+    use std::ffi::OsString;
     use std::path::PathBuf;
 
     fn checkpoint_test_record() -> autoeq::measurements::MeasurementRecord {
@@ -1296,6 +1317,42 @@ mod tests {
                 .to_string()
                 .contains("--qa")
         );
+    }
+
+    #[test]
+    fn renderer_capability_query_is_json_only_and_needs_no_product_inputs() {
+        let output = product_renderer_capabilities_json(&[OsString::from(
+            "--product-renderer-capabilities",
+        )])
+        .expect("capability query should need no measurements or device profile");
+        let value: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(value["schema_version"], 1);
+        assert_eq!(value["renderers"].as_array().unwrap().len(), 3);
+        assert_eq!(value["renderers"][0]["renderer"], "equalizer_apo");
+        assert_eq!(value["renderers"][0]["product_profile_export"], "verified");
+    }
+
+    #[test]
+    fn renderer_capability_query_rejects_ignored_work_arguments() {
+        for arguments in [
+            vec![
+                OsString::from("--product-renderer-capabilities"),
+                OsString::from("--curve"),
+                OsString::from("measurement.csv"),
+            ],
+            vec![
+                OsString::from("--product-renderer-capabilities"),
+                OsString::from("--num-filters"),
+                OsString::from("5"),
+            ],
+            vec![
+                OsString::from("--product-renderer-capabilities"),
+                OsString::from("--product-config"),
+                OsString::from("request.json"),
+            ],
+        ] {
+            assert!(product_renderer_capabilities_json(&arguments).is_err());
+        }
     }
 
     #[test]

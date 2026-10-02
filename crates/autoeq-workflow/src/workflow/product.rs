@@ -75,6 +75,179 @@ pub enum ProductRenderer {
     AppleAu,
 }
 
+/// Schema version for the machine-readable product renderer capability report.
+pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 1;
+
+/// Format emitted by the corresponding legacy or checked product serializer.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductRendererFormat {
+    EqualizerApoTextPreset,
+    RmeTotalMixRoomEqXml,
+    AppleAudioUnitPreset,
+}
+
+/// Whether a renderer has a product export path with profile-bound checks.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductProfileExportStatus {
+    /// The product workflow validates the caller's profile and records the
+    /// exact serialized preset and realized filter parameters.
+    Verified,
+    /// A legacy serializer exists, but the product workflow cannot make a
+    /// versioned device-compatibility claim for it.
+    LegacyOnly,
+}
+
+/// Stable machine-readable reason why a renderer is unavailable to profiled
+/// product export.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductRendererRefusalCode {
+    /// No versioned consumer/device contract is available for the legacy
+    /// serializer, so its output cannot be bound to a caller's device profile.
+    NoVerifiedVersionedDeviceContract,
+}
+
+impl ProductRendererRefusalCode {
+    /// Return the human-readable explanation shared by API validation and CLI
+    /// diagnostics.
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::NoVerifiedVersionedDeviceContract => {
+                "has no verified profile export path; use the legacy exporter without device-guarantee claims"
+            }
+        }
+    }
+}
+
+/// Checks that the profiled product exporter verifies for a renderer.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductRendererVerifiedFeature {
+    ExplicitPerMachineDeviceProfile,
+    SourceTargetAndRigProvenanceSidecar,
+    PresetSha256Binding,
+    QuantizedFilterTransferCheck,
+}
+
+/// Known behavior that limits what a renderer capability report promises.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductRendererLimitation {
+    /// Writing a preset does not install it or query the running application.
+    PresetRequiresUserInstallation,
+    /// The APO check validates serialization and declared limits, not playback
+    /// hardware behavior or audibility.
+    RuntimeDeviceAndAudibilityAreNotVerified,
+    /// The legacy RME writer can reshape or replace filters to fit its fixed
+    /// topology and supported filter slots.
+    LegacyRmeWriterMayTransformFilterTopology,
+    /// The legacy RME XML writer emits at most nine filters for each channel.
+    LegacyRmeWriterCapsAtNineFiltersPerChannel,
+    /// The legacy RME XML writer uses fixed zero channel gain and delay fields.
+    LegacyRmeWriterUsesZeroChannelGainAndDelay,
+    /// The legacy Apple Audio Unit writer emits at most sixteen bands.
+    LegacyAppleWriterCapsAtSixteenBands,
+    /// The legacy Apple Audio Unit writer stores filter values as f32.
+    LegacyAppleWriterUsesSinglePrecisionParameters,
+    /// The legacy Apple Audio Unit preset has no sample-rate binding.
+    LegacyAppleWriterHasNoSampleRateBinding,
+}
+
+/// Capability for one renderer in the product-profile export workflow.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProductRendererCapability {
+    pub renderer: ProductRenderer,
+    pub format: ProductRendererFormat,
+    pub legacy_export_available: bool,
+    pub product_profile_export: ProductProfileExportStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refusal_code: Option<ProductRendererRefusalCode>,
+    pub verified_features: Vec<ProductRendererVerifiedFeature>,
+    pub known_limitations: Vec<ProductRendererLimitation>,
+}
+
+/// Versioned machine-readable capabilities for product-profile exports.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ProductRendererCapabilities {
+    pub schema_version: u32,
+    pub renderers: Vec<ProductRendererCapability>,
+}
+
+impl ProductRenderer {
+    /// Describe the current product-profile and legacy export contracts.
+    ///
+    /// A `Verified` product export means the software checks the selected
+    /// serializer against an explicit caller-supplied profile and binds its
+    /// provenance. It does not mean the preset is installed or verified on a
+    /// running physical device.
+    pub fn capability(self) -> ProductRendererCapability {
+        match self {
+            Self::EqualizerApo => ProductRendererCapability {
+                renderer: self,
+                format: ProductRendererFormat::EqualizerApoTextPreset,
+                legacy_export_available: true,
+                product_profile_export: ProductProfileExportStatus::Verified,
+                refusal_code: None,
+                verified_features: vec![
+                    ProductRendererVerifiedFeature::ExplicitPerMachineDeviceProfile,
+                    ProductRendererVerifiedFeature::SourceTargetAndRigProvenanceSidecar,
+                    ProductRendererVerifiedFeature::PresetSha256Binding,
+                    ProductRendererVerifiedFeature::QuantizedFilterTransferCheck,
+                ],
+                known_limitations: vec![
+                    ProductRendererLimitation::PresetRequiresUserInstallation,
+                    ProductRendererLimitation::RuntimeDeviceAndAudibilityAreNotVerified,
+                ],
+            },
+            Self::RmeTotalMix => ProductRendererCapability {
+                renderer: self,
+                format: ProductRendererFormat::RmeTotalMixRoomEqXml,
+                legacy_export_available: true,
+                product_profile_export: ProductProfileExportStatus::LegacyOnly,
+                refusal_code: Some(ProductRendererRefusalCode::NoVerifiedVersionedDeviceContract),
+                verified_features: vec![],
+                known_limitations: vec![
+                    ProductRendererLimitation::LegacyRmeWriterMayTransformFilterTopology,
+                    ProductRendererLimitation::LegacyRmeWriterCapsAtNineFiltersPerChannel,
+                    ProductRendererLimitation::LegacyRmeWriterUsesZeroChannelGainAndDelay,
+                ],
+            },
+            Self::AppleAu => ProductRendererCapability {
+                renderer: self,
+                format: ProductRendererFormat::AppleAudioUnitPreset,
+                legacy_export_available: true,
+                product_profile_export: ProductProfileExportStatus::LegacyOnly,
+                refusal_code: Some(ProductRendererRefusalCode::NoVerifiedVersionedDeviceContract),
+                verified_features: vec![],
+                known_limitations: vec![
+                    ProductRendererLimitation::LegacyAppleWriterCapsAtSixteenBands,
+                    ProductRendererLimitation::LegacyAppleWriterUsesSinglePrecisionParameters,
+                    ProductRendererLimitation::LegacyAppleWriterHasNoSampleRateBinding,
+                ],
+            },
+        }
+    }
+}
+
+/// Return the current versioned product renderer capability report.
+pub fn product_renderer_capabilities() -> ProductRendererCapabilities {
+    ProductRendererCapabilities {
+        schema_version: PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION,
+        renderers: [
+            ProductRenderer::EqualizerApo,
+            ProductRenderer::RmeTotalMix,
+            ProductRenderer::AppleAu,
+        ]
+        .into_iter()
+        .map(ProductRenderer::capability)
+        .collect(),
+    }
+}
+
 /// Numeric interval declared by a caller-provided playback-device profile.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -290,11 +463,8 @@ impl DeviceProfile {
         if self.preamp_db.is_none_or(|value| !value.is_finite()) {
             return Err("device profile requires an explicit finite preamp value".into());
         }
-        if self.renderer != ProductRenderer::EqualizerApo {
-            return Err(format!(
-                "renderer {:?} has no verified profile export path; use the legacy exporter without device-guarantee claims",
-                self.renderer
-            ));
+        if let Some(reason) = self.renderer.capability().refusal_code {
+            return Err(format!("renderer {:?} {}", self.renderer, reason.message()));
         }
         Ok(())
     }
@@ -1080,13 +1250,102 @@ mod tests {
         assert!(studio_profile.validate_for_optimizer(&params).is_ok());
         assert!(portable_profile.validate_for_optimizer(&params).is_err());
 
-        let mut unknown_renderer = studio_profile.clone();
-        unknown_renderer.renderer = ProductRenderer::RmeTotalMix;
-        assert!(unknown_renderer.validate_for_optimizer(&params).is_err());
+        for renderer in [ProductRenderer::RmeTotalMix, ProductRenderer::AppleAu] {
+            let mut unverified_renderer = studio_profile.clone();
+            unverified_renderer.renderer = renderer;
+            let refusal = unverified_renderer
+                .validate_for_optimizer(&params)
+                .expect_err("legacy serializer has no verified product profile contract");
+            let reason = renderer
+                .capability()
+                .refusal_code
+                .expect("unsupported product renderer should have a reason code");
+            assert_eq!(
+                refusal,
+                format!("renderer {:?} {}", renderer, reason.message())
+            );
+        }
 
         let mut implicit_preamp = studio_profile;
         implicit_preamp.preamp_db = None;
         assert!(implicit_preamp.validate_for_optimizer(&params).is_err());
+    }
+
+    #[test]
+    fn renderer_capability_report_is_versioned_and_exposes_loss_reasons() {
+        let report = product_renderer_capabilities();
+        assert_eq!(
+            report.schema_version,
+            PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION
+        );
+        assert_eq!(report.renderers.len(), 3);
+
+        let apo = ProductRenderer::EqualizerApo.capability();
+        assert_eq!(
+            apo.product_profile_export,
+            ProductProfileExportStatus::Verified
+        );
+        assert_eq!(apo.refusal_code, None);
+        assert!(apo.legacy_export_available);
+        assert!(
+            apo.verified_features
+                .contains(&ProductRendererVerifiedFeature::SourceTargetAndRigProvenanceSidecar)
+        );
+        assert!(
+            apo.verified_features
+                .contains(&ProductRendererVerifiedFeature::QuantizedFilterTransferCheck)
+        );
+        assert!(
+            apo.known_limitations
+                .contains(&ProductRendererLimitation::RuntimeDeviceAndAudibilityAreNotVerified)
+        );
+
+        let rme = ProductRenderer::RmeTotalMix.capability();
+        assert_eq!(
+            rme.product_profile_export,
+            ProductProfileExportStatus::LegacyOnly
+        );
+        assert_eq!(
+            rme.refusal_code,
+            Some(ProductRendererRefusalCode::NoVerifiedVersionedDeviceContract)
+        );
+        assert!(rme.verified_features.is_empty());
+        assert!(rme.legacy_export_available);
+        assert!(
+            rme.known_limitations
+                .contains(&ProductRendererLimitation::LegacyRmeWriterCapsAtNineFiltersPerChannel)
+        );
+
+        let apple = ProductRenderer::AppleAu.capability();
+        assert_eq!(
+            apple.product_profile_export,
+            ProductProfileExportStatus::LegacyOnly
+        );
+        assert_eq!(
+            apple.refusal_code,
+            Some(ProductRendererRefusalCode::NoVerifiedVersionedDeviceContract)
+        );
+        assert!(apple.verified_features.is_empty());
+        assert!(
+            apple.known_limitations.contains(
+                &ProductRendererLimitation::LegacyAppleWriterUsesSinglePrecisionParameters
+            )
+        );
+        assert!(
+            apple
+                .known_limitations
+                .contains(&ProductRendererLimitation::LegacyAppleWriterHasNoSampleRateBinding)
+        );
+
+        let encoded = serde_json::to_value(&report).unwrap();
+        assert_eq!(encoded["schema_version"], 1);
+        assert_eq!(encoded["renderers"][0]["renderer"], "equalizer_apo");
+        assert_eq!(encoded["renderers"][1]["renderer"], "rme_total_mix");
+        assert_eq!(encoded["renderers"][2]["renderer"], "apple_au");
+        assert_eq!(
+            encoded["renderers"][1]["refusal_code"],
+            "no_verified_versioned_device_contract"
+        );
     }
 
     #[test]

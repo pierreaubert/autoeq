@@ -48,6 +48,29 @@ mod tests;
 mod types;
 mod validation_scorecard;
 
+#[cfg(test)]
+pub(crate) fn rebuild_routed_pruning_test_candidate(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    held_out: &HashMap<String, Vec<Curve>>,
+    sample_rate: f64,
+    directory: &Path,
+) -> Result<()> {
+    finalization::rebuild(result, config, held_out, sample_rate, directory)
+}
+
+#[cfg(test)]
+pub(crate) fn apply_routed_pruning_for_test(
+    result: &mut RoomOptimizationResult,
+    captures: &[seat_replay::Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    sample_rate: f64,
+    directory: &Path,
+) {
+    routed_pruning::apply(result, captures, held_out, config, sample_rate, directory);
+}
+
 pub use room_optimization_progress::*;
 pub use room_optimization_result::*;
 pub use types::*;

@@ -37,9 +37,12 @@ struct LegacyRecordingResult {
     channel: usize,
     wav_path: Option<String>,
     csv_path: Option<String>,
-    frequencies: Vec<f32>,
-    magnitude_db: Vec<f32>,
-    phase_deg: Vec<f32>,
+    #[serde(default)]
+    frequencies: Vec<f64>,
+    #[serde(default)]
+    magnitude_db: Vec<f64>,
+    #[serde(default)]
+    phase_deg: Vec<f64>,
     #[serde(default)]
     impulse_response: Option<Vec<f32>>,
     #[serde(default)]
@@ -85,44 +88,77 @@ struct LegacyRecordingConfiguration {
     sweep_end_freq: Option<f32>,
 }
 
-fn sanitize_filename(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c == '_' || c == '-' {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect()
+fn legacy_measurement(result: &LegacyRecordingResult) -> Result<InlineMeasurement, String> {
+    let count = result.frequencies.len();
+    if count != result.magnitude_db.len() {
+        return Err("frequency and magnitude arrays must have equal lengths".into());
+    }
+    if !result.phase_deg.is_empty() && result.phase_deg.len() != count {
+        return Err("phase array must be absent or match the response grid".into());
+    }
+    if count == 0 {
+        if result
+            .csv_path
+            .as_deref()
+            .is_none_or(|path| path.trim().is_empty())
+        {
+            return Err("legacy summary has neither response data nor a CSV reference; analyze its raw recording before import".into());
+        }
+    } else if count < 2
+        || result
+            .frequencies
+            .iter()
+            .any(|value| !value.is_finite() || *value <= 0.0)
+        || result.frequencies.windows(2).any(|pair| pair[0] >= pair[1])
+        || result
+            .magnitude_db
+            .iter()
+            .chain(&result.phase_deg)
+            .any(|value| !value.is_finite())
+    {
+        return Err("legacy response needs at least two finite points on a positive increasing frequency grid".into());
+    }
+    Ok(InlineMeasurement {
+        frequencies: result.frequencies.clone(),
+        magnitude_db: result.magnitude_db.clone(),
+        phase_deg: (!result.phase_deg.is_empty()).then(|| result.phase_deg.clone()),
+        name: None,
+        wav_path: result.wav_path.clone(),
+        csv_path: result.csv_path.clone(),
+    })
 }
 
-fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig {
+fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> Result<RoomConfig, String> {
+    if legacy.channels.is_empty() {
+        return Err("legacy recording has no channels".into());
+    }
     let mut speakers: HashMap<String, SpeakerConfig> = HashMap::new();
 
     for ch in &legacy.channels {
-        let safe_channel_name = sanitize_filename(&ch.channel_name);
-        let result = &ch.measurement;
-
-        // Store only file references, not inline data
-        let inline_measurement = InlineMeasurement {
-            frequencies: Vec::new(),
-            magnitude_db: Vec::new(),
-            phase_deg: None,
-            name: Some(ch.channel_name.clone()),
-            wav_path: result.wav_path.clone(),
-            csv_path: Some(format!("{}.csv", safe_channel_name)),
-        };
-
-        let measurement_ref = MeasurementRef::Inline(inline_measurement);
+        if ch.channel_name.trim().is_empty() || speakers.contains_key(&ch.channel_name) {
+            return Err(format!(
+                "missing or duplicate legacy channel identity: '{}'",
+                ch.channel_name
+            ));
+        }
+        if ch.is_group || !ch.group_drivers.is_empty() {
+            return Err(format!(
+                "{}: legacy driver groups require an explicit topology and crossover configuration; automatic import cannot preserve their routing",
+                ch.channel_name
+            ));
+        }
+        let mut inline_measurement = legacy_measurement(&ch.measurement)
+            .map_err(|reason| format!("{}: {reason}", ch.channel_name))?;
+        inline_measurement.name = Some(ch.channel_name.clone());
         let measurement_source = MeasurementSource::Single(roomeq_model::MeasurementSingle {
-            measurement: measurement_ref,
+            measurement: MeasurementRef::Inline(inline_measurement),
             speaker_name: None,
             provenance: Default::default(),
         });
-        let speaker_config = SpeakerConfig::Single(measurement_source);
-
-        speakers.insert(ch.channel_name.clone(), speaker_config);
+        speakers.insert(
+            ch.channel_name.clone(),
+            SpeakerConfig::Single(measurement_source),
+        );
     }
 
     // Convert recording configuration if present
@@ -154,7 +190,7 @@ fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig 
             ..Default::default()
         });
 
-    RoomConfig {
+    Ok(RoomConfig {
         version: roomeq_model::default_config_version(),
         system: None,
         speakers,
@@ -167,24 +203,28 @@ fn convert_legacy_to_room_config(legacy: &LegacyMeasurementsFile) -> RoomConfig 
         reporting: None,
         cea2034_cache: None,
         provenance: Default::default(),
-    }
+    })
 }
 
 /// Convert a legacy recording JSON string to a `RoomConfig`.
 ///
-/// Provenance, source/seat IDs, calibration state, and timing fields are
-/// carried over verbatim: channel names become speaker IDs unchanged, and
-/// sample rates, durations, sweep bounds, and calibration paths are copied
-/// without rescaling or recentering. Loading through the measurement (L1/L2)
-/// acquisition APIs awaits that lane's published loader; until it lands,
-/// this converter applies no independent gain, level, or clock adjustment.
+/// Preserves channel identities, response arrays, original file references,
+/// and recording settings without applying calibration or timing corrections.
+/// Calibration paths remain metadata; acquisition quality, absolute SPL and
+/// coherent timing remain unknown because a legacy summary cannot prove them.
+/// Raw IR and analysis summaries are not promoted into verified capture evidence.
+///
+/// # Errors
+///
+/// Rejects malformed or missing responses, duplicate channel identities, and
+/// driver groups that need an explicit topology and crossover configuration.
 pub fn convert_legacy_str_to_room_config(json: &str) -> Result<RoomConfig, String> {
     if !is_legacy_recording_format(json) {
         return Err("input is not a legacy recording file (no \"channels\" array)".to_string());
     }
     let legacy: LegacyMeasurementsFile =
         serde_json::from_str(json).map_err(|e| format!("invalid legacy recording JSON: {e}"))?;
-    Ok(convert_legacy_to_room_config(&legacy))
+    convert_legacy_to_room_config(&legacy)
 }
 
 fn is_legacy_recording_format(json: &str) -> bool {
@@ -361,7 +401,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("  {} channel(s)", legacy.channels.len());
 
     // Convert to new format
-    let room_config = convert_legacy_to_room_config(&legacy);
+    let room_config = convert_legacy_to_room_config(&legacy).map_err(std::io::Error::other)?;
 
     // Write output
     let output_json = serde_json::to_string_pretty(&room_config)?;
@@ -374,7 +414,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_recording_args;
+    use super::{MeasurementSource, SpeakerConfig, parse_recording_args};
     use std::path::PathBuf;
 
     #[test]
@@ -463,6 +503,25 @@ mod tests {
         ids.sort();
         assert_eq!(ids, vec!["Left", "Right"]);
 
+        // Response bytes and original references remain useful after migration;
+        // a calibration filename alone does not authorize measured phase/SPL.
+        let SpeakerConfig::Single(MeasurementSource::Single(left)) = &config.speakers["Left"]
+        else {
+            panic!("expected one legacy measurement");
+        };
+        let inline = left
+            .measurement
+            .inline_data()
+            .expect("inline legacy response");
+        assert_eq!(inline.frequencies, vec![100.0, 1000.0]);
+        assert_eq!(inline.magnitude_db, vec![80.0, 81.0]);
+        assert_eq!(inline.phase_deg.as_deref(), Some(&[0.0, 1.0][..]));
+        assert_eq!(inline.csv_path.as_deref(), Some("takes/left.csv"));
+        assert_eq!(inline.wav_path.as_deref(), Some("takes/left.wav"));
+        assert_eq!(left.provenance, Default::default());
+        assert!(!left.provenance.has_measured_spl);
+        assert!(left.provenance.timing_reference_id.is_none());
+
         // Calibration state, timing, and signal provenance are unchanged.
         let recording = config
             .recording_config
@@ -484,5 +543,111 @@ mod tests {
             recording.channel_names.as_deref(),
             Some(&["Left".to_string(), "Right".to_string()][..])
         );
+    }
+    fn legacy_fixture() -> serde_json::Value {
+        serde_json::json!({"channels": [{
+            "channel_name": "L",
+            "measurement": {
+                "channel": 0,
+                "wav_path": "raw/original.wav",
+                "csv_path": "responses/actual-name.csv",
+                "frequencies": [100.0, 1000.0],
+                "magnitude_db": [80.0, 81.0]
+            }
+        }]})
+    }
+
+    #[test]
+    fn legacy_file_only_import_retains_exact_reference_and_unknown_phase() {
+        let mut legacy = legacy_fixture();
+        legacy["channels"][0]["measurement"]["frequencies"] = serde_json::json!([]);
+        legacy["channels"][0]["measurement"]["magnitude_db"] = serde_json::json!([]);
+        let config = super::convert_legacy_str_to_room_config(&legacy.to_string())
+            .expect("file reference import");
+        let SpeakerConfig::Single(MeasurementSource::Single(source)) = &config.speakers["L"] else {
+            panic!("expected measurement source");
+        };
+        let inline = source.measurement.inline_data().expect("legacy reference");
+        assert_eq!(
+            inline.csv_path.as_deref(),
+            Some("responses/actual-name.csv")
+        );
+        assert!(inline.frequencies.is_empty());
+        assert!(inline.phase_deg.is_none());
+        assert_eq!(source.provenance, Default::default());
+    }
+
+    #[test]
+    fn legacy_import_rejects_data_loss_and_ambiguous_topology() {
+        let mut duplicate = legacy_fixture();
+        let first = duplicate["channels"][0].clone();
+        duplicate["channels"]
+            .as_array_mut()
+            .expect("channels")
+            .push(first);
+        assert!(
+            super::convert_legacy_str_to_room_config(&duplicate.to_string())
+                .unwrap_err()
+                .contains("duplicate")
+        );
+        let mut group = legacy_fixture();
+        group["channels"][0]["is_group"] = serde_json::json!(true);
+        assert!(
+            super::convert_legacy_str_to_room_config(&group.to_string())
+                .unwrap_err()
+                .contains("explicit topology")
+        );
+        let mut drivers = legacy_fixture();
+        drivers["channels"][0]["group_drivers"] =
+            serde_json::json!([drivers["channels"][0]["measurement"].clone()]);
+        assert!(super::convert_legacy_str_to_room_config(&drivers.to_string()).is_err());
+        let mut missing = legacy_fixture();
+        missing["channels"][0]["measurement"] = serde_json::json!({"channel": 0});
+        assert!(
+            super::convert_legacy_str_to_room_config(&missing.to_string())
+                .unwrap_err()
+                .contains("neither response data")
+        );
+        assert!(super::convert_legacy_str_to_room_config("{\"channels\": []}").is_err());
+    }
+
+    #[test]
+    fn legacy_import_validates_response_grid_and_phase_shape() {
+        for frequencies in [
+            vec![0.0, 1000.0],
+            vec![1000.0, 100.0],
+            vec![100.0, 100.0],
+            vec![100.0],
+        ] {
+            let mut legacy = legacy_fixture();
+            legacy["channels"][0]["measurement"]["frequencies"] = serde_json::json!(frequencies);
+            assert!(super::convert_legacy_str_to_room_config(&legacy.to_string()).is_err());
+        }
+        let mut phase = legacy_fixture();
+        phase["channels"][0]["measurement"]["phase_deg"] = serde_json::json!([0.0]);
+        assert!(
+            super::convert_legacy_str_to_room_config(&phase.to_string())
+                .unwrap_err()
+                .contains("phase array")
+        );
+    }
+    #[test]
+    fn legacy_import_does_not_round_responses_to_float32() {
+        let mut legacy = legacy_fixture();
+        let frequency = 100.123_456_789_987_f64;
+        let magnitude = 80.123_456_789_987_f64;
+        let phase = 1.123_456_789_987_f64;
+        legacy["channels"][0]["measurement"]["frequencies"][0] = serde_json::json!(frequency);
+        legacy["channels"][0]["measurement"]["magnitude_db"][0] = serde_json::json!(magnitude);
+        legacy["channels"][0]["measurement"]["phase_deg"] = serde_json::json!([phase, 0.0]);
+        let config = super::convert_legacy_str_to_room_config(&legacy.to_string())
+            .expect("full precision legacy response");
+        let SpeakerConfig::Single(MeasurementSource::Single(source)) = &config.speakers["L"] else {
+            panic!("expected measurement source");
+        };
+        let inline = source.measurement.inline_data().expect("response arrays");
+        assert_eq!(inline.frequencies[0], frequency);
+        assert_eq!(inline.magnitude_db[0], magnitude);
+        assert_eq!(inline.phase_deg.as_ref().unwrap()[0], phase);
     }
 }

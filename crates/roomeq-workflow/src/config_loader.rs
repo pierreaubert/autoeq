@@ -159,12 +159,23 @@ pub fn load_merged_config_strict(
         .with_context(|| format!("Failed to read config: {base_config_path:?}"))?;
     let mut config_value: serde_json::Value =
         serde_json::from_str(&config_json).context("Failed to parse config JSON")?;
+    let capture_handoff =
+        crate::capture_handoff::verify_capture_handoff(base_config_path, config_json.as_bytes())?;
 
     if let Some(override_path) = override_config_path {
         let override_json = std::fs::read_to_string(override_path)
             .with_context(|| format!("Failed to read override config: {override_path:?}"))?;
         let override_value: serde_json::Value =
             serde_json::from_str(&override_json).context("Failed to parse override config JSON")?;
+        if capture_handoff.is_some()
+            && ["speakers", "recording_config", "provenance", "version"]
+                .iter()
+                .any(|key| override_value.get(key).is_some())
+        {
+            bail!(
+                "capture handoff overrides cannot replace acquisition identities or measurements"
+            );
+        }
         merge_json_objects(&mut config_value, &override_value);
     }
     migrate_legacy_optimizer_mode(&mut config_value);
@@ -176,6 +187,30 @@ pub fn load_merged_config_strict(
     let mut room_config = deserialize_room_config_strict(config_value)?;
 
     room_config.validate_version().map_err(anyhow::Error::msg)?;
+    let declared_handoff = room_config
+        .recording_config
+        .as_ref()
+        .and_then(|recording| recording.capture_handoff_file.as_deref());
+    if declared_handoff
+        .is_some_and(|name| name != autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME)
+    {
+        bail!("unsupported capture handoff filename; expected capture-handoff.json");
+    }
+    if declared_handoff.is_some() && capture_handoff.is_none() {
+        bail!(
+            "required capture handoff is missing; restore the acquisition bundle before correction"
+        );
+    }
+    if capture_handoff.is_some() && declared_handoff.is_none() {
+        bail!("capture configuration is missing its required handoff declaration");
+    }
+    if let Some(handoff) = &capture_handoff {
+        crate::capture_handoff::freeze_capture_responses(
+            &mut room_config,
+            base_config_path,
+            handoff,
+        )?;
+    }
     room_config.resolve_paths(&config_dir);
     Ok((room_config, config_dir))
 }

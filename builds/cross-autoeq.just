@@ -75,7 +75,7 @@ docker-linux-x86: docker-base-linux-x86
       -v "$(pwd)":/project \
       -w /project \
       autoeq-linux-x86 \
-      bash -lc "cargo build --release --target x86_64-unknown-linux-gnu --lib --bins"
+      bash -lc "cargo build --release --target x86_64-unknown-linux-gnu --features cli --lib --bins"
     mkdir -p dist/linux
     find target/x86_64-unknown-linux-gnu/release -maxdepth 1 -type f -executable -print0 \
       | xargs -0 -I {} cp -f "{}" dist/linux/
@@ -93,7 +93,7 @@ docker-linux-arm64: docker-base-linux-arm64
       -v "$(pwd)":/project \
       -w /project \
       autoeq-linux-arm64 \
-      bash -lc "cargo build --release --target aarch64-unknown-linux-gnu --lib --bins"
+      bash -lc "cargo build --release --target aarch64-unknown-linux-gnu --features cli --lib --bins"
     mkdir -p dist/linux
     find target/aarch64-unknown-linux-gnu/release -maxdepth 1 -type f -executable -print0 \
       | xargs -0 -I {} cp -f "{}" dist/linux/
@@ -108,7 +108,7 @@ docker-windows-x86: docker-base-win-x86
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-win-x86 \
-      bash -lc "cargo build --release --target x86_64-pc-windows-gnullvm --lib --bins"
+      bash -lc "cargo build --release --target x86_64-pc-windows-gnullvm --features cli --lib --bins"
     mkdir -p dist/windows
     find target/x86_64-pc-windows-gnullvm/release -maxdepth 1 -type f -name '*.exe' -print0 \
       | xargs -0 -I {} cp -f "{}" dist/windows/
@@ -123,7 +123,7 @@ docker-windows-arm64: docker-base-win-arm64
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-win-arm64 \
-      bash -lc "cargo build --release --target aarch64-pc-windows-gnullvm --lib --bins"
+      bash -lc "cargo build --release --target aarch64-pc-windows-gnullvm --features cli --lib --bins"
     mkdir -p dist/windows
     find target/aarch64-pc-windows-gnullvm/release -maxdepth 1 -type f -name '*.exe' -print0 \
       | xargs -0 -I {} cp -f "{}" dist/windows/
@@ -138,7 +138,7 @@ test-linux-x86: docker-base-linux-x86
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-linux-x86 \
-      bash -lc "cargo test --lib --bins --tests --examples --release --target x86_64-unknown-linux-gnu"
+      bash -lc "cargo test --all-features --lib --bins --tests --examples --release --target x86_64-unknown-linux-gnu"
 
 [group('docker')]
 test-linux-arm64: docker-base-linux-arm64
@@ -150,7 +150,7 @@ test-linux-arm64: docker-base-linux-arm64
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-linux-arm64 \
-      bash -lc "cargo test --lib --bins --tests --examples --release --target aarch64-unknown-linux-gnu"
+      bash -lc "cargo test --all-features --lib --bins --tests --examples --release --target aarch64-unknown-linux-gnu"
 
 [group('docker')]
 qa-linux-x86: docker-base-linux-x86
@@ -162,7 +162,7 @@ qa-linux-x86: docker-base-linux-x86
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-linux-x86 \
-      bash -lc "cargo build --release --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
+      bash -lc "cargo build --release --features qa --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
 
 [group('docker')]
 qa-linux-arm64: docker-base-linux-arm64
@@ -174,7 +174,7 @@ qa-linux-arm64: docker-base-linux-arm64
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-linux-arm64 \
-      bash -lc "cargo build --release --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
+      bash -lc "cargo build --release --features qa --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
 
 [group('docker')]
 test-windows-x86: docker-base-win-x86
@@ -186,7 +186,7 @@ test-windows-x86: docker-base-win-x86
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-win-x86 \
-      bash -lc "cargo test --lib --bins --tests --examples --release --target x86_64-pc-windows-gnullvm --no-run"
+      bash -lc "cargo test --all-features --lib --bins --tests --examples --release --target x86_64-pc-windows-gnullvm --no-run"
 
 [group('docker')]
 qa-windows-x86: docker-base-win-x86
@@ -198,7 +198,7 @@ qa-windows-x86: docker-base-win-x86
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-win-x86 \
-      bash -lc "cargo build --release --target x86_64-pc-windows-gnullvm --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
+      bash -lc "cargo build --release --target x86_64-pc-windows-gnullvm --features qa --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
 
 [group('docker')]
 test-windows-arm64: docker-base-win-arm64
@@ -210,7 +210,7 @@ test-windows-arm64: docker-base-win-arm64
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-win-arm64 \
-      bash -lc "cargo test --lib --bins --tests --examples --release --target aarch64-pc-windows-gnullvm --no-run"
+      bash -lc "cargo test --all-features --lib --bins --tests --examples --release --target aarch64-pc-windows-gnullvm --no-run"
 
 [group('docker')]
 qa-windows-arm64: docker-base-win-arm64
@@ -222,7 +222,7 @@ qa-windows-arm64: docker-base-win-arm64
       -v "$(pwd)":/project \
       -w /project \
       autoeq-base-win-arm64 \
-      bash -lc "cargo build --release --target aarch64-pc-windows-gnullvm --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
+      bash -lc "cargo build --release --target aarch64-pc-windows-gnullvm --features qa --bin roomeq-qa-quality --bin roomeq-qa-coverage --bin roomeq-qa-features --bin roomeq-qa-synthetic"
 
 [group('cross')]
 docker-cross-arm: docker-linux-arm64 docker-windows-arm64

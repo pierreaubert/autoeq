@@ -1,4 +1,4 @@
-# autoeq (crate: `autoeq`, version: 0.5.54)
+# autoeq (crate: `autoeq`, version: 0.5.74)
 
 Core automatic equalization stack for speakers, headphones, and RoomEQ workflows.
 
@@ -78,7 +78,8 @@ the root `src/roomeq/` tree is a compatibility facade.
 
 ## Binary entry points
 
-From `Cargo.toml`:
+From `Cargo.toml`: CLI commands require `--features cli`; QA/fuzzer commands
+require `--features qa` (which includes `cli`). Default builds provide the library.
 
 - `autoeq`
 - `benchmark-autoeq-speaker`
@@ -89,6 +90,7 @@ From `Cargo.toml`:
 - `roomeq-qa-coverage`
 - `roomeq-qa-features`
 - `roomeq-qa-synthetic`
+- `roomeq-qa-acoustic`
 - `convert-recording`
 
 ## Useful commands
@@ -110,7 +112,7 @@ just qa-roomeq-coverage-gate  # hard 90% library line-coverage gate
 Targeted RoomEQ run:
 
 ```bash
-cargo run --release --bin roomeq -- \
+cargo run --release --features cli --bin roomeq -- \
   --config tests/data/roomeq/test_config_stereo.json \
   --output /tmp/out.json
 ```

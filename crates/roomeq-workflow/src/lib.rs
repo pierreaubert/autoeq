@@ -65,11 +65,12 @@ pub use measurement::{
 };
 pub use output::save_dsp_chain;
 pub use output_bundle::{
-    MEASUREMENTS_INDEX_FILENAME, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
-    candidate_asset_dirs, load_output_bundle, manifest_path_for as bundle_manifest_path_for,
-    publish_output_bundle_from, read_convolution_bytes, resolve_convolution_path, run_log_path_for,
-    save_output_bundle, save_output_bundle_with_resources,
-    save_output_bundle_with_resources_and_prepare,
+    FrozenBundleResource, FrozenOutputBundle, MEASUREMENTS_INDEX_FILENAME,
+    OutputBundleVerification, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
+    candidate_asset_dirs, load_output_bundle, load_output_bundle_frozen,
+    manifest_path_for as bundle_manifest_path_for, publish_output_bundle_from,
+    read_convolution_bytes, resolve_convolution_path, run_log_path_for, save_output_bundle,
+    save_output_bundle_with_resources, save_output_bundle_with_resources_and_prepare,
 };
 pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
 pub use room_optimization::{

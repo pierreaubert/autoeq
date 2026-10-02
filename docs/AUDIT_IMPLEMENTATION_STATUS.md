@@ -529,3 +529,37 @@ target directory before building and binding the generated WASM. Actual Just
 execution with temporary tool witnesses verifies default and custom paths with
 spaces for both recipes, copied output identities and refusal on metadata failure.
 This is recipe verification; it does not claim a fresh WASM distribution build.
+
+
+## Consumer PCM and public report dependency
+
+On clean AutoEQ `c099d5c`, installed CamillaDSP 4.1.3 (`05e9cfc`) passes all
+nine required consumer tests without optional skips: routing/polarity/delay,
+peaking and Linkwitz–Riley filters, convolution resources, hierarchical sub
+controls, coherent physical-sub output peaks and fractional group-delay transfer
+at 44.1/48/96 kHz. These are stdin/stdout PCM and sampled electrical witnesses;
+no audio device was opened and no acoustic/listening result is inferred.
+Before/after source provenance both equal
+`ac7913ba6880da18cc0ea63aebc454dae4aeb72e558ebe3173226a304f5417bd`.
+Evidence is retained in
+`/Volumes/home_tmp/tmp/autoeq-audit-evidence/camilladsp-consumer-20261002`.
+
+With explicit user approval, public GPUI branch
+`feat/report-headless-geometry` contains exactly commit
+`d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d`, one commit above public `main`.
+It exposes existing surface geometry without the rendering feature and passes
+32 existing surface tests, one headless consumer test and the headless library
+build. No application UI was implemented. Report assets are present in Cargo’s
+package inventory; package preparation still refuses unpublished `gpui-d3rs`
+0.9 registry requirements. Public Git dependency selection and registry releases
+are separate portability steps.
+
+The first frozen all-package run completed 22 packages: 21 passed; RoomEQ QA had
+two stale replay-test assumptions. One reconstructed phase-bearing measurements
+as raw in-memory curves and dropped their declared timing reference; the other
+assumed generated row 1 carried phase. The revised round-trip witness covers all
+17 current generated rows and restores declared sources, and timing validation
+selects a phase-bearing row by its semantic property. The related backend runner
+also used obsolete 16-row assumptions; it now binds exact indices and axis values
+to the checked-in parameter registry. Omitted/reordered/duplicated rows, altered
+axes and boolean indices are refused. Fresh integrated evidence remains pending.

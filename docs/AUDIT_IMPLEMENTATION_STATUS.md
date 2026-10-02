@@ -679,8 +679,15 @@ Commit `c58d9e79` exposes a versioned renderer capability response and an early
 `autoeq --product-renderer-capabilities` JSON query. The query requires no input
 or device profile, refuses additional work arguments before file loading, and
 opens no device. APO reports declared profile checks, quantized filter-transfer
-comparison and exact preset/provenance binding. Its production path does not
-reparse the emitted text or verify running hardware.
+comparison and exact preset/provenance binding. Commit `84ebc731` adds strict
+local parsing of the emitted and staged preset bytes before publication.
+The parser verifies PK, HP/LP, HPQ/LPQ and AP against the approved serialized
+parameters and their sampled transfer, including the explicit nonpositive preamp.
+It refuses stateful directives and unsupported syntax. LS/HS shelves refuse
+because the core fixed-slope transfer differs from the consumer's Q and
+corner-frequency interpretation. Existing preset/provenance files survive
+refusal. Routing remains inherited from the including APO configuration;
+installation and runtime device behavior remain unverified.
 
 RME and Apple AU remain explicitly unavailable to profiled product export with
 a stable reason code. Their legacy serializers remain available: the RME writer
@@ -789,3 +796,23 @@ The raw acoustic QA exits 1; that remains failed acoustic acceptance. The softwa
 report contract passes, with source and dependency inventories unchanged.
 No budget, threshold, golden, fixture, hardware or listening evidence changed.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-audit-evidence/heldout-cli-frozen-20261002-56961e38`.
+
+
+## Profiled APO emitted-text verification
+
+The `84ebc731` capability and provenance schemas advance to version 2 and
+describe the strict local subset check. Both the initial bytes and staged
+bytes are parsed before publishing the bound preset/provenance pair. The
+parsed fields produce the sidecar's realized filters. Legacy serializers
+retain their existing behavior. Optimizer preflight uses the actual HPQ/LPQ
+emission kinds and the constrained low-pass Q interval. Shelf topologies and
+positive profile preamps refuse before optimization.
+
+Final focused checks pass: three profiled workflow tests, 67 CLI library tests,
+two actual capability-query subprocess tests, and strict scoped library Clippy.
+Source, manifest, lock, selected dependency contents and the resolved Cargo
+graph match across those checks. The six integrated files exactly match the
+tested isolated commit `b43b0c97`. This check uses a local subset parser, not
+the Equalizer APO consumer or a running device. Matching shelf mapping and
+consumer/reference comparisons remain acceptance work.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-shelf-evidence`.

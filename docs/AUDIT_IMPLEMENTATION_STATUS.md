@@ -1223,3 +1223,60 @@ sampled electrical-gain failure against the original 12 dB limit. Those acoustic
 failures and the remaining A09 mode/model/rate matrix remain open. No expensive
 Genelec reoptimization, hardware activation or UI changes were performed for
 this checker fix.
+
+
+### Topology-aware parity correction and retained-artifact review
+
+The initial completeness patch discovered measurement keys rather than logical
+roles for explicit systems. Review of the real Genelec configuration caught
+that error before any fresh canary claim. Follow-up `3989535`, integrated as
+`dbf2102e`, takes expected channels from `system.speakers` logical keys when a
+system is declared, and from measurement keys for generic configs. A real
+Genelec configuration regression asserts the nine logical main roles, 54 mode
+pairs, and refusal when a declared logical output is missing.
+
+The corrected frozen candidate passes 6 focused tests, 189 full QA library
+tests (7 ignored), strict production Clippy, formatting and diff checks. The
+same five Git/path trees (9,183 files and four symlinks) were independently
+rehashed; before/after inventories and all five raw gate records match. The
+three integrated files equal the frozen corrected candidate. The prior
+188-test gate is retained as intermediate evidence, not final topology
+acceptance. Final evidence:
+`/Volumes/home_tmp/tmp/autoeq-a09-parity-logical-channels-20261003/`; root review:
+`/Users/pierre/a09-parity-logical-independent-review.json`.
+
+An independent NumPy calculation over the retained `210592a` deployed curves
+finds complete 54/54 comparisons in all three bands. Bass remains outside its
+unchanged limits: median 4.535255473 dB, maximum 9.650940423 dB. Main is
+0.240804393 / 1.185674422 dB, upper 0.004568669 / 0.011695774 dB. This is retained
+artifact arithmetic, not fresh optimization or hardware/PCM execution.
+Evidence: `/Users/pierre/a09-retained-parity-independent.json`.
+The checked-in IIR override enables the native sub-output limiter; the other
+three mode overrides leave it disabled. Their retained structural fallbacks
+therefore apply 19.585278608 dB static sub attenuation, while IIR preserves
+small-signal gain through dynamic output protection. This identifies a policy
+difference relevant to parity; it does not waive the original parity or
+sampled electrical-gain limits or establish a production remedy.
+
+## Exact saved-barrier pause dependency prototype
+
+Local math commit `8cedac8` adds caller-controlled `Continue`/`Pause` checkpoint
+actions and typed completed/paused outcomes. A nonterminal pause returns only
+after the save callback succeeds at a complete initial-population or generation
+barrier. It skips polishing and final report publication. Callback success is
+the caller's durability attestation; the solver does not inspect or synchronize
+external storage. Existing terminal Stop and legacy non-pausing API semantics
+remain distinct. Tests atomically serialize and read a generation-one checkpoint,
+compare complete identity/RNG/accounting state and exact resumed reports, and
+cover initial barriers, wrong identity/config and save errors.
+
+The frozen math slice passes 11 focused checkpoint tests, 255 optimizer library
+tests (1 ignored), 14 doctests, strict Clippy, formatting and diff checks on the
+repository's pinned Rust 1.92.0 toolchain. Root independently verified all 27
+evidence files and rehashed 124 source/dependency trees (7,641 file entries).
+Before/after inputs match. Earlier compile/lint/doc failures are preserved as
+transcript diagnostics, explicitly not raw logs or retroactive provenance.
+Evidence: `/Volumes/home_tmp/tmp/math-audio-a08-pause-evidence/`; root review:
+`/Users/pierre/a08-pause-independent-review.json`.
+Public publication approval is pending. AutoEQ production pause integration,
+full recovery matrix and physical storage crash recovery remain open.

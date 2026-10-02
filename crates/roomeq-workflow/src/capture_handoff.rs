@@ -148,9 +148,9 @@ pub fn verify_capture_handoff(
     let handoff: CaptureHandoff =
         serde_json::from_slice(&bytes).context("invalid capture handoff JSON")?;
     handoff.validate().map_err(anyhow::Error::msg)?;
-    if handoff.completion != CaptureCompletion::Complete {
+    if handoff.completion != CaptureCompletion::Complete && handoff.selected_take_ids.is_none() {
         bail!(
-            "capture acquisition is partial ({:?}); explicitly select/review completed takes before correction",
+            "capture acquisition is partial ({:?}) and has no explicit complete take matrix",
             handoff.completion
         );
     }
@@ -191,12 +191,10 @@ pub fn freeze_capture_responses(
     configuration: impl AsRef<Path>,
     handoff: &CaptureHandoff,
 ) -> Result<()> {
+    handoff.validate().map_err(anyhow::Error::msg)?;
     let root = configuration.as_ref().parent().unwrap_or(Path::new("."));
-    // Repeated acquisition is represented in the contract; explicit repeat
-    // selection/aggregation is required before projecting one response per mic.
-    if handoff.repeat_count != 1 {
-        bail!("capture repeats need an explicit selection/aggregation projection");
-    }
+    // Handoff validation requires an explicit complete matrix for repeated or
+    // partial parents. Legacy complete one-repeat handoffs remain readable.
     if config.speakers.len() != handoff.source_ids.len()
         || config
             .recording_config
@@ -229,11 +227,20 @@ pub fn freeze_capture_responses(
                 .find(|take| {
                     take.source_id == *source_id
                         && take.provenance.microphone_id == *microphone_id
-                        && take.repeat_index == 0
+                        && handoff
+                            .selected_take_ids
+                            .as_ref()
+                            .map_or(take.repeat_index == 0, |selected| {
+                                selected.iter().any(|id| id == &take.take_id)
+                            })
                 })
                 .context("capture projection take is missing")?;
+            let response_file = take
+                .response_file
+                .as_deref()
+                .context("selected capture take has no analyzed response")?;
             let reference = &source.measurements[index];
-            if reference.path().and_then(|path| path.to_str()) != Some(&take.response_file)
+            if reference.path().and_then(|path| path.to_str()) != Some(response_file)
                 || reference.name() != Some(microphone_id.as_str())
                 || capture.takes[index] != take.provenance
             {
@@ -244,19 +251,16 @@ pub fn freeze_capture_responses(
             let expected = handoff
                 .artifacts
                 .iter()
-                .find(|asset| asset.file == take.response_file)
+                .find(|asset| asset.file == response_file)
                 .context("capture response is unbound")?;
             let bytes = read_bounded(
-                &regular_local_file(root, &take.response_file)?,
+                &regular_local_file(root, response_file)?,
                 MAX_RESPONSE_BYTES,
             )?;
             if bytes.len() as u64 != expected.bytes
                 || autoeq_artifacts::sha256_hex(&bytes) != expected.sha256
             {
-                bail!(
-                    "capture response changed before parsing: {}",
-                    take.response_file
-                );
+                bail!("capture response changed before parsing: {}", response_file);
             }
             // Parse the exact verified bytes using the existing CSV adapter.
             let mut snapshot = tempfile::NamedTempFile::new()?;
@@ -265,7 +269,7 @@ pub fn freeze_capture_responses(
             let curve =
                 autoeq_measurements::read::read_curve_from_csv(&snapshot.path().to_path_buf())
                     .map_err(|error| {
-                        anyhow::anyhow!("invalid captured response {}: {error}", take.response_file)
+                        anyhow::anyhow!("invalid captured response {}: {error}", response_file)
                     })?;
             curve
                 .validate("verified capture response")
@@ -412,6 +416,8 @@ mod tests {
             source_ids: vec!["L".into()],
             microphone_ids: vec!["mic-1".into()],
             repeat_count: 1,
+            selected_take_ids: None,
+            parent_inventory_file: None,
             configuration_file: "recording.json".into(),
             artifacts,
             takes: vec![CaptureTakeIdentity {
@@ -420,7 +426,7 @@ mod tests {
                 repeat_index: 0,
                 raw_audio_file: "raw.wav".into(),
                 processed_audio_file: "processed.wav".into(),
-                response_file: "response.csv".into(),
+                response_file: Some("response.csv".into()),
                 calibration_file: "calibration.txt".into(),
                 provenance,
             }],
@@ -431,6 +437,29 @@ mod tests {
         )
         .unwrap();
         (root.join("recording.json"), handoff)
+    }
+
+    fn repeated_partial_fixture(root: &Path) -> (PathBuf, CaptureHandoff) {
+        let (configuration, mut handoff) = fixture(root);
+        let parent = b"exact raw parent journal bytes";
+        std::fs::write(root.join("capture-raw.json"), parent).unwrap();
+        handoff.session_id = digest(parent);
+        handoff.completion = CaptureCompletion::Cancelled;
+        handoff.repeat_count = 2;
+        handoff.selected_take_ids = Some(vec!["take-1".into()]);
+        handoff.parent_inventory_file = Some("capture-raw.json".into());
+        handoff.artifacts.push(CaptureArtifactIdentity {
+            file: "capture-raw.json".into(),
+            role: CaptureArtifactRole::SupportingEvidence,
+            bytes: parent.len() as u64,
+            sha256: digest(parent),
+        });
+        std::fs::write(
+            root.join(CAPTURE_HANDOFF_FILENAME),
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+        (configuration, handoff)
     }
 
     #[test]
@@ -459,6 +488,105 @@ mod tests {
             digest(b"20 0\n20000 0\n")
         );
         assert!(crate::config_loader::load_merged_config_strict(&path, None).is_err());
+    }
+
+    #[test]
+    fn cancelled_repeated_parent_loads_the_explicit_complete_matrix() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, handoff) = repeated_partial_fixture(directory.path());
+        let (config, _) = crate::config_loader::load_merged_config_strict(&path, None).unwrap();
+        let SpeakerConfig::Single(MeasurementSource::Multiple(source)) = &config.speakers["L"]
+        else {
+            panic!("selected capture source should remain a multiple measurement");
+        };
+        let capture = source.provenance.capture.as_ref().unwrap();
+        assert_eq!(capture.takes.len(), 1);
+        assert_eq!(capture.takes[0].device_id, "declared-usb-device");
+        assert_eq!(
+            handoff.selected_take_ids.as_deref().unwrap(),
+            &[String::from("take-1")]
+        );
+        assert_eq!(handoff.completion, CaptureCompletion::Cancelled);
+    }
+
+    #[test]
+    fn selected_take_must_match_the_exact_configuration_response_and_provenance() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, mut handoff) = repeated_partial_fixture(directory.path());
+        let raw = std::fs::read(directory.path().join("raw.wav")).unwrap();
+        let alternate_response = b"frequency_hz,spl_db\n100,83\n1000,84\n";
+        std::fs::write(directory.path().join("raw-2.wav"), &raw).unwrap();
+        std::fs::write(directory.path().join("processed-2.wav"), &raw).unwrap();
+        std::fs::write(directory.path().join("response-2.csv"), alternate_response).unwrap();
+        for (file, role, bytes) in [
+            ("raw-2.wav", CaptureArtifactRole::RawAudio, raw.as_slice()),
+            (
+                "processed-2.wav",
+                CaptureArtifactRole::ProcessedAudio,
+                raw.as_slice(),
+            ),
+            (
+                "response-2.csv",
+                CaptureArtifactRole::MagnitudeResponse,
+                alternate_response.as_slice(),
+            ),
+        ] {
+            handoff.artifacts.push(CaptureArtifactIdentity {
+                file: file.into(),
+                role,
+                bytes: bytes.len() as u64,
+                sha256: digest(bytes),
+            });
+        }
+        let mut alternate = handoff.takes[0].clone();
+        alternate.take_id = "take-2".into();
+        alternate.repeat_index = 1;
+        alternate.raw_audio_file = "raw-2.wav".into();
+        alternate.processed_audio_file = "processed-2.wav".into();
+        alternate.response_file = Some("response-2.csv".into());
+        alternate.provenance.device_id = "other-device".into();
+        handoff.takes.push(alternate);
+        handoff.selected_take_ids = Some(vec!["take-2".into()]);
+        std::fs::write(
+            directory.path().join(CAPTURE_HANDOFF_FILENAME),
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+
+        let error = crate::config_loader::load_merged_config_strict(&path, None).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("projection reference/order/provenance mismatch"),
+            "{error:#}"
+        );
+    }
+
+    #[test]
+    fn configuration_projection_bytes_are_bound_to_the_parent_handoff() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, _) = repeated_partial_fixture(directory.path());
+        let mut config_bytes = std::fs::read(&path).unwrap();
+        config_bytes.push(b' ');
+        std::fs::write(&path, &config_bytes).unwrap();
+        let error = verify_capture_handoff(&path, &config_bytes).unwrap_err();
+        assert!(error.to_string().contains("configuration SHA-256 changed"));
+    }
+
+    #[test]
+    fn direct_freeze_rejects_invalid_selection_before_reading_responses() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, mut handoff) = repeated_partial_fixture(directory.path());
+        handoff.selected_take_ids = Some(vec!["unknown-take".into()]);
+        let config_bytes = std::fs::read(&path).unwrap();
+        let mut config: RoomConfig = serde_json::from_slice(&config_bytes).unwrap();
+
+        let error = freeze_capture_responses(&mut config, &path, &handoff).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("selected capture take ID is unknown")
+        );
     }
 
     #[test]

@@ -70,10 +70,6 @@ fn phase_refusal(
 }
 
 /// Attach finite observed demand and its configured limit to a refused attempt.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "Explicit quantity, units, and evidence for one budget check"
-)]
 fn phase_budget_refusal(
     name: &str,
     gate: &roomeq_model::eligibility::ChannelOperationGate,

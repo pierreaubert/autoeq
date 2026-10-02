@@ -253,8 +253,8 @@ pub(super) fn validate_bundle_contents(bundle: &AcceptanceBundle) -> Vec<String>
             failures.push("headroom output identities are empty or duplicated".into());
         }
     }
-    if let Some(view) = &bundle.disposition {
-        if view.channels.is_empty()
+    if let Some(view) = &bundle.disposition
+        && (view.channels.is_empty()
             || view
                 .channels
                 .windows(2)
@@ -270,10 +270,9 @@ pub(super) fn validate_bundle_contents(bundle: &AcceptanceBundle) -> Vec<String>
                             || !driver.delay_ms.is_finite()
                             || driver.delay_ms < 0.0
                     })
-            })
-        {
-            failures.push("disposition lacks unique channels or finite causal stage facts".into());
-        }
+            }))
+    {
+        failures.push("disposition lacks unique channels or finite causal stage facts".into());
     }
     failures
 }

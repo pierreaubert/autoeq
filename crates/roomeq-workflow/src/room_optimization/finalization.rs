@@ -901,26 +901,25 @@ fn select_inner(
             limit: None,
             diagnostic: attempt.as_ref().err().map(ToString::to_string),
         });
-        if let Ok(score) = attempt {
-            if best
+        if let Ok(score) = attempt
+            && best
                 .as_ref()
                 .is_none_or(|(previous, _)| score < *previous - 1e-9)
-            {
-                candidate.metadata.stage_outcomes.push(StageOutcome {
-                    stage: "final_correction_strength".into(),
-                    status: StageStatus::Applied,
-                    advisories: vec![
-                        format!("selected_strength={strength}"),
-                        format!("selected_sub_strength={sub_strength}"),
-                        format!("selected_without_post_eq={omit_post_eq}"),
-                        "attenuation_included_in_final_acoustic_acceptance".into(),
-                    ],
-                    checks: Vec::new(),
-                });
-                best = Some((score, candidate));
-                if stop_after_trial {
-                    break;
-                }
+        {
+            candidate.metadata.stage_outcomes.push(StageOutcome {
+                stage: "final_correction_strength".into(),
+                status: StageStatus::Applied,
+                advisories: vec![
+                    format!("selected_strength={strength}"),
+                    format!("selected_sub_strength={sub_strength}"),
+                    format!("selected_without_post_eq={omit_post_eq}"),
+                    "attenuation_included_in_final_acoustic_acceptance".into(),
+                ],
+                checks: Vec::new(),
+            });
+            best = Some((score, candidate));
+            if stop_after_trial {
+                break;
             }
         }
     }
@@ -1339,6 +1338,10 @@ fn record_final_electrical_stage(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Candidate rebuild keeps policy, validation curves and artifact IO explicit"
+)]
 fn prepare_candidate(
     original: &RoomOptimizationResult,
     strengths: (f64, f64),
@@ -1446,13 +1449,12 @@ fn has_repeated_eq_sections(result: &RoomOptimizationResult) -> bool {
         if inspect(&chain.plugins, &mut seen) {
             return true;
         }
-        if let Some(drivers) = &chain.drivers {
-            if drivers
+        if let Some(drivers) = &chain.drivers
+            && drivers
                 .iter()
                 .any(|driver| inspect(&driver.plugins, &mut seen.clone()))
-            {
-                return true;
-            }
+        {
+            return true;
         }
     }
     false

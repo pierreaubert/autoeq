@@ -41,6 +41,135 @@ pub enum MeasurementOrigin {
     Derived,
 }
 
+/// Identity namespace for the physical measurement interface represented by
+/// a rig declaration. Acoustic measurement rigs and headphone couplers are
+/// separate domains and can never match one another.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum MeasurementRigKind {
+    AcousticMeasurement,
+    HeadphoneCoupler,
+}
+
+/// Optional per-machine components of an acoustic measurement chain. This is
+/// separate from [`MeasurementRigKind::HeadphoneCoupler`] and never inferred.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
+pub struct AcousticMeasurementHardware {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_interface_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone_id: Option<String>,
+    /// Caller-selected profile/source identity, not proof that calibration was
+    /// applied. Applied calibration is recorded by the separate provenance
+    /// calibration fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub microphone_calibration_profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback_device_id: Option<String>,
+}
+
+/// Caller-declared identity for the measurement rig used to produce a curve.
+///
+/// A matching identifier is only a declaration of identity. It does not
+/// verify calibration, reference approval, or physical equivalence.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[serde(deny_unknown_fields)]
+pub struct MeasurementRigIdentity {
+    pub kind: MeasurementRigKind,
+    pub domain: String,
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acoustic_hardware: Option<AcousticMeasurementHardware>,
+}
+
+impl MeasurementRigIdentity {
+    /// Construct an identity after trimming the caller-provided strings.
+    pub fn new(
+        kind: MeasurementRigKind,
+        domain: impl Into<String>,
+        id: impl Into<String>,
+    ) -> Result<Self, ProvenanceError> {
+        let identity = Self {
+            kind,
+            domain: domain.into().trim().to_owned(),
+            id: id.into().trim().to_owned(),
+            acoustic_hardware: None,
+        };
+        identity.validate()?;
+        Ok(identity)
+    }
+
+    /// Attach explicit acoustic-chain component identities.
+    pub fn with_acoustic_hardware(
+        mut self,
+        mut hardware: AcousticMeasurementHardware,
+    ) -> Result<Self, ProvenanceError> {
+        for identity in [
+            &mut hardware.audio_interface_id,
+            &mut hardware.microphone_id,
+            &mut hardware.microphone_calibration_profile_id,
+            &mut hardware.playback_device_id,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *identity = identity.trim().to_owned();
+        }
+        self.acoustic_hardware = Some(hardware);
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Validate deserialized or directly constructed identities. Values must
+    /// be non-empty and already trimmed so stored provenance is canonical.
+    pub fn validate(&self) -> Result<(), ProvenanceError> {
+        for (field, value) in [("domain", &self.domain), ("id", &self.id)] {
+            if value.trim().is_empty() {
+                return Err(ProvenanceError::InvalidRigIdentity(format!(
+                    "{field} must not be empty"
+                )));
+            }
+            if value.trim() != value {
+                return Err(ProvenanceError::InvalidRigIdentity(format!(
+                    "{field} must not have leading or trailing whitespace"
+                )));
+            }
+        }
+        if let Some(hardware) = &self.acoustic_hardware {
+            if self.kind != MeasurementRigKind::AcousticMeasurement {
+                return Err(ProvenanceError::InvalidRigIdentity(
+                    "acoustic hardware components cannot be attached to a headphone coupler identity"
+                        .into(),
+                ));
+            }
+            for (field, value) in [
+                ("audio_interface_id", &hardware.audio_interface_id),
+                ("microphone_id", &hardware.microphone_id),
+                (
+                    "microphone_calibration_profile_id",
+                    &hardware.microphone_calibration_profile_id,
+                ),
+                ("playback_device_id", &hardware.playback_device_id),
+            ] {
+                if let Some(value) = value {
+                    if value.trim().is_empty() {
+                        return Err(ProvenanceError::InvalidRigIdentity(format!(
+                            "{field} must not be empty when provided"
+                        )));
+                    }
+                    if value.trim() != value {
+                        return Err(ProvenanceError::InvalidRigIdentity(format!(
+                            "{field} must not have leading or trailing whitespace"
+                        )));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RedactionProfile {
@@ -261,6 +390,10 @@ pub struct MeasurementProvenance {
     /// K1 source identity (which loudspeaker / logical source).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
+    /// Explicitly declared measurement interface/coupler identity. Missing
+    /// means unknown and is never inferred from the source URI or model name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measurement_rig: Option<MeasurementRigIdentity>,
     /// K1 seat identity (which listening position).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seat_id: Option<String>,
@@ -334,6 +467,7 @@ impl MeasurementProvenance {
             uncertainty: UncertaintyMetadata::default(),
             capture_kind: CaptureKind::Unknown,
             source_id: None,
+            measurement_rig: None,
             seat_id: None,
             reference_id: None,
             reference_scope: ReferenceScope::Unknown,
@@ -463,6 +597,11 @@ impl MeasurementRecord {
         }
         if self.id.is_empty() {
             report.errors.push("measurement record id is empty".into());
+        }
+        if let Some(rig) = &self.provenance.measurement_rig
+            && let Err(error) = rig.validate()
+        {
+            report.errors.push(error.to_string());
         }
         if self.provenance.source_artifacts.is_empty() {
             report
@@ -652,6 +791,8 @@ pub enum ProvenanceError {
     SidecarTooLarge,
     #[error("unsupported provenance schema version {0}")]
     UnsupportedSchemaVersion(u32),
+    #[error("invalid measurement rig identity: {0}")]
+    InvalidRigIdentity(String),
 }
 
 pub fn sidecar_path(data_path: &Path) -> PathBuf {
@@ -872,5 +1013,78 @@ mod tests {
                 .iter()
                 .any(|error| error.contains("common coordinate frame"))
         );
+    }
+
+    #[test]
+    fn measurement_rig_identity_is_canonical_and_validated() {
+        let rig = MeasurementRigIdentity::new(
+            MeasurementRigKind::AcousticMeasurement,
+            "  calibration-lab  ",
+            "  mic-chain-01  ",
+        )
+        .unwrap();
+        assert_eq!(rig.domain, "calibration-lab");
+        assert_eq!(rig.id, "mic-chain-01");
+
+        let empty = MeasurementRigIdentity {
+            kind: MeasurementRigKind::AcousticMeasurement,
+            domain: " ".into(),
+            id: "mic-chain-01".into(),
+            acoustic_hardware: None,
+        };
+        assert!(empty.validate().is_err());
+
+        let untrimmed = MeasurementRigIdentity {
+            kind: MeasurementRigKind::HeadphoneCoupler,
+            domain: "coupler-db".into(),
+            id: " unit-2".into(),
+            acoustic_hardware: None,
+        };
+        assert!(untrimmed.validate().is_err());
+
+        let coupler_with_mic = MeasurementRigIdentity {
+            kind: MeasurementRigKind::HeadphoneCoupler,
+            domain: "coupler-db".into(),
+            id: "fixture-x".into(),
+            acoustic_hardware: Some(AcousticMeasurementHardware {
+                microphone_id: Some("mic-x".into()),
+                ..Default::default()
+            }),
+        };
+        assert!(coupler_with_mic.validate().is_err());
+
+        let measured_chain = MeasurementRigIdentity::new(
+            MeasurementRigKind::AcousticMeasurement,
+            "room-measurement-domain",
+            "front-left-chain",
+        )
+        .unwrap()
+        .with_acoustic_hardware(AcousticMeasurementHardware {
+            audio_interface_id: Some("rme-device".into()),
+            microphone_id: Some("umik-1".into()),
+            microphone_calibration_profile_id: Some("umik-calibration-2026".into()),
+            playback_device_id: Some("speaker-output-1".into()),
+        })
+        .unwrap();
+        let hardware = measured_chain.acoustic_hardware.unwrap();
+        assert_eq!(hardware.audio_interface_id.as_deref(), Some("rme-device"));
+        assert_eq!(hardware.microphone_id.as_deref(), Some("umik-1"));
+        assert_eq!(
+            hardware.playback_device_id.as_deref(),
+            Some("speaker-output-1")
+        );
+    }
+
+    #[test]
+    fn old_provenance_without_rig_stays_unknown_on_round_trip() {
+        let record = MeasurementRecord::legacy(curve()).unwrap();
+        let mut json = serde_json::to_value(record).unwrap();
+        json["provenance"]
+            .as_object_mut()
+            .unwrap()
+            .remove("measurement_rig");
+        let loaded: MeasurementRecord = serde_json::from_value(json).unwrap();
+        assert_eq!(loaded.provenance.measurement_rig, None);
+        assert!(loaded.validate(ValidationMode::Warn).is_valid());
     }
 }

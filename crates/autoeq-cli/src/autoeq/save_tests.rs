@@ -5,7 +5,10 @@ mod apo;
 #[cfg(test)]
 mod tests {
     use super::apo::parse_apo_filters;
-    use crate::autoeq_command::save::save_peq_to_file;
+    use crate::autoeq_command::save::{
+        ProductExportContext, publish_profiled_pair_with_test_hook, save_peq_to_file,
+        save_profiled_apo_to_file,
+    };
     use autoeq::cli::Args;
     use autoeq::loss::LossType;
     use clap::Parser;
@@ -240,6 +243,243 @@ mod tests {
                 .exists(),
             "no sidecar expected without pareto metadata"
         );
+    }
+
+    #[tokio::test]
+    async fn profiled_apo_export_reports_the_parameters_parsed_from_its_text() {
+        use autoeq::iir::{Biquad, BiquadFilterType};
+        use autoeq::workflow::{
+            DeviceProfile, DeviceRange, PreparedProduct, ProductMode, ProductRenderer,
+            ProductRequest, ProductSource, ProductTarget, TargetCompatibilityStatus, TargetProfile,
+        };
+
+        let temp_dir = TempDir::new().unwrap();
+        let source_path = temp_dir.path().join("source.csv");
+        let target_path = temp_dir.path().join("target.csv");
+        fs::write(
+            &source_path,
+            "frequency,spl\n20,70\n100,71\n1000,72\n20000,73\n",
+        )
+        .unwrap();
+        fs::write(
+            &target_path,
+            "frequency,spl\n20,0\n100,0\n1000,0\n20000,0\n",
+        )
+        .unwrap();
+        let source_record = autoeq::read::read_record_from_csv(&source_path).unwrap();
+        let target_record = autoeq::read::read_record_from_csv(&target_path).unwrap();
+        let target_profile = TargetProfile::new(target_record, vec![]).unwrap();
+        let compatibility = target_profile.assess_compatibility(&source_record);
+        assert_eq!(compatibility.status, TargetCompatibilityStatus::Unknown);
+        let profile = DeviceProfile {
+            id: "test-playback-chain".into(),
+            playback_device_id: "coreaudio:test-output".into(),
+            renderer: ProductRenderer::EqualizerApo,
+            sample_rate_hz: 48_000.0,
+            maximum_filter_count: 4,
+            supported_peq_models: vec!["pk".into()],
+            supported_filter_types: vec!["PK".into()],
+            frequency_hz: DeviceRange {
+                minimum: 20.0,
+                maximum: 20_000.0,
+            },
+            q: DeviceRange {
+                minimum: 0.5,
+                maximum: 10.0,
+            },
+            gain_db: DeviceRange {
+                minimum: -12.0,
+                maximum: 12.0,
+            },
+            preamp_db: Some(-3.56),
+        };
+        let request = ProductRequest {
+            mode: ProductMode::Speaker,
+            source: ProductSource::Csv {
+                path: source_path,
+                measurement_rig: None,
+            },
+            target: ProductTarget::Csv {
+                path: target_path,
+                supported_measurement_rigs: vec![],
+            },
+            device_profile: profile.clone(),
+            reject_declared_target_mismatch: false,
+        };
+        let prepared = PreparedProduct {
+            mode: ProductMode::Speaker,
+            source_record,
+            target_profile,
+            target_compatibility: compatibility,
+            spin_curves: None,
+        };
+        let filter = Biquad::new(BiquadFilterType::Peak, 500.49, 48_000.0, 1.236, -3.456);
+        let realized_filters = profile.apo_serialized_filters(48_000.0, &[filter]).unwrap();
+        let realized_preamp = profile.apo_serialized_preamp_db().unwrap();
+        let args = Args::parse_from(["autoeq-test", "--loss", "speaker-flat"]);
+        let output_path = temp_dir.path().join("result");
+
+        save_profiled_apo_to_file(
+            &args,
+            &realized_filters,
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                max_filter_transfer_delta_db: 0.0,
+            },
+        )
+        .await
+        .unwrap();
+
+        let apo_path = temp_dir.path().join("iir-autoeq-flat.txt");
+        let text = fs::read_to_string(&apo_path).unwrap();
+        assert!(text.lines().any(|line| line == "Preamp: -3.6 dB"));
+        let parsed = parse_apo_filters(&text).expect("profiled APO text should parse");
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].freq_hz, 500.0);
+        assert_eq!(parsed[0].q, 1.24);
+        assert_eq!(parsed[0].gain_db, -3.46);
+
+        let parsed_filter = Biquad::new(
+            BiquadFilterType::Peak,
+            parsed[0].freq_hz,
+            48_000.0,
+            parsed[0].q,
+            parsed[0].gain_db,
+        );
+        for frequency in [50.0, 100.0, 500.0, 1_000.0, 10_000.0] {
+            assert!(
+                (parsed_filter.log_result(frequency) - realized_filters[0].log_result(frequency))
+                    .abs()
+                    < 1e-12
+            );
+        }
+
+        let provenance_path = temp_dir
+            .path()
+            .join("iir-autoeq-flat.product-provenance.json");
+        let preset_path = temp_dir.path().join("iir-autoeq-flat.txt");
+        let preset_bytes = fs::read(&preset_path).unwrap();
+        let sidecar_bytes = fs::read(&provenance_path).unwrap();
+        autoeq::workflow::verify_apo_preset_binding(&preset_bytes, &sidecar_bytes).unwrap();
+        let mut edited_preset = preset_bytes.clone();
+        edited_preset.extend_from_slice(b"# altered\n");
+        assert!(
+            autoeq::workflow::verify_apo_preset_binding(&edited_preset, &sidecar_bytes).is_err()
+        );
+        let provenance: serde_json::Value = serde_json::from_slice(&sidecar_bytes).unwrap();
+        assert_eq!(provenance["target_compatibility"]["status"], "unknown");
+        assert_eq!(provenance["apo_serialization"]["realized_preamp_db"], -3.6);
+        assert_eq!(
+            provenance["apo_serialization"]["max_filter_transfer_delta_db"],
+            0.0
+        );
+        assert_eq!(provenance["realized_filters"][0]["frequency_hz"], 500.0);
+        assert_eq!(provenance["realized_filters"][0]["q"], 1.24);
+        assert_eq!(provenance["realized_filters"][0]["gain_db"], -3.46);
+        assert!(!temp_dir.path().join("iir-autoeq-flat.tmreq").exists());
+        assert!(!temp_dir.path().join("iir-autoeq-flat.aupreset").exists());
+
+        assert_eq!(prepared.source_record.curve.freq.len(), 4);
+    }
+
+    #[tokio::test]
+    async fn sidecar_publish_failure_restores_the_previous_bound_preset_pair() {
+        let temp_dir = TempDir::new().unwrap();
+        let preset_path = temp_dir.path().join("iir-autoeq-flat.txt");
+        let sidecar_path = temp_dir
+            .path()
+            .join("iir-autoeq-flat.product-provenance.json");
+        let old_preset = b"old preset bytes\n";
+        let old_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": autoeq_artifacts::sha256_hex(old_preset)
+            }
+        }))
+        .unwrap();
+        fs::write(&preset_path, old_preset).unwrap();
+        fs::write(&sidecar_path, &old_sidecar).unwrap();
+
+        let new_preset = b"new preset bytes\n";
+        let new_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": autoeq_artifacts::sha256_hex(new_preset)
+            }
+        }))
+        .unwrap();
+        let error = publish_profiled_pair_with_test_hook(
+            &preset_path,
+            new_preset,
+            &sidecar_path,
+            &new_sidecar,
+            || Err(std::io::Error::other("injected sidecar failure")),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("prior APO preset was restored"));
+        assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
+        assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
+        autoeq::workflow::verify_apo_preset_binding(
+            &fs::read(&preset_path).unwrap(),
+            &fs::read(&sidecar_path).unwrap(),
+        )
+        .unwrap();
+
+        let concurrent_preset = b"concurrent replacement\n";
+        let error = publish_profiled_pair_with_test_hook(
+            &preset_path,
+            new_preset,
+            &sidecar_path,
+            &new_sidecar,
+            || {
+                fs::write(&preset_path, concurrent_preset)?;
+                Err(std::io::Error::other("injected sidecar failure"))
+            },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("changed concurrently"));
+        assert_eq!(fs::read(&preset_path).unwrap(), concurrent_preset);
+        assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
+    }
+
+    #[tokio::test]
+    async fn profiled_export_refuses_to_replace_an_oversized_prior_preset() {
+        let temp_dir = TempDir::new().unwrap();
+        let preset_path = temp_dir.path().join("iir-autoeq-flat.txt");
+        let sidecar_path = temp_dir
+            .path()
+            .join("iir-autoeq-flat.product-provenance.json");
+        let prior_preset = vec![b'x'; 16 * 1024 * 1024 + 1];
+        fs::write(&preset_path, &prior_preset).unwrap();
+        fs::write(&sidecar_path, b"prior sidecar").unwrap();
+
+        let new_preset = b"new preset bytes\n";
+        let new_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": autoeq_artifacts::sha256_hex(new_preset)
+            }
+        }))
+        .unwrap();
+        let error = publish_profiled_pair_with_test_hook(
+            &preset_path,
+            new_preset,
+            &sidecar_path,
+            &new_sidecar,
+            || Ok(()),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("rollback safety limit"));
+        assert_eq!(
+            fs::metadata(&preset_path).unwrap().len(),
+            prior_preset.len() as u64
+        );
+        assert_eq!(fs::read(&sidecar_path).unwrap(), b"prior sidecar");
     }
 
     #[test]

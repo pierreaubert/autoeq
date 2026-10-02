@@ -899,3 +899,32 @@ would reach the unchanged 12 dB registry ceiling for that DC sum, but still
 requires all existing acoustic and output-quality checks. No threshold,
 fixture, graph or production source changed; A09 acoustic acceptance remains
 failed. Evidence: `/Volumes/home_tmp/tmp/autoeq-a09-bass-sum-diagnostic-20261002`.
+
+
+## Source-derived APO shelf mapping
+
+Commit `abdcc13a` adds profile-only `LSC`/`HSC` shelves with explicit 12 dB
+slope and center-frequency Fc. The legacy serializer is unchanged. Profiles
+must declare the actual emitted tokens. Capability/provenance schema 3
+records the frozen Equalizer APO source revision `bbfcc3e`, conservative
+consumer-version assumption 1.2.1, slope/frequency convention and absent Q.
+The [official configuration reference](https://sourceforge.net/p/equalizerapo/wiki/Configuration%20reference/) documents the center-frequency slope syntax; the
+[frozen factory source](https://sourceforge.net/p/equalizerapo/code/ci/bbfcc3e5024cbb9d61ba75fc88d78605cc4c9687/tree/filters/BiQuadFilterFactory.cpp) binds the slope interpretation.
+Strict parsing binds the actual emitted parameters and preset hash.
+
+Independent source equations are compared with actual core coefficients within
+16 floating-point epsilons after coefficient scaling and within 1e-10 dB on
+the declared transfer grid. Fixed independently calculated coefficient vectors and complex
+response witnesses cover shelf magnitude and phase semantics. The existing
+exact approved-versus-reconstructed core transfer check remains zero-tolerance.
+An ill-conditioned near-Nyquist HSC refuses; no bounds were widened.
+
+The final matched package passes CLI 73, workflow 48 and actual capability
+subprocess 2 tests, plus strict scoped library Clippy. Source, lock/config,
+metadata, Git/local dependencies, registry package bytes and toolchain records
+match before/after. Independent rehashing covers all six Git/local repositories
+(11,392 entries). The six integrated files match tested commit `4097f103`.
+This is a local parser and source-derived numerical check; the APO consumer
+and device were not run. A separate rounded-parameter escape from the original
+optimizer envelope remains under investigation.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-apo-roundtrip-evidence-20261002/final-gate-run-manifest.json`.

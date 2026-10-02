@@ -3,6 +3,7 @@
 use std::collections::BTreeSet;
 
 pub const MAX_PR_ROWS: usize = 24;
+const DIMENSION_CARDINALITIES: [usize; 9] = [3, 3, 3, 3, 3, 3, 2, 3, 3];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub struct ParameterRow {
@@ -47,6 +48,21 @@ impl ParameterRow {
             fir_duration: values[8],
         }
     }
+
+    #[cfg(test)]
+    fn values(self) -> [u8; Self::WIDTH] {
+        [
+            self.topology,
+            self.mode,
+            self.sample_rate,
+            self.filter_count,
+            self.grid_size,
+            self.measurement_shape,
+            self.phase,
+            self.crossover,
+            self.fir_duration,
+        ]
+    }
 }
 
 fn applicable(row: ParameterRow) -> bool {
@@ -63,21 +79,26 @@ fn pair_key(a: usize, av: u8, b: usize, bv: u8) -> (usize, u8, usize, u8) {
     (a, av, b, bv)
 }
 
+fn applicable_candidates() -> Vec<ParameterRow> {
+    let candidate_count = DIMENSION_CARDINALITIES.iter().product();
+    (0..candidate_count)
+        .filter_map(|encoded| {
+            let mut remaining = encoded;
+            let mut values = [0_u8; ParameterRow::WIDTH];
+            for (index, value) in values.iter_mut().enumerate() {
+                let cardinality = DIMENSION_CARDINALITIES[index];
+                *value = (remaining % cardinality) as u8;
+                remaining /= cardinality;
+            }
+            let row = ParameterRow::from_values(values);
+            applicable(row).then_some(row)
+        })
+        .collect()
+}
+
 /// Generate at most 24 rows with a fixed-seed greedy covering algorithm.
 pub fn generate_pr_matrix() -> Vec<ParameterRow> {
-    let mut candidates = Vec::new();
-    for encoded in 0..3usize.pow(ParameterRow::WIDTH as u32) {
-        let mut n = encoded;
-        let mut values = [0u8; ParameterRow::WIDTH];
-        for value in &mut values {
-            *value = (n % 3) as u8;
-            n /= 3;
-        }
-        let row = ParameterRow::from_values(values);
-        if applicable(row) {
-            candidates.push(row);
-        }
-    }
+    let mut candidates = applicable_candidates();
 
     let mut uncovered = BTreeSet::new();
     for a in 0..ParameterRow::WIDTH {
@@ -131,18 +152,7 @@ mod tests {
         let rows = generate_pr_matrix();
         assert!(!rows.is_empty());
         assert!(rows.len() <= MAX_PR_ROWS);
-        let candidates: Vec<_> = (0..3usize.pow(ParameterRow::WIDTH as u32))
-            .filter_map(|encoded| {
-                let mut n = encoded;
-                let mut values = [0u8; ParameterRow::WIDTH];
-                for value in &mut values {
-                    *value = (n % 3) as u8;
-                    n /= 3;
-                }
-                let row = ParameterRow::from_values(values);
-                applicable(row).then_some(row)
-            })
-            .collect();
+        let candidates = applicable_candidates();
         for a in 0..ParameterRow::WIDTH {
             for b in (a + 1)..ParameterRow::WIDTH {
                 for candidate in &candidates {
@@ -154,5 +164,65 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn checked_in_pr_manifest_exactly_matches_generated_rows_and_domains() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../qa/registry/parameter-matrix-pr.json"
+        ))
+        .expect("checked-in pairwise manifest should parse");
+        let dimensions = manifest["dimensions"]
+            .as_object()
+            .expect("manifest dimensions should be an object");
+        assert_eq!(
+            dimensions["phase"],
+            serde_json::json!(["absent", "coherent"]),
+            "phase values must map to the supported no-phase and coherent cases"
+        );
+        assert_eq!(
+            dimensions["crossover"],
+            serde_json::json!(["fixed_lr24", "automatic_lr24", "fixed_lr48"]),
+            "crossover values must map to distinct runtime policies"
+        );
+        let dimension_order = [
+            "topology",
+            "mode",
+            "sample_rate",
+            "filter_count",
+            "grid_size",
+            "measurement_shape",
+            "phase",
+            "crossover",
+            "fir_duration_ms",
+        ];
+        for (index, name) in dimension_order.iter().enumerate() {
+            let values = dimensions[*name]
+                .as_array()
+                .unwrap_or_else(|| panic!("manifest dimension {name} should be an array"));
+            assert_eq!(
+                values.len(),
+                DIMENSION_CARDINALITIES[index],
+                "manifest dimension {name} disagrees with the executable axis"
+            );
+            let unique: BTreeSet<_> = values
+                .iter()
+                .map(|value| serde_json::to_string(value).unwrap())
+                .collect();
+            assert_eq!(
+                unique.len(),
+                values.len(),
+                "duplicate semantic value in {name}"
+            );
+        }
+
+        let checked_rows: Vec<[u8; ParameterRow::WIDTH]> =
+            serde_json::from_value(manifest["rows"].clone())
+                .expect("manifest rows should be fixed-width integer vectors");
+        let generated_rows: Vec<_> = generate_pr_matrix()
+            .into_iter()
+            .map(ParameterRow::values)
+            .collect();
+        assert_eq!(checked_rows, generated_rows);
     }
 }

@@ -945,7 +945,7 @@ impl OwnedConstraintSpec {
     /// Returns a description when the global cap or the policy knots are
     /// incoherent.
     pub fn from_params(params: &crate::OptimParams) -> Result<Self, String> {
-        if !(params.max_q > 0.0) && params.max_q != f64::INFINITY {
+        if params.max_q.is_nan() || params.max_q <= 0.0 {
             return Err(format!(
                 "constraint spec needs a finite positive global_max_q or +inf (got {})",
                 params.max_q

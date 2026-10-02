@@ -1,5 +1,7 @@
 use super::super::ObjectiveData;
-use super::super::constraint_envelope::project_gains_onto_envelopes;
+use super::super::constraint_envelope::{
+    OwnedConstraintSpec, finalize_candidate, project_gains_onto_envelopes,
+};
 use super::create::create_de_callback;
 use super::create::create_de_objective;
 use super::misc::process_de_results;
@@ -47,10 +49,121 @@ pub fn optimize_filters_autoeq_with_callback(
     lower_bounds: &[f64],
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
+    autoeq_name: &str,
+    params: &crate::OptimParams,
+    callback: Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send>,
+) -> Result<(String, f64), (String, f64)> {
+    optimize_filters_autoeq_with_callback_and_initial(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        autoeq_name,
+        params,
+        None,
+        callback,
+    )
+}
+
+/// AutoEQ DE optimization whose first individual is an explicit candidate
+/// when one is supplied. The remaining population is initialized normally.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the explicit DE inputs keep bounds, objective, candidate, parameters, and callback visible"
+)]
+pub fn optimize_filters_autoeq_with_callback_and_initial(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
     _autoeq_name: &str,
     params: &crate::OptimParams,
+    initial_candidate: Option<&[f64]>,
     mut callback: Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send>,
 ) -> Result<(String, f64), (String, f64)> {
+    let explicit_initial_candidate = if let Some(candidate) = initial_candidate {
+        if candidate.is_empty()
+            || candidate.len() != x.len()
+            || candidate.len() != lower_bounds.len()
+            || candidate.len() != upper_bounds.len()
+        {
+            return Err((
+                format!(
+                    "warm-start candidate has {} parameters; x/lower/upper dimensions are {}/{}/{}",
+                    candidate.len(),
+                    x.len(),
+                    lower_bounds.len(),
+                    upper_bounds.len()
+                ),
+                f64::INFINITY,
+            ));
+        }
+        for (index, (&value, (&lower, &upper))) in candidate
+            .iter()
+            .zip(lower_bounds.iter().zip(upper_bounds))
+            .enumerate()
+        {
+            if !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err((
+                    format!(
+                        "warm-start bounds at parameter {index} are invalid: [{lower}, {upper}]"
+                    ),
+                    f64::INFINITY,
+                ));
+            }
+            if !value.is_finite() {
+                return Err((
+                    format!("warm-start candidate parameter {index} is not finite"),
+                    f64::INFINITY,
+                ));
+            }
+            if value < lower || value > upper {
+                return Err((
+                    format!(
+                        "warm-start candidate parameter {index}={value} is outside bounds [{lower}, {upper}]"
+                    ),
+                    f64::INFINITY,
+                ));
+            }
+        }
+        let constraint_spec = OwnedConstraintSpec::from_params(params).map_err(|reason| {
+            (
+                format!("current warm-start constraint spec is invalid: {reason}"),
+                f64::INFINITY,
+            )
+        })?;
+        let finalized = finalize_candidate(
+            "de-warm-start",
+            candidate,
+            &objective_data,
+            &constraint_spec.as_spec(),
+        )
+        .map_err(|reason| {
+            (
+                format!("warm-start candidate fails current constraint checks: {reason}"),
+                f64::INFINITY,
+            )
+        })?;
+        for (index, (&value, (&lower, &upper))) in finalized
+            .params
+            .iter()
+            .zip(lower_bounds.iter().zip(upper_bounds))
+            .enumerate()
+        {
+            if !value.is_finite() || value < lower || value > upper {
+                return Err((
+                    format!(
+                        "finalized warm-start parameter {index}={value} is outside bounds [{lower}, {upper}]"
+                    ),
+                    f64::INFINITY,
+                ));
+            }
+        }
+        Some(finalized.params)
+    } else {
+        None
+    };
+
     // Extract parameters from args
     let population = params.population;
     let maxeval = params.maxeval;
@@ -149,17 +262,13 @@ pub fn optimize_filters_autoeq_with_callback(
         );
     }
 
-    // Use the best smart guess as initial x0, fall back to Sobol initialization
-    let best_initial_guess = if !smart_guesses.is_empty() {
-        // Use the first (best) smart guess
-        Array1::from(smart_guesses[0].clone())
-    } else if !sobol_samples.is_empty() {
-        // Fallback to the first Sobol sample if no smart guesses
-        Array1::from(sobol_samples[0].clone())
-    } else {
-        // Ultimate fallback: use current x as initial guess
-        Array1::from(x.to_vec())
-    };
+    // A validated warm-start candidate takes precedence as DE's x0.
+    let best_initial_guess = choose_best_initial_guess(
+        explicit_initial_candidate.as_deref(),
+        &smart_guesses,
+        &sobol_samples,
+        x,
+    );
 
     if !params.quiet {
         log::debug!("🚀 Using smart initial guess with Sobol population initialization");
@@ -297,4 +406,42 @@ pub fn optimize_filters_autoeq_with_callback(
     let result = differential_evolution(&base_objective_fn, &setup.bounds, config)
         .map_err(|e| (format!("DE optimization failed: {:?}", e), f64::INFINITY))?;
     process_de_results(x, result, "AutoDE")
+}
+
+fn choose_best_initial_guess(
+    explicit_candidate: Option<&[f64]>,
+    smart_guesses: &[Vec<f64>],
+    sobol_samples: &[Vec<f64>],
+    current: &[f64],
+) -> Array1<f64> {
+    if let Some(candidate) = explicit_candidate {
+        Array1::from(candidate.to_vec())
+    } else if let Some(candidate) = smart_guesses.first() {
+        Array1::from(candidate.clone())
+    } else if let Some(candidate) = sobol_samples.first() {
+        Array1::from(candidate.clone())
+    } else {
+        Array1::from(current.to_vec())
+    }
+}
+
+#[cfg(test)]
+mod warm_start_initialization_tests {
+    use super::choose_best_initial_guess;
+
+    #[test]
+    fn explicit_candidate_is_the_de_initial_vector() {
+        let saved = [0.25, 1.75, -2.0];
+        let smart_guesses = vec![vec![0.5, 0.9, 1.0]];
+        let sobol_samples = vec![vec![0.7, 0.8, 1.5]];
+
+        let selected = choose_best_initial_guess(
+            Some(&saved),
+            &smart_guesses,
+            &sobol_samples,
+            &[0.9, 0.6, 0.0],
+        );
+
+        assert_eq!(selected.to_vec(), saved);
+    }
 }

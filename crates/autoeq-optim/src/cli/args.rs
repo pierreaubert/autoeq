@@ -86,6 +86,14 @@ pub struct Args {
     #[arg(long, default_value_t = 2_000)]
     pub maxeval: usize,
 
+    /// Load a checked warm-start candidate from this checkpoint file.
+    #[arg(long, value_name = "PATH")]
+    pub resume_state: Option<PathBuf>,
+
+    /// Atomically save a recoverable warm-start checkpoint to this file.
+    #[arg(long, value_name = "PATH")]
+    pub checkpoint_state: Option<PathBuf>,
+
     /// Whether to run a local refinement after global optimization
     #[arg(long, default_value_t = false)]
     pub refine: bool,
@@ -302,6 +310,8 @@ impl Args {
             curve: None,
             target: None,
             output: None,
+            resume_state: None,
+            checkpoint_state: None,
             speaker: None,
             version: None,
             measurement: None,
@@ -440,6 +450,24 @@ mod tests {
 
     fn parsed_base() -> Args {
         Args::try_parse_from::<&[&str], _>(&["prog"]).unwrap()
+    }
+
+    #[test]
+    fn warm_start_paths_parse_and_default_to_none() {
+        let defaults = Args::speaker_defaults();
+        assert!(defaults.resume_state.is_none());
+        assert!(defaults.checkpoint_state.is_none());
+
+        let parsed = Args::try_parse_from([
+            "prog",
+            "--resume-state",
+            "prior.json",
+            "--checkpoint-state",
+            "next.json",
+        ])
+        .expect("warm-start paths should be parsed");
+        assert_eq!(parsed.resume_state, Some("prior.json".into()));
+        assert_eq!(parsed.checkpoint_state, Some("next.json".into()));
     }
 
     #[test]

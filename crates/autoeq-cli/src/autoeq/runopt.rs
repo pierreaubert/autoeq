@@ -5,6 +5,9 @@ use autoeq::optim::{
 };
 use std::error::Error;
 
+pub(super) type CandidateProgressCallback =
+    Box<dyn FnMut(&autoeq::optim::setup::ProgressUpdate) -> Result<(), String> + Send + 'static>;
+
 /// Struct to hold optimization results including convergence status
 pub(super) struct OptimizationResult {
     pub(super) params: Vec<f64>,
@@ -41,6 +44,63 @@ pub(super) fn perform_optimization_with_bounds(
     perform_optimization_with_backend(params, objective_data, bounds, &RealOptimizerBackend::new())
 }
 
+pub(super) fn perform_optimization_with_candidate(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: &[f64],
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        bounds,
+        Some(initial_candidate),
+        None,
+        &RealOptimizerBackend::new(),
+        true,
+    )
+}
+
+/// Run AutoEQ DE with candidate-bearing progress events for durable checkpoints.
+/// Backends that expose only iteration/loss events cannot safely save a
+/// recoverable parameter vector, so this path rejects them explicitly.
+pub(super) fn perform_optimization_with_progress_callback(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: Option<&[f64]>,
+    callback: CandidateProgressCallback,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    let backend = autoeq::optim::backend::resolve(&params.algo)
+        .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return Err(std::io::Error::other(format!(
+            "periodic warm-start checkpoints require AutoEQ DE candidate progress; {} does not expose candidate snapshots",
+            backend.name()
+        ))
+        .into());
+    }
+    if matches!(
+        objective_data.loss_type,
+        autoeq::LossType::DriversFlat | autoeq::LossType::MultiSubFlat
+    ) {
+        return Err(std::io::Error::other(
+            "periodic warm-start checkpoints are not supported for multi-driver optimization",
+        )
+        .into());
+    }
+
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        bounds,
+        initial_candidate,
+        Some(callback),
+        &RealOptimizerBackend::new(),
+        true,
+    )
+}
+
 /// Backend-injectable optimization driver.
 ///
 /// Production callers pass [`RealOptimizerBackend`]; tests inject
@@ -53,11 +113,98 @@ pub(super) fn perform_optimization_with_backend(
     bounds: Option<(Vec<f64>, Vec<f64>)>,
     backend: &dyn OptimizerBackend,
 ) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend_and_candidate(params, objective_data, bounds, None, backend)
+}
+
+pub(super) fn perform_optimization_with_backend_and_candidate(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: Option<&[f64]>,
+    backend: &dyn OptimizerBackend,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        bounds,
+        initial_candidate,
+        None,
+        backend,
+        false,
+    )
+}
+
+fn perform_optimization_with_backend_and_candidate_and_progress_callback(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: Option<&[f64]>,
+    progress_callback: Option<CandidateProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    direct_de_warm_start: bool,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    let resolved_backend = autoeq::optim::backend::resolve(&params.algo)
+        .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+    if initial_candidate.is_some() && !resolved_backend.supports_initial_candidate() {
+        return Err(std::io::Error::other(format!(
+            "warm-start candidates are unsupported for {} because its optimizer path does not use the supplied initial candidate",
+            resolved_backend.name()
+        ))
+        .into());
+    }
     let (lower_bounds, upper_bounds) =
         bounds.unwrap_or_else(|| autoeq::workflow::setup_bounds(params));
 
-    // Generate initial guess based on loss type
-    let mut x = if objective_data.loss_type == autoeq::LossType::DriversFlat {
+    // Generate an initial guess or finalize the validated warm-start candidate.
+    let mut x = if let Some(candidate) = initial_candidate {
+        if candidate.is_empty()
+            || candidate.len() != lower_bounds.len()
+            || candidate.len() != upper_bounds.len()
+        {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidate has {} parameters; current bounds have {}",
+                candidate.len(),
+                lower_bounds.len()
+            ))
+            .into());
+        }
+        if let Some(index) = candidate.iter().position(|value| !value.is_finite()) {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidate parameter {index} is not finite"
+            ))
+            .into());
+        }
+        for (index, (&value, (&lower, &upper))) in candidate
+            .iter()
+            .zip(lower_bounds.iter().zip(&upper_bounds))
+            .enumerate()
+        {
+            if !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err(std::io::Error::other(format!(
+                    "warm-start bounds at parameter {index} are invalid: [{lower}, {upper}]"
+                ))
+                .into());
+            }
+            if value < lower || value > upper {
+                return Err(std::io::Error::other(format!(
+                    "warm-start candidate parameter {index}={value} is outside current bounds [{lower}, {upper}]"
+                ))
+                .into());
+            }
+        }
+        let constraint_spec = autoeq::optim::OwnedConstraintSpec::from_params(params)
+            .map_err(std::io::Error::other)?;
+        autoeq::optim::finalize_candidate(
+            "cli-warm-start",
+            candidate,
+            objective_data,
+            &constraint_spec.as_spec(),
+        )
+        .map_err(|reason| {
+            std::io::Error::other(format!("warm-start candidate is infeasible: {reason}"))
+        })?
+        .params
+    } else if objective_data.loss_type == autoeq::LossType::DriversFlat {
         let n_drivers = objective_data.drivers_data.as_ref().unwrap().drivers.len();
         autoeq::workflow::drivers_initial_guess(&lower_bounds, &upper_bounds, n_drivers)
     } else {
@@ -67,13 +214,86 @@ pub(super) fn perform_optimization_with_backend(
     // Calculate pre-optimization objective value
     let pre_objective = Some(optim::compute_fitness_penalties_ref(&x, objective_data));
 
-    let global_result = backend.optimize_filters(
-        &mut x,
-        &lower_bounds,
-        &upper_bounds,
-        objective_data.clone(),
-        params,
-    );
+    let global_result = if let Some(mut progress_callback) = progress_callback {
+        use std::sync::{Arc, Mutex};
+
+        let callback_error = Arc::new(Mutex::new(None));
+        let callback_error_for_de = Arc::clone(&callback_error);
+        let de_callback =
+            move |update: &autoeq::optim::setup::ProgressUpdate| match progress_callback(update) {
+                Ok(()) => autoeq::de::CallbackAction::Continue,
+                Err(error) => {
+                    *callback_error_for_de
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                    autoeq::de::CallbackAction::Stop
+                }
+            };
+        let mut global_params = params.clone();
+        // Keep the CLI's existing local-refinement path and its per-pass
+        // evidence contract. The candidate callback records the global pass.
+        global_params.refine = false;
+        let callback_config = autoeq::optim::setup::ProgressCallbackConfig {
+            interval: 1,
+            include_biquads: false,
+            include_filter_response: false,
+            frequencies: Vec::new(),
+        };
+        let output_result = if let Some(candidate) = initial_candidate {
+            autoeq::optim::setup::perform_optimization_with_progress_and_candidate(
+                &global_params,
+                objective_data,
+                callback_config,
+                candidate,
+                de_callback,
+            )
+        } else {
+            autoeq::optim::setup::perform_optimization_with_progress(
+                &global_params,
+                objective_data,
+                callback_config,
+                de_callback,
+            )
+        };
+        if let Some(error) = callback_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            return Err(std::io::Error::other(error).into());
+        }
+        let output = output_result?;
+        x.clone_from_slice(&output.params);
+        Ok((
+            output.optimization_run.stopping_reason,
+            optim::compute_fitness_penalties_ref(&x, objective_data),
+        ))
+    } else if direct_de_warm_start
+        && resolved_backend.name().eq_ignore_ascii_case("autoeq:de")
+        && let Some(candidate) = initial_candidate
+    {
+        let mut global_params = params.clone();
+        global_params.refine = false;
+        let output = autoeq::optim::setup::perform_optimization_with_run_descriptor_and_candidate(
+            &global_params,
+            objective_data,
+            candidate,
+            Box::new(|_| autoeq::de::CallbackAction::Continue),
+        )?;
+        x.clone_from_slice(&output.parameters);
+        Ok((
+            output.descriptor.stopping_reason,
+            optim::compute_fitness_penalties_ref(&x, objective_data),
+        ))
+    } else {
+        backend.optimize_filters(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data.clone(),
+            params,
+        )
+    };
     let global_evidence = OptimizerRunEvidence::from_backend_result(
         &params.algo,
         global_result.clone(),

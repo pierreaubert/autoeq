@@ -161,4 +161,32 @@ mod tests {
             assert_eq!(backend.name(), "autoeq:bo");
         }
     }
+
+    #[test]
+    fn warm_start_capability_is_explicit_for_registered_backends() {
+        for name in [
+            "autoeq:cobyla",
+            "autoeq:isres",
+            "autoeq:cmaes",
+            "autoeq:bo",
+            "autoeq:nsga2",
+            "autoeq:nsga3",
+            "autoeq:de",
+        ] {
+            assert!(
+                resolve(name)
+                    .expect("supported backend should resolve")
+                    .supports_initial_candidate(),
+                "{name} should accept a saved candidate"
+            );
+        }
+        for name in ["mh:de", "mh:pso", "mh:rga", "mh:tlbo", "mh:firefly"] {
+            assert!(
+                !resolve(name)
+                    .expect("MH backend should resolve")
+                    .supports_initial_candidate(),
+                "{name} does not seed from x0"
+            );
+        }
+    }
 }

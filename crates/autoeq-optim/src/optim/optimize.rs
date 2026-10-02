@@ -205,7 +205,15 @@ fn max_bound_violation(parameters: &[f64], lower_bounds: &[f64], upper_bounds: &
         .iter()
         .zip(lower_bounds)
         .zip(upper_bounds)
-        .map(|((&value, &lower), &upper)| (lower - value).max(value - upper).max(0.0))
+        .map(|((&value, &lower), &upper)| {
+            // f64::max discards NaNs; reject invalid values before reductions
+            // so a backend cannot receive usable evidence for a NaN candidate.
+            if !value.is_finite() || !lower.is_finite() || !upper.is_finite() || lower > upper {
+                f64::INFINITY
+            } else {
+                (lower - value).max(value - upper).max(0.0)
+            }
+        })
         .fold(0.0, f64::max)
 }
 
@@ -362,4 +370,52 @@ pub fn optimize_filters_with_callback_detailed(
         params.maxeval,
         params.seed,
     )
+}
+
+#[cfg(test)]
+mod evidence_validation_tests {
+    use super::*;
+
+    #[test]
+    fn converged_backend_cannot_authorize_nonfinite_parameters_or_invalid_bounds() {
+        for (parameters, lower, upper) in [
+            (vec![f64::NAN], vec![0.0], vec![1.0]),
+            (vec![f64::INFINITY], vec![0.0], vec![1.0]),
+            (vec![0.5], vec![f64::NAN], vec![1.0]),
+            (vec![0.5], vec![0.0], vec![f64::NAN]),
+            (vec![0.5], vec![1.0], vec![0.0]),
+            (vec![0.5], vec![f64::NEG_INFINITY], vec![f64::INFINITY]),
+            (vec![0.5], vec![], vec![1.0]),
+        ] {
+            let evidence = OptimizerRunEvidence::from_backend_result(
+                "autoeq:de",
+                Ok(("converged nfev=10".into(), 0.0)),
+                &parameters,
+                &lower,
+                &upper,
+                10,
+                Some(7),
+            );
+            assert_eq!(evidence.termination, OptimizerTermination::InvalidResult);
+            assert_eq!(evidence.confidence, OptimizerConfidence::Unusable);
+            assert!(!evidence.converged && !evidence.best_effort);
+            assert!(evidence.max_constraint_violation.is_infinite());
+        }
+    }
+
+    #[test]
+    fn valid_budget_limited_candidate_retains_best_effort_evidence() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("maximum evaluations reached nfev=10".into(), 0.5)),
+            &[0.0, 1.0],
+            &[0.0, 0.0],
+            &[1.0, 1.0],
+            10,
+            Some(7),
+        );
+        assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.max_constraint_violation, 0.0);
+    }
 }

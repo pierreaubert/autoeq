@@ -3,6 +3,10 @@
 // Rust guideline compliant 2026-02-21
 
 use autoeq::iir::{Biquad, BiquadFilterType, DEFAULT_Q_HIGH_LOW_PASS};
+use autoeq::workflow::{
+    PROFILED_APO_SHELF_COEFFICIENT_EPSILON_MULTIPLIER, PROFILED_APO_SHELF_MAX_TRANSFER_DELTA_DB,
+    PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE,
+};
 
 const MAX_VERIFIED_TEXT_BYTES: usize = 1024 * 1024;
 
@@ -13,14 +17,29 @@ struct ParsedFilter {
     frequency_hz: f64,
     gain_db: Option<f64>,
     q: Option<f64>,
+    slope_db_per_octave: Option<u8>,
+}
+
+#[derive(Debug)]
+pub(super) struct VerifiedApoFilterFields {
+    pub(super) kind: String,
+    pub(super) frequency_hz: f64,
+    pub(super) gain_db: Option<f64>,
+    pub(super) q: Option<f64>,
+    pub(super) slope_db_per_octave: Option<u8>,
+    pub(super) frequency_convention: Option<&'static str>,
 }
 
 #[derive(Debug)]
 pub(super) struct VerifiedApoText {
+    #[cfg(test)]
     pub(super) filters: Vec<Biquad>,
+    pub(super) emitted_filters: Vec<VerifiedApoFilterFields>,
     pub(super) preamp_db: f64,
     pub(super) sample_rate_hz: f64,
     pub(super) max_transfer_delta_db: f64,
+    pub(super) max_shelf_scaled_coefficient_delta: f64,
+    pub(super) max_shelf_source_transfer_delta_db: f64,
 }
 
 /// Verifies emitted APO text against the caller-approved serialized filters.
@@ -28,9 +47,10 @@ pub(super) struct VerifiedApoText {
 /// The parser accepts only the formatter subset checked for profiled output. It
 /// does not claim to be an Equalizer APO parser or to verify installation,
 /// device selection, channel routing, or runtime behavior. Routing is inherited
-/// from the surrounding Equalizer APO configuration. LS/HS shelves are
-/// refused because this core's fixed-slope shelf transfer does not match the
-/// consumer's Q and corner-frequency semantics.
+/// from the surrounding Equalizer APO configuration. Shelf output uses only
+/// LSC/HSC at 12 dB/octave and is checked against equations from the frozen
+/// Equalizer APO source revision. This is a local source-derived verification,
+/// not a check with the consumer parser or runtime.
 pub(super) fn verify_emitted_apo_text(
     contents: &[u8],
     sample_rate_hz: f64,
@@ -108,6 +128,9 @@ pub(super) fn verify_emitted_apo_text(
     let mut expected = expected_filters.to_vec();
     expected.sort_by(|left, right| left.freq.total_cmp(&right.freq));
     let mut realized_filters = Vec::with_capacity(parsed_filters.len());
+    let mut emitted_filters = Vec::with_capacity(parsed_filters.len());
+    let mut max_shelf_scaled_coefficient_delta = 0.0_f64;
+    let mut max_shelf_source_transfer_delta_db = 0.0_f64;
     let mut previous_frequency_hz = 0.0;
     for (index, (parsed, approved)) in parsed_filters.iter().zip(&expected).enumerate() {
         if parsed.index != index + 1 {
@@ -118,11 +141,13 @@ pub(super) fn verify_emitted_apo_text(
         }
         previous_frequency_hz = parsed.frequency_hz;
 
-        let (expected_kind, expected_has_gain, expected_has_q) = emitted_kind(approved)?;
+        let (expected_kind, expected_has_gain, expected_has_q, expected_slope) =
+            emitted_kind(approved)?;
         if parsed.kind != expected_kind
             || parsed.frequency_hz != approved.freq
             || parsed.gain_db.is_some() != expected_has_gain
             || parsed.q.is_some() != expected_has_q
+            || parsed.slope_db_per_octave != expected_slope
         {
             return Err(format!(
                 "emitted APO filter {} does not match the approved profile fields",
@@ -157,6 +182,7 @@ pub(super) fn verify_emitted_apo_text(
         };
         let realized_q = match parsed.q {
             Some(value) if value == approved.q => value,
+            None if is_shelf(approved.filter_type) => approved.q,
             None if approved.q == DEFAULT_Q_HIGH_LOW_PASS => approved.q,
             _ => {
                 return Err(format!(
@@ -165,13 +191,36 @@ pub(super) fn verify_emitted_apo_text(
                 ));
             }
         };
-        realized_filters.push(Biquad::new(
+        let realized_filter = Biquad::new(
             approved.filter_type,
             parsed.frequency_hz,
             sample_rate_hz,
             realized_q,
             realized_gain_db,
-        ));
+        );
+        if expected_slope.is_some() {
+            let check = verify_source_shelf_semantics(
+                expected_kind,
+                parsed.frequency_hz,
+                realized_gain_db,
+                sample_rate_hz,
+                &realized_filter,
+                frequencies_hz,
+            )?;
+            max_shelf_scaled_coefficient_delta =
+                max_shelf_scaled_coefficient_delta.max(check.scaled_coefficient_delta);
+            max_shelf_source_transfer_delta_db =
+                max_shelf_source_transfer_delta_db.max(check.max_transfer_delta_db);
+        }
+        emitted_filters.push(VerifiedApoFilterFields {
+            kind: parsed.kind.clone(),
+            frequency_hz: parsed.frequency_hz,
+            gain_db: parsed.gain_db,
+            q: parsed.q,
+            slope_db_per_octave: parsed.slope_db_per_octave,
+            frequency_convention: expected_slope.map(|_| "center_frequency_fc"),
+        });
+        realized_filters.push(realized_filter);
     }
 
     let max_transfer_delta_db = max_transfer_delta_db(
@@ -188,10 +237,14 @@ pub(super) fn verify_emitted_apo_text(
     }
 
     Ok(VerifiedApoText {
+        #[cfg(test)]
         filters: realized_filters,
+        emitted_filters,
         preamp_db: parsed_preamp,
         sample_rate_hz,
         max_transfer_delta_db,
+        max_shelf_scaled_coefficient_delta,
+        max_shelf_source_transfer_delta_db,
     })
 }
 
@@ -213,7 +266,7 @@ fn parse_preamp(line: &str) -> Result<f64, String> {
 
 fn parse_filter(line: &str) -> Result<ParsedFilter, String> {
     let fields = line.split_whitespace().collect::<Vec<_>>();
-    if fields.len() < 7 || fields[0] != "Filter" || fields[2] != "ON" || fields[4] != "Fc" {
+    if fields.len() < 4 || fields[0] != "Filter" || fields[2] != "ON" {
         return Err("profiled APO filter line has unsupported syntax".into());
     }
     let index = fields[1]
@@ -222,44 +275,65 @@ fn parse_filter(line: &str) -> Result<ParsedFilter, String> {
         .parse::<usize>()
         .map_err(|_| "profiled APO filter number is invalid".to_string())?;
     let kind = fields[3].to_owned();
-    let frequency_text = fields[5];
-    if fields[6] != "Hz" || !frequency_text.bytes().all(|byte| byte.is_ascii_digit()) {
-        return Err("profiled APO center frequency must be an integer number of Hz".into());
-    }
-    let frequency_hz = frequency_text
-        .parse::<f64>()
-        .map_err(|_| "profiled APO center frequency is invalid".to_string())?;
-    if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
-        return Err("profiled APO center frequency must be finite and positive".into());
-    }
-
-    let (gain_db, q) = match kind.as_str() {
-        "LS" | "HS" => Err(format!(
-            "profiled APO refuses {kind} shelves because core fixed-slope shelves do not match consumer Q and corner-frequency semantics"
-        ))?,
+    let (frequency_hz, gain_db, q, slope_db_per_octave) = match kind.as_str() {
+        "LS" | "HS" => {
+            return Err(format!(
+                "profiled APO shelf output requires {kind}C with an explicit 12 dB slope and center frequency"
+            ));
+        }
+        "LSC" | "HSC" => {
+            if fields.len() != 12
+                || fields[4] != "12"
+                || fields[5] != "dB"
+                || fields[6] != "Fc"
+                || fields[8] != "Hz"
+                || fields[9] != "Gain"
+                || fields[11] != "dB"
+            {
+                return Err(format!(
+                    "profiled APO {kind} shelf requires the exact '12 dB Fc <integer> Hz Gain <signed-value> dB' form"
+                ));
+            }
+            (
+                parse_frequency(fields[7])?,
+                Some(parse_fixed_decimal(fields[10], 2, true, "filter gain")?),
+                None,
+                Some(PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE),
+            )
+        }
         "PK" => {
-            if fields.len() != 12 || fields[7] != "Gain" || fields[9] != "dB" || fields[10] != "Q" {
+            if fields.len() != 12
+                || fields[4] != "Fc"
+                || fields[6] != "Hz"
+                || fields[7] != "Gain"
+                || fields[9] != "dB"
+                || fields[10] != "Q"
+            {
                 return Err(format!("profiled APO {kind} filter has unsupported fields"));
             }
             (
+                parse_frequency(fields[5])?,
                 Some(parse_fixed_decimal(fields[8], 2, true, "filter gain")?),
                 Some(parse_fixed_decimal(fields[11], 2, false, "filter Q")?),
+                None,
             )
         }
         "AP" | "LPQ" | "HPQ" => {
-            if fields.len() != 9 || fields[7] != "Q" {
+            if fields.len() != 9 || fields[4] != "Fc" || fields[6] != "Hz" || fields[7] != "Q" {
                 return Err(format!("profiled APO {kind} filter has unsupported fields"));
             }
             (
+                parse_frequency(fields[5])?,
                 None,
                 Some(parse_fixed_decimal(fields[8], 2, false, "filter Q")?),
+                None,
             )
         }
         "LP" | "HP" => {
-            if fields.len() != 7 {
+            if fields.len() != 7 || fields[4] != "Fc" || fields[6] != "Hz" {
                 return Err(format!("profiled APO {kind} filter has unsupported fields"));
             }
-            (None, None)
+            (parse_frequency(fields[5])?, None, None, None)
         }
         "BP" | "NO" => Err(format!(
             "profiled APO {kind} filters are refused because the emitted gain fields are not verified"
@@ -284,7 +358,21 @@ fn parse_filter(line: &str) -> Result<ParsedFilter, String> {
         frequency_hz,
         gain_db,
         q,
+        slope_db_per_octave,
     })
+}
+
+fn parse_frequency(text: &str) -> Result<f64, String> {
+    if !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("profiled APO center frequency must be an integer number of Hz".into());
+    }
+    let frequency_hz = text
+        .parse::<f64>()
+        .map_err(|_| "profiled APO center frequency is invalid".to_string())?;
+    if !frequency_hz.is_finite() || frequency_hz <= 0.0 {
+        return Err("profiled APO center frequency must be finite and positive".into());
+    }
+    Ok(frequency_hz)
 }
 
 fn parse_fixed_decimal(
@@ -319,31 +407,37 @@ fn parse_fixed_decimal(
     Ok(value)
 }
 
-fn emitted_kind(filter: &Biquad) -> Result<(&'static str, bool, bool), String> {
-    let (kind, has_gain, has_q) = match filter.filter_type {
-        BiquadFilterType::Peak => ("PK", true, true),
+fn emitted_kind(filter: &Biquad) -> Result<(&'static str, bool, bool, Option<u8>), String> {
+    let (kind, has_gain, has_q, slope_db_per_octave) = match filter.filter_type {
+        BiquadFilterType::Peak => ("PK", true, true, None),
         BiquadFilterType::Lowpass => {
             if (filter.q - DEFAULT_Q_HIGH_LOW_PASS).abs() < f64::EPSILON {
-                ("LP", false, false)
+                ("LP", false, false, None)
             } else {
-                ("LPQ", false, true)
+                ("LPQ", false, true, None)
             }
         }
         BiquadFilterType::Highpass => {
             if (filter.q - DEFAULT_Q_HIGH_LOW_PASS).abs() < f64::EPSILON {
-                ("HP", false, false)
+                ("HP", false, false, None)
             } else {
-                ("HPQ", false, true)
+                ("HPQ", false, true, None)
             }
         }
-        BiquadFilterType::HighpassVariableQ => ("HPQ", false, true),
-        BiquadFilterType::Lowshelf | BiquadFilterType::Highshelf => {
-            return Err(format!(
-                "profiled APO refuses {} shelves because core fixed-slope shelves do not match consumer Q and corner-frequency semantics",
-                filter.filter_type.short_name()
-            ));
-        }
-        BiquadFilterType::AllPass => ("AP", false, true),
+        BiquadFilterType::HighpassVariableQ => ("HPQ", false, true, None),
+        BiquadFilterType::Lowshelf => (
+            "LSC",
+            true,
+            false,
+            Some(PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE),
+        ),
+        BiquadFilterType::Highshelf => (
+            "HSC",
+            true,
+            false,
+            Some(PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE),
+        ),
+        BiquadFilterType::AllPass => ("AP", false, true, None),
         BiquadFilterType::Bandpass
         | BiquadFilterType::Notch
         | BiquadFilterType::LowshelfOrf
@@ -360,7 +454,178 @@ fn emitted_kind(filter: &Biquad) -> Result<(&'static str, bool, bool), String> {
             "APO {kind} output does not encode the approved filter gain"
         ));
     }
-    Ok((kind, has_gain, has_q))
+    Ok((kind, has_gain, has_q, slope_db_per_octave))
+}
+
+fn is_shelf(filter_type: BiquadFilterType) -> bool {
+    matches!(
+        filter_type,
+        BiquadFilterType::Lowshelf | BiquadFilterType::Highshelf
+    )
+}
+
+#[derive(Debug, Clone, Copy)]
+struct SourceShelfCheck {
+    scaled_coefficient_delta: f64,
+    max_transfer_delta_db: f64,
+}
+
+fn verify_source_shelf_semantics(
+    kind: &str,
+    frequency_hz: f64,
+    gain_db: f64,
+    sample_rate_hz: f64,
+    core_filter: &Biquad,
+    comparison_frequencies_hz: &[f64],
+) -> Result<SourceShelfCheck, String> {
+    let source = source_shelf_coefficients(kind, frequency_hz, gain_db, sample_rate_hz)?;
+    let core_coefficients = core_coefficients(core_filter);
+    if core_coefficients.iter().any(|value| !value.is_finite()) {
+        return Err("profiled APO core shelf coefficients are non-finite".into());
+    }
+    let scale = source
+        .iter()
+        .chain(core_coefficients.iter())
+        .fold(1.0_f64, |maximum, value| maximum.max(value.abs()));
+    if !scale.is_finite() || scale <= 0.0 {
+        return Err("profiled APO shelf coefficient scale is invalid".into());
+    }
+    let max_coefficient_delta = source
+        .iter()
+        .zip(core_coefficients)
+        .map(|(source, core)| (source - core).abs())
+        .fold(0.0_f64, f64::max);
+    let scaled_coefficient_delta = max_coefficient_delta / scale;
+    let coefficient_limit =
+        f64::EPSILON * f64::from(PROFILED_APO_SHELF_COEFFICIENT_EPSILON_MULTIPLIER);
+    if !scaled_coefficient_delta.is_finite() || scaled_coefficient_delta > coefficient_limit {
+        return Err(format!(
+            "profiled APO {kind} shelf coefficients exceed the source-derived bound: scaled delta {scaled_coefficient_delta:e}, limit {coefficient_limit:e}"
+        ));
+    }
+
+    let mut max_transfer_delta_db = 0.0_f64;
+    for &frequency in comparison_frequencies_hz {
+        let source_magnitude = response_magnitude(&source, frequency, sample_rate_hz)?;
+        let core_magnitude = response_magnitude(&core_coefficients, frequency, sample_rate_hz)?;
+        let delta_db = (20.0 * core_magnitude.log10() - 20.0 * source_magnitude.log10()).abs();
+        if !delta_db.is_finite() {
+            return Err("profiled APO source shelf response difference is non-finite".into());
+        }
+        max_transfer_delta_db = max_transfer_delta_db.max(delta_db);
+    }
+    if max_transfer_delta_db > PROFILED_APO_SHELF_MAX_TRANSFER_DELTA_DB {
+        return Err(format!(
+            "profiled APO {kind} shelf sampled source transfer delta {max_transfer_delta_db:e} dB exceeds {:.1e} dB",
+            PROFILED_APO_SHELF_MAX_TRANSFER_DELTA_DB
+        ));
+    }
+    Ok(SourceShelfCheck {
+        scaled_coefficient_delta,
+        max_transfer_delta_db,
+    })
+}
+
+/// Reconstructs the 12 dB/octave LSC/HSC equations in Equalizer APO source
+/// revision bbfcc3e5024cbb9d61ba75fc88d78605cc4c9687. Its factory divides the
+/// explicit 12 dB slope by 12, giving S=1, and the `C` token keeps Fc as the
+/// center frequency. These are source-derived equations, not a consumer parse.
+fn source_shelf_coefficients(
+    kind: &str,
+    frequency_hz: f64,
+    gain_db: f64,
+    sample_rate_hz: f64,
+) -> Result<[f64; 5], String> {
+    if !frequency_hz.is_finite()
+        || frequency_hz <= 0.0
+        || frequency_hz >= sample_rate_hz / 2.0
+        || !gain_db.is_finite()
+        || !sample_rate_hz.is_finite()
+        || sample_rate_hz <= 0.0
+    {
+        return Err("profiled APO shelf source-equation inputs are invalid".into());
+    }
+    let amplitude = 10.0_f64.powf(gain_db / 40.0);
+    if !amplitude.is_finite() || amplitude <= 0.0 {
+        return Err("profiled APO shelf gain is outside source-equation range".into());
+    }
+    let omega = 2.0 * std::f64::consts::PI * frequency_hz / sample_rate_hz;
+    let cosine = omega.cos();
+    let sine = omega.sin();
+    let slope = f64::from(PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE);
+    let shelf_s = slope / 12.0;
+    let alpha = (sine / 2.0) * ((amplitude + 1.0 / amplitude) * (1.0 / shelf_s - 1.0) + 2.0).sqrt();
+    let beta = 2.0 * amplitude.sqrt() * alpha;
+    let (b0, b1, b2, a0, a1, a2) = match kind {
+        "LSC" => (
+            amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cosine + beta),
+            2.0 * amplitude * ((amplitude - 1.0) - (amplitude + 1.0) * cosine),
+            amplitude * ((amplitude + 1.0) - (amplitude - 1.0) * cosine - beta),
+            (amplitude + 1.0) + (amplitude - 1.0) * cosine + beta,
+            -2.0 * ((amplitude - 1.0) + (amplitude + 1.0) * cosine),
+            (amplitude + 1.0) + (amplitude - 1.0) * cosine - beta,
+        ),
+        "HSC" => (
+            amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cosine + beta),
+            -2.0 * amplitude * ((amplitude - 1.0) + (amplitude + 1.0) * cosine),
+            amplitude * ((amplitude + 1.0) + (amplitude - 1.0) * cosine - beta),
+            (amplitude + 1.0) - (amplitude - 1.0) * cosine + beta,
+            2.0 * ((amplitude - 1.0) - (amplitude + 1.0) * cosine),
+            (amplitude + 1.0) - (amplitude - 1.0) * cosine - beta,
+        ),
+        _ => {
+            return Err(format!(
+                "unsupported source-derived APO shelf type '{kind}'"
+            ));
+        }
+    };
+    let raw = [b0, b1, b2, a0, a1, a2];
+    if raw.iter().any(|value| !value.is_finite()) || a0 <= f64::MIN_POSITIVE {
+        return Err(
+            "profiled APO shelf source coefficients are non-finite or ill-conditioned".into(),
+        );
+    }
+    let normalized = [b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0];
+    if normalized.iter().any(|value| !value.is_finite()) {
+        return Err("profiled APO normalized shelf coefficients are non-finite".into());
+    }
+    Ok(normalized)
+}
+
+fn core_coefficients(filter: &Biquad) -> [f64; 5] {
+    let coefficients = filter.coefficients();
+    [
+        coefficients.b0,
+        coefficients.b1,
+        coefficients.b2,
+        coefficients.a1,
+        coefficients.a2,
+    ]
+}
+
+fn response_magnitude(
+    coefficients: &[f64; 5],
+    frequency_hz: f64,
+    sample_rate_hz: f64,
+) -> Result<f64, String> {
+    let omega = 2.0 * std::f64::consts::PI * frequency_hz / sample_rate_hz;
+    let (sin1, cos1) = omega.sin_cos();
+    let (sin2, cos2) = (2.0 * omega).sin_cos();
+    let [b0, b1, b2, a1, a2] = *coefficients;
+    let numerator = (b0 + b1 * cos1 + b2 * cos2).hypot(-b1 * sin1 - b2 * sin2);
+    let denominator = (1.0 + a1 * cos1 + a2 * cos2).hypot(-a1 * sin1 - a2 * sin2);
+    if !numerator.is_finite()
+        || numerator <= 0.0
+        || !denominator.is_finite()
+        || denominator <= f64::MIN_POSITIVE
+    {
+        return Err("profiled APO source shelf response is non-finite or ill-conditioned".into());
+    }
+    let magnitude = numerator / denominator;
+    if !magnitude.is_finite() || magnitude <= 0.0 {
+        return Err("profiled APO source shelf response magnitude is invalid".into());
+    }
+    Ok(magnitude)
 }
 
 fn max_transfer_delta_db(
@@ -426,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn shelf_filter_text_is_refused_even_when_its_fields_match_core_output() {
+    fn legacy_ls_and_hs_text_is_refused_in_profiled_output() {
         for (kind, filter_type) in [
             ("LS", BiquadFilterType::Lowshelf),
             ("HS", BiquadFilterType::Highshelf),
@@ -443,8 +708,255 @@ mod tests {
                 &[50.0, 100.0, 1_000.0],
             )
             .expect_err("profiled path must not equate core and consumer shelf semantics");
-            assert!(error.contains("fixed-slope shelves"), "{error}");
+            assert!(
+                error.contains("requires") && error.contains("12 dB"),
+                "{error}"
+            );
         }
+    }
+
+    #[test]
+    fn lsc_and_hsc_require_the_exact_center_slope_form() {
+        let shelf = Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 0.71, 3.0);
+        let malformed = [
+            "Filter 1: ON LSC 6 dB Fc 100 Hz Gain +3.00 dB",
+            "Filter 1: ON LSC Fc 100 Hz 12 dB Gain +3.00 dB",
+            "Filter 1: ON LSC 12 dB Fc 100 Hz Gain +3.00 dB Q 0.71",
+            "Filter 1: ON LSC 12 dB Fc 100.0 Hz Gain +3.00 dB",
+        ];
+        for filter_line in malformed {
+            let text = format!("Preamp: 0.0 dB\n{filter_line}\n");
+            assert!(
+                verify_emitted_apo_text(
+                    text.as_bytes(),
+                    48_000.0,
+                    &[shelf.clone()],
+                    0.0,
+                    &[50.0, 100.0, 1_000.0],
+                )
+                .is_err(),
+                "malformed shelf line should be refused: {filter_line}"
+            );
+        }
+        let high_shelf = Biquad::new(BiquadFilterType::Highshelf, 100.0, 48_000.0, 1.4, -3.0);
+        assert!(
+            verify_emitted_apo_text(
+                b"Preamp: 0.0 dB\nFilter 1: ON LSC 12 dB Fc 100 Hz Gain -3.00 dB\n",
+                48_000.0,
+                &[high_shelf],
+                0.0,
+                &[50.0, 100.0, 1_000.0],
+            )
+            .is_err(),
+            "low/high shelf token mismatches must fail"
+        );
+    }
+
+    #[test]
+    fn source_formula_coefficients_match_independent_official_reference_vectors() {
+        // Fixed values were calculated independently from the Equalizer APO
+        // bbfcc3e source equations. This test does not call the production
+        // source-equation reconstruction below.
+        let cases: [(BiquadFilterType, f64, f64, f64, [f64; 5]); 4] = [
+            (
+                BiquadFilterType::Lowshelf,
+                6.0,
+                1_000.0,
+                48_000.0,
+                [
+                    1.0325624832475901,
+                    -1.8388568718996405,
+                    0.82874768431246981,
+                    -1.8444568671609198,
+                    0.85571017229878077,
+                ],
+            ),
+            (
+                BiquadFilterType::Highshelf,
+                -6.0,
+                10_000.0,
+                44_100.0,
+                [
+                    0.68739215633142059,
+                    0.021044882595103832,
+                    0.11805174933139004,
+                    -0.3692965111837429,
+                    0.19578529944165726,
+                ],
+            ),
+            (
+                BiquadFilterType::Lowshelf,
+                24.0,
+                1.0,
+                44_100.0,
+                [
+                    1.0001505328853939,
+                    -1.9998989772826405,
+                    0.99974852520641388,
+                    -1.9998990151378668,
+                    0.99989902023658062,
+                ],
+            ),
+            (
+                BiquadFilterType::Highshelf,
+                -24.0,
+                22_049.0,
+                44_100.0,
+                [
+                    0.99984948977134502,
+                    1.9995980098798121,
+                    0.99974852520641322,
+                    1.9995979720302828,
+                    0.99959805282728764,
+                ],
+            ),
+        ];
+        for (filter_type, gain, frequency, sample_rate, reference) in cases {
+            let actual = Biquad::new(filter_type, frequency, sample_rate, 1.37, gain);
+            let actual = core_coefficients(&actual);
+            let scale = reference
+                .iter()
+                .fold(1.0_f64, |maximum, value| maximum.max((*value).abs()));
+            for (actual, expected) in actual.iter().zip(reference) {
+                assert!(
+                    (actual - expected).abs()
+                        <= f64::EPSILON
+                            * f64::from(PROFILED_APO_SHELF_COEFFICIENT_EPSILON_MULTIPLIER)
+                            * scale,
+                    "{filter_type:?} coefficient differs from frozen source reference: {actual:.17e} vs {expected:.17e}"
+                );
+            }
+        }
+
+        let low: Biquad<f64> = Biquad::new(BiquadFilterType::Lowshelf, 1_000.0, 48_000.0, 1.0, 6.0);
+        let low_reference = [
+            1.0325624832475901,
+            -1.8388568718996405,
+            0.82874768431246981,
+            -1.8444568671609198,
+            0.85571017229878077,
+        ];
+        let high: Biquad<f64> =
+            Biquad::new(BiquadFilterType::Highshelf, 10_000.0, 44_100.0, 1.0, -6.0);
+        let high_reference = [
+            0.68739215633142059,
+            0.021044882595103832,
+            0.11805174933139004,
+            -0.3692965111837429,
+            0.19578529944165726,
+        ];
+        for (filter, coefficients, frequency, sample_rate) in [
+            (&low, low_reference, 1_200.0, 48_000.0),
+            (&high, high_reference, 7_300.0, 44_100.0),
+        ] {
+            let expected = reference_response(&coefficients, frequency, sample_rate);
+            let actual = filter.complex_response(frequency);
+            let phase_delta = (actual.im.atan2(actual.re) - expected.1.atan2(expected.0)).abs();
+            assert!((actual.re - expected.0).abs() < 1.0e-14);
+            assert!((actual.im - expected.1).abs() < 1.0e-14);
+            assert!(
+                phase_delta < 1.0e-14,
+                "complex phase delta was {phase_delta:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_shelf_check_covers_rates_gain_and_frequency_limits() {
+        for sample_rate in [44_100.0_f64, 48_000.0, 96_000.0, 192_000.0] {
+            let nyquist = sample_rate / 2.0;
+            let frequencies = [20.0, (sample_rate * 0.45).round()];
+            for frequency in frequencies {
+                if frequency <= 0.0 || frequency >= nyquist {
+                    continue;
+                }
+                for gain in [-24.0, -6.0, 0.0, 6.0, 24.0] {
+                    for (kind, filter_type) in [
+                        ("LSC", BiquadFilterType::Lowshelf),
+                        ("HSC", BiquadFilterType::Highshelf),
+                    ] {
+                        let filter = Biquad::new(filter_type, frequency, sample_rate, 0.73, gain);
+                        let line = format!(
+                            "Preamp: 0.0 dB\nFilter 1: ON {kind} 12 dB Fc {frequency:.0} Hz Gain {gain:+.2} dB\n"
+                        );
+                        let verified = verify_emitted_apo_text(
+                            line.as_bytes(),
+                            sample_rate,
+                            &[filter],
+                            0.0,
+                            &[1.0, 20.0, frequency.min(nyquist - 0.5), nyquist - 1.0],
+                        )
+                        .unwrap_or_else(|error| {
+                            panic!("{kind} gain={gain} Fc={frequency} Fs={sample_rate}: {error}")
+                        });
+                        assert_eq!(verified.max_transfer_delta_db, 0.0);
+                        assert!(verified.max_shelf_scaled_coefficient_delta <= 16.0 * f64::EPSILON);
+                        assert!(verified.max_shelf_source_transfer_delta_db <= 1.0e-10);
+                        assert_eq!(verified.emitted_filters[0].kind, kind);
+                        assert_eq!(verified.emitted_filters[0].q, None);
+                        assert_eq!(verified.emitted_filters[0].slope_db_per_octave, Some(12));
+                        assert_eq!(
+                            verified.emitted_filters[0].frequency_convention,
+                            Some("center_frequency_fc")
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn low_frequency_center_remains_within_the_declared_source_bounds() {
+        let filter = Biquad::new(BiquadFilterType::Lowshelf, 1.0, 44_100.0, 0.73, 24.0);
+        let text = b"Preamp: 0.0 dB\nFilter 1: ON LSC 12 dB Fc 1 Hz Gain +24.00 dB\n";
+        let verified = verify_emitted_apo_text(text, 44_100.0, &[filter], 0.0, &[0.5, 1.0, 20.0])
+            .expect("low-frequency shelf should pass when it satisfies both numeric bounds");
+        assert_eq!(verified.max_transfer_delta_db, 0.0);
+        assert!(verified.max_shelf_scaled_coefficient_delta <= 16.0 * f64::EPSILON);
+        assert!(verified.max_shelf_source_transfer_delta_db <= 1.0e-10);
+    }
+
+    #[test]
+    fn ill_conditioned_near_nyquist_roundtrip_is_refused_without_relaxing_bounds() {
+        let filter = Biquad::new(BiquadFilterType::Highshelf, 22_049.0, 44_100.0, 0.73, -6.0);
+        let text = b"Preamp: 0.0 dB\nFilter 1: ON HSC 12 dB Fc 22049 Hz Gain -6.00 dB\n";
+        let error = verify_emitted_apo_text(text, 44_100.0, &[filter], 0.0, &[1.0, 20.0, 22_049.0])
+            .expect_err("non-finite or out-of-bound responses must fail closed");
+        assert!(
+            error.contains("transfer comparison is non-finite"),
+            "the reported limitation must remain tied to the failed comparison: {error}"
+        );
+    }
+
+    #[test]
+    fn non_representable_shelf_source_equations_fail_closed() {
+        assert!(source_shelf_coefficients("LSC", 100.0, 100_000.0, 48_000.0).is_err());
+        let invalid = Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 1.0, 100_000.0);
+        let text = b"Preamp: 0.0 dB\nFilter 1: ON LSC 12 dB Fc 100 Hz Gain +100000.00 dB\n";
+        assert!(
+            verify_emitted_apo_text(text, 48_000.0, &[invalid], 0.0, &[50.0, 100.0, 1_000.0])
+                .is_err()
+        );
+    }
+
+    fn reference_response(
+        coefficients: &[f64; 5],
+        frequency_hz: f64,
+        sample_rate_hz: f64,
+    ) -> (f64, f64) {
+        let omega = std::f64::consts::TAU * frequency_hz / sample_rate_hz;
+        let (sin1, cos1) = omega.sin_cos();
+        let (sin2, cos2) = (2.0 * omega).sin_cos();
+        let [b0, b1, b2, a1, a2] = *coefficients;
+        let numerator_re = b0 + b1 * cos1 + b2 * cos2;
+        let numerator_im = -b1 * sin1 - b2 * sin2;
+        let denominator_re = 1.0 + a1 * cos1 + a2 * cos2;
+        let denominator_im = -a1 * sin1 - a2 * sin2;
+        let denominator_power = denominator_re * denominator_re + denominator_im * denominator_im;
+        (
+            (numerator_re * denominator_re + numerator_im * denominator_im) / denominator_power,
+            (numerator_im * denominator_re - numerator_re * denominator_im) / denominator_power,
+        )
     }
 
     #[test]

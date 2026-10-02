@@ -1330,7 +1330,7 @@ mod tests {
         )])
         .expect("capability query should need no measurements or device profile");
         let value: serde_json::Value = serde_json::from_str(&output).unwrap();
-        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["schema_version"], 3);
         assert_eq!(value["renderers"].as_array().unwrap().len(), 3);
         assert_eq!(value["renderers"][0]["renderer"], "equalizer_apo");
         assert_eq!(value["renderers"][0]["product_profile_export"], "verified");

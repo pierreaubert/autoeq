@@ -278,7 +278,7 @@ mod tests {
             sample_rate_hz: 48_000.0,
             maximum_filter_count: 4,
             supported_peq_models: vec!["pk".into()],
-            supported_filter_types: vec!["PK".into()],
+            supported_filter_types: vec!["PK".into(), "LSC".into(), "HSC".into()],
             frequency_hz: DeviceRange {
                 minimum: 20.0,
                 maximum: 20_000.0,
@@ -373,10 +373,13 @@ mod tests {
             autoeq::workflow::verify_apo_preset_binding(&edited_preset, &sidecar_bytes).is_err()
         );
 
-        let shelf = Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 0.71, 3.0);
-        let shelf_refusal = save_profiled_apo_to_file(
+        let shelves = [
+            Biquad::new(BiquadFilterType::Lowshelf, 100.0, 48_000.0, 0.71, 3.0),
+            Biquad::new(BiquadFilterType::Highshelf, 10_000.0, 48_000.0, 1.37, -3.0),
+        ];
+        save_profiled_apo_to_file(
             &args,
-            &[shelf],
+            &shelves,
             realized_preamp,
             &output_path,
             &LossType::SpeakerFlat,
@@ -389,13 +392,105 @@ mod tests {
             },
         )
         .await
-        .expect_err("direct profile save must refuse shelf semantic mismatch before writing");
-        assert!(shelf_refusal.to_string().contains("fixed-slope shelves"));
-        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
-        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+        .expect("verified 12 dB LSC/HSC shelves should publish");
+        let shelf_preset_bytes = fs::read(&preset_path).unwrap();
+        let shelf_sidecar_bytes = fs::read(&provenance_path).unwrap();
+        let shelf_text = String::from_utf8(shelf_preset_bytes.clone()).unwrap();
+        assert!(
+            shelf_text
+                .lines()
+                .any(|line| line == "Filter 1: ON LSC 12 dB Fc 100 Hz Gain +3.00 dB")
+        );
+        assert!(
+            shelf_text
+                .lines()
+                .any(|line| line == "Filter 2: ON HSC 12 dB Fc 10000 Hz Gain -3.00 dB")
+        );
+        assert!(!shelf_text.contains(" ON LS ") && !shelf_text.contains(" ON HS "));
+        autoeq::workflow::verify_apo_preset_binding(&shelf_preset_bytes, &shelf_sidecar_bytes)
+            .unwrap();
+        let shelf_manifest: serde_json::Value =
+            serde_json::from_slice(&shelf_sidecar_bytes).unwrap();
+        assert_eq!(shelf_manifest["schema_version"], 3);
+        assert_eq!(shelf_manifest["realized_filters"][0]["type"], "LSC");
+        assert_eq!(
+            shelf_manifest["realized_filters"][0]["q"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            shelf_manifest["realized_filters"][0]["slope_db_per_octave"],
+            12
+        );
+        assert_eq!(
+            shelf_manifest["realized_filters"][0]["frequency_convention"],
+            "center_frequency_fc"
+        );
+        assert_eq!(shelf_manifest["realized_filters"][1]["type"], "HSC");
+        assert_eq!(
+            shelf_manifest["realized_filters"][1]["q"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            shelf_manifest["realized_filters"][1]["slope_db_per_octave"],
+            12
+        );
+        assert_eq!(
+            shelf_manifest["realized_filters"][1]["frequency_convention"],
+            "center_frequency_fc"
+        );
+        assert_eq!(
+            shelf_manifest["apo_serialization"]["emitted_text_verification"]["source_shelf_contract"]
+                ["equalizer_apo_source_revision"],
+            "bbfcc3e5024cbb9d61ba75fc88d78605cc4c9687"
+        );
+        assert_eq!(
+            shelf_manifest["apo_serialization"]["emitted_text_verification"]["source_shelf_contract"]
+                ["max_scaled_coefficient_delta_epsilon"],
+            16
+        );
+        assert_eq!(
+            shelf_manifest["apo_serialization"]["emitted_text_verification"]["source_shelf_contract"]
+                ["max_sampled_transfer_delta_db"],
+            1.0e-10
+        );
+        assert!(
+            shelf_manifest["apo_serialization"]["emitted_text_verification"]["max_shelf_scaled_coefficient_delta"]
+                .as_f64()
+                .is_some_and(|delta| delta <= 16.0 * f64::EPSILON)
+        );
+        assert!(
+            shelf_manifest["apo_serialization"]["emitted_text_verification"]["max_shelf_source_transfer_delta_db"]
+                .as_f64()
+                .is_some_and(|delta| delta <= 1.0e-10)
+        );
+
+        let unsupported = Biquad::new(BiquadFilterType::Bandpass, 1_000.0, 48_000.0, 1.0, 0.0);
+        let unsupported_refusal = save_profiled_apo_to_file(
+            &args,
+            &[unsupported],
+            realized_preamp,
+            &output_path,
+            &LossType::SpeakerFlat,
+            ProductExportContext {
+                request: &request,
+                prepared: &prepared,
+                compatibility: &prepared.target_compatibility,
+                max_filter_transfer_delta_db: 0.0,
+                verification_frequencies_hz: &[50.0, 100.0, 500.0, 1_000.0, 10_000.0],
+            },
+        )
+        .await
+        .expect_err("unsupported stage must fail before replacing the bound pair");
+        assert!(
+            unsupported_refusal
+                .to_string()
+                .contains("unverified filter type")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), shelf_preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), shelf_sidecar_bytes);
 
         let provenance: serde_json::Value = serde_json::from_slice(&sidecar_bytes).unwrap();
-        assert_eq!(provenance["schema_version"], 2);
+        assert_eq!(provenance["schema_version"], 3);
         assert_eq!(provenance["target_compatibility"]["status"], "unknown");
         assert_eq!(provenance["apo_serialization"]["realized_preamp_db"], -3.6);
         assert_eq!(
@@ -447,8 +542,8 @@ mod tests {
         .await
         .expect_err("comment-injected APO commands cannot be verified or published");
         assert!(error.to_string().contains("unsupported command"));
-        assert_eq!(fs::read(&preset_path).unwrap(), preset_bytes);
-        assert_eq!(fs::read(&provenance_path).unwrap(), sidecar_bytes);
+        assert_eq!(fs::read(&preset_path).unwrap(), shelf_preset_bytes);
+        assert_eq!(fs::read(&provenance_path).unwrap(), shelf_sidecar_bytes);
     }
 
     #[tokio::test]

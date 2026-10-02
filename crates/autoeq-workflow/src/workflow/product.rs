@@ -76,7 +76,19 @@ pub enum ProductRenderer {
 }
 
 /// Schema version for the machine-readable product renderer capability report.
-pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 2;
+pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 3;
+
+/// Frozen Equalizer APO source revision used to verify the profiled shelf
+/// coefficient mapping. This is a source-derived check, not a runtime claim.
+pub const PROFILED_APO_SHELF_SOURCE_REVISION: &str = "bbfcc3e5024cbb9d61ba75fc88d78605cc4c9687";
+/// Conservative minimum consumer version assumed for the documented LSC/HSC behavior.
+pub const PROFILED_APO_SHELF_MINIMUM_VERSION_ASSUMPTION: &str = "1.2.1";
+/// Slope used by the only shelf mapping verified for profiled output.
+pub const PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE: u8 = 12;
+/// Multiplier for the normalized source/core coefficient comparison bound.
+pub const PROFILED_APO_SHELF_COEFFICIENT_EPSILON_MULTIPLIER: u32 = 16;
+/// Maximum source/core sampled transfer difference for the shelf mapping.
+pub const PROFILED_APO_SHELF_MAX_TRANSFER_DELTA_DB: f64 = 1.0e-10;
 
 /// Format emitted by the corresponding legacy or checked product serializer.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,6 +142,42 @@ pub enum ProductRendererVerifiedFeature {
     PresetSha256Binding,
     QuantizedFilterTransferCheck,
     StrictEmittedTextRoundTripCheck,
+    SourceDerivedApoShelfCoefficientAndTransferCheck,
+}
+
+/// Source and numeric contract for profiled Equalizer APO shelf serialization.
+/// The local verifier does not parse with or execute Equalizer APO itself.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ProfiledApoShelfContract {
+    pub emitted_filter_types: Vec<String>,
+    pub slope_db_per_octave: u8,
+    pub frequency_convention: String,
+    pub q_encoded: bool,
+    pub equalizer_apo_source_revision: String,
+    pub minimum_consumer_version_assumption: String,
+    pub coefficient_comparison: String,
+    pub max_scaled_coefficient_delta_epsilon: u32,
+    pub max_sampled_transfer_delta_db: f64,
+    pub consumer_runtime_checked: bool,
+}
+
+/// Return the exact shelf contract advertised by the profile verifier.
+pub fn profiled_apo_shelf_contract() -> ProfiledApoShelfContract {
+    ProfiledApoShelfContract {
+        emitted_filter_types: vec!["LSC".into(), "HSC".into()],
+        slope_db_per_octave: PROFILED_APO_SHELF_SLOPE_DB_PER_OCTAVE,
+        frequency_convention: "center_frequency_fc".into(),
+        q_encoded: false,
+        equalizer_apo_source_revision: PROFILED_APO_SHELF_SOURCE_REVISION.into(),
+        minimum_consumer_version_assumption: PROFILED_APO_SHELF_MINIMUM_VERSION_ASSUMPTION.into(),
+        coefficient_comparison:
+            "max_abs_delta <= 16*f64::EPSILON*max(1,max_abs(source_coefficients,core_coefficients))"
+                .into(),
+        max_scaled_coefficient_delta_epsilon: PROFILED_APO_SHELF_COEFFICIENT_EPSILON_MULTIPLIER,
+        max_sampled_transfer_delta_db: PROFILED_APO_SHELF_MAX_TRANSFER_DELTA_DB,
+        consumer_runtime_checked: false,
+    }
 }
 
 /// Known behavior that limits what a renderer capability report promises.
@@ -146,9 +194,6 @@ pub enum ProductRendererLimitation {
     /// APO text does not bind a device or channel; both are inherited from the
     /// including Equalizer APO configuration.
     ProfiledApoRoutingIsInheritedFromIncludingConfiguration,
-    /// The core's shelves use a fixed slope, while Equalizer APO LS/HS commands
-    /// apply consumer-specific Q and corner-frequency semantics.
-    ProfiledApoRefusesShelvesWithMismatchedTransferSemantics,
     /// The legacy RME writer can reshape or replace filters to fit its fixed
     /// topology and supported filter slots.
     LegacyRmeWriterMayTransformFilterTopology,
@@ -165,7 +210,7 @@ pub enum ProductRendererLimitation {
 }
 
 /// Capability for one renderer in the product-profile export workflow.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProductRendererCapability {
     pub renderer: ProductRenderer,
@@ -176,10 +221,12 @@ pub struct ProductRendererCapability {
     pub refusal_code: Option<ProductRendererRefusalCode>,
     pub verified_features: Vec<ProductRendererVerifiedFeature>,
     pub known_limitations: Vec<ProductRendererLimitation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profiled_apo_shelf_contract: Option<ProfiledApoShelfContract>,
 }
 
 /// Versioned machine-readable capabilities for product-profile exports.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProductRendererCapabilities {
     pub schema_version: u32,
@@ -207,14 +254,15 @@ impl ProductRenderer {
                     ProductRendererVerifiedFeature::PresetSha256Binding,
                     ProductRendererVerifiedFeature::QuantizedFilterTransferCheck,
                     ProductRendererVerifiedFeature::StrictEmittedTextRoundTripCheck,
+                    ProductRendererVerifiedFeature::SourceDerivedApoShelfCoefficientAndTransferCheck,
                 ],
                 known_limitations: vec![
                     ProductRendererLimitation::PresetRequiresUserInstallation,
                     ProductRendererLimitation::RuntimeDeviceAndAudibilityAreNotVerified,
                     ProductRendererLimitation::ProfiledApoRefusesUnverifiedFilterSyntax,
                     ProductRendererLimitation::ProfiledApoRoutingIsInheritedFromIncludingConfiguration,
-                    ProductRendererLimitation::ProfiledApoRefusesShelvesWithMismatchedTransferSemantics,
                 ],
+                profiled_apo_shelf_contract: Some(profiled_apo_shelf_contract()),
             },
             Self::RmeTotalMix => ProductRendererCapability {
                 renderer: self,
@@ -228,6 +276,7 @@ impl ProductRenderer {
                     ProductRendererLimitation::LegacyRmeWriterCapsAtNineFiltersPerChannel,
                     ProductRendererLimitation::LegacyRmeWriterUsesZeroChannelGainAndDelay,
                 ],
+                profiled_apo_shelf_contract: None,
             },
             Self::AppleAu => ProductRendererCapability {
                 renderer: self,
@@ -241,6 +290,7 @@ impl ProductRenderer {
                     ProductRendererLimitation::LegacyAppleWriterUsesSinglePrecisionParameters,
                     ProductRendererLimitation::LegacyAppleWriterHasNoSampleRateBinding,
                 ],
+                profiled_apo_shelf_contract: None,
             },
         }
     }
@@ -365,23 +415,23 @@ fn required_profiled_apo_filter_types(
         }
         crate::PeqModel::LsPk => {
             if num_filters <= 1 {
-                vec!["LS"]
+                vec!["LSC"]
             } else {
-                vec!["LS", "PK"]
+                vec!["LSC", "PK"]
             }
         }
         crate::PeqModel::LsPkHs => match num_filters {
-            0 | 1 => vec!["LS"],
-            2 => vec!["LS", "HS"],
-            _ => vec!["LS", "PK", "HS"],
+            0 | 1 => vec!["LSC"],
+            2 => vec!["LSC", "HSC"],
+            _ => vec!["LSC", "PK", "HSC"],
         },
         crate::PeqModel::PkLsHs => match num_filters {
-            0 | 1 => vec!["HS"],
-            2 => vec!["LS", "HS"],
-            _ => vec!["PK", "LS", "HS"],
+            0 | 1 => vec!["HSC"],
+            2 => vec!["LSC", "HSC"],
+            _ => vec!["PK", "LSC", "HSC"],
         },
         crate::PeqModel::FreePkFree | crate::PeqModel::Free => vec![
-            "PK", "LP", "LPQ", "HP", "HPQ", "LS", "HS", "BP", "NO", "AP", "LSO", "HSO", "PKM",
+            "PK", "LP", "LPQ", "HP", "HPQ", "LSC", "HSC", "BP", "NO", "AP", "LSO", "HSO", "PKM",
         ],
     };
     types.sort_unstable();
@@ -407,12 +457,8 @@ fn profiled_apo_filter_kind(filter: &crate::iir::Biquad) -> Result<&'static str,
             }
         }
         crate::iir::BiquadFilterType::HighpassVariableQ => "HPQ",
-        crate::iir::BiquadFilterType::Lowshelf => {
-            return Err(profiled_apo_filter_refusal("LS"));
-        }
-        crate::iir::BiquadFilterType::Highshelf => {
-            return Err(profiled_apo_filter_refusal("HS"));
-        }
+        crate::iir::BiquadFilterType::Lowshelf => "LSC",
+        crate::iir::BiquadFilterType::Highshelf => "HSC",
         crate::iir::BiquadFilterType::AllPass => "AP",
         crate::iir::BiquadFilterType::Bandpass
         | crate::iir::BiquadFilterType::Notch
@@ -425,7 +471,7 @@ fn profiled_apo_filter_kind(filter: &crate::iir::Biquad) -> Result<&'static str,
             ));
         }
     };
-    if kind != "PK" && filter.db_gain != 0.0 {
+    if !matches!(kind, "PK" | "LSC" | "HSC") && filter.db_gain != 0.0 {
         return Err(format!(
             "profiled Equalizer APO {kind} output does not encode filter gain"
         ));
@@ -434,13 +480,16 @@ fn profiled_apo_filter_kind(filter: &crate::iir::Biquad) -> Result<&'static str,
 }
 
 fn is_supported_profiled_apo_filter_kind(kind: &str) -> bool {
-    matches!(kind, "PK" | "LP" | "LPQ" | "HP" | "HPQ" | "AP")
+    matches!(
+        kind,
+        "PK" | "LP" | "LPQ" | "HP" | "HPQ" | "LSC" | "HSC" | "AP"
+    )
 }
 
 fn profiled_apo_filter_refusal(kind: &str) -> String {
     if matches!(kind, "LS" | "HS") {
         format!(
-            "profiled Equalizer APO refuses {kind} shelves: core fixed-slope shelves do not match consumer Q and corner-frequency semantics"
+            "profiled Equalizer APO shelf output uses {kind} only in the legacy path; profiles must declare LSC/HSC with a 12 dB slope"
         )
     } else {
         format!("profiled Equalizer APO export refuses unverified filter type '{kind}'")
@@ -548,6 +597,7 @@ impl DeviceProfile {
             "filter type",
             &[
                 "PK", "LP", "LPQ", "HP", "HS", "HPQ", "LS", "BP", "NO", "AP", "LSO", "HSO", "PKM",
+                "LSC", "HSC",
             ],
         )?;
         if params.num_filters > self.maximum_filter_count {
@@ -1450,6 +1500,24 @@ mod tests {
             report.schema_version,
             PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION
         );
+        let apo = ProductRenderer::EqualizerApo.capability();
+        let shelf_contract = apo
+            .profiled_apo_shelf_contract
+            .expect("profiled APO capability exposes the checked shelf mapping");
+        assert_eq!(shelf_contract.emitted_filter_types, ["LSC", "HSC"]);
+        assert_eq!(shelf_contract.slope_db_per_octave, 12);
+        assert_eq!(shelf_contract.frequency_convention, "center_frequency_fc");
+        assert!(!shelf_contract.q_encoded);
+        assert_eq!(
+            shelf_contract.equalizer_apo_source_revision,
+            PROFILED_APO_SHELF_SOURCE_REVISION
+        );
+        assert_eq!(shelf_contract.max_scaled_coefficient_delta_epsilon, 16);
+        assert_eq!(shelf_contract.max_sampled_transfer_delta_db, 1.0e-10);
+        assert!(!shelf_contract.consumer_runtime_checked);
+        assert!(apo.verified_features.contains(
+            &ProductRendererVerifiedFeature::SourceDerivedApoShelfCoefficientAndTransferCheck
+        ));
         assert_eq!(report.renderers.len(), 3);
 
         let apo = ProductRenderer::EqualizerApo.capability();
@@ -1471,6 +1539,9 @@ mod tests {
             apo.verified_features
                 .contains(&ProductRendererVerifiedFeature::StrictEmittedTextRoundTripCheck)
         );
+        assert!(apo.verified_features.contains(
+            &ProductRendererVerifiedFeature::SourceDerivedApoShelfCoefficientAndTransferCheck
+        ));
         assert!(
             apo.known_limitations
                 .contains(&ProductRendererLimitation::RuntimeDeviceAndAudibilityAreNotVerified)
@@ -1478,9 +1549,9 @@ mod tests {
         assert!(apo.known_limitations.contains(
             &ProductRendererLimitation::ProfiledApoRoutingIsInheritedFromIncludingConfiguration
         ));
-        assert!(apo.known_limitations.contains(
-            &ProductRendererLimitation::ProfiledApoRefusesShelvesWithMismatchedTransferSemantics
-        ));
+        let shelf_contract = apo.profiled_apo_shelf_contract.unwrap();
+        assert_eq!(shelf_contract.emitted_filter_types, ["LSC", "HSC"]);
+        assert!(!shelf_contract.consumer_runtime_checked);
 
         let rme = ProductRenderer::RmeTotalMix.capability();
         assert_eq!(
@@ -1520,7 +1591,10 @@ mod tests {
         );
 
         let encoded = serde_json::to_value(&report).unwrap();
-        assert_eq!(encoded["schema_version"], 2);
+        assert_eq!(
+            encoded["schema_version"],
+            PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION
+        );
         assert_eq!(encoded["renderers"][0]["renderer"], "equalizer_apo");
         assert_eq!(encoded["renderers"][1]["renderer"], "rme_total_mix");
         assert_eq!(encoded["renderers"][2]["renderer"], "apple_au");
@@ -1621,7 +1695,7 @@ mod tests {
         free_profile.supported_peq_models.push("free".into());
         free_profile.supported_filter_types.extend(
             [
-                "LPQ", "HP", "HPQ", "LS", "HS", "BP", "NO", "AP", "LSO", "HSO", "PKM",
+                "LPQ", "HP", "HPQ", "LS", "HS", "LSC", "HSC", "BP", "NO", "AP", "LSO", "HSO", "PKM",
             ]
             .into_iter()
             .map(str::to_owned),
@@ -1650,22 +1724,29 @@ mod tests {
     }
 
     #[test]
-    fn profiled_apo_refuses_shelf_models_before_optimizer_search_and_direct_validation() {
+    fn profiled_apo_requires_lsc_hsc_and_validates_fixed_slope_shelves() {
         for model in [crate::PeqModel::LsPk, crate::PeqModel::PkLsHs] {
             let mut params = optimizer_params();
             params.peq_model = model;
             params.num_filters = 3;
             let mut profile = device_profile("studio", 48_000.0);
             profile.supported_peq_models = vec![model.to_string()];
-            profile.supported_filter_types = vec!["PK".into(), "LS".into(), "HS".into()];
+            profile.supported_filter_types = vec!["PK".into(), "LSC".into(), "HSC".into()];
 
-            let refusal = profile
+            profile
                 .validate_for_optimizer(&params)
-                .expect_err("shelf topologies must be refused before optimization starts");
-            assert!(refusal.contains("fixed-slope shelves"), "{refusal}");
+                .expect("shelf models pass when the device profile declares LSC/HSC");
+
+            let mut legacy_declaration = profile.clone();
+            legacy_declaration.supported_filter_types = vec!["PK".into(), "LS".into(), "HS".into()];
+            let refusal = legacy_declaration
+                .validate_for_optimizer(&params)
+                .expect_err("legacy LS/HS declarations do not attest to LSC/HSC output");
+            assert!(refusal.contains("filter type"), "{refusal}");
         }
 
-        let profile = device_profile("studio", 48_000.0);
+        let mut profile = device_profile("studio", 48_000.0);
+        profile.supported_filter_types = vec!["PK".into(), "LSC".into(), "HSC".into()];
         for shelf in [
             crate::iir::Biquad::new(
                 crate::iir::BiquadFilterType::Lowshelf,
@@ -1682,10 +1763,9 @@ mod tests {
                 -3.0,
             ),
         ] {
-            let refusal = profile
+            profile
                 .validate_filters(48_000.0, &[shelf])
-                .expect_err("shelf filters must not be admitted by direct profile validation");
-            assert!(refusal.contains("fixed-slope shelves"), "{refusal}");
+                .expect("12 dB center shelves are supported by the profiled serializer");
         }
     }
 

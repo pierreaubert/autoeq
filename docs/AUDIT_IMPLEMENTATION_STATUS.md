@@ -3015,3 +3015,33 @@ normal edge, the workflow-to-optimizer dev edge, and root source/binary/test
 budgets. No policy limit was raised. Registry and cross-platform acceptance
 remain open. Evidence: `autoeq-a00-standalone-proof-20261003` and
 `autoeq-main-merge-20261003/standalone-partition.log` under the task evidence root.
+
+### A00 CLI supervisor ownership (2026-10-03)
+
+RoomEQ runtime startup, Ctrl-C registration readiness and cancellation
+supervision now belong to `roomeq-cli`. The root binary retains its command
+name and delegates to the crate entrypoint. Both existing signal tests moved
+with the unchanged supervisor body; the CLI library suite passes 76/76.
+Root source, binary and unit-test metrics meet the unchanged budgets exactly
+(581 LOC, 184 binary LOC, two tests). The locked release launcher compile and strict CLI all-target Clippy gates pass.
+The partition gate still rejects the two existing dependency edges; no
+allowlist or budget was relaxed. Logs: `autoeq-supervisor-*.log` under the
+task evidence root. This is an ownership change, not new hardware evidence.
+
+### A09 derived-trim integration (2026-10-03)
+
+Reviewed recalibration commit `5b1d3c18` is integrated into local main through
+`fe92cc81`. Safety-gate rollback and structural fallback recompute generated
+input trims and output protection from the current executable correction;
+original measured alignment bands and user calibration gains are retained.
+The integrated workflow suite passes 1,039 tests (seven ignored), the model
+band regression and strict workflow Clippy pass, and both generated schema
+baselines match. The workflow suite used an ephemeral offline lock refresh
+before the standalone lock/config integration; final metadata and schema
+checks are locked and offline. The newer non-routed finalizer behavior remains.
+
+No measured optimization was rerun and the original failed Genelec evidence
+remains failed. The later output-attenuation gate uses the same tested rollback
+wrapper but lacks a separately forced rollback fixture. Full A09 measured
+mode/rate/time-domain acceptance remains open. Logs are in
+`a09-integration-da6458fc-evidence` under the task evidence root.

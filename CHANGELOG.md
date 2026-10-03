@@ -1,5 +1,8 @@
 # Unreleased
 
+- Move RoomEQ signal supervision and runtime startup into the CLI crate,
+  keeping the root binary as a compatibility launcher.
+
 - Keep local GPUI demos in a separate workspace so backend source installs
   resolve without sibling GPUI checkouts; preserve the existing demo recipes.
 

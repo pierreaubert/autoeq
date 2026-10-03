@@ -2683,3 +2683,57 @@ Commands, logs, resolved metadata and integration hashes are retained under
 checkout prerequisite for source builds. It does not establish registry package
 installation, cross-platform execution or a new benchmark quality result. The
 unpublished NSGA/BO changes remain separate prerequisites for their integrations.
+
+
+### A09 matched-policy electrical diagnostic and missing candidate evidence
+
+A copy-only replay applies the retained static Sub1 cut to the IIR baseline
+and removes its nine tagged limiter-compensation delays. Root independently
+verified original/copy hashes and that these are the only semantic graph edits;
+the other three graphs are unchanged. The production electrical evaluator then
+reports identical output-amplitude arrays for all four copied graphs on the
+retained 8193-point, 48 kHz grid. This equality is limited to its routing/electrical
+projection: recorded input trims and acoustic curve/post-IR metadata are excluded.
+No acoustic parity, PCM playback or accepted correction is established.
+
+The final diagnostic is
+`/Users/pierre/a09-matched-output-policy-diagnostic-20261003-final/replay-summary-final.json`,
+SHA-256 `d4ae60a0bf332ec9907c64d0339a8d371269719baf095003cdd783ce49d358ed`.
+Root transformation receipt:
+`/Users/pierre/a09-matched-policy-root-transform-review.json`.
+Original helper source/lock/executable/log hashes are recorded separately from
+post-build metadata. That later metadata re-resolved math sources after the
+public-pin update and does not identify the earlier executed build dependencies;
+no before/after source freeze is claimed for this diagnostic.
+
+Retained selection evidence has zero passing candidates: 22 IIR rows and 66 rows
+for each other mode failed. The IIR useful-output-loss plateau occurs in rejected
+candidate rows, not its final identity fallback. Candidate graphs, required cut
+maps and post-alignment replay inputs were not retained, so reconstructing them
+from the fallback would be invalid. Source review shows the useful-output
+reference is measured response replayed through structural routing with correction
+stages removed, not the serialized optimized final curve. A new opt-in capture and
+one-mode rerun will record the actual candidate stages and scoring inputs. The
+original canary failures and budgets remain unchanged.
+
+### A16 private nightly matrix workflow (2026-10-03)
+
+Commit **fc8fa01** adds a private-Gitea-only daily/manual workflow for the existing
+841-cell, 48 kHz matrix. It builds from locked public dependencies, records
+provenance, preserves the executable in a tar archive with hashes, runs strict
+analysis, and always attempts current-run artifact upload with 90-day retention.
+Run/attempt-specific non-hidden evidence directories avoid cached output reuse.
+Explicit step caps fit within the 330-minute job cap; the runner receives SIGINT
+at 150 minutes to permit an interrupted receipt before forced termination.
+
+The private workflow passed YAML parsing, shell syntax checks, diff checking and
+source review. Integrated bytes match the reviewed source, SHA-256
+`3afba5f56647465103117cdc7dd1a1a042b95b4627605f916b2bdac5b89755cf`.
+Existing CI mirror checks still pass. No workflow was pushed or dispatched;
+Gitea runner/upload-action compatibility and actual retention remain unverified.
+This adds no sample-rate coverage beyond 48 kHz.
+
+The separate public-mirror proposal **469a61e** was not integrated: automatic
+approval review rejected scheduled public GitHub uploads without explicit
+artifact-publication authorization. The user decision is pending. Main contains
+no corresponding GitHub nightly workflow.

@@ -2278,3 +2278,37 @@ SHA-256 `ae2923f341c880f53bead5533220cfddf7b3df1ba1a3ea183ac2b6152e3115fd`.
 The full matrix remains pending watchdog review and broader smoke coverage for
 measured inputs, Pareto, refinement and observer cancellation. These changes
 remain in the worker worktree pending final review and integration.
+
+### A07: broader smoke and BO EHVI callback contract (2026-10-03)
+
+Root ran six more fresh-process cells with the same frozen binary and 30-second
+watchdog. Measured-room COBRA cap128, COBRA-to-COBYLA refinement cap512,
+NSGA-II/III Pareto cap512, and COBRA observer cancellation returned expected
+results. The independent checker passed all five returned receipts. Refinement
+used two stages and 512 Search/3 Validation calls; NSGA-II and III each used
+512 Search/34 Validation calls and retained typed Pareto reports. Observer
+cancellation stopped after 11 Search calls with zero Validation.
+
+BO EHVI cap512 exceeded the external watchdog; its owned process group was
+killed and reaped (exit -9), with no result JSON. This remains an explicit
+failed/incomplete cell, not a passing matrix result. Artifacts and execution
+records: `/Volumes/home_tmp/tmp/autoeq-a07-shared-pipeline-evidence/root-smoke-v2`.
+Root receipt for returned cells:
+`/Users/pierre/a07-controlled-broader-smoke-independent-review.json`.
+
+Inspection found that the BO adapter discarded callbacks on the EHVI path; the
+underlying multi-objective loop also does not invoke them. The optimizer trait
+now exposes invocation-specific callback support. Controlled dispatch refuses
+EHVI observer requests before scoring, and direct/legacy BO observer entry
+points also refuse. Scalar BO retains callback support, including a scalar
+objective with the EHVI option enabled. Internal control callbacks are only
+installed when the selected mode supports them.
+
+Regression tests cover mode selection, all three observer entry points,
+unchanged candidate parameters, and zero Search/Validation scoring on refusal.
+All 396 optimizer library tests and strict optimizer library/test Clippy passed
+with source hashes unchanged. Logs, exact argv and hashes are retained in
+`/Volumes/home_tmp/tmp/a07-bo-ehvi-callback-evidence-20261003/gates.json`.
+This fixes the callback contract; it does not add cancellation checks inside
+GP fitting or EHVI proposal computation. The observed deadline failure remains
+open, and the full matrix is still pending watchdog review.

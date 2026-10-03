@@ -50,6 +50,7 @@ members = [
     "crates/autoeq-report-wasm",
     "crates/autoeq-report-wasm-shell",
     "crates/autoeq-report-gpui",
+    "crates/autoeq-gpui-examples",
 ]
 [workspace.package]
 version = "0.5.74"
@@ -88,7 +89,7 @@ base64 = "0.23"
 build_html = "2.7"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4.5", features = ["derive"] }
-criterion = "0.8"
+criterion = "0.8.2"
 csv = "1.4"
 directories = "6"
 env_logger = "0.11"
@@ -109,27 +110,26 @@ serde_json = "1.0"
 sha2 = "0.11"
 schemars = "1.2"
 strsim = "0.11"
-thiserror = "2"
+thiserror = "2.0.17"
 tokio = { version = "1", features = ["rt-multi-thread", "fs", "macros", "io-util", "process", "signal"] }
 urlencoding = "2.1"
 zip = { version = "8", default-features = false }
 tempfile = "3.23"
 assert_fs = "1.0"
-proptest = { version = "1.8", default-features = false, features = ["std"] }
+proptest = { version = "1.9", default-features = false, features = ["std"] }
 serial_test = "4"
 wide = "0.6.1"
 
-# Shared report primitives from the GitHub tree (never Gitea: releases
-# must resolve from public sources; local checkouts only via [patch]).
-math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-optimisation = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-sofa-reader = "0.2"
+# Shared report primitives from the sibling math-audio workspace.
+math-iir-fir = { version = "0.5", path = "../math-audio/crates/math-iir-fir" }
+math-dsp = { version = "0.5", path = "../math-audio/crates/math-dsp" }
+math-optimisation = { version = "0.5", path = "../math-audio/crates/math-optimisation" }
+math-rir = { version = "0.5", path = "../math-audio/crates/math-rir" }
+sofa-reader = { version = "0.2", path = "../sofa-reader" }
 
 # Core numerical computing
 ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
-oxiblas-ndarray = "0.2.1"
+oxiblas-ndarray = "0.2.2"
 
 rayon = "1.11"
 

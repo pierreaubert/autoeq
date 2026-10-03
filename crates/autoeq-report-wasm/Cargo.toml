@@ -17,4 +17,7 @@ workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 base64 = "0.22"
-d3rs = { package = "gpui-d3rs", path = "../../../gpui-toolkit/crates/gpui-d3rs", version = "0.9", default-features = false }
+# grid.rs uses d3rs::surface, which gpui-d3rs gates behind its "gpui"
+# feature. Declare it here instead of relying on feature unification
+# from elsewhere in the graph (nothing else enables it).
+d3rs = { package = "gpui-d3rs", path = "../../../gpui-toolkit/crates/gpui-d3rs", version = "0.9", default-features = false, features = ["gpui"] }

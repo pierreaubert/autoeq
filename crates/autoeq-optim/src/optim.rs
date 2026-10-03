@@ -15,7 +15,7 @@
 //! You should have received a copy of the GNU General Public License
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub use backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
+pub use backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer, FilterOptimizerOutput};
 
 /// Version of the optimizer implementation used in warm-start identities.
 pub const OPTIMIZER_IMPLEMENTATION_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -82,10 +82,11 @@ pub use constraint_envelope::{
     BudgetBreach, COMPOSITE_COMPARISON_EPS_DB, ClassifiedOutcome, CompositeBreach,
     ConstrainedCandidate, ConstraintDiagnostic, ConstraintKind, ConstraintSpec, FinalizedCandidate,
     GainAdjustment, JudgedParetoFront, JudgedParetoMember, OptimizationOutcomeKind,
-    OwnedConstraintSpec, ParetoFeasibility, QAdjustment, VALIDATED_SUBDIVISIONS_PER_BIN,
-    check_composite_gain_envelope, check_pareto_feasibility, classify_outcome, constrain_candidate,
-    enforce_local_q_at_centers, enforce_local_q_envelope_at_centers, envelope_bound_at,
-    finalize_candidate, is_peq_layout_loss, judge_pareto_members, policy_local_q_knots,
+    OwnedConstraintSpec, ParetoFeasibility, ParetoValidationError, QAdjustment,
+    VALIDATED_SUBDIVISIONS_PER_BIN, check_composite_gain_envelope, check_pareto_feasibility,
+    classify_outcome, constrain_candidate, enforce_local_q_at_centers,
+    enforce_local_q_envelope_at_centers, envelope_bound_at, finalize_candidate, is_peq_layout_loss,
+    judge_pareto_members, judge_pareto_members_with_stop, policy_local_q_knots,
     project_gains_onto_envelopes, validate_envelope_knots, validated_composite_grid,
     verify_joint_budgets,
 };

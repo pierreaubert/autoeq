@@ -102,6 +102,7 @@ pub fn to_optimizer_run_evidence(
                 objective: restart.objective,
             })
             .collect(),
+        pareto_report: value.pareto_report.clone(),
     }
 }
 

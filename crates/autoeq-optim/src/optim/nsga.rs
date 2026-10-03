@@ -156,6 +156,13 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                         f64::INFINITY,
                     ));
                 }
+                if objective.terminal_stop_requested() {
+                    return Err((
+                        format!("{} stopped before Pareto front validation", self.name),
+                        f64::INFINITY,
+                    ));
+                }
+                let validation_objective = objective.post_search_validation_view();
                 // Judge every eligible member through the shared envelopes
                 // before selection so an infeasible member can never win the
                 // compromise pick on a score its repaired form cannot keep.
@@ -174,13 +181,22 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                 let judged = match judge_front_members(
                     self.name,
                     front,
-                    objective.as_ref(),
+                    &validation_objective,
                     &owned.as_spec(),
                 ) {
                     Ok(judged) => judged,
                     Err(reason) => return Err((reason, f64::INFINITY)),
                 };
-                let Some(best) = choose_compromise(&judged, objective.as_ref()) else {
+                if !objective_vectors_are_finite(&judged) {
+                    return Err((
+                        format!(
+                            "{} produced non-finite or inconsistent Pareto objectives",
+                            self.name
+                        ),
+                        f64::INFINITY,
+                    ));
+                }
+                let Some(best) = choose_compromise(&judged, &validation_objective) else {
                     return Err((
                         format!("{} produced an empty judged front", self.name),
                         f64::INFINITY,
@@ -195,7 +211,7 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                     self.name,
                     &cfg,
                     &judged,
-                    objective.as_ref(),
+                    &validation_objective,
                     report.nfev,
                     report.nit,
                 ) {
@@ -204,7 +220,7 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                         self.name,
                         nsga_front_report_json(&front_report)
                     );
-                    let loss = compute_fitness_penalties_ref(x, objective.as_ref());
+                    let loss = compute_fitness_penalties_ref(x, &validation_objective);
                     return Ok((
                         format!(
                             "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6} \
@@ -220,7 +236,7 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                         loss,
                     ));
                 }
-                let loss = compute_fitness_penalties_ref(x, objective.as_ref());
+                let loss = compute_fitness_penalties_ref(x, &validation_objective);
                 Ok((
                     format!(
                         "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6}",
@@ -239,7 +255,19 @@ impl FilterOptimizer for AutoeqNsgaBackend {
     }
 }
 
-/// Normalised frame for compromise selection: per-axis weights plus the
+fn objective_vectors_are_finite(front: &[ParetoSolution]) -> bool {
+    let Some(first) = front.first() else {
+        return false;
+    };
+    let objective_count = first.objectives.len();
+    objective_count > 0
+        && front.iter().all(|solution| {
+            solution.objectives.len() == objective_count
+                && solution.objectives.iter().all(|value| value.is_finite())
+        })
+}
+
+/// Normalized frame for compromise selection: per-axis weights plus the
 /// ideal/nadir points spanning the front.
 struct CompromiseFrame {
     weights: Vec<f64>,
@@ -348,13 +376,10 @@ fn choose_compromise<'a>(
     front: &'a [ParetoSolution],
     objective: &ObjectiveData,
 ) -> Option<&'a ParetoSolution> {
-    if front.is_empty() {
+    if !objective_vectors_are_finite(front) {
         return None;
     }
     let m = front[0].objectives.len();
-    if m == 0 {
-        return front.first();
-    }
     let frame = compromise_frame(front, objective, m);
     let distances = compromise_distances(front, &frame);
     front
@@ -556,7 +581,7 @@ pub fn build_nsga_front_report(
     nfev: usize,
     generations: usize,
 ) -> Option<NsgaFrontReport> {
-    if front.is_empty() {
+    if !objective_vectors_are_finite(front) {
         return None;
     }
     let m = front[0].objectives.len();
@@ -675,14 +700,35 @@ fn variant_label(variant: NsgaVariant) -> &'static str {
 
 #[cfg(test)]
 mod nsga_front_report_tests {
+    use super::super::backend::FilterOptimizer;
+    use super::super::compute::compute_pareto_objectives;
+    use super::super::constraint_envelope::ConstraintSpec;
+    use super::super::loss::{Objective, ObjectiveContext};
+    use super::super::params::OptimParams;
+    use super::super::run_control::OptimizerRunControl;
     use super::{
-        NsgaConfig, NsgaVariant, ObjectiveData, ParetoSolution, build_nsga_front_report,
-        choose_compromise, nsga_front_report_json,
+        AutoeqNsgaBackend, NsgaConfig, NsgaVariant, ObjectiveData, ParetoSolution,
+        build_nsga_front_report, choose_compromise, judge_front_members, nsga_front_report_json,
     };
     use crate::loss::LossType;
     use crate::roomeq::MultiMeasurementStrategy;
     use crate::{MultiObjectiveData, ObjectiveDataBuilder, PeqModel};
+    use clap::Parser;
     use ndarray::Array1;
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    struct GainDistance {
+        center_db: f64,
+    }
+
+    impl Objective for GainDistance {
+        fn compute(&self, parameters: &[f64], _context: &ObjectiveContext<'_>) -> f64 {
+            parameters
+                .get(2)
+                .map_or(f64::INFINITY, |gain| (gain - self.center_db).powi(2))
+        }
+    }
 
     fn base_objective() -> ObjectiveData {
         let freqs = Array1::from_vec(vec![100.0, 200.0, 400.0, 800.0, 1600.0]);
@@ -715,6 +761,32 @@ mod nsga_front_report_tests {
             uncertainty_cvar_alpha: None,
         });
         obj
+    }
+
+    fn tradeoff_objective() -> ObjectiveData {
+        let objective_for = |center_db| {
+            let mut objective = base_objective();
+            objective.loss_type = LossType::SpeakerScore;
+            objective.min_db = -6.0;
+            objective.max_db = 6.0;
+            objective.objective = Some(Arc::new(GainDistance { center_db }));
+            objective
+        };
+        let left = objective_for(-1.0);
+        let right = objective_for(1.0);
+        let mut objective = left.clone();
+        objective.multi_objective = Some(MultiObjectiveData {
+            objectives: vec![left, right],
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.5, 0.5],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        objective
+    }
+
+    fn candidate_at_gain(gain_db: f64) -> Vec<f64> {
+        vec![500.0_f64.log10(), 1.0, gain_db]
     }
 
     fn sol(o1: f64, o2: f64) -> ParetoSolution {
@@ -837,6 +909,140 @@ mod nsga_front_report_tests {
         let objective = two_seat_objective(vec![0.5, 0.5]);
         assert!(choose_compromise(&[], &objective).is_none());
         assert!(build_nsga_front_report("autoeq:nsga2", &cfg(), &[], &objective, 0, 0).is_none());
+    }
+
+    #[test]
+    fn exhausted_search_cap_uses_validation_front_for_compromise_ordering() {
+        let objective = tradeoff_objective();
+        let control = OptimizerRunControl::new(NonZeroUsize::new(1).expect("positive cap"));
+        let search = objective.with_run_control(control.clone());
+
+        // Consume the single search slot. Later Pareto calls through this view
+        // are deliberately refused as +infinity by the exhausted search gate.
+        assert!(
+            compute_pareto_objectives(&candidate_at_gain(0.0), &search)
+                .iter()
+                .all(|value| value.is_finite())
+        );
+        assert!(control.snapshot().budget_exhausted);
+
+        let raw_front = [-1.0, 0.0, 1.0]
+            .into_iter()
+            .enumerate()
+            .map(|(rank, gain)| ParetoSolution {
+                x: Array1::from(candidate_at_gain(gain)),
+                objectives: vec![0.0, 0.0],
+                rank,
+                crowding_distance: 1.0,
+            })
+            .collect::<Vec<_>>();
+        let invalid_search_front = judge_front_members(
+            "test-nsga",
+            &raw_front,
+            &search,
+            &ConstraintSpec::unconstrained(),
+        )
+        .expect("front members remain structurally valid");
+        assert!(invalid_search_front.iter().all(|point| {
+            point.objectives.len() == 2 && point.objectives.iter().all(|value| value.is_infinite())
+        }));
+        assert!(choose_compromise(&invalid_search_front, &search).is_none());
+
+        let validation = search.post_search_validation_view();
+        let finite_front = judge_front_members(
+            "test-nsga",
+            &raw_front,
+            &validation,
+            &ConstraintSpec::unconstrained(),
+        )
+        .expect("validation scores are outside the exhausted search cap");
+        assert_eq!(
+            finite_front
+                .iter()
+                .map(|point| point.objectives.clone())
+                .collect::<Vec<_>>(),
+            vec![vec![0.0, 4.0], vec![1.0, 1.0], vec![4.0, 0.0]]
+        );
+        let best = choose_compromise(&finite_front, &validation).expect("finite tradeoff point");
+        assert!((best.x[2] - 0.0).abs() < 1e-12);
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluations_started, 1);
+        assert_eq!(snapshot.validation_evaluations_started, 3);
+        assert_eq!(snapshot.validation_evaluations_completed, 3);
+    }
+
+    #[test]
+    fn fixed_seed_nsga16_cap_allows_finite_post_search_front_scoring() {
+        let objective = tradeoff_objective();
+        let control = OptimizerRunControl::new(NonZeroUsize::new(16).expect("positive cap"));
+        let search = objective.with_run_control(control.clone());
+        let mut args = crate::cli::Args::parse_from(["autoeq"]);
+        args.num_filters = 1;
+        args.population = 16;
+        args.maxeval = 16;
+        args.seed = Some(20261003);
+        args.no_parallel = true;
+        let params = OptimParams::from(&args);
+        let backend = AutoeqNsgaBackend::new_nsga2("autoeq:nsga2");
+        let lower = vec![2.0, 0.3, -6.0];
+        let upper = vec![3.0, 8.0, 6.0];
+        let mut x = vec![500.0_f64.log10(), 1.0, 0.0];
+        let profile = backend
+            .evaluation_budget_profile(&lower, &upper, &params)
+            .expect("NSGA reports its search budget profile");
+        assert_eq!(profile.requested_evaluations, 16);
+        assert_eq!(profile.solver_evaluation_limit, Some(16));
+        assert_eq!(profile.minimum_complete_batch, 16);
+
+        let result = backend.optimize(&mut x, &lower, &upper, search, &params, None);
+        let (status, loss) = result.expect("fixed-seed NSGA should return a compromise");
+        assert!(loss.is_finite(), "status={status}");
+        assert!(status.contains("selected compromise scalar loss"));
+        assert!(x.iter().all(|value| value.is_finite()));
+
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluation_budget, 16);
+        assert_eq!(snapshot.evaluations_started, 16);
+        assert!(snapshot.budget_exhausted);
+        assert!(snapshot.validation_evaluations_started > 0);
+        assert_eq!(
+            snapshot.validation_evaluations_started,
+            snapshot.validation_evaluations_completed
+        );
+    }
+
+    #[test]
+    fn compromise_and_report_refuse_nonfinite_or_mismatched_objectives() {
+        let objective = two_seat_objective(vec![0.5, 0.5]);
+        let infinite_front = vec![
+            sol(f64::INFINITY, f64::INFINITY),
+            sol(f64::INFINITY, f64::INFINITY),
+        ];
+        // The old normalization treated inf-inf as a non-finite span and set
+        // every axis distance to zero, so this front selected its first row.
+        assert_eq!(
+            super::super::misc::compromise_distance(
+                &[f64::INFINITY, f64::INFINITY],
+                &[f64::INFINITY, f64::INFINITY],
+                &[f64::INFINITY, f64::INFINITY],
+                &[0.5, 0.5],
+            ),
+            0.0
+        );
+        assert!(choose_compromise(&infinite_front, &objective).is_none());
+        assert!(
+            build_nsga_front_report("autoeq:nsga2", &cfg(), &infinite_front, &objective, 16, 1)
+                .is_none()
+        );
+
+        let nan_front = vec![sol(f64::NAN, 1.0), sol(1.0, 1.0)];
+        assert!(choose_compromise(&nan_front, &objective).is_none());
+        let mismatched_front = vec![sol(0.0, 1.0), {
+            let mut point = sol(1.0, 0.0);
+            point.objectives.pop();
+            point
+        }];
+        assert!(choose_compromise(&mismatched_front, &objective).is_none());
     }
 
     #[test]

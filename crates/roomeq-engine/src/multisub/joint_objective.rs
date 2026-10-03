@@ -664,7 +664,7 @@ pub fn apply_shared_eq_to_residual(per_seat: &[Curve], shared_eq_db: &[f64]) -> 
         .iter()
         .map(|seat| {
             seat.validate("shared residual EQ seat")?;
-            if &seat.freq != grid {
+            if seat.freq != grid {
                 return Err(AutoeqError::InvalidMeasurement {
                     message:
                         "seat grids disagree for shared residual EQ; resample explicitly first"
@@ -1387,8 +1387,10 @@ mod tests {
                 &resources,
                 &resources,
             )
-            .err()
-            .expect("all-pass workflow must refuse unverified timing");
+            .map_or_else(
+                |error| error,
+                |_| panic!("all-pass workflow must refuse unverified timing"),
+            );
             assert!(error.to_string().contains("timing reference"), "{error}");
         }
     }
@@ -1409,8 +1411,10 @@ mod tests {
                 &prepared,
                 prepared.reference_scope.clone(),
             )
-            .err()
-            .expect("placeholder timing cannot authorize joint processing");
+            .map_or_else(
+                |error| error,
+                |_| panic!("placeholder timing cannot authorize joint processing"),
+            );
             assert!(
                 error.to_string().contains("timing reference"),
                 "{reference:?}: {error}"

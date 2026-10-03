@@ -375,11 +375,15 @@ mod tests {
 
     #[test]
     fn optimizer_adapter_carries_frequency_q_policy() {
-        let mut high = roomeq_model::HighFrequencyCorrectionConfig::default();
-        high.start_hz = 1_600.0;
-        high.max_q = 0.8;
-        let mut config = OptimizerConfig::default();
-        config.high_frequency_correction = Some(high);
+        let high = roomeq_model::HighFrequencyCorrectionConfig {
+            start_hz: 1_600.0,
+            max_q: 0.8,
+            ..Default::default()
+        };
+        let config = OptimizerConfig {
+            high_frequency_correction: Some(high),
+            ..Default::default()
+        };
         let params = config.to_optim_params(48_000.0);
         let policy = params
             .frequency_q_policy

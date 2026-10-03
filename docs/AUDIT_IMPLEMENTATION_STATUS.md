@@ -1992,3 +1992,36 @@ Owner consistency review verifies 28 saved response hashes:
 `3490a67defedf8f3a46e4558801e866379cb278557693f580f57451541f2cac4`.
 The run report SHA-256 is
 `d9432b79bfb412d33bdad2e0b5dd1e8c11e4ada74fd90309baadcabda92d4235`.
+
+### A04 ESS run05: complete bounded synthetic diagnostic pass
+
+A fresh execution used the reviewed run05 sources with the corrected tolerance
+module reference and static module-contract check. The runner, fit and frozen
+V7 math retained their prior thresholds and resource limits. All three sequential
+children exited zero and were reaped: fit, V7 reference, independent evaluator.
+Total elapsed time was 18.346 seconds against 600 seconds. Sampled peak RSS was
+1,150,238,720 / 855,736,320 / 50,937,856 bytes respectively, below the fixed
+1,610,612,736-byte cap. Fit/reference getrusage peaks were slightly higher
+(1,154,433,024 / 856,162,304 bytes), also below the cap.
+
+The full-run evaluator accepted all four cases with no issues: 20 training,
+four held-out, 20 matrix-free/reference predictions and 24 formula/PCM harmonic
+comparisons. This result is not a replay-only diagnostic. The failed run04 and
+its later diagnostic replay remain preserved separately.
+
+Root independently checked 1,519 source/input/artifact file hashes, static-source
+identity, child exit/reaping/order, resource gates, comparison counts, and stable
+before/after inventories. Inventory receipt hashes differ only because their
+labels differ; their recorded files and runtime identities agree.
+
+Evidence root: `/Volumes/home_tmp/tmp/ess-matrixfree-qr-run05-20261003`.
+Execution SHA-256:
+`8f2364237c1cb65b57ad362436746630c1c294cd7ced9d48cfcb22eb6bf66c62`.
+Evaluator SHA-256:
+`fe0829bb3c0a5504732bc3519508f1c28eb11e2620220d97cb9abac6405fa16d`.
+Root review: `/Users/pierre/ess-run05-independent-review.json`, SHA-256
+`40ab7940f0f02751fe5f35ac8f0ce7f275397e055afee758a2638a775b27495c`.
+
+Acceptance remains limited to the declared synthetic 4 kHz, 320-tap diagnostic.
+Production-scale estimator integration, broader excitation/model validity and
+physical measurement evidence remain open; A04 is still partial.

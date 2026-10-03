@@ -565,6 +565,28 @@ mod tests {
     }
 
     #[test]
+    fn unstaged_control_keeps_the_original_single_dispatch_cap() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(3).unwrap());
+        assert_eq!(control.effective_evaluation_limit(), 3);
+        assert!(control.stage_snapshot().is_none());
+        for _ in 0..2 {
+            drop(
+                control
+                    .begin_evaluation(EvaluationStage::Search, 1)
+                    .unwrap(),
+            );
+        }
+        assert_eq!(control.effective_evaluation_limit(), 1);
+        drop(
+            control
+                .begin_evaluation(EvaluationStage::Search, 1)
+                .unwrap(),
+        );
+        assert_eq!(control.effective_evaluation_limit(), 0);
+        assert!(control.stage_snapshot().is_none());
+    }
+
+    #[test]
     fn cancel_closes_gate_and_waits_for_active_scores() {
         let control = OptimizerRunControl::new(NonZeroUsize::new(4).unwrap());
         let guard = control

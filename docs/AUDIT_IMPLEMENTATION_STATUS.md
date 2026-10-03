@@ -1605,3 +1605,61 @@ and mapped-settings engine witness remains open. No measurement, playback,
 installed-app replacement or UI work was performed.
 Evidence: `/private/tmp/rew-a11-witness-r97jthw7/`;
 root review: `/Users/pierre/a11-rew-preflight-independent-review.json`.
+
+
+## Shared electrical replay resource budget
+
+The shared sampled electrical assessment now enforces the physical-drive
+replay's existing limit of 16,777,216 path/frequency pairs. Checked
+multiplication refuses oversized requests before allocating response buffers
+or accessing convolution sidecars. It preserves the requested grid. Retained
+complex response samples alone can occupy 256 MiB at the limit; transient
+buffers and filter taps require additional memory.
+
+A regression with 129 paths and 131,072 frequencies fails against the baseline
+because it reaches the deliberately missing sidecar instead of refusing the
+request. The fixed implementation refuses first. Removing one path reaches
+the exact limit and proceeds to normal sidecar validation, without allocating
+the full response set. All 13 focused electrical tests and the full workflow
+library pass (1,019 passed, seven ignored). Strict library/test Clippy,
+formatting, locked offline metadata and diff checks pass.
+
+Root verified the five matched source/manifest/lock/config identities, all five
+final command log hashes, the 671-package metadata graph, baseline failure and
+focused result. Integrated source bytes equal the tested candidate. Dependency
+package bytes were not freshly inventoried. This closes a resource-limit
+bypass; the Genelec acoustic and electrical acceptance failures remain open.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a09-electrical-budget-evidence-20261003/`;
+root review: `/Users/pierre/a09-electrical-budget-independent-review.json`.
+
+## Matrix-free parallel-Hammerstein investigation: failed fit
+
+The first matrix-free experiment uses FFT forward/adjoint operators and
+undamped LSQR against the retained V7 synthetic capture fixtures. The protocol
+was frozen after retained pilot exploration. Root verified all 73 original
+source/protocol/reference/fixture file identities before and after execution,
+their current bytes, the execution manifests and raw log hashes. Added
+post-failure diagnostic files are outside that original scoped inventory.
+
+Forward comparisons and adjoint identities pass, as do eight refusal controls
+and the resource caps. All four positive fits fail the frozen harmonic
+accuracy checks. The continuous symbol certificate is UNPROVEN; its negative
+lower bound does not establish rank deficiency. No computed capture result is
+accepted. A separate replay with unchanged solver settings records all four
+fits reaching the 10,000-iteration limit (LSQR stop code seven), with held-out
+normalized RMS residuals between 5.24e-5 and 7.36e-5 against a 1e-8 limit.
+High-order harmonic errors are also unacceptable. The original failed run and
+its thresholds remain unchanged. The summary's unavailable condition bound
+uses nonstandard JSON Infinity; it is diagnostic evidence, not an interchange
+contract.
+
+A separate 48 kHz operator-only stress check uses five deterministic ten-second
+inputs, 80 ms support and a 160 ms guard. Forward/adjoint execution is finite,
+adjoint discrepancy is 8.97e-18, peak RSS is 946,896,896 bytes within the 1.5 GiB
+cap, and the bounded subprocess exits zero. This verifies scaling for those
+operators, without fitting kernels or certifying identifiability, measured
+distortion, longer room tails or hardware. Training-only preconditioning and
+finite-design conditioning are being investigated separately; no production
+analyzer or physical acceptance is established.
+Evidence: `/Volumes/home_tmp/tmp/ess-matrixfree-probe-20261003/`;
+root review: `/Users/pierre/ess-matrixfree-run01-independent-review.json`.

@@ -295,13 +295,12 @@ pub fn execute_prepared_channel(
             result.channel.t60_octaves =
                 crate::ir_acoustics::measured_octave_t60(&impulse.samples, impulse.sample_rate);
         }
-        if result.channel.waterfall.is_none() || result.channel.resonance_decays.is_none() {
-            if let Some((waterfall, decays)) =
+        if (result.channel.waterfall.is_none() || result.channel.resonance_decays.is_none())
+            && let Some((waterfall, decays)) =
                 crate::ir_acoustics::measured_waterfall(&impulse.samples, impulse.sample_rate)
-            {
-                result.channel.waterfall = Some(waterfall);
-                result.channel.resonance_decays = Some(decays);
-            }
+        {
+            result.channel.waterfall = Some(waterfall);
+            result.channel.resonance_decays = Some(decays);
         }
         if result.channel.wavelet.is_none() {
             result.channel.wavelet =

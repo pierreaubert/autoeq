@@ -59,80 +59,6 @@ pub fn cancellation_baseline(
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    fn branches(deficit: f64) -> (Curve, Curve) {
-        let main = Curve {
-            freq: ndarray::array![20., 40., 80., 160., 320., 640., 2000.],
-            spl: ndarray::Array1::zeros(7),
-            phase: Some(ndarray::Array1::zeros(7)),
-            ..Default::default()
-        };
-        let mut bass = main.clone();
-        let phase = (10_f64.powf(-deficit / 20.0) / 2.0).acos().to_degrees() * 2.0;
-        bass.phase = Some(ndarray::Array1::from_elem(7, phase));
-        (main, bass)
-    }
-    fn context() -> CrossoverCancellationContext {
-        let (main, bass) = branches(10.0);
-        CrossoverCancellationContext {
-            limit_db: 3.0,
-            sources: [(
-                "L".into(),
-                cancellation_baseline(&main, &bass, 80.).unwrap(),
-            )]
-            .into(),
-        }
-    }
-    #[test]
-    fn cancellation_replay_credits_improvement_against_frozen_baseline() {
-        let context = context();
-        for (deficit, accepted) in [(4.0, true), (10.0, false), (11.0, false)] {
-            let (main, bass) = branches(deficit);
-            let sum = super::super::complex_sum_mains(&[&main, &bass]);
-            let result =
-                assess_crossover_cancellation("L", &main, &bass, &sum, 80., Some(&context))
-                    .unwrap();
-            assert_eq!(result.accepted, accepted);
-            assert!((result.final_db - deficit).abs() < 1e-10);
-            assert!((result.baseline_db.unwrap() - 10.0).abs() < 1e-10);
-            let other = assess_crossover_cancellation("R", &main, &bass, &sum, 80., Some(&context))
-                .unwrap();
-            assert!(!other.accepted, "L evidence must not authorize R");
-        }
-    }
-    #[test]
-    fn cancellation_compares_both_crossover_windows_and_rejects_invalid_support() {
-        let mut context = context();
-        let (main, mut bass) = branches(2.0);
-        bass.phase.as_mut().unwrap()[1] =
-            (10_f64.powf(-12.0 / 20.0) / 2.0).acos().to_degrees() * 2.0;
-        let sum = super::super::complex_sum_mains(&[&main, &bass]);
-        let result =
-            assess_crossover_cancellation("L", &main, &bass, &sum, 320., Some(&context)).unwrap();
-        assert!(!result.accepted);
-        assert_eq!(result.final_worst_frequency_hz, 40.0);
-        assert_eq!(result.comparison_band_hz, [40., 640.]);
-        context.sources.get_mut("L").unwrap().cancellation_db[0] = f64::NAN;
-        let result =
-            assess_crossover_cancellation("L", &main, &bass, &sum, 320., Some(&context)).unwrap();
-        assert_eq!(result.baseline_db, None);
-        assert!(!result.accepted);
-    }
-    #[test]
-    fn cancellation_is_invariant_to_common_safety_attenuation() {
-        let (mut main, mut bass) = branches(4.0);
-        main.spl.mapv_inplace(|v| v - 20.0);
-        bass.spl.mapv_inplace(|v| v - 20.0);
-        let sum = super::super::complex_sum_mains(&[&main, &bass]);
-        let result =
-            assess_crossover_cancellation("L", &main, &bass, &sum, 80., Some(&context())).unwrap();
-        assert!(result.accepted);
-        assert!((result.improvement_db.unwrap() - 6.0).abs() < 1e-10);
-    }
-}
-
 /// Compare both spectra on the candidate grid, never extrapolating a baseline.
 pub fn assess_crossover_cancellation(
     source: &str,
@@ -232,4 +158,78 @@ pub fn assess_crossover_cancellation(
         accepted,
         reason: reason.into(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn branches(deficit: f64) -> (Curve, Curve) {
+        let main = Curve {
+            freq: ndarray::array![20., 40., 80., 160., 320., 640., 2000.],
+            spl: ndarray::Array1::zeros(7),
+            phase: Some(ndarray::Array1::zeros(7)),
+            ..Default::default()
+        };
+        let mut bass = main.clone();
+        let phase = (10_f64.powf(-deficit / 20.0) / 2.0).acos().to_degrees() * 2.0;
+        bass.phase = Some(ndarray::Array1::from_elem(7, phase));
+        (main, bass)
+    }
+    fn context() -> CrossoverCancellationContext {
+        let (main, bass) = branches(10.0);
+        CrossoverCancellationContext {
+            limit_db: 3.0,
+            sources: [(
+                "L".into(),
+                cancellation_baseline(&main, &bass, 80.).unwrap(),
+            )]
+            .into(),
+        }
+    }
+    #[test]
+    fn cancellation_replay_credits_improvement_against_frozen_baseline() {
+        let context = context();
+        for (deficit, accepted) in [(4.0, true), (10.0, false), (11.0, false)] {
+            let (main, bass) = branches(deficit);
+            let sum = super::super::complex_sum_mains(&[&main, &bass]);
+            let result =
+                assess_crossover_cancellation("L", &main, &bass, &sum, 80., Some(&context))
+                    .unwrap();
+            assert_eq!(result.accepted, accepted);
+            assert!((result.final_db - deficit).abs() < 1e-10);
+            assert!((result.baseline_db.unwrap() - 10.0).abs() < 1e-10);
+            let other = assess_crossover_cancellation("R", &main, &bass, &sum, 80., Some(&context))
+                .unwrap();
+            assert!(!other.accepted, "L evidence must not authorize R");
+        }
+    }
+    #[test]
+    fn cancellation_compares_both_crossover_windows_and_rejects_invalid_support() {
+        let mut context = context();
+        let (main, mut bass) = branches(2.0);
+        bass.phase.as_mut().unwrap()[1] =
+            (10_f64.powf(-12.0 / 20.0) / 2.0).acos().to_degrees() * 2.0;
+        let sum = super::super::complex_sum_mains(&[&main, &bass]);
+        let result =
+            assess_crossover_cancellation("L", &main, &bass, &sum, 320., Some(&context)).unwrap();
+        assert!(!result.accepted);
+        assert_eq!(result.final_worst_frequency_hz, 40.0);
+        assert_eq!(result.comparison_band_hz, [40., 640.]);
+        context.sources.get_mut("L").unwrap().cancellation_db[0] = f64::NAN;
+        let result =
+            assess_crossover_cancellation("L", &main, &bass, &sum, 320., Some(&context)).unwrap();
+        assert_eq!(result.baseline_db, None);
+        assert!(!result.accepted);
+    }
+    #[test]
+    fn cancellation_is_invariant_to_common_safety_attenuation() {
+        let (mut main, mut bass) = branches(4.0);
+        main.spl.mapv_inplace(|v| v - 20.0);
+        bass.spl.mapv_inplace(|v| v - 20.0);
+        let sum = super::super::complex_sum_mains(&[&main, &bass]);
+        let result =
+            assess_crossover_cancellation("L", &main, &bass, &sum, 80., Some(&context())).unwrap();
+        assert!(result.accepted);
+        assert!((result.improvement_db.unwrap() - 6.0).abs() < 1e-10);
+    }
 }

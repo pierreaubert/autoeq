@@ -4,7 +4,7 @@ use super::*;
 use autoeq_core::response::try_compute_peq_complex_response;
 use autoeq_core::x2peq::peq2x;
 use autoeq_optim::optim::run_control::{OptimizerRunSnapshot, OptimizerStageSnapshot};
-use autoeq_optim::optim::{OptimizerDispatchOutcome, OptimizerRunEvidence};
+use autoeq_optim::optim::{OptimizerDispatchOutcome, OptimizerRunEvidence, OptimizerTermination};
 use roomeq_engine::eq::optimize_channel_eq_multi_controlled_detailed;
 use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig};
 use std::collections::BTreeSet;
@@ -298,7 +298,7 @@ pub struct StageExecutionRecord {
 }
 
 /// Typed backend-entry outcome for the exact stage.
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum StageDispatchRecord {
     BackendInvoked,
@@ -698,7 +698,19 @@ fn execute_cell(
     let (outcome, status, refusal, stage_records, candidate) = match engine_result {
         Ok(output) => {
             let stage_records = convert_stages(&output.stages);
-            if spec.purpose == CellPurpose::ParetoFront
+            if snapshot.deadline_reached
+                || stage_records
+                    .iter()
+                    .any(|stage| stage.evidence.termination == OptimizerTermination::TimedOut)
+            {
+                (
+                    ControlledCellOutcome::TimedOut,
+                    "cooperative deadline reached".to_string(),
+                    Some("the shared root search deadline closed scoring".to_string()),
+                    stage_records,
+                    None,
+                )
+            } else if spec.purpose == CellPurpose::ParetoFront
                 && !stage_records
                     .iter()
                     .any(|stage| stage.evidence.pareto_report.is_some())
@@ -707,15 +719,6 @@ fn execute_cell(
                     "Pareto-front cell {} completed without a dispatch-scoped front report",
                     spec.cell_id
                 ));
-            }
-            if snapshot.deadline_reached {
-                (
-                    ControlledCellOutcome::TimedOut,
-                    "cooperative deadline reached".to_string(),
-                    Some("the shared root search deadline closed scoring".to_string()),
-                    stage_records,
-                    None,
-                )
             } else if spec.purpose == CellPurpose::ObserverStop {
                 return Err(format!(
                     "observer-stop cell {} completed without a callback stop",
@@ -733,6 +736,10 @@ fn execute_cell(
         }
         Err(error) => {
             let stage_records = convert_stages(error.stages());
+            let stage_outcomes = stage_records
+                .iter()
+                .map(|stage| (stage.dispatch, stage.evidence.termination))
+                .collect::<Vec<_>>();
             let has_callback_refusal = error.stages().iter().any(|stage| {
                 stage.dispatch == OptimizerDispatchOutcome::NotStartedCallbackUnsupported
             });
@@ -742,7 +749,17 @@ fn execute_cell(
                     OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)
                 )
             });
-            if spec.purpose == CellPurpose::ObserverUnsupported {
+            if let Some(outcome) =
+                authoritative_failure_outcome(stage_outcomes.iter().copied(), spec.purpose)
+            {
+                (
+                    outcome,
+                    error.reason.clone(),
+                    Some(error.reason.clone()),
+                    stage_records,
+                    None,
+                )
+            } else if spec.purpose == CellPurpose::ObserverUnsupported {
                 if !has_callback_refusal
                     || snapshot.evaluations_started != 0
                     || snapshot.validation_evaluations_started != 0
@@ -773,30 +790,18 @@ fn execute_cell(
                     stage_records,
                     None,
                 )
-            } else if snapshot.deadline_reached {
-                (
-                    ControlledCellOutcome::TimedOut,
-                    error.reason.clone(),
-                    Some("the shared root search deadline closed scoring".to_string()),
-                    stage_records,
-                    None,
-                )
-            } else if has_budget_refusal {
-                (
-                    ControlledCellOutcome::BudgetRefused,
-                    error.reason.clone(),
-                    Some(error.reason),
-                    stage_records,
-                    None,
-                )
             } else {
-                (
-                    ControlledCellOutcome::BackendFailure,
-                    error.reason.clone(),
-                    Some(error.reason),
-                    stage_records,
-                    None,
-                )
+                let outcome = classify_failed_pipeline(
+                    stage_outcomes.iter().map(|(_, termination)| *termination),
+                    snapshot.deadline_reached,
+                    has_budget_refusal,
+                );
+                let refusal = if outcome == ControlledCellOutcome::TimedOut {
+                    Some("the shared root search deadline closed scoring".to_string())
+                } else {
+                    Some(error.reason.clone())
+                };
+                (outcome, error.reason.clone(), refusal, stage_records, None)
             }
         }
     };
@@ -1181,6 +1186,70 @@ pub fn write_cell_specs() -> Result<(), String> {
         .map_err(|error| format!("cannot write controlled cell specs: {error}"))
 }
 
+fn classify_failed_pipeline(
+    terminations: impl IntoIterator<Item = OptimizerTermination>,
+    deadline_reached: bool,
+    budget_refusal: bool,
+) -> ControlledCellOutcome {
+    let mut invalid_result = false;
+    let mut backend_failure = false;
+    let mut timed_out = deadline_reached;
+    for termination in terminations {
+        match termination {
+            OptimizerTermination::InvalidResult => invalid_result = true,
+            OptimizerTermination::BackendFailure => backend_failure = true,
+            OptimizerTermination::TimedOut => timed_out = true,
+            OptimizerTermination::Converged
+            | OptimizerTermination::EvaluationLimit
+            | OptimizerTermination::NonConverged
+            | OptimizerTermination::UserStopped => {}
+        }
+    }
+    if invalid_result {
+        ControlledCellOutcome::InvalidCandidate
+    } else if backend_failure {
+        ControlledCellOutcome::BackendFailure
+    } else if timed_out {
+        ControlledCellOutcome::TimedOut
+    } else if budget_refusal {
+        ControlledCellOutcome::BudgetRefused
+    } else {
+        ControlledCellOutcome::BackendFailure
+    }
+}
+
+fn authoritative_failure_outcome(
+    stage_outcomes: impl IntoIterator<Item = (StageDispatchRecord, OptimizerTermination)>,
+    purpose: CellPurpose,
+) -> Option<ControlledCellOutcome> {
+    let mut invalid_result = false;
+    let mut backend_failure = false;
+    for (dispatch, termination) in stage_outcomes {
+        if purpose == CellPurpose::ObserverUnsupported
+            && dispatch == StageDispatchRecord::NotStartedCallbackUnsupported
+            && termination == OptimizerTermination::BackendFailure
+        {
+            continue;
+        }
+        match termination {
+            OptimizerTermination::InvalidResult => invalid_result = true,
+            OptimizerTermination::BackendFailure => backend_failure = true,
+            OptimizerTermination::Converged
+            | OptimizerTermination::EvaluationLimit
+            | OptimizerTermination::NonConverged
+            | OptimizerTermination::UserStopped
+            | OptimizerTermination::TimedOut => {}
+        }
+    }
+    if invalid_result {
+        Some(ControlledCellOutcome::InvalidCandidate)
+    } else if backend_failure {
+        Some(ControlledCellOutcome::BackendFailure)
+    } else {
+        None
+    }
+}
+
 fn executable_identity() -> Result<(String, String), String> {
     use sha2::{Digest, Sha256};
     use std::io::Read as _;
@@ -1220,12 +1289,14 @@ fn executable_identity() -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CellPurpose, benchmark_cell_spec_inventory, benchmark_cell_specs, ensure_unique_spec_ids,
-        run_benchmark_cell_spec,
+        CellPurpose, ControlledCellOutcome, StageDispatchRecord, authoritative_failure_outcome,
+        benchmark_cell_spec_inventory, benchmark_cell_specs, classify_failed_pipeline,
+        ensure_unique_spec_ids, run_benchmark_cell_spec,
     };
     use crate::optimizer_benchmark::{
         benchmark_manifest, ensure_unique_case_ids, ensure_unique_seeds,
     };
+    use autoeq_optim::optim::OptimizerTermination;
 
     #[test]
     fn generated_matrix_has_exact_declared_cells_and_stage_quotas() {
@@ -1324,5 +1395,86 @@ mod tests {
         assert_eq!(first.cells.len(), first.expected_cell_count);
         assert_eq!(first.spec_inventory_sha256, second.spec_inventory_sha256);
         assert_eq!(first.cells, second.cells);
+    }
+
+    #[test]
+    fn typed_failures_precede_deadline_and_typed_timeout_is_retained() {
+        assert_eq!(
+            classify_failed_pipeline([OptimizerTermination::BackendFailure], true, false,),
+            ControlledCellOutcome::BackendFailure
+        );
+        assert_eq!(
+            classify_failed_pipeline([OptimizerTermination::InvalidResult], true, false,),
+            ControlledCellOutcome::InvalidCandidate
+        );
+        assert_eq!(
+            classify_failed_pipeline([OptimizerTermination::TimedOut], false, false,),
+            ControlledCellOutcome::TimedOut
+        );
+        assert_eq!(
+            classify_failed_pipeline(
+                [
+                    OptimizerTermination::BackendFailure,
+                    OptimizerTermination::TimedOut
+                ],
+                true,
+                false,
+            ),
+            ControlledCellOutcome::BackendFailure
+        );
+        assert_eq!(
+            classify_failed_pipeline([OptimizerTermination::EvaluationLimit], false, true,),
+            ControlledCellOutcome::BudgetRefused
+        );
+    }
+
+    #[test]
+    fn observer_stop_does_not_mask_backend_failure_but_expected_refusal_is_not_failure() {
+        assert_eq!(
+            authoritative_failure_outcome(
+                [(
+                    StageDispatchRecord::BackendInvoked,
+                    OptimizerTermination::BackendFailure,
+                )],
+                CellPurpose::ObserverStop,
+            ),
+            Some(ControlledCellOutcome::BackendFailure)
+        );
+        assert_eq!(
+            authoritative_failure_outcome(
+                [(
+                    StageDispatchRecord::NotStartedCallbackUnsupported,
+                    OptimizerTermination::BackendFailure,
+                )],
+                CellPurpose::ObserverUnsupported,
+            ),
+            None
+        );
+        assert_eq!(
+            authoritative_failure_outcome(
+                [(
+                    StageDispatchRecord::NotStartedCallbackUnsupported,
+                    OptimizerTermination::InvalidResult,
+                )],
+                CellPurpose::ObserverUnsupported,
+            ),
+            Some(ControlledCellOutcome::InvalidCandidate)
+        );
+        assert_eq!(
+            authoritative_failure_outcome(
+                [
+                    (
+                        StageDispatchRecord::BackendInvoked,
+                        OptimizerTermination::BackendFailure,
+                    ),
+                    (
+                        StageDispatchRecord::BackendInvoked,
+                        OptimizerTermination::InvalidResult,
+                    ),
+                ],
+                CellPurpose::ObserverStop,
+            ),
+            Some(ControlledCellOutcome::InvalidCandidate)
+        );
     }
 }

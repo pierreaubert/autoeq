@@ -1,6 +1,7 @@
 use autoeq_qa::optimizer_benchmark::{
     BenchmarkCancellation, BenchmarkCliArgs, BenchmarkRunOptions, run_benchmark_cell_spec_file,
-    run_optimizer_benchmark, write_cell_specs, write_controlled_cell_result, write_report,
+    run_optimizer_benchmark, run_rate_canary_cell_spec_file, write_cell_specs,
+    write_controlled_cell_result, write_rate_canary_cell_specs, write_report,
 };
 use clap::Parser;
 
@@ -25,7 +26,11 @@ async fn run() -> Result<(), String> {
                 "--list-cell-specs cannot be combined with matrix overrides or --output".into(),
             );
         }
-        return write_cell_specs();
+        return if args.rate_canary {
+            write_rate_canary_cell_specs()
+        } else {
+            write_cell_specs()
+        };
     }
     if let Some(path) = args.cell_spec.as_deref() {
         if args.evaluation_budget.is_some()
@@ -35,7 +40,11 @@ async fn run() -> Result<(), String> {
         {
             return Err("--cell-spec cannot be combined with matrix overrides".into());
         }
-        let result = run_benchmark_cell_spec_file(path)?;
+        let result = if args.rate_canary {
+            run_rate_canary_cell_spec_file(path)?
+        } else {
+            run_benchmark_cell_spec_file(path)?
+        };
         write_controlled_cell_result(args.output.as_deref(), &result)?;
         eprintln!(
             "cell={} outcome={:?} root_search={}/{} validation={} elapsed_ms={}",
@@ -47,6 +56,9 @@ async fn run() -> Result<(), String> {
             result.elapsed_millis
         );
         return Ok(());
+    }
+    if args.rate_canary {
+        return Err("--rate-canary requires --list-cell-specs or --cell-spec".into());
     }
     let cancellation = BenchmarkCancellation::default();
     let worker_cancellation = cancellation.clone();

@@ -35,8 +35,10 @@ use std::time::{Duration, Instant};
 mod controlled_cell;
 pub use controlled_cell::{
     BenchmarkCellSpec, CellPurpose, CellSpecInventory, ControlledCellOutcome, ControlledCellResult,
-    benchmark_cell_spec_inventory, benchmark_cell_specs, run_benchmark_cell_spec,
-    run_benchmark_cell_spec_file, write_cell_specs, write_controlled_cell_result,
+    RateCanaryCellSpecInventory, benchmark_cell_spec_inventory, benchmark_cell_specs,
+    rate_canary_cell_spec_inventory, rate_canary_cell_specs, run_benchmark_cell_spec,
+    run_benchmark_cell_spec_file, run_rate_canary_cell_spec, run_rate_canary_cell_spec_file,
+    write_cell_specs, write_controlled_cell_result, write_rate_canary_cell_specs,
 };
 
 const FIXED_MANIFEST: &str = include_str!("../optimizer-benchmark/manifest.json");
@@ -561,7 +563,9 @@ pub fn run_optimizer_benchmark(
         .cases
         .iter()
         .zip(&source_snapshots)
-        .map(|(declaration, sources)| load_case(declaration, &manifest, sources))
+        .map(|(declaration, sources)| {
+            load_case(declaration, &manifest, sources, manifest.sample_rate_hz)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let fixtures = manifest
         .cases
@@ -673,7 +677,12 @@ pub fn run_optimizer_benchmark_cell_with_time_budget(
         .ok_or_else(|| format!("unknown benchmark case '{case_id}'"))?;
     let root = repository_root();
     let source_snapshot = snapshot_declared_sources(&root, &declaration.source_paths)?;
-    let case = load_case(declaration, &manifest, &source_snapshot)?;
+    let case = load_case(
+        declaration,
+        &manifest,
+        &source_snapshot,
+        manifest.sample_rate_hz,
+    )?;
     let control = OptimizerRunControl::new(
         std::num::NonZeroUsize::new(budget)
             .ok_or_else(|| "evaluation budget must be positive".to_string())?,
@@ -1189,11 +1198,17 @@ fn load_case(
     declaration: &FixtureDeclaration,
     manifest: &BenchmarkManifest,
     sources: &SourceSnapshot,
+    sample_rate_hz: f64,
 ) -> Result<LoadedCase, String> {
+    validate_sample_rate_support(declaration, sample_rate_hz)?;
     match declaration.kind.as_str() {
-        "analytic_peq" => load_analytic_case(declaration, manifest),
-        "measured_headphone_csv" => load_measured_headphone_case(declaration, manifest, sources),
-        "measured_room_csv" => load_measured_room_case(declaration, manifest, sources),
+        "analytic_peq" => load_analytic_case(declaration, manifest, sample_rate_hz),
+        "measured_headphone_csv" => {
+            load_measured_headphone_case(declaration, manifest, sources, sample_rate_hz)
+        }
+        "measured_room_csv" => {
+            load_measured_room_case(declaration, manifest, sources, sample_rate_hz)
+        }
         unknown => Err(format!(
             "unknown fixture kind '{unknown}' for {}",
             declaration.id
@@ -1201,10 +1216,52 @@ fn load_case(
     }
 }
 
+fn validate_sample_rate_support(
+    declaration: &FixtureDeclaration,
+    sample_rate_hz: f64,
+) -> Result<(), String> {
+    if !sample_rate_hz.is_finite() || sample_rate_hz <= 0.0 {
+        return Err(format!(
+            "{} has invalid sample rate {sample_rate_hz}",
+            declaration.id
+        ));
+    }
+    let nyquist_hz = sample_rate_hz / 2.0;
+    if !declaration.frequency_min_hz.is_finite()
+        || !declaration.frequency_max_hz.is_finite()
+        || declaration.frequency_min_hz <= 0.0
+        || declaration.frequency_min_hz > declaration.frequency_max_hz
+        || declaration.frequency_max_hz >= nyquist_hz
+    {
+        return Err(format!(
+            "{} correction band [{}, {}] Hz must remain below the {nyquist_hz} Hz Nyquist frequency at {sample_rate_hz} Hz",
+            declaration.id, declaration.frequency_min_hz, declaration.frequency_max_hz
+        ));
+    }
+    for (index, filter) in declaration.plant_filters_hz_q_gain_db.iter().enumerate() {
+        if filter.len() != 3
+            || !filter[0].is_finite()
+            || !filter[1].is_finite()
+            || !filter[2].is_finite()
+            || filter[0] <= 0.0
+            || filter[0] >= nyquist_hz
+            || filter[1] <= 0.0
+        {
+            return Err(format!(
+                "{} analytic plant filter {index} is invalid or outside Nyquist at {sample_rate_hz} Hz",
+                declaration.id
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn load_analytic_case(
     declaration: &FixtureDeclaration,
     manifest: &BenchmarkManifest,
+    sample_rate_hz: f64,
 ) -> Result<LoadedCase, String> {
+    validate_sample_rate_support(declaration, sample_rate_hz)?;
     let count = declaration
         .frequency_points
         .filter(|count| *count >= 16)
@@ -1224,12 +1281,8 @@ fn load_analytic_case(
         .iter()
         .flat_map(|[frequency, q, gain]| [frequency.log10(), *q, *gain])
         .collect::<Vec<_>>();
-    let plant_transfer = autoeq_optim::x2peq::x2spl(
-        &freqs,
-        &plant_parameters,
-        manifest.sample_rate_hz,
-        PeqModel::Pk,
-    );
+    let plant_transfer =
+        autoeq_optim::x2peq::x2spl(&freqs, &plant_parameters, sample_rate_hz, PeqModel::Pk);
     let make_channel = |id: &str, offset: f64| {
         let response = freqs
             .iter()
@@ -1247,7 +1300,14 @@ fn load_analytic_case(
                     + offset * (frequency / 1_000.0).log2().tanh()
             })
             .collect::<Vec<_>>();
-        objective_for_curve(id, freqs.clone(), response, declaration, manifest)
+        objective_for_curve(
+            id,
+            freqs.clone(),
+            response,
+            declaration,
+            manifest,
+            sample_rate_hz,
+        )
     };
     let training = vec![
         make_channel("left", 0.0)?,
@@ -1265,6 +1325,7 @@ fn load_measured_headphone_case(
     declaration: &FixtureDeclaration,
     manifest: &BenchmarkManifest,
     sources: &SourceSnapshot,
+    sample_rate_hz: f64,
 ) -> Result<LoadedCase, String> {
     let csv_path = declaration
         .source_paths
@@ -1279,8 +1340,22 @@ fn load_measured_headphone_case(
     let left = normalized_resample(&left, &freqs, NORMALIZATION_REFERENCE_HZ)?;
     let right = normalized_resample(&right, &freqs, NORMALIZATION_REFERENCE_HZ)?;
     let training = vec![
-        objective_for_curve("left", freqs.clone(), left, declaration, manifest)?,
-        objective_for_curve("right", freqs.clone(), right, declaration, manifest)?,
+        objective_for_curve(
+            "left",
+            freqs.clone(),
+            left,
+            declaration,
+            manifest,
+            sample_rate_hz,
+        )?,
+        objective_for_curve(
+            "right",
+            freqs.clone(),
+            right,
+            declaration,
+            manifest,
+            sample_rate_hz,
+        )?,
     ];
     Ok(LoadedCase {
         declaration: declaration.clone(),
@@ -1294,6 +1369,7 @@ fn load_measured_room_case(
     declaration: &FixtureDeclaration,
     manifest: &BenchmarkManifest,
     sources: &SourceSnapshot,
+    sample_rate_hz: f64,
 ) -> Result<LoadedCase, String> {
     let room_inputs = resolve_room_input_paths(&declaration.source_paths)?;
     let training_paths = [
@@ -1315,6 +1391,7 @@ fn load_measured_room_case(
             spl,
             declaration,
             manifest,
+            sample_rate_hz,
         )?);
     }
     let held_out_paths = [
@@ -1333,6 +1410,7 @@ fn load_measured_room_case(
             spl,
             declaration,
             manifest,
+            sample_rate_hz,
         )?);
     }
     Ok(LoadedCase {
@@ -1349,7 +1427,9 @@ fn objective_for_curve(
     response_db: Vec<f64>,
     declaration: &FixtureDeclaration,
     manifest: &BenchmarkManifest,
+    sample_rate_hz: f64,
 ) -> Result<MeasurementObjective, String> {
+    validate_sample_rate_support(declaration, sample_rate_hz)?;
     if response_db.len() != freqs.len() || response_db.iter().any(|value| !value.is_finite()) {
         return Err(format!(
             "{}:{id} has invalid measurement dimensions or values",
@@ -1367,7 +1447,7 @@ fn objective_for_curve(
         freqs.clone(),
         Array1::zeros(freqs.len()),
         Array1::from(deviation),
-        manifest.sample_rate_hz,
+        sample_rate_hz,
         PeqModel::Pk,
         if declaration.domain == "headphone" {
             LossType::HeadphoneFlat
@@ -1564,6 +1644,9 @@ pub fn write_report(path: Option<&Path>, report: &BenchmarkReport) -> Result<(),
     about = "Run the fixed AutoEQ optimizer benchmark matrix"
 )]
 pub struct BenchmarkCliArgs {
+    /// Select the separate 44.1/96 kHz filter-realization canary inventory.
+    #[arg(long)]
+    pub rate_canary: bool,
     /// Write the JSON report to a file instead of stdout.
     #[arg(long)]
     pub output: Option<PathBuf>,

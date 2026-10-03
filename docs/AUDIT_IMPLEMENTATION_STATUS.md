@@ -21,9 +21,9 @@ cannot replace them.
 | A04 measurement/live analysis | Partial | Live calibration implemented and bounded synthetic ESS diagnostic passes; production estimator/dependency integration, broader validity and hardware evidence remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
-| A07 optimizer quality | Partial | Shared stage budgets, multi-measurement adaptive passes, headphone loss and validated Pareto reporting integrated; 841-cell production-pipeline matrix and derived presets remain |
+| A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; independent delivered-transfer checks, reusable analysis gate, public BO dependency integration and justified presets remain |
 | A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
-| A09 realized correction | Partial | Kautz multirate witnesses pass; fresh Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
+| A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Transaction/restart recovery and immutable playback contracts committed; 15 typed REW DSP cases pass with failed cleanup gate retained; text-import and broader deployed-consumer evidence remain |
 | A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
@@ -2524,3 +2524,17 @@ Follow-up **46b2f1b** removes a false unknown-algorithm warning for the document
 bare `cobra` alias, tests both spellings, and updates the README backend list.
 Six focused model validation tests and strict model library/test Clippy passed.
 Use `optimizer.algorithm: "autoeq:cobra"` (or `"cobra"`). UI remains deferred.
+
+
+### A03 hardware availability checked (2026-10-03)
+
+A fresh CoreAudio enumeration outside the sandbox did not list an RME interface
+or UMIK microphone. The sandbox-only query returned an empty inventory and was
+not used to infer absence. The unrestricted read-only receipt is
+`/Users/pierre/a03-hardware-inventory-20261003.json`; available devices include
+ADAM Audio D3V, USB audio CODEC, BRIO, built-in speakers and virtual devices.
+No streams were opened and no stimulus was played. The supplied microphone
+calibration directory exists with microphone-specific orientation files.
+Device and calibration selections remain parameters; these unrelated devices do
+not satisfy the requested RME/UMIK capture evidence. Hardware-dependent acceptance
+remains pending while independent backend verification continues.

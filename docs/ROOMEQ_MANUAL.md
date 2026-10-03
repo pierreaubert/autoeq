@@ -905,7 +905,10 @@ cargo run --features cli --bin roomeq -- --config <config.json> --output <output
 - `--verbose`: Enable verbose output
 - `--help`: Print help information
 
-`rew` emits a single-channel REW Generic EQ filter-settings file.
+`rew` emits single-channel REW Generic EQ reference text for manual entry.
+REW cannot reload this text; it saves and reloads filter settings as binary
+`.req` files. RoomEQ does not produce `.req` files. Check filter type and shelf
+parameter conventions against the resulting response when entering filters.
 `coefficients` emits normalized `a0=1, a1, a2, b0, b1, b2` sections using the
 same canonical biquad implementation as runtime DSP. Both formats reject
 convolution, crossovers, routing, or unknown stages instead of silently

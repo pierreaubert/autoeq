@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; Linux ARM build/help verified; registry, Windows and Linux x86 evidence remain |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; Linux ARM build/help and Windows ARM cross-build verified; registry, Windows runtime and Linux x86 evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -3101,3 +3101,30 @@ Raw commands, exits, source/lock hashes and log hashes are retained under
 integration receipt is `/Users/pierre/a00-partition-repairs-main-integration.json`.
 These repairs do not complete registry, platform-runtime, UI or hardware
 acceptance, and the private audit has not been pushed publicly.
+
+### A00 Windows ARM backend cross-build (2026-10-03)
+
+Frozen source `91946527` passes locked offline checking and debug executable
+builds for all four backend CLIs on `aarch64-pc-windows-gnullvm`. PE inspection
+confirms four COFF ARM64 executable artifacts and retains their DLL imports.
+The existing Linux-hosted `math-audio-base-win-arm64` image is pinned by full
+image digest in the receipt; it uses Rust 1.95 and llvm-mingw Clang 22.1.4.
+Network access is disabled, source and dependency caches are mounted read-only,
+and generic CPU flags are explicit.
+
+The first link attempt failed because the image lacks a Windows SQLite
+library. That failed log is retained. The successful build supplies a static
+Windows ARM SQLite archive compiled offline from the cached, locked
+`libsqlite3-sys` 0.36.0 source with the same target compiler. Source/header/archive
+hashes, compiler flags, native-library environment, command exits and all four
+executable hashes are bound in
+`/Users/pierre/a00-windows-arm-cli-verification.json`. No repository dependency,
+manifest or lockfile was changed for this prerequisite.
+
+This is GNU/LLVM Windows ARM cross-build evidence. No Windows runtime or Wine
+is available, so executable help, file durability and device behavior were not
+run. It does not prove MSVC, Windows x86, release packaging or the unintegrated
+recovery draft. Raw logs use the `autoeq-a00-windows-arm-*` prefix under the task
+evidence root; PE details are retained at
+`/Users/pierre/autoeq-a00-windows-arm-pe-inspection.log`. Registry and runtime
+acceptance remain open.

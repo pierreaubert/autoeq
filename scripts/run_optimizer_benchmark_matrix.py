@@ -14,10 +14,12 @@ from collections import Counter
 from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
 import signal
+import struct
 import subprocess
 import sys
 import tempfile
@@ -29,6 +31,30 @@ INVENTORY_SCHEMA = "autoeq.optimizer_benchmark_cell_inventory/v1"
 RUN_SCHEMA = "autoeq.optimizer_benchmark_matrix_run/v1"
 RESULT_SCHEMA = "autoeq.optimizer_benchmark_cell_result/v1"
 EXPECTED_CELLS = 841
+RATE_CANARY_INVENTORY_SCHEMA = "autoeq.optimizer_rate_canary_cell_inventory/v1"
+RATE_CANARY_SPEC_SCHEMA = "autoeq.optimizer_rate_canary_cell/v1"
+RATE_CANARY_EXPECTED_CELLS = 112
+RATE_CANARY_SAMPLE_RATES_HZ = (44_100, 96_000)
+RATE_CANARY_CASE_IDS = frozenset({
+    "analytic_headphone_peq",
+    "asr_beyerdynamic_dt1990pro",
+    "measured_stereo_8361a",
+})
+RATE_CANARY_REGISTERED_BACKENDS = frozenset({
+    "autoeq:cobyla",
+    "autoeq:cobra",
+    "autoeq:isres",
+    "autoeq:cmaes",
+    "autoeq:bo",
+    "autoeq:nsga2",
+    "autoeq:nsga3",
+    "autoeq:de",
+    "mh:de",
+    "mh:pso",
+    "mh:rga",
+    "mh:tlbo",
+    "mh:firefly",
+})
 INVENTORY_WATCHDOG_SECONDS = 60.0
 ALLOWED_OUTCOMES = {
     "completed",
@@ -136,35 +162,147 @@ def kill_process_group(process: subprocess.Popen[bytes]) -> None:
         pass
 
 
-def validate_inventory(payload: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def validate_rate_canary_profile(cells: list[dict[str, Any]]) -> None:
+    """Check the declared 112-cell rate canary Cartesian product."""
+    rates = set(RATE_CANARY_SAMPLE_RATES_HZ)
+    cases = {spec["case_id"] for spec in cells}
+    analytic_case = "analytic_headphone_peq"
+    if cases != RATE_CANARY_CASE_IDS:
+        raise ValueError("rate canary must contain the three fixed cases and analytic headphone case")
+
+    def decoded_rate(spec: dict[str, Any]) -> int:
+        bits = spec.get("sample_rate_hz_bits")
+        if type(bits) is not int or not 0 <= bits < 2**64:
+            raise ValueError(f"invalid sample rate in {spec.get('cell_id')}")
+        value = struct.unpack(">d", bits.to_bytes(8, "big"))[0]
+        if not math.isfinite(value) or value not in rates:
+            raise ValueError(f"rate canary has unsupported sample rate {value!r}")
+        return int(value)
+
+    for spec in cells:
+        rate = decoded_rate(spec)
+        prefix = f"rate{rate}hz:"
+        if not spec["cell_id"].startswith(prefix):
+            raise ValueError(f"rate canary cell ID does not encode {rate} Hz: {spec['cell_id']}")
+        f_min = struct.unpack(">d", spec["frequency_min_hz_bits"].to_bytes(8, "big"))[0]
+        f_max = struct.unpack(">d", spec["frequency_max_hz_bits"].to_bytes(8, "big"))[0]
+        if not (math.isfinite(f_min) and math.isfinite(f_max) and 0 < f_min <= f_max < rate / 2):
+            raise ValueError(f"rate canary band is not strictly below Nyquist: {spec['cell_id']}")
+        if spec.get("seed") != 42:
+            raise ValueError(f"rate canary must use seed 42: {spec['cell_id']}")
+
+    ordinary = [spec for spec in cells if spec["purpose"] == "ordinary"]
+    backends = {spec["backend"] for spec in ordinary}
+    if backends != RATE_CANARY_REGISTERED_BACKENDS:
+        missing = sorted(RATE_CANARY_REGISTERED_BACKENDS - backends)
+        unexpected = sorted(backends - RATE_CANARY_REGISTERED_BACKENDS)
+        raise ValueError(
+            "ordinary rate-canary backend set differs from the registered 13-backend plan; "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+    ordinary_keys = {
+        (spec["case_id"], spec["backend"], decoded_rate(spec), spec["seed"],
+         spec["root_search_budget"], spec["stage_search_budget"])
+        for spec in ordinary
+    }
+    expected_ordinary = {
+        (case, backend, rate, 42, 128, 128)
+        for case in cases for backend in backends for rate in rates
+    }
+    if len(ordinary) != 78 or ordinary_keys != expected_ordinary:
+        raise ValueError("ordinary rate-canary cells do not match the 13x3x2 cap-128 product")
+
+    for purpose, stage_budget in (("adaptive", 128), ("refinement", 256)):
+        rows = [spec for spec in cells if spec["purpose"] == purpose]
+        keys = {
+            (spec["case_id"], decoded_rate(spec), spec["backend"],
+             spec["root_search_budget"], spec["stage_search_budget"])
+            for spec in rows
+        }
+        expected = {
+            (case, rate, "autoeq:de", 512, stage_budget)
+            for case in cases for rate in rates
+        }
+        if len(rows) != 6 or keys != expected:
+            raise ValueError(f"{purpose} rate-canary cells do not match the DE three-case/two-rate plan")
+
+    pareto = [spec for spec in cells if spec["purpose"] == "pareto_front"]
+    pareto_keys = {
+        (spec["case_id"], decoded_rate(spec), spec["backend"], spec["root_search_budget"])
+        for spec in pareto
+    }
+    expected_pareto = {
+        (case, rate, backend, 512)
+        for case in cases for rate in rates
+        for backend in ("autoeq:nsga2", "autoeq:nsga3", "autoeq:bo")
+    }
+    if len(pareto) != 18 or pareto_keys != expected_pareto:
+        raise ValueError("Pareto rate-canary cells do not match the three-backend product")
+
+    observer_stop = [spec for spec in cells if spec["purpose"] == "observer_stop"]
+    observer_unsupported = [spec for spec in cells if spec["purpose"] == "observer_unsupported"]
+    expected_stops = {(analytic_case, rate, "autoeq:cobra", 128) for rate in rates}
+    expected_refusals = {(analytic_case, rate, "autoeq:cobyla", 128) for rate in rates}
+    if len(observer_stop) != 2 or {
+        (spec["case_id"], decoded_rate(spec), spec["backend"], spec["root_search_budget"])
+        for spec in observer_stop
+    } != expected_stops:
+        raise ValueError("observer-stop rate-canary cells do not match COBRA at both rates")
+    if len(observer_unsupported) != 2 or {
+        (spec["case_id"], decoded_rate(spec), spec["backend"], spec["root_search_budget"])
+        for spec in observer_unsupported
+    } != expected_refusals:
+        raise ValueError("observer-refusal rate-canary cells do not match COBYLA at both rates")
+
+
+def validate_inventory(payload: bytes, *, rate_canary: bool = False) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     try:
         inventory = json.loads(payload, object_pairs_hook=reject_duplicate_keys)
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ValueError(f"CLI returned invalid inventory JSON: {error}") from error
-    if not isinstance(inventory, dict) or inventory.get("schema") != INVENTORY_SCHEMA:
+    expected_schema = RATE_CANARY_INVENTORY_SCHEMA if rate_canary else INVENTORY_SCHEMA
+    expected_cell_count = RATE_CANARY_EXPECTED_CELLS if rate_canary else EXPECTED_CELLS
+    expected_spec_schema = RATE_CANARY_SPEC_SCHEMA if rate_canary else "autoeq.optimizer_benchmark_cell/v1"
+    if not isinstance(inventory, dict) or inventory.get("schema") != expected_schema:
         raise ValueError("CLI returned an unknown cell inventory schema")
     cells = inventory.get("cells")
-    expected_count = inventory.get("expected_cell_count")
+    declared_count = inventory.get("expected_cell_count")
     inventory_sha = inventory.get("spec_inventory_sha256")
-    if (type(expected_count) is not int or expected_count != EXPECTED_CELLS
-            or not isinstance(cells, list) or len(cells) != expected_count
+    if (type(declared_count) is not int or declared_count != expected_cell_count
+            or not isinstance(cells, list) or len(cells) != declared_count
             or not isinstance(inventory_sha, str) or len(inventory_sha) != 64):
         raise ValueError("CLI inventory is incomplete or has invalid identity fields")
     ids: list[str] = []
     for spec in cells:
         if not isinstance(spec, dict) or not isinstance(spec.get("cell_id"), str):
             raise ValueError("cell inventory contains a malformed spec")
-        if spec.get("schema") != "autoeq.optimizer_benchmark_cell/v1":
+        if spec.get("schema") != expected_spec_schema:
             raise ValueError(f"unknown cell spec schema for {spec.get('cell_id')}")
         watchdog = spec.get("process_watchdog_millis")
         if type(watchdog) is not int or watchdog <= 0:
             raise ValueError(f"invalid process watchdog for {spec['cell_id']}")
+        if rate_canary:
+            for field in ("case_id", "backend", "purpose"):
+                if not isinstance(spec.get(field), str) or not spec[field]:
+                    raise ValueError(f"rate-canary cell {spec['cell_id']} has invalid {field}")
+            for field in ("sample_rate_hz_bits", "frequency_min_hz_bits", "frequency_max_hz_bits"):
+                if type(spec.get(field)) is not int or not 0 <= spec[field] < 2**64:
+                    raise ValueError(f"rate-canary cell {spec['cell_id']} has invalid {field}")
+            if type(spec.get("seed")) is not int or type(spec.get("root_search_budget")) is not int \
+                    or type(spec.get("stage_search_budget")) is not int:
+                raise ValueError(f"rate-canary cell {spec['cell_id']} has invalid budget or seed")
         ids.append(spec["cell_id"])
     if len(set(ids)) != len(ids):
         raise ValueError("cell inventory contains duplicate IDs")
     computed_sha = sha256_bytes(canonical_json_bytes(cells))
     if computed_sha != inventory_sha:
         raise ValueError("cell inventory content does not match its declared SHA-256")
+    if rate_canary:
+        if inventory.get("sample_rate_scope") != "digital_filter_realization_hz; measurement_capture_rate_not_asserted":
+            raise ValueError("rate-canary inventory does not distinguish realization rate from capture rate")
+        if inventory.get("sample_rates_hz") != list(RATE_CANARY_SAMPLE_RATES_HZ):
+            raise ValueError("rate-canary inventory sample-rate declaration is incorrect")
+        validate_rate_canary_profile(cells)
     return inventory, cells
 
 
@@ -196,7 +334,8 @@ def validate_result(result_path: Path, spec: dict[str, Any], inventory: dict[str
 
 def run_one_cell(index: int, spec: dict[str, Any], inventory: dict[str, Any],
                  inventory_sha256: str, binary: Path, binary_sha256: str,
-                 repository: Path, output: Path, environment: dict[str, str]
+                 repository: Path, output: Path, environment: dict[str, str],
+                 *, rate_canary: bool = False,
                  ) -> dict[str, Any]:
     cell_dir = output / "cells" / safe_cell_dir_name(index, spec["cell_id"])
     cell_dir.mkdir(parents=True, exist_ok=False)
@@ -206,6 +345,8 @@ def run_one_cell(index: int, spec: dict[str, Any], inventory: dict[str, Any],
     spec_bytes = canonical_json_bytes(spec) + b"\n"
     spec_path.write_bytes(spec_bytes)
     command = [str(binary), "--cell-spec", str(spec_path), "--output", str(partial_result)]
+    if rate_canary:
+        command.append("--rate-canary")
     watchdog_millis = spec.get("process_watchdog_millis")
     if type(watchdog_millis) is not int or watchdog_millis <= 0:
         raise ValueError(f"invalid watchdog for cell {spec['cell_id']}")
@@ -281,6 +422,7 @@ def environment_digest(environment: dict[str, str]) -> str:
 
 
 def run(args: argparse.Namespace) -> int:
+    rate_canary = bool(getattr(args, "rate_canary", False))
     binary = args.binary.resolve(strict=True)
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise ValueError("--binary must name an executable file")
@@ -295,6 +437,8 @@ def run(args: argparse.Namespace) -> int:
     )
     binary_sha256 = sha256_file(binary)
     list_command = [str(binary), "--list-cell-specs"]
+    if rate_canary:
+        list_command.append("--rate-canary")
     inventory_start = time.monotonic()
     code: int | None = None
     timed_out = False
@@ -310,10 +454,11 @@ def run(args: argparse.Namespace) -> int:
         if timed_out or code != 0:
             raise RuntimeError(f"spec-list process ended code={code} timeout={timed_out}")
         inventory_bytes = (output / "cell-spec-list.stdout.json").read_bytes()
-        inventory, all_specs = validate_inventory(inventory_bytes)
+        inventory, all_specs = validate_inventory(inventory_bytes, rate_canary=rate_canary)
     except KeyboardInterrupt:
         write_json_atomic(output / "matrix-run.json", {
             "schema": RUN_SCHEMA,
+            "matrix_mode": "rate_canary" if rate_canary else "legacy_48khz",
             "status": "interrupted",
             "error": "supervisor interrupted while the CLI was listing cell specs",
             "binary_path": str(binary),
@@ -335,6 +480,7 @@ def run(args: argparse.Namespace) -> int:
     except Exception as error:
         write_json_atomic(output / "matrix-run.json", {
             "schema": RUN_SCHEMA,
+            "matrix_mode": "rate_canary" if rate_canary else "legacy_48khz",
             "status": "failed",
             "error": f"{type(error).__name__}: {error}",
             "binary_path": str(binary),
@@ -365,6 +511,7 @@ def run(args: argparse.Namespace) -> int:
     if selection_error:
         write_json_atomic(output / "matrix-run.json", {
             "schema": RUN_SCHEMA,
+            "matrix_mode": "rate_canary" if rate_canary else "legacy_48khz",
             "status": "failed",
             "error": selection_error,
             "binary_path": str(binary),
@@ -388,6 +535,7 @@ def run(args: argparse.Namespace) -> int:
 
     run_record: dict[str, Any] = {
         "schema": RUN_SCHEMA,
+        "matrix_mode": "rate_canary" if rate_canary else "legacy_48khz",
         "status": "running",
         "started_at_utc": utc_now(),
         "repository": str(repository),
@@ -434,6 +582,7 @@ def run(args: argparse.Namespace) -> int:
                     repository,
                     output,
                     environment,
+                    rate_canary=rate_canary,
                 )
             except Exception as error:
                 receipt = {
@@ -511,6 +660,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", required=True, type=Path, help="built optimizer-benchmark executable")
     parser.add_argument("--output", required=True, type=Path, help="new evidence directory; must not exist")
+    parser.add_argument(
+        "--rate-canary", action="store_true",
+        help="run the separate 44.1/96 kHz realization-rate inventory",
+    )
     parser.add_argument(
         "--cell-id",
         action="append",

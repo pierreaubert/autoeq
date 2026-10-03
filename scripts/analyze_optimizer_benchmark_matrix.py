@@ -28,6 +28,7 @@ else:
 
 
 ANALYSIS_SCHEMA = "autoeq.optimizer_benchmark_matrix_analysis/v2"
+RATE_CANARY_ANALYSIS_SCHEMA = "autoeq.optimizer_rate_canary_matrix_analysis/v1"
 CELL_SPEC_SCHEMA = "autoeq.optimizer_benchmark_cell/v1"
 PROCESS_SCHEMA = "autoeq.optimizer_benchmark_cell_process/v1"
 ALLOWED_OUTCOMES = runner.ALLOWED_OUTCOMES
@@ -161,14 +162,22 @@ def add_problem(problems: list[dict[str, str]], code: str, message: str,
     problems.append(record)
 
 
-def validate_inventory(payload: bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def validate_inventory(
+    payload: bytes, *, rate_canary: bool = False
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     inventory = parse_json(payload, "printed cell-spec inventory")
-    if not isinstance(inventory, dict) or inventory.get("schema") != runner.INVENTORY_SCHEMA:
+    expected_inventory_schema = (
+        runner.RATE_CANARY_INVENTORY_SCHEMA if rate_canary else runner.INVENTORY_SCHEMA
+    )
+    expected_spec_schema = runner.RATE_CANARY_SPEC_SCHEMA if rate_canary else CELL_SPEC_SCHEMA
+    if not isinstance(inventory, dict) or inventory.get("schema") != expected_inventory_schema:
         raise AnalysisInputError("printed inventory has an unsupported schema")
     cells = inventory.get("cells")
     expected = inventory.get("expected_cell_count")
     if not exact_int(expected) or expected <= 0 or not isinstance(cells, list) or expected != len(cells):
         raise AnalysisInputError("printed inventory count does not match its cells")
+    if rate_canary and expected != runner.RATE_CANARY_EXPECTED_CELLS:
+        raise AnalysisInputError("rate-canary inventory does not contain exactly 112 cells")
     declared_hash = inventory.get("spec_inventory_sha256")
     if not valid_sha256(declared_hash):
         raise AnalysisInputError("printed inventory has an invalid SHA-256 field")
@@ -176,7 +185,7 @@ def validate_inventory(payload: bytes) -> tuple[dict[str, Any], list[dict[str, A
         raise AnalysisInputError("printed inventory content does not match its SHA-256")
     ids: list[str] = []
     for spec in cells:
-        if not isinstance(spec, dict) or spec.get("schema") != CELL_SPEC_SCHEMA:
+        if not isinstance(spec, dict) or spec.get("schema") != expected_spec_schema:
             raise AnalysisInputError("printed inventory contains a malformed cell spec")
         cell_id = spec.get("cell_id")
         if not isinstance(cell_id, str) or not cell_id.strip():
@@ -224,6 +233,11 @@ def validate_inventory(payload: bytes) -> tuple[dict[str, Any], list[dict[str, A
             and decoded["min_gain_db_bits"] <= decoded["max_gain_db_bits"]
         ):
             raise AnalysisInputError(f"cell {spec['cell_id']} has inconsistent encoded constraints")
+    if rate_canary:
+        try:
+            runner.validate_inventory(payload, rate_canary=True)
+        except ValueError as error:
+            raise AnalysisInputError(f"rate-canary inventory contract failed: {error}") from error
     return inventory, cells
 
 
@@ -425,6 +439,23 @@ def float_from_bits(spec: dict[str, Any], field: str, cell_id: str,
     if not math.isfinite(value):
         add_problem(problems, "constraint_spec", f"{field} decodes to a non-finite value", cell_id)
         return None
+    return value
+
+
+def sample_rate_for_group(spec: dict[str, Any], *, rate_canary: bool) -> float | None:
+    """Decode a rate only for rate-canary grouping; legacy groups stay univariate."""
+    if not rate_canary:
+        return None
+    cell_id = spec.get("cell_id")
+    raw = spec.get("sample_rate_hz_bits")
+    if not isinstance(cell_id, str) or not exact_int(raw) or not 0 <= raw < 2**64:
+        raise AnalysisInputError("rate-canary grouping has an invalid sample-rate bit field")
+    try:
+        value = struct.unpack(">d", raw.to_bytes(8, "big"))[0]
+    except (OverflowError, struct.error) as error:
+        raise AnalysisInputError(f"rate-canary grouping cannot decode sample rate: {error}") from error
+    if not math.isfinite(value) or value <= 0:
+        raise AnalysisInputError("rate-canary grouping has a non-finite or non-positive sample rate")
     return value
 
 
@@ -639,6 +670,8 @@ def verify_result(receipt: dict[str, Any], spec: dict[str, Any], inventory_sha: 
         str(binary_path), "--cell-spec", str(cell_dir / "cell-spec.json"),
         "--output", str(cell_dir / "cell-result.partial.json"),
     ]
+    if spec.get("schema") == runner.RATE_CANARY_SPEC_SCHEMA:
+        expected_command.append("--rate-canary")
     if command != expected_command:
         add_problem(problems, "receipt_command", "child command does not match its bound spec/output paths", cell_id)
     if repository_path is not None:
@@ -765,15 +798,21 @@ def verify_result(receipt: dict[str, Any], spec: dict[str, Any], inventory_sha: 
     return result, quality, identity_ok
 
 
-def verify_run(run_dir: Path) -> dict[str, Any]:
+def verify_run(run_dir: Path, *, rate_canary: bool = False) -> dict[str, Any]:
     run_dir = run_dir.resolve(strict=True)
     matrix_bytes = (run_dir / "matrix-run.json").read_bytes()
     inventory_bytes = (run_dir / "cell-spec-list.stdout.json").read_bytes()
     matrix = parse_json(matrix_bytes, "matrix-run.json")
     if not isinstance(matrix, dict) or matrix.get("schema") != runner.RUN_SCHEMA:
         raise AnalysisInputError("matrix-run.json has an unsupported schema")
-    inventory, specs = validate_inventory(inventory_bytes)
+    inventory, specs = validate_inventory(inventory_bytes, rate_canary=rate_canary)
     problems: list[dict[str, str]] = []
+    expected_mode = "rate_canary" if rate_canary else "legacy_48khz"
+    recorded_mode = matrix.get("matrix_mode")
+    if rate_canary and recorded_mode != expected_mode:
+        add_problem(problems, "matrix_mode", "rate-canary analysis needs a rate-canary run record")
+    elif not rate_canary and recorded_mode not in (None, "legacy_48khz"):
+        add_problem(problems, "matrix_mode", "legacy analysis cannot consume a rate-canary run record")
     inventory_sha = inventory["spec_inventory_sha256"]
     spec_ids = [spec["cell_id"] for spec in specs]
     id_set = set(spec_ids)
@@ -829,6 +868,8 @@ def verify_run(run_dir: Path) -> dict[str, Any]:
     if matrix.get("cell_spec_list_watchdog_timed_out") is not False:
         add_problem(problems, "inventory_execution", "cell-spec listing was timed out or lacks explicit false")
     expected_list_command = [str(binary_path), "--list-cell-specs"]
+    if rate_canary:
+        expected_list_command.append("--rate-canary")
     if matrix.get("cell_spec_list_command") != expected_list_command:
         add_problem(problems, "inventory_execution", "recorded inventory command does not identify the matrix binary")
     environment_sha = matrix.get("environment_sha256")
@@ -978,21 +1019,24 @@ def verify_run(run_dir: Path) -> dict[str, Any]:
         "inventory_bytes": inventory_bytes,
         "matrix_bytes": matrix_bytes,
         "unexpected_cell_directories": unexpected_dirs,
+        "rate_canary": rate_canary,
     }
 
 
-def build_report(run_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
-    state = verify_run(run_dir)
+def build_report(run_dir: Path, *, rate_canary: bool = False) -> tuple[dict[str, Any], dict[str, bytes]]:
+    state = verify_run(run_dir, rate_canary=rate_canary)
     matrix = state["matrix"]
     specs = state["specs"]
     results = state["results"]
     qualities = state["qualities"]
     receipts = state["receipts"]
     planned = state["planned_ids"]
-    groups: dict[tuple[str, str, str, int], dict[str, Any]] = {}
+    groups: dict[tuple[str, str, str, float | None, int], dict[str, Any]] = {}
     for spec in specs:
+        sample_rate_hz = sample_rate_for_group(spec, rate_canary=rate_canary)
         key = (spec.get("purpose", "<missing>"), spec.get("backend", "<missing>"),
-               spec.get("case_id", "<missing>"), spec.get("root_search_budget", -1))
+               spec.get("case_id", "<missing>"), sample_rate_hz if rate_canary else None,
+               spec.get("root_search_budget", -1))
         group = groups.setdefault(key, {
             "planned": 0, "outcomes": Counter(), "runner_failures": 0,
             "missing": 0, "completed": 0, "quality_eligible": 0,
@@ -1006,8 +1050,10 @@ def build_report(run_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
         spec = state["specs_by_id"].get(cell_id)
         if spec is None:
             continue
+        sample_rate_hz = sample_rate_for_group(spec, rate_canary=rate_canary)
         key = (spec.get("purpose", "<missing>"), spec.get("backend", "<missing>"),
-               spec.get("case_id", "<missing>"), spec.get("root_search_budget", -1))
+               spec.get("case_id", "<missing>"), sample_rate_hz if rate_canary else None,
+               spec.get("root_search_budget", -1))
         group = groups[key]
         receipt = receipts.get(cell_id)
         result = results.get(cell_id)
@@ -1046,8 +1092,8 @@ def build_report(run_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
             if finite(value):
                 group[target].append(float(value))
     group_rows = []
-    for (purpose, backend, case_id, cap), group in sorted(groups.items()):
-        group_rows.append({
+    for (purpose, backend, case_id, sample_rate_hz, cap), group in sorted(groups.items()):
+        row = {
             "purpose": purpose, "backend": backend, "case_id": case_id, "root_cap": cap,
             "planned": group["planned"],
             "returned": sum(group["outcomes"].values()),
@@ -1066,7 +1112,10 @@ def build_report(run_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
             "search_evaluations_started": distribution(group["search_evals"]),
             "validation_evaluations_started": distribution(group["validation_evals"]),
             "engine_elapsed_millis": distribution(group["engine_millis"]),
-        })
+        }
+        if rate_canary:
+            row["sample_rate_hz"] = sample_rate_hz
+        group_rows.append(row)
     outcomes = Counter(result.get("outcome", "<missing>") for result in results.values())
     by_purpose: dict[str, Counter[str]] = defaultdict(Counter)
     by_backend: dict[str, Counter[str]] = defaultdict(Counter)
@@ -1090,7 +1139,7 @@ def build_report(run_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
             gate_failures.append({"code": "quality_exclusion", "cell_id": cell_id,
                                   "message": "completed candidate is not eligible for quality distributions"})
     report = {
-        "schema": ANALYSIS_SCHEMA,
+        "schema": RATE_CANARY_ANALYSIS_SCHEMA if rate_canary else ANALYSIS_SCHEMA,
         "analysis_created_at_utc": datetime.now(timezone.utc).isoformat(),
         "read_only": True,
         "run_directory": str(Path(run_dir).resolve()),
@@ -1140,9 +1189,16 @@ def build_report(run_dir: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
             "The measured_stereo_8361a fixture is perturbation-derived evidence, not an independent measured capture.",
             "Repeated seed labels for deterministic backends are not independent randomized trials.",
         ],
-        "groups_by_backend_case_purpose_cap": group_rows,
         "analyzer_sha256": sha256_file(Path(__file__).resolve()),
     }
+    if rate_canary:
+        report["matrix_mode"] = "rate_canary"
+        report["sample_rate_scope"] = (
+            "digital_filter_realization_hz; measurement_capture_rate_not_asserted"
+        )
+        report["groups_by_backend_case_purpose_rate_cap"] = group_rows
+    else:
+        report["groups_by_backend_case_purpose_cap"] = group_rows
     return report, {"matrix-run.snapshot.json": state["matrix_bytes"],
                     "cell-spec-list.stdout.snapshot.json": state["inventory_bytes"]}
 
@@ -1167,17 +1223,28 @@ def render_markdown(report: dict[str, Any]) -> str:
         "", "## Completed, feasible quality distributions", "",
         "Only completed rows with finite unique paired metrics and feasible realized filters contribute.",
         "`Δ worst loss` is final minus baseline; negative means the paired worst loss decreased.", "",
-        "| Purpose | Backend | Case | Cap | Planned | Returned | Completed | Quality n | Excluded | Timeout | Median Δ worst | Median held-out Δ worst |",
-        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ("| Purpose | Backend | Case | Rate Hz | Cap | Planned | Returned | Completed | Quality n | Excluded | Timeout | Median Δ worst | Median held-out Δ worst |"
+         if "groups_by_backend_case_purpose_rate_cap" in report
+         else "| Purpose | Backend | Case | Cap | Planned | Returned | Completed | Quality n | Excluded | Timeout | Median Δ worst | Median held-out Δ worst |"),
+        ("|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+         if "groups_by_backend_case_purpose_rate_cap" in report
+         else "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"),
     ])
-    for row in report["groups_by_backend_case_purpose_cap"]:
+    group_field = (
+        "groups_by_backend_case_purpose_rate_cap"
+        if "groups_by_backend_case_purpose_rate_cap" in report
+        else "groups_by_backend_case_purpose_cap"
+    )
+    for row in report[group_field]:
         outcomes = row["outcomes"]
         primary = row["paired_final_minus_baseline_worst"]
         heldout = row["heldout_final_minus_baseline_worst"]
         fmt = lambda value: "—" if value is None else f"{value:.6g}"
+        rate_column = f"{row['sample_rate_hz']} | " if "sample_rate_hz" in row else ""
         lines.append(
-            f"| {row['purpose']} | {row['backend']} | {row['case_id']} | {row['root_cap']} | "
-            f"{row['planned']} | {row['returned']} | {row['completed']} | {row['quality_eligible_completed']} | "
+            f"| {row['purpose']} | {row['backend']} | {row['case_id']} | "
+            f"{rate_column}{row['root_cap']} | {row['planned']} | {row['returned']} | "
+            f"{row['completed']} | {row['quality_eligible_completed']} | "
             f"{row['quality_excluded_completed']} | {outcomes.get('timed_out', 0)} | "
             f"{fmt(primary['median'])} | {fmt(heldout['median'])} |"
         )
@@ -1191,10 +1258,10 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_analysis(run_dir: Path, output_dir: Path) -> dict[str, Any]:
+def write_analysis(run_dir: Path, output_dir: Path, *, rate_canary: bool = False) -> dict[str, Any]:
     if output_dir.exists():
         raise FileExistsError(f"refusing to overwrite analysis output: {output_dir}")
-    report, snapshots = build_report(run_dir)
+    report, snapshots = build_report(run_dir, rate_canary=rate_canary)
     matrix_after = (Path(run_dir) / "matrix-run.json").read_bytes()
     inventory_snapshot = snapshots["cell-spec-list.stdout.snapshot.json"]
     inventory_after = (Path(run_dir) / "cell-spec-list.stdout.json").read_bytes()
@@ -1228,17 +1295,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True, help="new analysis output directory")
     parser.add_argument("--require-complete", action="store_true",
                         help="return nonzero unless all inventory cells and strict validations pass")
+    parser.add_argument(
+        "--rate-canary", action="store_true",
+        help="validate and group the separate 44.1/96 kHz realization-rate inventory",
+    )
     args = parser.parse_args(argv)
     if args.output.exists():
         print(f"analysis failed: refusing to overwrite existing output: {args.output}", file=sys.stderr)
         return 1 if args.require_complete else 2
     try:
-        report = write_analysis(args.run, args.output)
+        report = write_analysis(args.run, args.output, rate_canary=args.rate_canary)
     except (OSError, AnalysisInputError, ValueError) as error:
         if not args.output.exists():
             args.output.mkdir(parents=True, exist_ok=False)
         failure = {
-            "schema": ANALYSIS_SCHEMA,
+            "schema": RATE_CANARY_ANALYSIS_SCHEMA if args.rate_canary else ANALYSIS_SCHEMA,
             "read_only": True,
             "run_directory": str(args.run),
             "strict_mode": args.require_complete,

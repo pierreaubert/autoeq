@@ -2142,3 +2142,35 @@ Root review: `/Users/pierre/a07-pareto-independent-review.json`, SHA-256
 Evidence: `/Volumes/home_tmp/tmp/a07-pareto-integrated-evidence-20261003`.
 Full engine integration will be checked with the adaptive budget-profile slice.
 The full benchmark matrix and evidence-derived presets remain open.
+
+### A07 stage profile and Pareto integration gates
+
+Integrated `61ac957` records each controlled dispatch dimension, bounds, root/
+stage cap and backend-supplied solver profile. Custom backends default to unknown
+profile; the real dispatcher retains canonical identity without inventing a
+solver plan when no budget remains. Adaptive Cobra regressions verify increasing
+pass dimensions and the corresponding dimension-dependent initialization batch.
+
+Root independently matched all four source files to worker `2b3d4fe`. The
+combined engine suite passed 887 tests with one ignored; optimizer tests passed
+394/394. Strict optimizer/model/engine library/test Clippy passed.
+Root review: `/Users/pierre/a07-stage-profile-independent-review.json`, SHA-256
+`6f517c3a8cd9cda810d30368537065da58d158948fc239457ac244d1e5083859`.
+The production benchmark harness and its manifest-to-input provenance checks
+remain in progress; no full 841-case acceptance is claimed.
+
+### A11 REW generic text import contract clarified
+
+The frozen beta132 bundled help at `wizardhelp/help/html/file.html` explicitly
+states generic filter-settings text cannot be loaded into REW; saved/opened
+filter sets use binary `.req`. Root also inspected the File/FilterSet loader
+bytecode: it uses ObjectInputStream and the TMreq Filters File marker. This
+strengthens the earlier API-only observation: generic EQ text is a reference/
+exchange representation, not an established REW reload format. Device-specific
+importers are separate. No application or audio process ran for this inspection.
+
+Evidence receipt:
+`/Volumes/home_tmp/tmp/rew-a11-beta132-api-20261003/evidence/rew-text-import-contract-root/receipt.json`,
+SHA-256 `fa0f40e8ec9d58d02b90bd850444b519afd2fe882152d6a88f24d70ba92f0ee6`.
+Backend capability labels and export instructions still require review against
+this limitation. The typed API numerical witness remains separately valid.

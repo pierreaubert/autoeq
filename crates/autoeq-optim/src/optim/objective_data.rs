@@ -156,11 +156,31 @@ impl ObjectiveData {
         self.with_evaluation_tracking(run_control, super::run_control::EvaluationStage::Search)
     }
 
-    pub(crate) fn with_validation_tracking(
+    /// Count post-search scores separately from the shared search cap.
+    ///
+    /// Finalization and pipeline safety checks remain possible after the search
+    /// cap is exhausted. Callers must check cancellation before starting them.
+    pub fn with_validation_tracking(
         &self,
         run_control: super::run_control::OptimizerRunControl,
     ) -> Self {
         self.with_evaluation_tracking(run_control, super::run_control::EvaluationStage::Validation)
+    }
+
+    /// Preserve shared accounting while moving post-search scores to validation.
+    pub(crate) fn post_search_validation_view(&self) -> Self {
+        self.prepared().run_control.as_ref().map_or_else(
+            || self.clone(),
+            |control| self.with_validation_tracking(control.clone()),
+        )
+    }
+
+    /// Check explicit terminal requests independently of search-cap exhaustion.
+    pub(crate) fn terminal_stop_requested(&self) -> bool {
+        self.prepared().run_control.as_ref().is_some_and(|control| {
+            let snapshot = control.snapshot();
+            snapshot.cancellation_requested || snapshot.deadline_reached
+        })
     }
 
     fn with_evaluation_tracking(

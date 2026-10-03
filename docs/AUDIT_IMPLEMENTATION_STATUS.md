@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; registry package installation and cross-platform evidence remain |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; Linux ARM build/help verified; registry, Windows and Linux x86 evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -3045,3 +3045,27 @@ remains failed. The later output-attenuation gate uses the same tested rollback
 wrapper but lacks a separately forced rollback fixture. Full A09 measured
 mode/rate/time-domain acceptance remains open. Logs are in
 `a09-integration-da6458fc-evidence` under the task evidence root.
+
+### A00 Linux ARM backend binaries (2026-10-03)
+
+Frozen source `88e4ae36` passes locked offline source checking and debug
+binary builds for `autoeq`, `roomeq`, `autoeq-download-speakers` and
+`convert-recording` on `aarch64-unknown-linux-gnu`. All four built binaries
+exit zero for `--help` inside the same isolated Ubuntu image. The existing
+`math-audio-base-linux-arm64` image is pinned in the verification receipt
+(`sha256:2a2071b2f7c...`); its installed Rust 1.95 toolchain was selected
+explicitly. Network access was disabled and source/dependency mounts were
+read-only. Generic CPU flags avoid inheriting this Mac host CPU identity.
+
+Separate Mac-host cross-checks for Linux x86 and Windows MSVC x86 stopped
+before our code could be checked: Linux lacks `x86_64-linux-gnu-gcc`, and
+Windows lacks C runtime/SDK headers needed by `aws-lc-sys`. They remain
+unavailable evidence. Initial container attempts selected an absent stable
+toolchain and failed offline; those logs remain alongside the successful
+pinned-toolchain check. No physical audio device was opened, and this is
+not a release-package or Windows runtime verification.
+
+Raw logs use the `autoeq-a00-linux-arm-*` prefix under the task evidence
+root. `/Users/pierre/a00-cross-platform-cli-verification.json` binds the
+source/image/toolchain, raw logs and four binary hashes. Registry packaging
+and the remaining platform requirements are still open.

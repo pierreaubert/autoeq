@@ -2758,9 +2758,12 @@ verifies the configured expiry, not elapsed retention. The server reports 28.0.0
 Receipt: `/Users/pierre/a16-gitea-artifact-smoke-verification.json`.
 
 The Gitea repository API reports `private: false` at its private-network address.
-Network isolation and repository visibility are distinct. The smoke run uploaded
+Network isolation and repository visibility are distinct. A root anonymous API
+request followed the artifact redirect (302 to 200), downloaded its ZIP, and
+verified the exact marker bytes. Artifact privacy on this repository therefore
+relies on private-network access, not repository sign-in. The smoke run uploaded
 no benchmark or audit payload. The full nightly workflow has not been published
-or run, and access controls for its full evidence remain to be verified.
+or run.
 
 ### A08 NSGA exact continuation integration prepared (2026-10-03)
 
@@ -2778,6 +2781,12 @@ NSGA filter 14/14, NSGA envelope 2/2, bounded I/O 1/1, DE exact continuation 3/3
 and strict Clippy for the three changed crates.
 
 These tests used the isolated math checkpoint revision through a command-only
-Cargo override. The source commit contains no lockfile or path dependency change.
-Main integration still requires the published math NSGA dependency; these results
-do not establish recovery of an entire multi-stage RoomEQ job.
+Cargo override. Later metadata inspection found the old worktree configuration
+also resolved DSP/IIR from a sibling checkout containing two dirty crossover
+files. The reported test results remain observations of that local build; they
+do not establish clean public-dependency reproducibility. A fresh integration
+check with the public DSP/IIR/RIR pins and only the isolated NSGA override is
+required before relying on that stronger claim. The source commit contains no
+lockfile or path dependency change. Main integration still requires the published
+math NSGA dependency; these results do not establish recovery of an entire
+multi-stage RoomEQ job.

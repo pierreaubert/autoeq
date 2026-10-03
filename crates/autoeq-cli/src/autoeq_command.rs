@@ -233,6 +233,9 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             post_score,
             qa_threshold,
         );
+        if !spacing_ok {
+            spacing::print_freq_spacing(&opt_result.params, &optim_params, "qa-final");
+        }
         qa::display_qa_analysis(&qa_result);
         qa::require_qa_pass(&qa_result)?;
 

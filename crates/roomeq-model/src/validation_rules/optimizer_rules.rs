@@ -614,7 +614,7 @@ pub fn rule_algorithm(ctx: &mut ValidationContext<'_>) {
 }
 
 pub fn rule_loss_type(ctx: &mut ValidationContext<'_>) {
-    let valid_loss_types = ["flat", "score", "epa"];
+    let valid_loss_types = ["flat", "headphone_flat", "score", "epa"];
     if !valid_loss_types.contains(&ctx.opt.loss_type.as_str()) {
         ctx.add_error(format!(
             "Unknown loss_type '{}', must be one of {:?}",
@@ -1152,6 +1152,15 @@ mod optimizer_rule_tests {
     fn rule_loss_type_known_is_valid() {
         let result = run_rule(rule_loss_type, &default_config());
         assert!(result.is_valid);
+    }
+
+    #[test]
+    fn rule_loss_type_headphone_flat_is_valid() {
+        let mut config = default_config();
+        config.loss_type = "headphone_flat".to_string();
+        let result = run_rule(rule_loss_type, &config);
+        assert!(result.is_valid);
+        assert!(result.warnings.is_empty());
     }
 
     #[test]

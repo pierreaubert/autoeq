@@ -121,10 +121,10 @@ wide = "0.6.1"
 
 # Shared report primitives from the GitHub tree (never Gitea: releases
 # must resolve from public sources; local checkouts only via [patch]).
-math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
-math-dsp = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", rev = "bc3afa204820bb8783fd75e4b8592248cd7500b6", version = "0.5" }
+math-dsp = { git = "https://github.com/pierreaubert/math-audio", rev = "bc3afa204820bb8783fd75e4b8592248cd7500b6", version = "0.5" }
 math-optimisation = { git = "https://github.com/pierreaubert/math-audio", rev = "acdea21f853629a13b7f88f8baef51eb0394754c", version = "0.5" }
-math-rir = { git = "https://github.com/pierreaubert/math-audio", version = "0.5" }
+math-rir = { git = "https://github.com/pierreaubert/math-audio", rev = "bc3afa204820bb8783fd75e4b8592248cd7500b6", version = "0.5" }
 sofa-reader = "0.2"
 
 # Core numerical computing

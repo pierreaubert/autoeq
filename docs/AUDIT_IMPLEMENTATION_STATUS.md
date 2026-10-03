@@ -18,14 +18,14 @@ cannot replace them.
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Live calibration and local method/metric CSV evidence implemented; public dependency integration, numerical distortion/linearity and hardware validation remain |
+| A04 measurement/live analysis | Partial | Live calibration implemented and bounded synthetic ESS diagnostic passes; production estimator/dependency integration, broader validity and hardware evidence remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
-| A07 optimizer quality | Partial | Fresh 540-cell matrix at three budgets verified; broader representative cases and derived presets remain |
-| A08 recoverable jobs | Partial | Exact DE continuation pinned; scoped CLI cancellation and native provenance verified; pause, broader recovery and hardware checks remain |
+| A07 optimizer quality | Partial | Shared stage budgets, multi-measurement adaptive passes, headphone loss and validated Pareto reporting integrated; 841-cell production-pipeline matrix and derived presets remain |
+| A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
 | A09 realized correction | Partial | Kautz multirate witnesses pass; fresh Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
-| A11 bundles/export | Partial | Native transaction recovery, immutable resource snapshots and capability queries committed; immutable frozen playback API committed; combined external/native restart recovery committed; broader consumer witnesses remain |
+| A11 bundles/export | Partial | Transaction/restart recovery and immutable playback contracts committed; 15 typed REW DSP cases pass with failed cleanup gate retained; text-import and broader deployed-consumer evidence remain |
 | A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
 | A13 rendering/accessibility | Deferred | Begin after backend work |
 | A14 perceptual/listening evidence | Partial | Exact stimulus-hash disjointness and metric validity limits committed; independent references/domain registry and relevant blinded listening evidence remain |

@@ -1333,3 +1333,141 @@ fn cross_mode_expected_channels_use_declared_logical_topology_roles() {
         ["front_left_large".to_string()].into_iter().collect()
     );
 }
+
+fn accepted_cross_mode_result(plugin_types: &[&str]) -> RoomOptimizationResult {
+    use roomeq_model::{
+        CorrectionAcceptancePolicy, CorrectionAcceptanceReport, CorrectionDecision,
+        CorrectionMetricSummary, RoomEqOutcome,
+    };
+    let mut result = result_with_channel_slopes(0.0, 0.0, 0.0);
+    result.channels.get_mut("L").unwrap().plugins = plugin_types
+        .iter()
+        .map(|kind| {
+            serde_json::from_value(serde_json::json!({
+                "plugin_type": kind, "parameters": {}
+            }))
+            .unwrap()
+        })
+        .collect();
+    result.metadata.correction_acceptance = Some(CorrectionAcceptanceReport {
+        policy: CorrectionAcceptancePolicy::RuntimeSafety,
+        runtime_policy: None,
+        decision: CorrectionDecision::Accepted,
+        accepted: true,
+        outcome: RoomEqOutcome::Accepted,
+        metrics: CorrectionMetricSummary {
+            auditory_frequency_measure: "erb_rate".into(),
+            pre_target_weighted_rms_db: 1.0,
+            post_target_weighted_rms_db: 0.5,
+            improvement_db: 0.5,
+            improvement_ratio: 0.5,
+            post_p95_abs_residual_db: 0.5,
+            post_worst_abs_residual_db: 0.5,
+            correction_rms_db: 0.5,
+            max_abs_correction_db: 0.5,
+        },
+        violations: Vec::new(),
+        realized_processing: None,
+        processing_fallback: None,
+        observations: Vec::new(),
+        reverted_stages: Vec::new(),
+        acoustic_quality: None,
+        realization_quality: None,
+    });
+    result
+}
+
+#[test]
+fn strict_cross_mode_rejects_baselines_and_stale_acceptance() {
+    use super::run::strict_cross_mode_correction;
+    use roomeq_model::{CorrectionDecision, ProcessingMode, RoomEqOutcome};
+    let mut result = accepted_cross_mode_result(&["eq"]);
+    assert!(strict_cross_mode_correction(&result, &ProcessingMode::LowLatency).is_ok());
+    for decision in [
+        CorrectionDecision::IdentityFallback,
+        CorrectionDecision::Rejected,
+    ] {
+        let report = result.metadata.correction_acceptance.as_mut().unwrap();
+        report.decision = decision;
+        report.accepted = false;
+        report.outcome = RoomEqOutcome::Accepted; // Stale summary must not win.
+        assert!(strict_cross_mode_correction(&result, &ProcessingMode::LowLatency).is_err());
+    }
+    result.metadata.correction_acceptance = None;
+    assert!(
+        strict_cross_mode_correction(&result, &ProcessingMode::LowLatency)
+            .unwrap_err()
+            .contains("missing")
+    );
+}
+
+#[test]
+fn strict_cross_mode_checks_actual_family_and_acceptance_violations() {
+    use super::run::strict_cross_mode_correction;
+    use roomeq_model::{ProcessingMode, RealizedProcessing};
+    for (mode, kinds) in [
+        (ProcessingMode::LowLatency, vec!["eq"]),
+        (ProcessingMode::PhaseLinear, vec!["convolution"]),
+        (ProcessingMode::Hybrid, vec!["eq", "convolution"]),
+        (ProcessingMode::MixedPhase, vec!["eq", "convolution"]),
+    ] {
+        assert!(strict_cross_mode_correction(&accepted_cross_mode_result(&kinds), &mode).is_ok());
+    }
+    let mut result = accepted_cross_mode_result(&["eq"]);
+    result
+        .metadata
+        .correction_acceptance
+        .as_mut()
+        .unwrap()
+        .realized_processing = Some(RealizedProcessing::Hybrid);
+    assert!(
+        strict_cross_mode_correction(&result, &ProcessingMode::MixedPhase)
+            .unwrap_err()
+            .contains("iir_only_realized")
+    );
+    for violation in ["evidence_missing", "worst_position_regressed"] {
+        result
+            .metadata
+            .correction_acceptance
+            .as_mut()
+            .unwrap()
+            .violations = vec![violation.into()];
+        assert!(strict_cross_mode_correction(&result, &ProcessingMode::LowLatency).is_err());
+    }
+}
+
+#[test]
+fn strict_cross_mode_failure_survives_functional_safe_revert_policy() {
+    use roomeq_model::{CorrectionDecision, ProcessingMode};
+    let mut result = accepted_cross_mode_result(&["eq"]);
+    result
+        .metadata
+        .correction_acceptance
+        .as_mut()
+        .unwrap()
+        .decision = CorrectionDecision::IdentityFallback;
+    let reason =
+        super::run::strict_cross_mode_correction(&result, &ProcessingMode::LowLatency).unwrap_err();
+    let mut scorecard = super::metric_scorecard::placeholder_scorecard(0.0);
+    scorecard.correction_reverted = true;
+    let mut row = TestResult {
+        label: "mode correction".into(),
+        pre_score: 1.0,
+        scorecard,
+        pass: false,
+        reason,
+    };
+    super::enforce_registry_expectations(
+        "cross_mode/test",
+        &["functional_artifact".into()],
+        crate::registry::ScenarioExpect {
+            improvement_min_pct: 0.0,
+            max_post_score: 20.0,
+            max_boost_db: 12.0,
+            allow_safe_revert: true,
+            gate_purpose: crate::registry::QaGatePurpose::Safety,
+        },
+        std::slice::from_mut(&mut row),
+    );
+    assert!(!row.pass);
+}

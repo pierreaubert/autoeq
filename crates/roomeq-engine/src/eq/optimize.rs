@@ -402,6 +402,7 @@ pub(crate) fn prepare_multi_measurement_objective_recorded(
                 LossType::SpeakerFlat
             }
         }
+        "headphone_flat" => LossType::HeadphoneFlat,
         "score" => LossType::SpeakerScore,
         "epa" => LossType::Epa,
         _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
@@ -3218,6 +3219,43 @@ mod multi_eq_tests {
         assert_eq!(objectives[0].freqs.as_ref(), objectives[1].freqs.as_ref());
         assert!(objectives[0].freqs[0] >= 30.0);
         assert!(objectives[0].freqs[objectives[0].freqs.len() - 1] <= 18_000.0);
+    }
+
+    #[test]
+    fn multi_measurement_preparation_preserves_headphone_flat_loss() {
+        let config = OptimizerConfig {
+            loss_type: "headphone_flat".to_string(),
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            ..OptimizerConfig::default()
+        };
+        let (objective, params, _) = prepare_multi_measurement_objective(
+            &[make_simple_room_curve()],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .expect("headphone flat objective should prepare");
+
+        assert_eq!(params.loss, LossType::HeadphoneFlat);
+        let multi = objective.multi_objective.as_ref().expect("multi objective");
+        assert_eq!(multi.objectives.len(), 1);
+        assert!(
+            multi
+                .objectives
+                .iter()
+                .all(|measurement| measurement.loss_type == LossType::HeadphoneFlat)
+        );
+        let responses: Vec<_> = multi
+            .objectives
+            .iter()
+            .map(|measurement| Array1::zeros(measurement.freqs.len()))
+            .collect();
+        assert!(matches!(
+            autoeq_optim::optim::compute_response_fitness(&responses, &objective),
+            Some(fitness) if fitness.is_finite()
+        ));
     }
 
     #[test]

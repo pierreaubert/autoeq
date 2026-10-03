@@ -44,6 +44,7 @@ impl OptimizerConfigExt for OptimizerConfig {
         let loss = match self.loss_type.as_str() {
             "flat" if self.asymmetric_loss => LossType::SpeakerFlatAsymmetric,
             "flat" => LossType::SpeakerFlat,
+            "headphone_flat" => LossType::HeadphoneFlat,
             "score" => LossType::SpeakerScore,
             "epa" => LossType::Epa,
             _ => LossType::SpeakerFlat,
@@ -329,6 +330,18 @@ mod tests {
         for sample_rate in [44_100.0, 48_000.0, 96_000.0, 192_000.0] {
             assert_eq!(config.to_optim_params(sample_rate).sample_rate, sample_rate);
         }
+    }
+
+    #[test]
+    fn optimizer_adapter_preserves_headphone_flat_loss() {
+        let config = OptimizerConfig {
+            loss_type: "headphone_flat".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.to_optim_params(48_000.0).loss,
+            LossType::HeadphoneFlat
+        );
     }
 
     #[test]

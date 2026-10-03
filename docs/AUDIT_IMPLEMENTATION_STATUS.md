@@ -1728,3 +1728,59 @@ approved and a reproducible public pin is available. This dependency affects
 this integration only; other backend audit work can continue.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a08-cobyla-cancel-evidence-20261003/`;
 root review: `/Users/pierre/a08-cobyla-adapter-independent-review.json`.
+
+
+## QR right-preconditioner diagnostic: retained result and review correction
+
+After the failed matrix-free fit and finite-Gram whitening investigation, a
+training-input-only dense economy QR supplies a right preconditioner for the
+same matrix-free LSQR solver. The finite 320-tap reference design has 14,795
+rows and 1,600 columns; its dense matrix occupies 189,376,000 bytes. This is
+a bounded synthetic reference, without a scalable 48 kHz production claim.
+
+All four retained run02 fits stop in two LSQR iterations, with their serialized
+training, held-out and fitted-PCM gates passing unchanged thresholds. Root
+verified 44 source/fixture/prior-evidence identities, 1,437 NumPy/SciPy file
+identities and matched runtime inventories. The raw wrapper labels this run
+as01 and leaves the result hash null; a separate completion receipt corrects
+these fields while preserving the original record. Exact fitted taps and the
+independent analytic-formula versus PCM scorer subcheck were not serialized,
+so this is not full scorer acceptance.
+
+Root found a certificate-reporting error: implemented lower/upper bounds are
+singular-value bounds, but their ratio was square-rooted for the reported
+condition bound. The reported value 1.0007476458 corresponds to a singular-bound
+ratio of 1.0014958506. The next separately declared revision will correct that
+calculation. Its FFT application envelope also needs explicit conditional
+wording because a PocketFFT-specific rigorous error proof is not established.
+The finite dense QR/SVD certificate and this assumed implementation envelope
+remain separate. Original failed and successful diagnostic evidence is intact.
+Evidence: `/Volumes/home_tmp/tmp/ess-matrixfree-probe-20261003/`;
+root review: `/Users/pierre/ess-qr-run02-independent-review.json`.
+
+## REW beta132 noaudio API overlay: preserved documented-route failure
+
+The separately verified official beta132 API payload has the missing API
+classes. Its immutable overlay retains all 330 original runtime entries and
+adds one byte-identical official configuration file at the runtime root.
+The installer was not executed and the installed REW application was not
+replaced. The headless process used explicit noaudio arguments and private
+Java home/tmp/preferences.
+
+Its first overlay run starts the owned API listener, but the documented
+GET /audio readiness contract fails with404. The generated OpenAPI artifact
+and bytecode identify GET /audio/status instead, with a noaudio availability
+guard. API Shutdown returns202 and the owned process exits0 with no remaining
+group members. Runtime entries and original user preference/log inventories
+remain unchanged. The immediate API-port bind check is false; the later
+separate receipt finds no listener and permits a bind, without proving the
+earlier socket state or its cause.
+
+Root independently verified all 331 current runtime entries, original user
+inventory equality, process/output evidence and the separate later port receipt.
+A new health-only runner will retain live version/document responses and verify
+the nested route's explicit noaudio refusal. This does not replace or relabel
+the preserved GET /audio failure. Actual REW filter-engine/export consumer
+acceptance remains open; no hardware or playback occurred.
+Evidence: `/Volumes/home_tmp/tmp/rew-a11-beta132-api-20261003/`;
+root review: `/Users/pierre/rew-overlay-failure-independent-review.json`.

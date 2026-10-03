@@ -11,6 +11,8 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+use super::atomic_file::replace_atomically;
+
 /// Serialized schema version for exact AutoEQ DE state files.
 pub const EXACT_DE_STATE_VERSION: u32 = 1;
 /// Maximum serialized exact checkpoint size accepted on load or save.
@@ -111,7 +113,7 @@ pub fn save_exact_optimizer_state(state: &ExactOptimizerState, path: &Path) -> i
     state
         .validate_for_save()
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
-    atomic_replace(path, |file| {
+    replace_atomically(path, |file| {
         write_bounded_state(file, state, EXACT_DE_STATE_MAX_BYTES)
     })
 }
@@ -211,20 +213,6 @@ impl Write for BoundedWriter<'_> {
     }
 }
 
-fn atomic_replace(path: &Path, write: impl FnOnce(&mut File) -> io::Result<()>) -> io::Result<()> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
-    write(temporary.as_file_mut())?;
-    temporary.as_file().sync_all()?;
-    temporary.persist(path).map_err(|error| error.error)?;
-    #[cfg(unix)]
-    File::open(parent)?.sync_all()?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,8 +274,9 @@ mod tests {
         let state = ExactOptimizerState::from_checkpoint(checkpoint(), "fixture-run")
             .expect("consistent identity");
 
-        let save_error = atomic_replace(&destination, |file| write_bounded_state(file, &state, 32))
-            .expect_err("small size limit rejects serialized state");
+        let save_error =
+            replace_atomically(&destination, |file| write_bounded_state(file, &state, 32))
+                .expect_err("small size limit rejects serialized state");
         assert!(save_error.to_string().contains("size limit"));
         assert_eq!(
             std::fs::read(&destination).expect("prior file survives"),

@@ -4,7 +4,6 @@ use autoeq::optim::pareto::ParetoFilter;
 use autoeq_plot::param_utils::{PeqLayout, params_per_filter};
 use std::{error::Error, path::Path};
 use tokio::fs;
-use tokio::io::AsyncReadExt;
 
 /// Warn threshold for the APO round-trip objective gap (absolute, in the
 /// scalar objective's units). Integer-Hz serialization of typical filters
@@ -309,181 +308,6 @@ fn validate_profiled_output_envelope(
         "serialized APO candidate",
     )?;
     Ok(())
-}
-
-async fn read_existing_product_file_bounded(
-    path: &Path,
-    maximum_bytes: u64,
-) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-    let file = match fs::File::open(path).await {
-        Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error.into()),
-    };
-    let mut bytes = Vec::new();
-    file.take(maximum_bytes.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .await?;
-    if bytes.len() as u64 > maximum_bytes {
-        return Err(format!(
-            "existing product output {} exceeds the {maximum_bytes}-byte rollback safety limit",
-            path.display()
-        )
-        .into());
-    }
-    Ok(Some(bytes))
-}
-
-async fn rollback_profiled_preset_if_unchanged(
-    preset_path: &Path,
-    previous_preset: Option<&[u8]>,
-    published_preset: &[u8],
-) -> Result<(), Box<dyn Error>> {
-    let current_preset = read_existing_product_file_bounded(preset_path, 16 * 1024 * 1024).await?;
-    if current_preset.as_deref() != Some(published_preset) {
-        return Err(
-            "APO preset changed concurrently; rollback left the newer file untouched".into(),
-        );
-    }
-    match previous_preset {
-        Some(previous) => autoeq_artifacts::write_file_atomically(preset_path, previous)?,
-        None => fs::remove_file(preset_path).await?,
-    }
-    Ok(())
-}
-
-async fn write_staged_file(path: &Path, contents: &[u8]) -> Result<(), Box<dyn Error>> {
-    fs::write(path, contents).await?;
-    fs::File::open(path).await?.sync_all().await?;
-    Ok(())
-}
-
-/// Stage and validate both outputs before publishing either one. The preset
-/// is atomically replaced first; if sidecar publication then fails, restore the
-/// previous preset only when the destination still contains our new bytes.
-#[cfg(test)]
-async fn publish_profiled_pair_with_hook<F>(
-    preset_path: &Path,
-    preset_bytes: &[u8],
-    sidecar_path: &Path,
-    sidecar_bytes: &[u8],
-    before_sidecar_publish: F,
-) -> Result<(), Box<dyn Error>>
-where
-    F: FnOnce() -> std::io::Result<()>,
-{
-    publish_profiled_pair_with_hooks(
-        preset_path,
-        preset_bytes,
-        sidecar_path,
-        sidecar_bytes,
-        |_| Ok(()),
-        before_sidecar_publish,
-    )
-    .await
-}
-
-async fn publish_profiled_pair_with_hooks<V, F>(
-    preset_path: &Path,
-    preset_bytes: &[u8],
-    sidecar_path: &Path,
-    sidecar_bytes: &[u8],
-    verify_staged_preset: V,
-    before_sidecar_publish: F,
-) -> Result<(), Box<dyn Error>>
-where
-    V: FnOnce(&[u8]) -> std::io::Result<()>,
-    F: FnOnce() -> std::io::Result<()>,
-{
-    let parent = preset_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let sidecar_parent = sidecar_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    if parent != sidecar_parent {
-        return Err("profiled APO preset and sidecar must share a directory".into());
-    }
-
-    let staging = autoeq_artifacts::ArtifactBundleStaging::new(parent)?;
-    let staged_preset = staging.member_path(Path::new("preset.txt"))?;
-    let staged_sidecar = staging.member_path(Path::new("provenance.json"))?;
-    write_staged_file(&staged_preset, preset_bytes).await?;
-    write_staged_file(&staged_sidecar, sidecar_bytes).await?;
-    let staged_preset_bytes = fs::read(&staged_preset).await?;
-    let staged_sidecar_bytes = fs::read(&staged_sidecar).await?;
-    verify_staged_preset(&staged_preset_bytes)?;
-    autoeq::workflow::verify_apo_preset_binding(&staged_preset_bytes, &staged_sidecar_bytes)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-
-    // Read the existing preset with a hard byte limit before publishing so a
-    // failed second rename can restore the prior file without an unbounded read.
-    let previous_preset = read_existing_product_file_bounded(preset_path, 16 * 1024 * 1024).await?;
-    autoeq_artifacts::write_file_atomically(preset_path, &staged_preset_bytes)?;
-
-    let sidecar_publish = before_sidecar_publish().and_then(|()| {
-        autoeq_artifacts::write_file_atomically(sidecar_path, &staged_sidecar_bytes)
-    });
-    if let Err(publish_error) = sidecar_publish {
-        if let Err(rollback_error) = rollback_profiled_preset_if_unchanged(
-            preset_path,
-            previous_preset.as_deref(),
-            &staged_preset_bytes,
-        )
-        .await
-        {
-            return Err(format!(
-                "failed to publish product provenance sidecar ({publish_error}); failed to restore the prior APO preset ({rollback_error})"
-            )
-            .into());
-        }
-        return Err(format!(
-            "failed to publish product provenance sidecar; prior APO preset was restored: {publish_error}"
-        )
-        .into());
-    }
-    Ok(())
-}
-
-async fn publish_profiled_pair(
-    preset_path: &Path,
-    preset_bytes: &[u8],
-    sidecar_path: &Path,
-    sidecar_bytes: &[u8],
-    verify_staged_preset: impl FnOnce(&[u8]) -> std::io::Result<()>,
-) -> Result<(), Box<dyn Error>> {
-    publish_profiled_pair_with_hooks(
-        preset_path,
-        preset_bytes,
-        sidecar_path,
-        sidecar_bytes,
-        verify_staged_preset,
-        || Ok(()),
-    )
-    .await
-}
-
-#[cfg(test)]
-pub(super) async fn publish_profiled_pair_with_test_hook<F>(
-    preset_path: &Path,
-    preset_bytes: &[u8],
-    sidecar_path: &Path,
-    sidecar_bytes: &[u8],
-    before_sidecar_publish: F,
-) -> Result<(), Box<dyn Error>>
-where
-    F: FnOnce() -> std::io::Result<()>,
-{
-    publish_profiled_pair_with_hook(
-        preset_path,
-        preset_bytes,
-        sidecar_path,
-        sidecar_bytes,
-        before_sidecar_publish,
-    )
-    .await
 }
 
 impl ParetoExport {
@@ -817,7 +641,7 @@ pub(super) async fn save_profiled_apo_to_file(
                 "objective_max_db": context.effective_envelope.objective_max_db,
                 "composite_band_hz": context.effective_envelope.composite_band_hz,
                 "composite_grid_point_count": context.effective_envelope.composite_frequencies_hz.len(),
-                "composite_grid_sha256_le_f64": autoeq_artifacts::sha256_hex(&composite_frequency_bytes)
+                "composite_grid_sha256_le_f64": autoeq::workflow::product_bytes_sha256_hex(&composite_frequency_bytes)
             },
             "source_and_serialized_candidates_checked": true,
             "frequency_inverse_transform_allowance": FREQUENCY_BOUND_INVERSE_EPS,
@@ -831,7 +655,7 @@ pub(super) async fn save_profiled_apo_to_file(
             "gain_decimal_places": 2,
             "preamp_decimal_places": 1,
             "realized_preamp_db": emitted_text.preamp_db,
-            "preset_sha256": autoeq_artifacts::sha256_hex(&preset_bytes),
+            "preset_sha256": autoeq::workflow::product_bytes_sha256_hex(&preset_bytes),
             "max_filter_transfer_delta_db": context.max_filter_transfer_delta_db,
             "verified_output": "Equalizer APO text preset in the checked profiled subset",
             "emitted_text_verification": {
@@ -859,7 +683,7 @@ pub(super) async fn save_profiled_apo_to_file(
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
     autoeq::workflow::verify_apo_preset_binding(&preset_bytes, &manifest_bytes)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    publish_profiled_pair(
+    autoeq::workflow::publish_apo_preset_pair(
         &file_path,
         &preset_bytes,
         &manifest_path,
@@ -875,8 +699,7 @@ pub(super) async fn save_profiled_apo_to_file(
             .map(|_| ())
             .map_err(std::io::Error::other)
         },
-    )
-    .await?;
+    )?;
     crate::qa_println!(
         args,
         "🕶 Profiled APO preset saved to: {}",

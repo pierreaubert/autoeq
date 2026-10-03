@@ -2190,3 +2190,23 @@ capability serialization. Validation passed: targeted rustfmt checks on the
 three Rust files, `git diff --check`, and
 `cargo check --locked --offline -p roomeq-export --lib` (11.66 seconds, existing
 audit target). No new consumer execution or import acceptance is claimed.
+
+### A07: independent fixture provenance review (2026-10-03)
+
+Root inspected the fixed benchmark manifest and all declared source bytes from
+the shared-pipeline harness worktree. All four 8361A held-out files match the
+checked-in generator's rounded frequency, magnitude, and phase formulas for
+every row. Both headphone ear series and all six room series have finite,
+strictly increasing frequency samples covering their declared optimization
+bands and the 425 Hz normalization reference. Eleven source files were hashed
+and remained unchanged during inspection. This confirms derived-curve
+robustness evidence only; no independent measured seats or hardware evidence
+were added.
+
+Receipt: `/Users/pierre/a07-benchmark-fixture-independent-review.json`, SHA-256
+`d1cb1903064603048100c991e1e8503c3e496d50e604136b9263707aee7006a0`.
+
+Review also identified two harness requirements before running the production
+matrix: reject duplicate case/seed/spec identities and retain the planned cell
+inventory; parse and hash the same retained source byte buffers. The worker
+implementation is in progress. No full matrix result is claimed.

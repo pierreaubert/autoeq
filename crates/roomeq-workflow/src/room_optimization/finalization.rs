@@ -35,6 +35,16 @@ struct DiagnosticGraphHashes {
     playback_projection_sha256: String,
 }
 
+struct CorrectionSafetyGateContext<'a> {
+    config: &'a RoomConfig,
+    sample_rate: f64,
+    smoothing_n: usize,
+    evaluation_band: (f64, f64),
+    sidecar_dir: &'a Path,
+    processing_mode: ProcessingMode,
+    group_delay_budget_ms: Option<f64>,
+}
+
 fn diagnostic_result_value(result: &RoomOptimizationResult) -> Result<serde_json::Value> {
     let channel_results: std::collections::BTreeMap<_, _> = result
         .channel_results
@@ -266,6 +276,105 @@ fn failed(message: impl Into<String>) -> AutoeqError {
     AutoeqError::OptimizationFailed {
         message: message.into(),
     }
+}
+
+fn finalizer_signal_path_projection(result: &RoomOptimizationResult) -> serde_json::Value {
+    let global_plugins = result.to_dsp_chain_output().global_plugins;
+    let channels: std::collections::BTreeMap<_, _> = result
+        .channels
+        .iter()
+        .map(|(name, chain)| {
+            let drivers = chain.drivers.as_ref().map(|drivers| {
+                drivers
+                    .iter()
+                    .map(|driver| {
+                        serde_json::json!({
+                            "name": driver.name,
+                            "index": driver.index,
+                            "plugins": &driver.plugins,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            (
+                name.clone(),
+                serde_json::json!({
+                    "plugins": &chain.plugins,
+                    "drivers": drivers,
+                }),
+            )
+        })
+        .collect();
+    let bass_routing = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|report| report.routing_graph.as_ref())
+        .map(|graph| {
+            serde_json::json!({
+                "input_trim_db": &graph.input_trim_db,
+                "matrix": &graph.matrix,
+            })
+        });
+    serde_json::json!({
+        "global_plugins": global_plugins,
+        "channels": channels,
+        "bass_routing_calibration": bass_routing,
+    })
+}
+
+/// Apply the correction safety gate and refresh derived Home Cinema gains if
+/// that gate changed the candidate's signal path.
+fn apply_safety_gate_with_level_recalibration(
+    result: &mut RoomOptimizationResult,
+    context: &CorrectionSafetyGateContext<'_>,
+) -> Result<()> {
+    let before_gate = finalizer_signal_path_projection(result);
+    room_optimization_result::apply_final_correction_safety_gate(
+        result,
+        context.sample_rate,
+        context.smoothing_n,
+        context.evaluation_band,
+        context.sidecar_dir,
+        context.processing_mode.clone(),
+        context.group_delay_budget_ms,
+    );
+    if before_gate == finalizer_signal_path_projection(result) {
+        return Ok(());
+    }
+
+    if !crate::topology::recalibrate_post_dsp_levels(
+        result,
+        context.config,
+        context.sample_rate,
+        context.sidecar_dir,
+    )? {
+        return Ok(());
+    }
+    refresh_responses(result, context.sample_rate, context.sidecar_dir)?;
+    refresh_final_reports(
+        result,
+        context.config,
+        context.sample_rate,
+        context.sidecar_dir,
+    );
+
+    let before_final_gate = finalizer_signal_path_projection(result);
+    room_optimization_result::apply_final_correction_safety_gate(
+        result,
+        context.sample_rate,
+        context.smoothing_n,
+        context.evaluation_band,
+        context.sidecar_dir,
+        context.processing_mode.clone(),
+        context.group_delay_budget_ms,
+    );
+    if before_final_gate != finalizer_signal_path_projection(result) {
+        return Err(failed(
+            "correction safety gate changed the signal path after post-rollback level recalibration; refusing the candidate",
+        ));
+    }
+    Ok(())
 }
 
 fn output_safety_attenuation_budget_checks(
@@ -1107,15 +1216,16 @@ fn select_inner(
                 }
                 refresh_responses(&mut candidate, fs, dir)?;
                 refresh_final_reports(&mut candidate, config, fs, dir);
-                room_optimization_result::apply_final_correction_safety_gate(
-                    &mut candidate,
-                    fs,
-                    config.optimizer.smooth_n,
-                    (config.optimizer.min_freq, config.optimizer.max_freq),
-                    dir,
-                    config.optimizer.processing_mode.clone(),
-                    group_delay_budget_ms(config),
-                );
+                let safety_gate = CorrectionSafetyGateContext {
+                    config,
+                    sample_rate: fs,
+                    smoothing_n: config.optimizer.smooth_n,
+                    evaluation_band: (config.optimizer.min_freq, config.optimizer.max_freq),
+                    sidecar_dir: dir,
+                    processing_mode: config.optimizer.processing_mode.clone(),
+                    group_delay_budget_ms: group_delay_budget_ms(config),
+                };
+                apply_safety_gate_with_level_recalibration(&mut candidate, &safety_gate)?;
                 refresh_responses(&mut candidate, fs, dir)?;
             }
             if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
@@ -1698,7 +1808,7 @@ fn baseline_crossover_residuals(
 /// Publish the exact correction-free graph used as the replay baseline.
 /// Missing measurements remain an evidence limitation, with no accepted claim.
 #[allow(clippy::too_many_arguments)]
-fn publish_baseline(
+pub(super) fn publish_baseline(
     result: &mut RoomOptimizationResult,
     captures: &[seat_replay::Capture],
     held_out: &HashMap<String, Vec<Curve>>,
@@ -1712,8 +1822,10 @@ fn publish_baseline(
     let mut baseline = result.clone();
     seat_replay::restore_structural_baseline(&mut baseline);
     // The discarded correction and its derived trims no longer describe this
-    // graph. Reconstruct playback before measuring levels; never retain a
+    // graph. Recompute the topology-owned trims from the structural candidate
+    // before rebuilding playback or measuring levels. Never retain a
     // successful alignment report from a different candidate.
+    crate::topology::recalibrate_post_dsp_levels(&mut baseline, config, fs, dir)?;
     refresh_responses(&mut baseline, fs, dir)?;
     // Alignment is a candidate operation. A rejected correction must not make
     // the structural fallback disappear merely because its own optional level
@@ -1986,6 +2098,7 @@ fn prepare_candidate(
             store,
         )?;
     }
+    crate::topology::recalibrate_post_dsp_levels(&mut result, config, fs, dir)?;
     rebuild(&mut result, config, validation, fs, dir)?;
     sub_output_limiter::install(&mut result, config, fs)?;
     refresh_responses(&mut result, fs, dir)?;
@@ -2149,15 +2262,16 @@ pub(super) fn rebuild(
     // Repeating it before any graph mutation replays the same chain twice.
     refresh_final_reports(result, config, fs, dir);
     let temporal_before_gate = temporal_replay_inputs(result);
-    room_optimization_result::apply_final_correction_safety_gate(
-        result,
-        fs,
-        config.optimizer.smooth_n,
-        (config.optimizer.min_freq, config.optimizer.max_freq),
-        dir,
-        config.optimizer.processing_mode.clone(),
-        group_delay_budget_ms(config),
-    );
+    let safety_gate = CorrectionSafetyGateContext {
+        config,
+        sample_rate: fs,
+        smoothing_n: config.optimizer.smooth_n,
+        evaluation_band: (config.optimizer.min_freq, config.optimizer.max_freq),
+        sidecar_dir: dir,
+        processing_mode: config.optimizer.processing_mode.clone(),
+        group_delay_budget_ms: group_delay_budget_ms(config),
+    };
+    apply_safety_gate_with_level_recalibration(result, &safety_gate)?;
     refresh_responses(result, fs, dir)?;
     // The safety gate does not rewrite sidecars. Reuse the just-built evidence
     // only when the full channels, source curves, and retained FIRs agree.

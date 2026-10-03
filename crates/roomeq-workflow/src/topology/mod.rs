@@ -19,6 +19,7 @@ pub(crate) use home_cinema::RoleSpliceOutcome;
 pub(crate) use home_cinema::collect_routed_splice_outcomes;
 pub(crate) use home_cinema::crossover_timing_refused;
 pub(crate) use home_cinema::main_level_alignment_band;
+pub(crate) use home_cinema::recalibrate_post_dsp_levels;
 pub(crate) use home_cinema::reconstruct_deployed_snapshot_best_effort;
 pub(crate) use home_cinema::reconstruct_deployed_source_curves;
 pub(crate) use home_cinema::reconstruct_deployed_source_curves_unenforced;

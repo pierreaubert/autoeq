@@ -1059,6 +1059,7 @@ mod tests {
             routes,
             matrix: None,
             input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: Vec::new(),
         };
         let expanded = expand_routed_electrical_paths(&channels, &graph).unwrap();
@@ -1176,6 +1177,7 @@ mod tests {
             routes,
             matrix: None,
             input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: Vec::new(),
         };
         result.metadata.bass_management = Some(
@@ -1311,6 +1313,7 @@ mod tests {
             }],
             matrix: None,
             input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: Vec::new(),
         };
         let expanded = expand_routed_electrical_paths(&fixture.channels, &graph).unwrap();

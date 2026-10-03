@@ -21,7 +21,7 @@ cannot replace them.
 | A04 measurement/live analysis | Partial | Live calibration implemented and bounded synthetic ESS diagnostic passes; production estimator/dependency integration, broader validity and hardware evidence remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
-| A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; independent delivered-transfer checks, reusable analysis gate, public BO dependency integration and justified presets remain |
+| A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently; reusable analysis gate, public BO dependency integration and justified presets remain |
 | A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
 | A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
@@ -2538,3 +2538,52 @@ calibration directory exists with microphone-specific orientation files.
 Device and calibration selections remain parameters; these unrelated devices do
 not satisfy the requested RME/UMIK capture evidence. Hardware-dependent acceptance
 remains pending while independent backend verification continues.
+
+
+### A09 retained Genelec failure separated by cause (2026-10-03)
+
+Read-only source and retained-graph review identifies different output protection
+policies in the cross-mode fixture: IIR enables a runtime limiter and compensating
+5 ms delays; the other three modes apply a tagged 19.5852786 dB Sub1 static cut.
+FIR/Hybrid/MixedPhase pairwise bass deltas are zero, while each IIR-versus-static
+comparison repeats median 4.535255 dB / maximum 9.650940 dB. This delivered-chain
+failure stays intact. A separate matched-static-policy graph diagnostic is being
+prepared on copies; it will not replace the original fixture or failure receipt.
+
+The 12 dB electrical failure is a sampled small-signal route envelope for ten
+unit-peak inputs with independent phases. It deliberately retains pre-limiter
+linear evidence; maximum individual filter-section gain is zero. Independent DC
+route decomposition sums to 9.53375265585 amplitude / 19.58527760759 dB and agrees
+with the retained assessment within 3.98e-12 dB. Evidence:
+`/Volumes/home_tmp/tmp/autoeq-a09-bass-sum-diagnostic-20261002/results.json` and
+`/Users/pierre/a09-retained-parity-independent.json`.
+This is not an observed programme peak or a physical output-safety measurement.
+Neither the unit-input envelope nor the 12 dB limit is relaxed. For this fixed
+linear graph, at least 7.5852776 dB static attenuation is necessary to meet that
+12 dB bound; a hypothetical 3 dB static-cut budget cannot satisfy both. That
+conditional statement does not prove a new optimization or physical system
+infeasible. The actual fixture has no configured static-cut budget.
+
+
+### A07 independent release PEQ response check (2026-10-03)
+
+The independent binary64 cookbook implementation verifies **all 746 completed
+PEQ cascades** on their scored grids. Maximum discrepancies in stored minimum,
+maximum and RMS transfer summaries are respectively **2.81e-10, 5.85e-10 and
+3.32e-11 dB**, below the predeclared **1e-6 dB** tolerance. It checks all 841 result
+identities and recomputes finite transfers and stage bounds for **166 Pareto
+reports / 882 candidate rows**. The candidate schema has no per-candidate transfer
+summary for equality comparison; no independent Pareto-objective claim is made.
+Analytic controls include unity, signed center gain, reciprocal sections, and a
+stored-summary mutation exercised through the actual comparator.
+
+Receipt `/Users/pierre/a07_independent_peq_transfer_release_v3.json`, SHA-256
+`de1eda3102509de02d301edb5a93bdfe171a8df15e7d01422a4fcff192ca8c0b`,
+reports zero issues. Script SHA-256:
+`6d088ee1ced7cab7dd0a8c7f18c6705f22b86cb6b2625dc1e22f1572ee1ad8ee`.
+All 4208 frozen run files stayed unchanged; input source hashes matched.
+This checks sampled 48 kHz peaking-filter responses, not continuous-frequency
+extrema, phase/timing agreement, PCM consumers, other filter families, or physical
+playback. The failed v2 receipt is retained: its 1682 identity errors came solely
+from comparing pretty JSON bytes with hashes defined over compact field-order
+JSON. V3 keeps raw-file hashes separate and validates the defined spec digest.

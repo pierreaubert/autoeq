@@ -80,6 +80,7 @@ pub enum ProductRenderer {
 /// Schema version for the machine-readable product renderer capability report.
 pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 3;
 
+// Match the former CLI rollback snapshot cap so publication memory remains bounded.
 const PRODUCT_PAIR_MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Frozen Equalizer APO source revision used to verify the profiled shelf
@@ -1010,6 +1011,12 @@ where
 {
     let parent = output_parent(preset_path);
     let sidecar_parent = output_parent(sidecar_path);
+    if parent != sidecar_parent {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "profiled APO preset and sidecar must share a directory",
+        ));
+    }
     let canonical_parent = fs::canonicalize(parent)?;
     if canonical_parent != fs::canonicalize(sidecar_parent)? {
         return Err(io::Error::new(
@@ -1710,6 +1717,79 @@ mod tests {
                 .unwrap_err();
         assert!(error.to_string().contains("must be distinct files"));
         assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
+
+        let other_parent = tempfile::tempdir().unwrap();
+        let different_parent_sidecar = other_parent.path().join("provenance.json");
+        let error = publish_apo_preset_pair(
+            &preset_path,
+            new_preset,
+            &different_parent_sidecar,
+            &new_sidecar,
+            |_| Ok(()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("must share a directory"));
+        assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
+        assert!(!different_parent_sidecar.exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+
+            let symlinked_parent = directory.path().join("same-parent-alias");
+            symlink(directory.path(), &symlinked_parent).unwrap();
+            let symlink_parent_sidecar = symlinked_parent.join("preset.provenance.json");
+            let error = publish_apo_preset_pair(
+                &preset_path,
+                new_preset,
+                &symlink_parent_sidecar,
+                &new_sidecar,
+                |_| Ok(()),
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("must share a directory"));
+            assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
+            assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn product_pair_stages_and_publishes_when_both_paths_use_the_same_symlinked_parent() {
+        use std::os::unix::fs::symlink;
+
+        let temporary = tempfile::tempdir().unwrap();
+        let real_parent = temporary.path().join("real-output");
+        fs::create_dir(&real_parent).unwrap();
+        let symlinked_parent = temporary.path().join("output-alias");
+        symlink(&real_parent, &symlinked_parent).unwrap();
+        let preset_path = symlinked_parent.join("preset.txt");
+        let sidecar_path = symlinked_parent.join("provenance.json");
+        let preset_bytes = b"preset through symlinked parent\n";
+        let sidecar_bytes = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(preset_bytes)
+            }
+        }))
+        .unwrap();
+
+        publish_apo_preset_pair(
+            &preset_path,
+            preset_bytes,
+            &sidecar_path,
+            &sidecar_bytes,
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(real_parent.join("preset.txt")).unwrap(),
+            preset_bytes
+        );
+        assert_eq!(
+            fs::read(real_parent.join("provenance.json")).unwrap(),
+            sidecar_bytes
+        );
     }
 
     fn rig(kind: MeasurementRigKind, domain: &str, id: &str) -> MeasurementRigIdentity {

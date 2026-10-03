@@ -1547,3 +1547,53 @@ not their acoustic acceptance. The full mode/rate/time and deployed-chain
 requirements remain open.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a09-comparability-evidence-20261003-final2/`;
 root review: `/Users/pierre/a09-comparability-independent-review.json`.
+
+
+## Production CLI interruption and exact-resume witness
+
+An isolated CLI integration test runs the production binary through an
+uninterrupted fit, SIGINT pause, fresh-process resume, terminal resume and
+changed-input refusal. The deterministic analytic input has 4,096 frequency
+samples, five peak filters, seed 91,827 and a requested 1,057-evaluation budget.
+The requested population of 32 resolves to 60 for the 15-dimensional fit;
+the uninterrupted run completes 16 generations and 1,021 evaluations.
+SIGINT pauses at generation two after 181 evaluations with a durable
+nonterminal checkpoint. Resume matches every DE checkpoint field and all
+outer persisted fields except the write timestamp. APO preamp and five filter
+rows match; terminal resume publishes the normal HTML report. Pause and
+changed-input refusal preserve all four prior output files.
+
+The first actual-process tests falsely timed out because their child guard
+discarded an exit status observed during the optional second-SIGINT check.
+A later bounded wait then polled an empty guard. The guard now caches terminal
+status, with a deterministic early-exit regression. The original failed logs
+remain preserved; they do not establish a production exit hang. The fixture,
+optimizer budget and 30-second pause hang guard were unchanged.
+
+Root independently compared the full saved state, all eight prior-output
+sentinels, APO rows and retained command/artifact hashes. This witness uses a
+command-only local math pause override. Its test and production pause sources
+remain isolated pending public dependency integration; it does not close the
+broader recovery or hardware matrix.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a08-cli-sigint-e2e-evidence-20261003/`;
+root review: `/Users/pierre/a08-cli-sigint-e2e-independent-review.json`.
+
+## Installed REW API capability refusal
+
+A bounded headless startup of the exact installed REW 5.31.3 launcher and JAR
+used `-noaudio`, private preference files and private Java home/temp paths.
+Inherited HOME and TMPDIR were preserved. REW's private startup log reports
+`API not supported in this build`; API readiness was unavailable. The owned
+process was terminated and reaped, both checked ports were released and no
+REW process remained. Before/after hashes of the checked user preference/log
+paths match. Root independently verified the bundle/script hashes, both
+bounded stream logs, the capability-refusal log and 17 recorded user-path
+entries, including current hashes of 11 files. The first report omitted the
+final readiness exception; the retained application log supplies the specific
+build refusal.
+
+This supplies no REW parsing or engine PCM acceptance. The proposed text-parser
+and mapped-settings engine witness remains open. No measurement, playback,
+installed-app replacement or UI work was performed.
+Evidence: `/private/tmp/rew-a11-witness-r97jthw7/`;
+root review: `/Users/pierre/a11-rew-preflight-independent-review.json`.

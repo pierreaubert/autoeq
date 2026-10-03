@@ -5,6 +5,7 @@
 
 pub use crate::optim::setup::*;
 
+mod atomic_file;
 pub mod exact_resume;
 pub mod product;
 pub mod resume;

@@ -3100,11 +3100,8 @@ mod tests {
 
     #[test]
     fn final_safety_gate_rejects_selected_stopped_candidate() {
-        use autoeq_optim::optim::run_control::OptimizerRunControl;
-        use std::num::NonZeroUsize;
-
         let mut result = single_channel_room_result("left");
-        let mut evidence = OptimizerRunEvidence::from_backend_result(
+        let evidence = OptimizerRunEvidence::from_backend_result(
             "autoeq:de",
             Ok(("stopped by callback".to_string(), 0.5)),
             &[0.0],
@@ -3113,14 +3110,15 @@ mod tests {
             40,
             Some(7),
         );
-        // Legacy status text alone is not evidence of user cancellation.
-        let control = OptimizerRunControl::new(NonZeroUsize::new(40).unwrap());
-        control.request_cancel();
-        evidence.apply_run_control(&control.snapshot());
-        assert_eq!(
-            evidence.termination,
-            autoeq_optim::optim::OptimizerTermination::UserStopped
-        );
+        // The optimizer crate tests that run control creates this typed result.
+        // This workflow test consumes the serialized boundary without taking
+        // a test-only dependency on the optimizer implementation.
+        let mut evidence_json = serde_json::to_value(evidence)
+            .expect("serialize optimizer evidence fixture");
+        evidence_json["termination"] = serde_json::json!("user_stopped");
+        evidence_json["confidence"] = serde_json::json!("unusable");
+        let evidence = serde_json::from_value(evidence_json)
+            .expect("deserialize typed stopped optimizer evidence");
         result
             .channel_results
             .get_mut("left")

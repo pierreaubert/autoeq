@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::error::Error;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 /// Top-level product workflow selector. Room correction is owned by the
@@ -77,6 +79,8 @@ pub enum ProductRenderer {
 
 /// Schema version for the machine-readable product renderer capability report.
 pub const PRODUCT_RENDERER_CAPABILITIES_SCHEMA_VERSION: u32 = 3;
+
+const PRODUCT_PAIR_MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Frozen Equalizer APO source revision used to verify the profiled shelf
 /// coefficient mapping. This is a source-derived check, not a runtime claim.
@@ -928,10 +932,23 @@ pub struct ProductRequest {
     pub reject_declared_target_mismatch: bool,
 }
 
+/// Return the lowercase SHA-256 digest of product output bytes.
+pub fn product_bytes_sha256_hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 /// Verify that an APO provenance sidecar is bound to these exact preset bytes.
 /// Call this before trusting the sidecar's device or realized-filter metadata.
 /// The check validates content identity; it does not make two-file publication
 /// power-loss atomic.
+///
+/// # Errors
+///
+/// Returns an error when the sidecar is malformed, lacks a preset digest, or
+/// is bound to different preset bytes.
 pub fn verify_apo_preset_binding(preset_bytes: &[u8], sidecar_bytes: &[u8]) -> Result<(), String> {
     let sidecar: serde_json::Value = serde_json::from_slice(sidecar_bytes)
         .map_err(|error| format!("invalid product provenance sidecar: {error}"))?;
@@ -940,14 +957,222 @@ pub fn verify_apo_preset_binding(preset_bytes: &[u8], sidecar_bytes: &[u8]) -> R
         .and_then(|serialization| serialization.get("preset_sha256"))
         .and_then(serde_json::Value::as_str)
         .ok_or_else(|| "product sidecar has no APO preset SHA-256 binding".to_owned())?;
-    let actual_hash = Sha256::digest(preset_bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
+    let actual_hash = product_bytes_sha256_hex(preset_bytes);
     if recorded_hash != actual_hash {
         return Err("product sidecar SHA-256 does not match the APO preset bytes".into());
     }
     Ok(())
+}
+
+/// Publish a verified APO preset and its provenance sidecar as one product operation.
+///
+/// Both files are staged and checked before either destination changes. If a
+/// returned write error follows a successful first replacement, the previous
+/// file is restored only while the destination still contains transaction
+/// bytes. The two renames are not power-loss atomic as a pair.
+///
+/// # Errors
+///
+/// Returns an error when paths are invalid, staging or verification fails, an
+/// output exceeds the rollback limit, or publication/rollback encounters a
+/// filesystem error or concurrent replacement.
+pub fn publish_apo_preset_pair<V>(
+    preset_path: &Path,
+    preset_bytes: &[u8],
+    sidecar_path: &Path,
+    sidecar_bytes: &[u8],
+    verify_staged_preset: V,
+) -> io::Result<()>
+where
+    V: FnOnce(&[u8]) -> io::Result<()>,
+{
+    publish_apo_preset_pair_with_hook(
+        preset_path,
+        preset_bytes,
+        sidecar_path,
+        sidecar_bytes,
+        verify_staged_preset,
+        write_product_output,
+    )
+}
+
+fn publish_apo_preset_pair_with_hook<V, F>(
+    preset_path: &Path,
+    preset_bytes: &[u8],
+    sidecar_path: &Path,
+    sidecar_bytes: &[u8],
+    verify_staged_preset: V,
+    publish_sidecar: F,
+) -> io::Result<()>
+where
+    V: FnOnce(&[u8]) -> io::Result<()>,
+    F: FnOnce(&Path, &[u8]) -> io::Result<()>,
+{
+    let parent = output_parent(preset_path);
+    let sidecar_parent = output_parent(sidecar_path);
+    let canonical_parent = fs::canonicalize(parent)?;
+    if canonical_parent != fs::canonicalize(sidecar_parent)? {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "profiled APO preset and sidecar must share a directory",
+        ));
+    }
+    let preset_name = preset_path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "APO preset path has no file name",
+        )
+    })?;
+    let sidecar_name = sidecar_path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "APO sidecar path has no file name",
+        )
+    })?;
+    if canonical_parent.join(preset_name) == canonical_parent.join(sidecar_name) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "profiled APO preset and sidecar must be distinct files",
+        ));
+    }
+
+    let staging = tempfile::Builder::new()
+        .prefix(".autoeq-product-pair-")
+        .tempdir_in(parent)?;
+    let staged_preset = staging.path().join("preset.txt");
+    let staged_sidecar = staging.path().join("provenance.json");
+    write_staged_product_file(&staged_preset, preset_bytes)?;
+    write_staged_product_file(&staged_sidecar, sidecar_bytes)?;
+    let staged_preset_bytes = read_product_file_bounded(&staged_preset)?;
+    let staged_sidecar_bytes = read_product_file_bounded(&staged_sidecar)?;
+    verify_staged_preset(&staged_preset_bytes)?;
+    verify_apo_preset_binding(&staged_preset_bytes, &staged_sidecar_bytes)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+
+    let previous_preset = read_existing_product_file(preset_path)?;
+    let previous_sidecar = read_existing_product_file(sidecar_path)?;
+    if let Err(publish_error) = write_product_output(preset_path, &staged_preset_bytes) {
+        return Err(rollback_product_publication_error(
+            "APO preset",
+            publish_error,
+            restore_product_file_if_unchanged(
+                preset_path,
+                previous_preset.as_deref(),
+                &staged_preset_bytes,
+            ),
+        ));
+    }
+
+    let sidecar_publish = publish_sidecar(sidecar_path, &staged_sidecar_bytes);
+    if let Err(publish_error) = sidecar_publish {
+        let sidecar_rollback = restore_product_file_if_unchanged(
+            sidecar_path,
+            previous_sidecar.as_deref(),
+            &staged_sidecar_bytes,
+        );
+        if let Err(rollback_error) = sidecar_rollback {
+            return Err(io::Error::other(format!(
+                "failed to publish product provenance sidecar ({publish_error}); sidecar changed concurrently or could not be restored ({rollback_error}); APO preset was left untouched"
+            )));
+        }
+        if let Err(rollback_error) = restore_product_file_if_unchanged(
+            preset_path,
+            previous_preset.as_deref(),
+            &staged_preset_bytes,
+        ) {
+            return Err(io::Error::other(format!(
+                "failed to publish product provenance sidecar ({publish_error}); failed to restore the prior APO preset ({rollback_error})"
+            )));
+        }
+        return Err(io::Error::other(format!(
+            "failed to publish product provenance sidecar; prior APO preset pair was restored: {publish_error}"
+        )));
+    }
+    Ok(())
+}
+
+fn rollback_product_publication_error(
+    label: &str,
+    publish_error: io::Error,
+    rollback_result: io::Result<()>,
+) -> io::Error {
+    match rollback_result {
+        Ok(()) => io::Error::new(
+            publish_error.kind(),
+            format!("failed to publish {label}; prior file was restored: {publish_error}"),
+        ),
+        Err(rollback_error) => io::Error::other(format!(
+            "failed to publish {label} ({publish_error}); failed to restore the prior file ({rollback_error})"
+        )),
+    }
+}
+
+fn output_parent(path: &Path) -> &Path {
+    path.parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+}
+
+fn write_staged_product_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    if bytes.len() as u64 > PRODUCT_PAIR_MAX_FILE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "staged product output exceeds the 16 MiB limit",
+        ));
+    }
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(bytes)?;
+    file.sync_all()
+}
+
+fn read_product_file_bounded(path: &Path) -> io::Result<Vec<u8>> {
+    let file = File::open(path)?;
+    let mut bytes = Vec::new();
+    file.take(PRODUCT_PAIR_MAX_FILE_BYTES.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > PRODUCT_PAIR_MAX_FILE_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "product output exceeds the 16 MiB limit",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn read_existing_product_file(path: &Path) -> io::Result<Option<Vec<u8>>> {
+    match read_product_file_bounded(path) {
+        Ok(bytes) => Ok(Some(bytes)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error),
+    }
+}
+
+fn write_product_output(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    super::atomic_file::replace_atomically(path, |file| file.write_all(bytes))
+}
+
+fn restore_product_file_if_unchanged(
+    path: &Path,
+    previous: Option<&[u8]>,
+    transaction_bytes: &[u8],
+) -> io::Result<()> {
+    let current = read_existing_product_file(path)?;
+    if current.as_deref() == previous {
+        return Ok(());
+    }
+    if current.as_deref() != Some(transaction_bytes) {
+        return Err(io::Error::other(format!(
+            "{} changed concurrently; rollback left the newer file untouched",
+            path.display()
+        )));
+    }
+    match previous {
+        Some(previous) => write_product_output(path, previous),
+        None => {
+            fs::remove_file(path)?;
+            super::atomic_file::sync_parent_directory(path)
+        }
+    }
 }
 
 /// Adapter bundle used to keep API/cache sources replaceable in tests and
@@ -1347,10 +1572,7 @@ mod tests {
         let preset = b"GraphicEQ: 100 1\n";
         let sidecar = serde_json::to_vec(&serde_json::json!({
             "apo_serialization": {
-                "preset_sha256": Sha256::digest(preset)
-                    .iter()
-                    .map(|byte| format!("{byte:02x}"))
-                    .collect::<String>()
+                "preset_sha256": product_bytes_sha256_hex(preset)
             }
         }))
         .unwrap();
@@ -1358,6 +1580,136 @@ mod tests {
         verify_apo_preset_binding(preset, &sidecar).unwrap();
         assert!(verify_apo_preset_binding(b"GraphicEQ: 100 2\n", &sidecar).is_err());
         assert!(verify_apo_preset_binding(preset, b"{}").is_err());
+    }
+
+    #[test]
+    fn verified_product_pair_restores_both_files_after_second_publish_failure() {
+        let directory = tempfile::tempdir().unwrap();
+        let preset_path = directory.path().join("preset.txt");
+        let sidecar_path = directory.path().join("preset.provenance.json");
+        let old_preset = b"old preset\n";
+        let old_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(old_preset)
+            }
+        }))
+        .unwrap();
+        fs::write(&preset_path, old_preset).unwrap();
+        fs::write(&sidecar_path, &old_sidecar).unwrap();
+
+        let new_preset = b"new preset\n";
+        let new_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(new_preset)
+            }
+        }))
+        .unwrap();
+        let error = publish_apo_preset_pair_with_hook(
+            &preset_path,
+            new_preset,
+            &sidecar_path,
+            &new_sidecar,
+            |_| Ok(()),
+            |path, bytes| {
+                write_product_output(path, bytes)?;
+                Err(io::Error::other("injected post-install durability error"))
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("prior APO preset pair was restored")
+        );
+        assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
+        assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
+        verify_apo_preset_binding(
+            &fs::read(&preset_path).unwrap(),
+            &fs::read(&sidecar_path).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn product_pair_rollback_does_not_overwrite_concurrent_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let preset_path = directory.path().join("preset.txt");
+        let sidecar_path = directory.path().join("preset.provenance.json");
+        let old_preset = b"old preset\n";
+        let old_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(old_preset)
+            }
+        }))
+        .unwrap();
+        fs::write(&preset_path, old_preset).unwrap();
+        fs::write(&sidecar_path, &old_sidecar).unwrap();
+
+        let new_preset = b"new preset\n";
+        let new_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(new_preset)
+            }
+        }))
+        .unwrap();
+        let concurrent_preset = b"concurrent preset\n";
+        let error = publish_apo_preset_pair_with_hook(
+            &preset_path,
+            new_preset,
+            &sidecar_path,
+            &new_sidecar,
+            |_| Ok(()),
+            |_, _| {
+                fs::write(&preset_path, concurrent_preset)?;
+                Err(io::Error::other("injected sidecar write failure"))
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("changed concurrently"));
+        assert_eq!(fs::read(&preset_path).unwrap(), concurrent_preset);
+        assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
+    }
+
+    #[test]
+    fn product_pair_refuses_aliases_and_preserves_prior_outputs_on_verification_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let preset_path = directory.path().join("preset.txt");
+        let old_preset = b"old preset\n";
+        fs::write(&preset_path, old_preset).unwrap();
+        let old_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(old_preset)
+            }
+        }))
+        .unwrap();
+        let sidecar_path = directory.path().join("preset.provenance.json");
+        fs::write(&sidecar_path, &old_sidecar).unwrap();
+
+        let new_preset = b"new preset\n";
+        let new_sidecar = serde_json::to_vec(&serde_json::json!({
+            "apo_serialization": {
+                "preset_sha256": product_bytes_sha256_hex(new_preset)
+            }
+        }))
+        .unwrap();
+        let error = publish_apo_preset_pair(
+            &preset_path,
+            new_preset,
+            &sidecar_path,
+            &new_sidecar,
+            |_| Err(io::Error::other("invalid preset")),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("invalid preset"));
+        assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
+        assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
+
+        let alias = directory.path().join("./preset.txt");
+        let error =
+            publish_apo_preset_pair(&preset_path, new_preset, &alias, &new_sidecar, |_| Ok(()))
+                .unwrap_err();
+        assert!(error.to_string().contains("must be distinct files"));
+        assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
     }
 
     fn rig(kind: MeasurementRigKind, domain: &str, id: &str) -> MeasurementRigIdentity {

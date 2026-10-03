@@ -1820,3 +1820,29 @@ Broader A07 preset coverage and the complete backend audit remain open.
 Evidence: `/Volumes/home_tmp/tmp/roomeq-cobra-evidence-20261003/`;
 root review: `/Users/pierre/roomeq-cobra-independent-review.json`
 (SHA-256 `5fde9893d0f2270c26dd6954aef8b43860c351504f1b1d8706cf5e0ead873127`).
+
+
+## Integrated COBRA bound refusal and stop-before-refinement guards
+
+COBRA follow-up `095cc5b`, integrated as `06bc8cdc`, rejects nonfinite scalar
+bounds before the unused initial-candidate clamp. Its full optimizer suite
+passes 371 tests, with strict scoped Clippy and selected-source format checks.
+The new refusal test proves scoring never begins for NaN or infinite bounds.
+
+Stop-admission candidate `9427e79` is integrated as `bcaae56a`. Single,
+adaptive and multi-measurement RoomEQ now return a typed observer-stop error
+immediately after global search, before candidate emission validation or
+optional local-refinement admission. Continue retains the refinement path.
+Root captured the previously missing negative-control log: removing only the
+two guards fails both stop tests with unusable-candidate validation errors.
+Restored source passes all four observer-filter tests. Existing engine-wide
+strict Clippy diagnostics remain outside these changed hunks; already-running
+local solvers are outside this admission guard.
+
+The combined integrated branch passes 6 COBRA tests, 4 observer tests, and all
+8 real CLI integration tests, including SIGINT/prior-bundle preservation and
+the loadable COBRA stereo bundle. Nineteen selected source/config identities
+match the reviewed candidates and remain unchanged across combined gates.
+Evidence: `/Volumes/home_tmp/tmp/roomeq-cobra-evidence-20261003/integrated/`
+and `/Volumes/home_tmp/tmp/room-pass-stop-root-evidence-20261003/`;
+root review: `/Users/pierre/roomeq-cobra-integrated-review.json`.

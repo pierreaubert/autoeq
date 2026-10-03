@@ -19,6 +19,19 @@ use roomeq_model::{
 };
 use std::collections::HashMap;
 
+fn diagnostic_workspace_root() -> anyhow::Result<std::path::PathBuf> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .canonicalize()?;
+    anyhow::ensure!(root.join("Cargo.lock").is_file());
+    anyhow::ensure!(
+        root.join("data_tests/roomeq/measured/5.1.4_genelec/recordings.json")
+            .is_file(),
+        "workspace root is missing the measured Genelec IIR input"
+    );
+    Ok(root)
+}
+
 use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
 
 #[test]
@@ -1331,6 +1344,36 @@ fn cross_mode_expected_channels_use_declared_logical_topology_roles() {
     assert_eq!(
         expected_parity_main_channels(&generic),
         ["front_left_large".to_string()].into_iter().collect()
+    );
+}
+
+#[test]
+#[ignore = "explicit one-mode measured diagnostic; run only after capture review"]
+fn a09_genelec_iir_finalization_diagnostic() {
+    let root = diagnostic_workspace_root().unwrap();
+    let evidence_parent = crate::qa_evidence_dir();
+    std::fs::create_dir_all(&evidence_parent).unwrap();
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let diagnostic_root = evidence_parent.join(format!(
+        "a09-finalization-diagnostic-{}-{nonce}",
+        std::process::id()
+    ));
+
+    super::run::finalization_diagnostic::run_one_iir(&root, &diagnostic_root, 600_000).unwrap();
+}
+
+#[test]
+fn iir_diagnostic_root_resolves_from_workspace_manifest() {
+    let root = diagnostic_workspace_root().unwrap();
+    assert!(root.join("Cargo.toml").is_file());
+    assert!(root.join("Cargo.lock").is_file());
+    assert!(root.join("crates/roomeq-qa/Cargo.toml").is_file());
+    assert!(
+        root.join("data_tests/roomeq/measured/5.1.4_genelec/recordings.json")
+            .is_file()
     );
 }
 

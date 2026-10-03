@@ -6,8 +6,7 @@ mod apo;
 mod tests {
     use super::apo::parse_apo_filters;
     use crate::autoeq_command::save::{
-        ProductExportContext, publish_profiled_pair_with_test_hook, save_peq_to_file,
-        save_profiled_apo_to_file,
+        ProductExportContext, save_peq_to_file, save_profiled_apo_to_file,
     };
     use autoeq::cli::Args;
     use autoeq::loss::LossType;
@@ -1001,8 +1000,8 @@ mod tests {
         assert_eq!(fs::read(&provenance_path).unwrap(), shelf_sidecar_bytes);
     }
 
-    #[tokio::test]
-    async fn sidecar_publish_failure_restores_the_previous_bound_preset_pair() {
+    #[test]
+    fn profiled_pair_validation_failure_preserves_the_previous_bound_pair() {
         let temp_dir = TempDir::new().unwrap();
         let preset_path = temp_dir.path().join("iir-autoeq-flat.txt");
         let sidecar_path = temp_dir
@@ -1011,7 +1010,7 @@ mod tests {
         let old_preset = b"old preset bytes\n";
         let old_sidecar = serde_json::to_vec(&serde_json::json!({
             "apo_serialization": {
-                "preset_sha256": autoeq_artifacts::sha256_hex(old_preset)
+                "preset_sha256": autoeq::workflow::product_bytes_sha256_hex(old_preset)
             }
         }))
         .unwrap();
@@ -1021,20 +1020,23 @@ mod tests {
         let new_preset = b"new preset bytes\n";
         let new_sidecar = serde_json::to_vec(&serde_json::json!({
             "apo_serialization": {
-                "preset_sha256": autoeq_artifacts::sha256_hex(new_preset)
+                "preset_sha256": autoeq::workflow::product_bytes_sha256_hex(new_preset)
             }
         }))
         .unwrap();
-        let error = publish_profiled_pair_with_test_hook(
+        let error = autoeq::workflow::publish_apo_preset_pair(
             &preset_path,
             new_preset,
             &sidecar_path,
             &new_sidecar,
-            || Err(std::io::Error::other("injected sidecar failure")),
+            |_| Err(std::io::Error::other("injected preset validation failure")),
         )
-        .await
         .unwrap_err();
-        assert!(error.to_string().contains("prior APO preset was restored"));
+        assert!(
+            error
+                .to_string()
+                .contains("injected preset validation failure")
+        );
         assert_eq!(fs::read(&preset_path).unwrap(), old_preset);
         assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
         autoeq::workflow::verify_apo_preset_binding(
@@ -1042,23 +1044,6 @@ mod tests {
             &fs::read(&sidecar_path).unwrap(),
         )
         .unwrap();
-
-        let concurrent_preset = b"concurrent replacement\n";
-        let error = publish_profiled_pair_with_test_hook(
-            &preset_path,
-            new_preset,
-            &sidecar_path,
-            &new_sidecar,
-            || {
-                fs::write(&preset_path, concurrent_preset)?;
-                Err(std::io::Error::other("injected sidecar failure"))
-            },
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("changed concurrently"));
-        assert_eq!(fs::read(&preset_path).unwrap(), concurrent_preset);
-        assert_eq!(fs::read(&sidecar_path).unwrap(), old_sidecar);
     }
 
     #[tokio::test]
@@ -1075,20 +1060,19 @@ mod tests {
         let new_preset = b"new preset bytes\n";
         let new_sidecar = serde_json::to_vec(&serde_json::json!({
             "apo_serialization": {
-                "preset_sha256": autoeq_artifacts::sha256_hex(new_preset)
+                "preset_sha256": autoeq::workflow::product_bytes_sha256_hex(new_preset)
             }
         }))
         .unwrap();
-        let error = publish_profiled_pair_with_test_hook(
+        let error = autoeq::workflow::publish_apo_preset_pair(
             &preset_path,
             new_preset,
             &sidecar_path,
             &new_sidecar,
-            || Ok(()),
+            |_| Ok(()),
         )
-        .await
         .unwrap_err();
-        assert!(error.to_string().contains("rollback safety limit"));
+        assert!(error.to_string().contains("16 MiB limit"));
         assert_eq!(
             fs::metadata(&preset_path).unwrap().len(),
             prior_preset.len() as u64

@@ -40,7 +40,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
-autoeq-optim = { workspace = true }
 criterion = { workspace = true }
 
 [[bench]]

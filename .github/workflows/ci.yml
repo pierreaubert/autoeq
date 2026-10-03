@@ -51,7 +51,7 @@ jobs:
           python3 scripts/check_ci_workflow_parity.py
 
       - name: Check numerical QA runner contracts
-        run: python3 -m unittest scripts.test_run_crate_test_matrix scripts.test_check_parameter_matrix
+        run: python3 -m unittest scripts.test_run_crate_test_matrix scripts.test_run_optimizer_benchmark_matrix scripts.test_check_parameter_matrix
 
       - name: cargo check
         run: cargo check --workspace --all-targets --all-features

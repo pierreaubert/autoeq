@@ -29,6 +29,8 @@ use serde::Serialize;
 /// Fixed AutoEQ optimizer budget/quality matrix and its command-line support.
 pub mod optimizer_benchmark;
 
+pub(crate) mod optimizer_benchmark_sources;
+
 /// Relative error `|a − b| / |b|` with deterministic zero handling: 0 when
 /// both are zero (or both non-finite-equal), ∞ when only the reference is
 /// zero, NaN when either side is NaN.

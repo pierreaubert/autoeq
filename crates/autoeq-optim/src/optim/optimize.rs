@@ -329,6 +329,28 @@ impl OptimizerRunEvidence {
         self.refresh_quality_flags();
     }
 
+    fn apply_validation_refusal_stop(
+        &mut self,
+        snapshot: &super::run_control::OptimizerRunSnapshot,
+        confirmed_finalization_refusal: bool,
+    ) {
+        if !confirmed_finalization_refusal
+            || self.termination != OptimizerTermination::BackendFailure
+            || snapshot.validation_evaluations_refused == 0
+        {
+            return;
+        }
+        self.termination = if snapshot.cancellation_requested {
+            OptimizerTermination::UserStopped
+        } else if snapshot.deadline_reached {
+            OptimizerTermination::TimedOut
+        } else {
+            return;
+        };
+        self.objective = None;
+        self.refresh_quality_flags();
+    }
+
     /// Whether the retained parameters and objective are finite and satisfy the recorded bounds.
     ///
     /// This only reports parameter validity; it does not override stop cause,
@@ -381,6 +403,41 @@ fn max_bound_violation(parameters: &[f64], lower_bounds: &[f64], upper_bounds: &
             }
         })
         .fold(0.0, f64::max)
+}
+
+fn validation_refusal_caused_by_stop(
+    backend_result: &Result<(String, f64), (String, f64)>,
+    finalized_result: &Result<(String, f64), (String, f64)>,
+    parameters: &[f64],
+    bounds: (&[f64], &[f64]),
+    snapshots: (
+        &super::run_control::OptimizerRunSnapshot,
+        &super::run_control::OptimizerRunSnapshot,
+    ),
+    stage_snapshots: (
+        Option<&OptimizerStageSnapshot>,
+        Option<&OptimizerStageSnapshot>,
+    ),
+) -> bool {
+    let (lower_bounds, upper_bounds) = bounds;
+    let (before, after) = snapshots;
+    let (before_stage, after_stage) = stage_snapshots;
+    let validation_refusal_count_increased = match (before_stage, after_stage) {
+        (Some(before), Some(after)) => {
+            after.validation_evaluations_refused > before.validation_evaluations_refused
+        }
+        _ => after.validation_evaluations_refused > before.validation_evaluations_refused,
+    };
+    let stop_was_latched = after.cancellation_requested
+        || after.deadline_reached
+        || after_stage.is_some_and(|stage| stage.cancellation_requested || stage.deadline_reached);
+    backend_result
+        .as_ref()
+        .is_ok_and(|(_, loss)| loss.is_finite())
+        && max_bound_violation(parameters, lower_bounds, upper_bounds) <= 1e-9
+        && finalized_result.is_err()
+        && stop_was_latched
+        && validation_refusal_count_increased
 }
 
 /// Optimize filter parameters using global optimization algorithms
@@ -467,6 +524,7 @@ struct ControlledOptimizationDispatch {
     result: Result<(String, f64), (String, f64)>,
     dispatch: OptimizerDispatchOutcome,
     evaluation_limit: usize,
+    validation_stop_refusal: bool,
 }
 
 struct RunControlDispatchOptions<'a> {
@@ -493,6 +551,7 @@ fn optimize_filters_with_run_control_dispatch(
         result: Err((message, f64::INFINITY)),
         dispatch,
         evaluation_limit,
+        validation_stop_refusal: false,
     };
     let algorithm = algo_override.unwrap_or(&params.algo);
     let Some(backend) = super::registry::resolve(algorithm) else {
@@ -561,6 +620,7 @@ fn optimize_filters_with_run_control_dispatch(
             )),
             dispatch: OptimizerDispatchOutcome::NotStartedBudgetRefusal(refusal),
             evaluation_limit,
+            validation_stop_refusal: false,
         };
     }
 
@@ -601,21 +661,43 @@ fn optimize_filters_with_run_control_dispatch(
         backend_callback,
     );
     let snapshot = run_control.snapshot();
-    let finalized = if snapshot.cancellation_requested || snapshot.deadline_reached {
-        result
+    let stage_snapshot_before_finalization = run_control.stage_snapshot();
+    let stop_before_finalization = snapshot.cancellation_requested
+        || snapshot.deadline_reached
+        || stage_snapshot_before_finalization
+            .as_ref()
+            .is_some_and(|stage| stage.cancellation_requested || stage.deadline_reached);
+    let backend_result = result;
+    let (finalized, validation_stop_refusal) = if stop_before_finalization {
+        (backend_result, false)
     } else {
-        finalize_dispatch_winner(
+        let finalized = finalize_dispatch_winner(
             backend.name(),
             x,
             &validation_snapshot,
             &controlled_params,
-            result,
-        )
+            backend_result.clone(),
+        );
+        let snapshot_after_finalization = run_control.snapshot();
+        let stage_snapshot_after_finalization = run_control.stage_snapshot();
+        let validation_stop_refusal = validation_refusal_caused_by_stop(
+            &backend_result,
+            &finalized,
+            x,
+            (lower_bounds, upper_bounds),
+            (&snapshot, &snapshot_after_finalization),
+            (
+                stage_snapshot_before_finalization.as_ref(),
+                stage_snapshot_after_finalization.as_ref(),
+            ),
+        );
+        (finalized, validation_stop_refusal)
     };
     ControlledOptimizationDispatch {
         result: finalized,
         dispatch: OptimizerDispatchOutcome::BackendInvoked,
         evaluation_limit,
+        validation_stop_refusal,
     }
 }
 
@@ -687,6 +769,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     let result = dispatch_result.result;
     let dispatch = dispatch_result.dispatch;
     let evaluation_limit = dispatch_result.evaluation_limit;
+    let validation_stop_refusal = dispatch_result.validation_stop_refusal;
     let snapshot = run_control.snapshot();
     let stage_snapshot = run_control.stage_snapshot();
     let algorithm = algo_override.unwrap_or(&params.algo);
@@ -718,6 +801,9 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     }
     if dispatch == OptimizerDispatchOutcome::NotStartedRunStopped {
         evidence.apply_not_started_stop(&snapshot);
+    }
+    if validation_stop_refusal {
+        evidence.apply_validation_refusal_stop(&snapshot, true);
     }
     ControlledOptimizerRun {
         result,
@@ -917,6 +1003,140 @@ mod evidence_validation_tests {
         assert_eq!(evidence.termination, OptimizerTermination::BackendFailure);
         assert!(!evidence.has_valid_candidate());
         assert!(!evidence.best_effort);
+    }
+
+    #[test]
+    fn validation_stop_refusal_maps_only_a_valid_backend_winner_to_stop_evidence() {
+        use super::super::run_control::{EvaluationStage, OptimizerRunControl};
+        use std::num::NonZeroUsize;
+
+        let parameters = [0.5];
+        let lower = [0.0];
+        let upper = [1.0];
+        let backend_winner = Ok(("backend best".to_owned(), 0.25));
+        let refused_finalization = Err(("finalizer score refused".to_owned(), f64::INFINITY));
+
+        for deadline in [false, true] {
+            let control = OptimizerRunControl::new(NonZeroUsize::new(3).unwrap());
+            let before = control.snapshot();
+            if deadline {
+                control.request_deadline();
+            } else {
+                control.request_cancel();
+            }
+            assert!(
+                control
+                    .begin_evaluation(EvaluationStage::Validation, 1)
+                    .is_none()
+            );
+            let after = control.snapshot();
+
+            assert!(validation_refusal_caused_by_stop(
+                &backend_winner,
+                &refused_finalization,
+                &parameters,
+                (&lower, &upper),
+                (&before, &after),
+                (None, None),
+            ));
+            let mut evidence = OptimizerRunEvidence::from_backend_result(
+                "autoeq:cobra",
+                refused_finalization.clone(),
+                &parameters,
+                &lower,
+                &upper,
+                3,
+                Some(1),
+            );
+            assert_eq!(evidence.termination, OptimizerTermination::BackendFailure);
+            evidence.apply_validation_refusal_stop(&after, true);
+            assert_eq!(
+                evidence.termination,
+                if deadline {
+                    OptimizerTermination::TimedOut
+                } else {
+                    OptimizerTermination::UserStopped
+                }
+            );
+
+            let real_backend_failure = Err(("solver failed before finalization".to_owned(), 1.0));
+            assert!(!validation_refusal_caused_by_stop(
+                &real_backend_failure,
+                &refused_finalization,
+                &parameters,
+                (&lower, &upper),
+                (&before, &after),
+                (None, None),
+            ));
+            let mut failure = OptimizerRunEvidence::from_backend_result(
+                "autoeq:cobra",
+                real_backend_failure,
+                &parameters,
+                &lower,
+                &upper,
+                3,
+                Some(1),
+            );
+            failure.apply_validation_refusal_stop(&after, false);
+            assert_eq!(failure.termination, OptimizerTermination::BackendFailure);
+
+            let invalid_parameters = [f64::NAN];
+            assert!(!validation_refusal_caused_by_stop(
+                &backend_winner,
+                &refused_finalization,
+                &invalid_parameters,
+                (&lower, &upper),
+                (&before, &after),
+                (None, None),
+            ));
+            let mut invalid = OptimizerRunEvidence::from_backend_result(
+                "autoeq:cobra",
+                refused_finalization.clone(),
+                &invalid_parameters,
+                &lower,
+                &upper,
+                3,
+                Some(1),
+            );
+            assert_eq!(invalid.termination, OptimizerTermination::InvalidResult);
+            invalid.apply_validation_refusal_stop(&after, true);
+            assert_eq!(invalid.termination, OptimizerTermination::InvalidResult);
+        }
+    }
+
+    #[test]
+    fn validation_refusal_in_another_stage_does_not_reclassify_finalizer_failure() {
+        use super::super::run_control::{EvaluationStage, OptimizerRunControl};
+        use std::num::NonZeroUsize;
+
+        let root = OptimizerRunControl::new(NonZeroUsize::new(3).unwrap());
+        let finalizing_stage = root.with_stage_budget(NonZeroUsize::new(2).unwrap());
+        let unrelated_stage = root.with_stage_budget(NonZeroUsize::new(2).unwrap());
+        let before_root = finalizing_stage.snapshot();
+        let before_stage = finalizing_stage.stage_snapshot();
+
+        root.request_cancel();
+        assert!(
+            unrelated_stage
+                .begin_evaluation(EvaluationStage::Validation, 1)
+                .is_none()
+        );
+
+        let after_root = finalizing_stage.snapshot();
+        let after_stage = finalizing_stage.stage_snapshot();
+        assert_eq!(after_root.validation_evaluations_refused, 1);
+        assert_eq!(
+            after_stage.as_ref().unwrap().validation_evaluations_refused,
+            0
+        );
+        assert!(!validation_refusal_caused_by_stop(
+            &Ok(("backend best".to_owned(), 0.25)),
+            &Err(("finalizer failed".to_owned(), f64::INFINITY)),
+            &[0.5],
+            (&[0.0], &[1.0]),
+            (&before_root, &after_root),
+            (before_stage.as_ref(), after_stage.as_ref()),
+        ));
     }
 }
 

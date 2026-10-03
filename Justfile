@@ -29,6 +29,15 @@ prod-autoeq:
 	{{cargo}} build --release --features cli --bin benchmark-autoeq-speaker
 	{{cargo}} build --release --features cli --bin autoeq-download-speakers
 
+# Speaker-data visualization demos are owned by AutoEQ.
+[group('build')]
+demo-d3rs-spinorama:
+	{{cargo}} build --release -p autoeq-gpui-examples --bin d3rs-spinorama
+
+[group('build')]
+demo-px-spinorama:
+	{{cargo}} build --release -p autoeq-gpui-examples --bin px-spinorama
+
 [group('build')]
 roomeq:
 	{{cargo}} build --release --features cli --bin roomeq

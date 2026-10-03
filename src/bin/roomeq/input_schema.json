@@ -2197,6 +2197,14 @@
           "format": "double",
           "type": "number"
         },
+        "max_output_safety_attenuation_db": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Optional cumulative additional static safety attenuation limits by physical output, in dB.\nOnly serial `room_eq_safety_gain` gains count; common pre-route cuts count for every\naffected output. Baseline calibration and untagged trims remain separate. This is an\noperator-declared output-loss budget, not calibrated SPL or hardware-capacity evidence.\nRuntime limiting is never credited toward physical-drive attenuation. Unknown output IDs\nare refused before search; omitted outputs keep the existing behavior.",
+          "type": "object"
+        },
         "max_useful_output_loss_db": {
           "default": 3.0,
           "description": "Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.\nSubwoofers are exempt. This is not input attenuation or PEQ boost.",

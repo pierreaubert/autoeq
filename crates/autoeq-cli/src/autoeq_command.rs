@@ -234,6 +234,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             qa_threshold,
         );
         qa::display_qa_analysis(&qa_result);
+        qa::require_qa_pass(&qa_result)?;
 
         return Ok(());
     }

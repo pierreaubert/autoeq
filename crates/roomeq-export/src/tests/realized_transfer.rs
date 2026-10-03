@@ -518,6 +518,7 @@ fn multisub_fixture(sub_count: usize) -> (DspGraph, HashMap<String, Vec<f64>>) {
         routes,
         matrix: None,
         input_trim_db: Default::default(),
+        post_dsp_main_alignment_band_hz: None,
         advisories: vec!["ok".to_string()],
     };
     let metadata = OptimizationMetadata {

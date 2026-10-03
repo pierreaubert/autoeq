@@ -407,6 +407,7 @@ mod tests {
             routes: vec![],
             matrix: None,
             input_trim_db: HashMap::from([("L".into(), -3.0)]),
+            post_dsp_main_alignment_band_hz: None,
             advisories: vec![],
         };
         for (source_index, source) in ["L", "R", "LFE"].into_iter().enumerate() {

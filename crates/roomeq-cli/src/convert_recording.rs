@@ -1,10 +1,11 @@
 //! Utility to convert legacy recording.json files to the new RoomConfig format.
 //!
 //! Usage:
-//!   convert_recording <input.json> [output.json]
+//!   convert-recording <input.json> [output.json]
 //!
 //! If output is not specified, the input file is overwritten and a .bak backup is created.
 
+use clap::Parser;
 use roomeq_model::{
     DspChainOutput, InlineMeasurement, MeasurementRef, MeasurementSource, OptimizerConfig,
     RecordingConfiguration, RoomConfig, SpeakerConfig,
@@ -313,39 +314,33 @@ fn parse_dsp_chain_output_with_latest_version(json: &str) -> Result<DspChainOutp
     Ok(output)
 }
 
-fn parse_recording_args(args: &[String]) -> Result<(PathBuf, PathBuf), String> {
-    if args.len() < 2 {
-        let prog = args
-            .first()
-            .map(|s| s.as_str())
-            .unwrap_or("convert_recording");
-        return Err(format!(
-            "Usage: {prog} <input.json> [output.json]\n\n\
-             Converts legacy recording.json files to the new RoomConfig format.\n\n\
-             If output is not specified, the input file is overwritten\n\
-             and a .bak backup is created."
-        ));
-    }
+#[derive(Debug, Parser)]
+#[command(
+    name = "convert-recording",
+    version,
+    about = "Convert legacy recording JSON to the current RoomConfig format",
+    after_help = "If OUTPUT is omitted, INPUT is overwritten after creating a .bak backup."
+)]
+struct RecordingArgs {
+    /// Recording JSON to convert.
+    input: PathBuf,
+    /// Destination JSON; defaults to INPUT.
+    output: Option<PathBuf>,
+}
 
-    let input_path = PathBuf::from(&args[1]);
-    let output_path = if args.len() > 2 {
-        PathBuf::from(&args[2])
-    } else {
-        input_path.clone()
-    };
-    Ok((input_path, output_path))
+fn parse_recording_args<I, T>(args: I) -> Result<(PathBuf, PathBuf), clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let args = RecordingArgs::try_parse_from(args)?;
+    let output = args.output.unwrap_or_else(|| args.input.clone());
+    Ok((args.input, output))
 }
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let args: Vec<String> = std::env::args().collect();
-
-    let (input_path, output_path) = match parse_recording_args(&args) {
-        Ok(paths) => paths,
-        Err(msg) => {
-            eprintln!("{msg}");
-            std::process::exit(1);
-        }
-    };
+    let (input_path, output_path) =
+        parse_recording_args(std::env::args_os()).unwrap_or_else(|error| error.exit());
 
     // Read input file
     let json = std::fs::read_to_string(&input_path)?;
@@ -441,6 +436,36 @@ mod tests {
     fn missing_input_errors() {
         let args = vec!["prog".to_string()];
         assert!(parse_recording_args(&args).is_err());
+    }
+
+    #[test]
+    fn cli_help_and_version_are_display_requests() {
+        for option in ["--help", "-h", "--version", "-V"] {
+            let error = parse_recording_args(["convert-recording", option]).unwrap_err();
+            let expected = if option == "--help" || option == "-h" {
+                clap::error::ErrorKind::DisplayHelp
+            } else {
+                clap::error::ErrorKind::DisplayVersion
+            };
+            assert_eq!(error.kind(), expected);
+            assert_eq!(error.exit_code(), 0);
+        }
+    }
+
+    #[test]
+    fn cli_rejects_unknown_options_and_extra_paths() {
+        for args in [
+            vec!["convert-recording", "--unknown"],
+            vec!["convert-recording", "in.json", "out.json", "extra.json"],
+        ] {
+            assert_eq!(
+                parse_recording_args(args).unwrap_err().kind(),
+                clap::error::ErrorKind::UnknownArgument
+            );
+        }
+        let (input, output) = parse_recording_args(["convert-recording", "--", "--help"]).unwrap();
+        assert_eq!(input, PathBuf::from("--help"));
+        assert_eq!(output, input);
     }
 
     #[test]

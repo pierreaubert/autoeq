@@ -1,5 +1,8 @@
 # Unreleased
 
+- Fix `convert-recording --help` and `--version` to exit before file access;
+  reject unknown options and excess paths before conversion.
+
 - Add `autoeq:cobra` / `cobra` for RoomEQ constrained surrogate optimization,
   with seeded search, native inequalities, evaluation accounting and callbacks.
 

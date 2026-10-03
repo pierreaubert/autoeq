@@ -1505,3 +1505,45 @@ acceptance is claimed. Capture provenance and a suitable production contract
 remain required before integration; the existing ESS path remains fail-closed.
 Evidence: `/private/tmp/ess-v7-psf-probe-20261003/`;
 root review: `/Users/pierre/ess-v7-independent-review.json`.
+
+
+## Measured-suite comparison evidence and shared controls
+
+Commit `c16671a`, integrated as `9e9e80c1`, fixes a false pass in
+`roomeq_suite_report.py --check`: two modes with identical pre-correction RMS
+but different sub-output limiter policies previously passed. An actual report
+CLI test reproduces that false pass on unchanged baseline `4fdd3b1f` (the
+negative test exits one because the baseline CLI returns zero instead of two).
+The new report requires every requested distinct mode, a finite nonnegative
+pre-metric, and declared shared input/topology/target/finalization controls.
+Missing or malformed configurations, nonfinite JSON, boolean/overflowing
+metrics and unequal shared controls fail the comparison. Malformed acceptance
+metadata produces an error entry without crashing report generation.
+
+Complete effective-config differences remain visible, without assuming they
+were intentional. Separate shared-control differences include source/recording
+declarations, topology, targets and finalization. Processing-mode and
+FIR/hybrid design differences can remain while common controls match. Equality
+does not verify external measurement bytes, equal search budgets/filter families
+or physical capture conditions. Report-only execution still writes failure
+evidence and exits zero; explicit `--check` refuses failed comparisons.
+
+All 11 report tests and 35 related matrix-backend/measured-result tests pass
+(46 total), including positive and negative report CLI executions. Python
+compilation and diff checks pass. Root verified all four raw gate logs, matched
+hashes for eight source/fixture files, the exact baseline script and four
+retained Genelec graph hashes. The integrated report/test files equal the
+tested candidate bytes. Earlier broad discovery ran 50 tests with four missing
+release-synthetic-binary prerequisite failures; the first combined module
+invocation also lacked the existing scripts' import path. Neither is counted
+as a passing gate; the import failure logs remain preserved separately.
+
+The unchanged Genelec IIR override requests a runtime limiter; the other mode
+overrides do not. Retained workflow replay graphs lack `effective_config`, so
+they cannot supply that report comparison evidence. No fixture, acceptance
+threshold, optimization or measured result changed. The historical bass-parity
+and electrical-gain failures remain unresolved; this fixes reporting truth,
+not their acoustic acceptance. The full mode/rate/time and deployed-chain
+requirements remain open.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a09-comparability-evidence-20261003-final2/`;
+root review: `/Users/pierre/a09-comparability-independent-review.json`.

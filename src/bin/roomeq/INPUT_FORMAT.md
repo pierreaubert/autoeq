@@ -443,7 +443,8 @@ combined main/sub response through the main speaker's measured passband.
   "default_input_peak": 1.0,
   "input_peak_limits": {"L": 1.0, "R": 1.0, "LFE": 1.0},
   "output_ceiling_dbfs": 0.0,
-  "max_attenuation_db": 12.0
+  "max_attenuation_db": 12.0,
+  "max_output_safety_attenuation_db": {"Sub1": 8.0}
 }
 ```
 
@@ -516,6 +517,23 @@ training and held-out seat is checked against the same structural acoustic
 baseline, including single-seat systems. No valid candidate means an
 optimization error. Rejected alternatives are diagnostic search outcomes;
 the selected graph has separate enforced safety checks.
+
+`optimizer.finalization.max_output_safety_attenuation_db` is an optional map
+from canonical physical-output IDs to finite, nonnegative additional static
+safety-attenuation limits. An omitted or empty map keeps the existing behavior.
+Routed output IDs use resolved physical-output names; independent channel and
+driver IDs use the exact JSON tuple strings emitted by electrical-headroom
+diagnostics (for example, `["channel","L"]` or
+`["driver","L",0,"woofer"]`). Unknown or stale IDs refuse before candidate
+search. For each configured output, the bound sums tagged static
+`room_eq_safety_gain` cuts along the most attenuated complete input-to-output
+path. A common pre-route cut counts for every physical output it feeds, and
+successive pre-route and post-route cuts add together. Baseline calibration and
+untagged level trims are outside this additional-loss budget; frequency-
+selective EQ is governed by its existing checks. A runtime limiter does not
+earn credit toward physical-drive attenuation. This operator-declared output-
+loss budget is not calibrated SPL or evidence of hardware capacity.
+
 Frequency-selective trials add at most twelve common PEQ/shelf sections, keep
 their centers inside the declared correction band, and bound the sum
 of their cuts by `max_attenuation_db`. Complete-graph replay, rather than section

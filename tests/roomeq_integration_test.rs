@@ -21,6 +21,147 @@ mod common;
 
 use common::binary_runner::{BinaryRunner, ProcessBinaryRunner, run_roomeq};
 
+#[test]
+fn convert_refuses_graph_over_output_safety_budget_without_touching_export() {
+    let directory = tempfile::TempDir::new().expect("temporary export directory");
+    let graph_path = directory.path().join("rejected-diagnostic.json");
+    let export_path = directory.path().join("room.yml");
+    let prior_export = b"prior external preset";
+
+    let mut graph = autoeq::roomeq_model::DspGraph::new("1");
+    graph.add_channel("left", Vec::new());
+    graph.metadata = Some(
+        serde_json::from_value(serde_json::json!({
+            "pre_score": 1.0,
+            "post_score": 1.0,
+            "algorithm": "synthetic-budget-refusal",
+            "iterations": 0,
+            "timestamp": "fixture",
+            "correction_acceptance": {
+                "policy": "runtime_safety",
+                "decision": "accepted",
+                "accepted": true,
+                "outcome": "accepted",
+                "metrics": {
+                    "auditory_frequency_measure": "erb_rate",
+                    "pre_target_weighted_rms_db": 1.0,
+                    "post_target_weighted_rms_db": 1.0,
+                    "improvement_db": 0.0,
+                    "improvement_ratio": 0.0,
+                    "post_p95_abs_residual_db": 1.0,
+                    "post_worst_abs_residual_db": 1.0,
+                    "correction_rms_db": 0.0,
+                    "max_abs_correction_db": 0.0
+                }
+            },
+            "stage_outcomes": [{
+                "stage": "final_output_safety_attenuation_budget",
+                "status": "degraded",
+                "checks": [{
+                    "id": "max_output_safety_attenuation_db:[\"channel\",\"left\"]",
+                    "kind": "safety",
+                    "passed": false,
+                    "observed": 7.0,
+                    "limit": 6.0
+                }]
+            }]
+        }))
+        .expect("fixture metadata satisfies the serialized output contract"),
+    );
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&graph).unwrap())
+        .expect("write diagnostic graph");
+    std::fs::write(&export_path, prior_export).expect("write prior preset");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roomeq"))
+        .args([
+            "--convert",
+            graph_path.to_str().unwrap(),
+            "--export-format",
+            "camilladsp",
+            "--export-path",
+            export_path.to_str().unwrap(),
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("run the RoomEQ CLI conversion path");
+
+    assert!(
+        !output.status.success(),
+        "over-budget output must be refused"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("output safety-attenuation budget"),
+        "CLI should report the failed budget check: {stderr}"
+    );
+    assert_eq!(std::fs::read(&export_path).unwrap(), prior_export);
+}
+
+#[test]
+fn convert_refuses_stored_accepted_outcome_when_acceptance_details_derive_rejected() {
+    let directory = tempfile::TempDir::new().expect("temporary export directory");
+    let graph_path = directory.path().join("contradictory-acceptance.json");
+    let export_path = directory.path().join("room.yml");
+    let prior_export = b"prior external preset";
+
+    let mut graph = autoeq::roomeq_model::DspGraph::new("1");
+    graph.add_channel("left", Vec::new());
+    graph.metadata = Some(
+        serde_json::from_value(serde_json::json!({
+            "pre_score": 1.0,
+            "post_score": 1.0,
+            "algorithm": "synthetic-contradictory-acceptance",
+            "iterations": 0,
+            "timestamp": "fixture",
+            "correction_acceptance": {
+                "policy": "runtime_safety",
+                "decision": "rejected",
+                "accepted": true,
+                "outcome": "accepted",
+                "metrics": {
+                    "auditory_frequency_measure": "erb_rate",
+                    "pre_target_weighted_rms_db": 1.0,
+                    "post_target_weighted_rms_db": 1.0,
+                    "improvement_db": 0.0,
+                    "improvement_ratio": 0.0,
+                    "post_p95_abs_residual_db": 1.0,
+                    "post_worst_abs_residual_db": 1.0,
+                    "correction_rms_db": 0.0,
+                    "max_abs_correction_db": 0.0
+                }
+            }
+        }))
+        .expect("fixture metadata satisfies the serialized output contract"),
+    );
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&graph).unwrap())
+        .expect("write contradictory diagnostic graph");
+    std::fs::write(&export_path, prior_export).expect("write prior preset");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roomeq"))
+        .args([
+            "--convert",
+            graph_path.to_str().unwrap(),
+            "--export-format",
+            "camilladsp",
+            "--export-path",
+            export_path.to_str().unwrap(),
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("run the RoomEQ CLI conversion path");
+
+    assert!(
+        !output.status.success(),
+        "stored Accepted must not override a derived Rejected outcome"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no approved playback result") && stderr.contains("Rejected"),
+        "CLI should report the derived rejection: {stderr}"
+    );
+    assert_eq!(std::fs::read(&export_path).unwrap(), prior_export);
+}
+
 #[cfg(unix)]
 const MAX_CAPTURED_CHILD_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
 #[cfg(unix)]

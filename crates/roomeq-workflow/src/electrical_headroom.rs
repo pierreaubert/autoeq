@@ -479,6 +479,84 @@ pub fn expand_routed_electrical_paths(
         .collect())
 }
 
+/// Sum tagged static safety gains along every physical input-to-output path.
+///
+/// Values are positive attenuation amounts in dB. A common pre-route gain is
+/// counted on each physical output path it affects, then serial route/output
+/// gains are added. If several logical inputs reach one physical output, the
+/// largest path total is returned for that output. Untagged calibration and
+/// level trims, frequency-selective EQ, and dynamic limiters are not counted.
+///
+/// # Errors
+/// Rejects an invalid or unsupported graph, malformed safety-gain metadata,
+/// and nonfinite cumulative attenuation.
+pub fn room_eq_safety_attenuation_by_output(
+    graph: &roomeq_model::DspGraph,
+) -> Result<BTreeMap<String, f64>> {
+    let paths = if let Some(routing) = canonical_electrical_routing(graph)? {
+        expand_routed_electrical_paths(&graph.channels, routing)?
+    } else {
+        expand_independent_electrical_paths(
+            &graph.channels,
+            &independent_graph_output_ports(&graph.channels),
+        )?
+    };
+    let mut attenuation_by_output = BTreeMap::new();
+    for path in paths {
+        let mut attenuation_db = 0.0_f64;
+        for plugin in path.stages.iter().flat_map(|stage| &stage.plugins) {
+            let Some(tag) = plugin.parameters.get("room_eq_safety_gain") else {
+                continue;
+            };
+            match tag.as_bool() {
+                Some(true) => {}
+                Some(false) => continue,
+                None => {
+                    return Err(AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "physical output '{}' has a malformed room_eq_safety_gain tag",
+                            path.output
+                        ),
+                    });
+                }
+            }
+            if plugin.plugin_type != "gain" {
+                return Err(AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "physical output '{}' tags non-gain processor '{}' as a static safety gain",
+                        path.output, plugin.plugin_type
+                    ),
+                });
+            }
+            let gain_db = plugin
+                .parameters
+                .get("gain_db")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| value.is_finite() && *value <= 0.0)
+                .ok_or_else(|| AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "physical output '{}' has a malformed or positive tagged safety gain",
+                        path.output
+                    ),
+                })?;
+            attenuation_db += -gain_db;
+            if !attenuation_db.is_finite() {
+                return Err(AutoeqError::InvalidMeasurement {
+                    message: format!(
+                        "physical output '{}' has nonfinite cumulative safety attenuation",
+                        path.output
+                    ),
+                });
+            }
+        }
+        attenuation_by_output
+            .entry(path.output)
+            .and_modify(|previous: &mut f64| *previous = previous.max(attenuation_db))
+            .or_insert(attenuation_db);
+    }
+    Ok(attenuation_by_output)
+}
+
 pub fn replay_sampled_electrical_headroom(
     paths: &[SerializedElectricalPath<'_>],
     frequencies_hz: &[f64],
@@ -1043,6 +1121,153 @@ mod tests {
             .err()
             .unwrap();
         assert!(error.to_string().contains("physical identity"));
+    }
+
+    #[test]
+    fn safety_budget_counts_common_and_output_gains_on_each_routed_path() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let right = crate::test_fixtures::single_channel_room_result("R")
+            .channels
+            .remove("R")
+            .unwrap();
+        result.channels.insert("R".into(), right);
+        let mut sub = crate::test_fixtures::single_channel_room_result("Sub1")
+            .channels
+            .remove("Sub1")
+            .unwrap();
+        let mut common_cut = roomeq_engine::output::create_gain_plugin(-2.0);
+        common_cut.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        common_cut.parameters["room_eq_stage"] = serde_json::json!("pre_route");
+        result.channels.get_mut("L").unwrap().plugins = vec![common_cut];
+        let mut output_cut = roomeq_engine::output::create_gain_plugin(-3.0);
+        output_cut.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        output_cut.parameters["room_eq_stage"] = serde_json::json!("post_route");
+        sub.plugins = vec![output_cut];
+        result.channels.insert("Sub1".into(), sub);
+
+        let routes = ["L", "R"]
+            .into_iter()
+            .enumerate()
+            .map(|(source_index, source)| roomeq_model::BassManagementRoute {
+                group_id: None,
+                source_channel: source.into(),
+                source_index,
+                destination: "Sub1".into(),
+                destination_index: 0,
+                pre_chain_channel: Some(source.into()),
+                post_chain_channel: Some("Sub1".into()),
+                route_kind: "low".into(),
+                crossover_type: "LR24".into(),
+                high_pass_hz: None,
+                low_pass_hz: None,
+                gain_db: 0.0,
+                gain_linear: 1.0,
+                matrix_gain: 1.0,
+                delay_ms: 0.0,
+                polarity_inverted: false,
+            })
+            .collect();
+        let routing = roomeq_model::BassManagementRoutingGraph {
+            physical_sub_output: "Sub1".into(),
+            physical_sub_outputs: Vec::new(),
+            stereo_routing: None,
+            input_channels: vec!["L".into(), "R".into()],
+            output_channels: vec!["Sub1".into()],
+            routes,
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            advisories: Vec::new(),
+        };
+        result.metadata.bass_management = Some(
+            serde_json::from_value(serde_json::json!({
+                "routing_title": "synthetic safety-budget route",
+                "enabled": true,
+                "crossover_type": "LR24",
+                "crossover_frequency_hz": 80.0,
+                "redirected_bass_enabled": true,
+                "sub_trim_db": 0.0,
+                "max_sub_boost_db": 0.0,
+                "headroom_margin_db": 0.0,
+                "applied_sub_gain_db": null,
+                "gain_limited": false,
+                "physical_sub_outputs": ["Sub1"],
+                "redirected_bass_channel_count": 1,
+                "main_high_pass_hz": null,
+                "sub_low_pass_hz": null,
+                "lfe_headroom_required_db": 0.0,
+                "signal_flow": [],
+                "signal_flow_advisories": [],
+                "routing_graph": routing,
+                "advisory": "synthetic test route"
+            }))
+            .unwrap(),
+        );
+
+        let attenuation = room_eq_safety_attenuation_by_output(&result.to_dsp_chain_output())
+            .expect("valid serialized route");
+        // L's common pre-route cut and the post-route output cut sum to 5 dB.
+        // R reaches the same output with only the 3 dB post-route cut, so the
+        // physical output budget retains the worst route.
+        assert_eq!(attenuation, BTreeMap::from([("Sub1".into(), 5.0)]));
+    }
+
+    #[test]
+    fn safety_budget_counts_a_common_cut_for_each_driver_output() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut common_cut = roomeq_engine::output::create_gain_plugin(-2.0);
+        common_cut.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![common_cut];
+        result.channels.get_mut("L").unwrap().drivers = Some(vec![
+            roomeq_model::DriverDspChain {
+                measured_acoustics: None,
+                name: "woofer".into(),
+                index: 0,
+                plugins: vec![tagged_safety_gain(-3.0)],
+                initial_curve: None,
+                measured_band_hz: None,
+            },
+            roomeq_model::DriverDspChain {
+                measured_acoustics: None,
+                name: "tweeter".into(),
+                index: 1,
+                plugins: vec![tagged_safety_gain(-1.0)],
+                initial_curve: None,
+                measured_band_hz: None,
+            },
+        ]);
+
+        let attenuation = room_eq_safety_attenuation_by_output(&result.to_dsp_chain_output())
+            .expect("both physical driver paths resolve");
+        assert_eq!(
+            attenuation,
+            BTreeMap::from([
+                (
+                    serde_json::json!(["driver", "L", 0, "woofer"]).to_string(),
+                    5.0
+                ),
+                (
+                    serde_json::json!(["driver", "L", 1, "tweeter"]).to_string(),
+                    3.0
+                ),
+            ])
+        );
+    }
+
+    fn tagged_safety_gain(gain_db: f64) -> roomeq_model::PluginConfigWrapper {
+        let mut gain = roomeq_engine::output::create_gain_plugin(gain_db);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        gain
+    }
+
+    #[test]
+    fn safety_budget_rejects_malformed_tagged_gain_metadata() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut gain = roomeq_engine::output::create_gain_plugin(2.0);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![gain];
+        let error = room_eq_safety_attenuation_by_output(&result.to_dsp_chain_output())
+            .expect_err("positive tagged gain must fail closed");
+        assert!(error.to_string().contains("malformed or positive"));
     }
 
     #[test]

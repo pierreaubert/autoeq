@@ -2111,3 +2111,13 @@ Evidence receipts under
 Model production-library Clippy passed in the worker. Model test-target Clippy
 retains an unrelated pre-existing field-reassignment lint in headroom.rs:201;
 this mapping change does not claim that broader gate passed.
+
+### A00 model test lint gate restored
+
+Commit `5b9d66c` replaces post-default field assignment in one headroom test
+with an equivalent struct initializer. All five headroom tests passed, and
+strict roomeq-model library/test Clippy now passes. Formatting and diff checks
+also pass. This closes the previously recorded model-test lint obstruction;
+production behavior is unchanged.
+Evidence: `/Volumes/home_tmp/tmp/a00-model-lint-evidence-20261003/gates.json`,
+SHA-256 `3ff18c7a74ae7626b93ae6ef053249eb0b2f25854300b2f34acdb17ea17e0777`.

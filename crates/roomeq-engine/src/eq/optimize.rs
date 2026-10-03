@@ -4593,6 +4593,30 @@ mod controlled_pipeline_tests {
             let stage_counts = stage.stage_snapshot.expect("adaptive stage quota recorded");
             assert_eq!(stage_counts.evaluation_budget, 64);
             assert!(stage_counts.evaluations_started <= 64);
+            let profile = &stage.search_profile;
+            assert_eq!(profile.dispatch_algorithm, stage.evidence.algorithm);
+            assert_eq!(profile.resolved_backend.as_deref(), Some("autoeq:cobra"));
+            assert_eq!(profile.effective_evaluation_limit, 64);
+            assert_eq!(profile.stage_evaluation_budget, Some(64));
+            assert_eq!(profile.parameter_dimension, profile.lower_bounds.len());
+            assert_eq!(profile.parameter_dimension, profile.upper_bounds.len());
+            let budget = profile
+                .budget_profile
+                .expect("registered adaptive backend supplies its search profile");
+            assert_eq!(
+                budget.requested_evaluations,
+                profile.effective_evaluation_limit
+            );
+            assert_eq!(budget.solver_evaluation_limit, Some(64));
+            assert_eq!(
+                budget.initial_batch_size,
+                profile
+                    .parameter_dimension
+                    .saturating_mul(3)
+                    .saturating_add(1)
+                    .min(profile.effective_evaluation_limit),
+                "per-pass batch profile must use that pass's actual vector dimension"
+            );
             assert_eq!(
                 stage_counts.component_evaluations_started,
                 stage_counts.evaluations_started * curves.len()
@@ -4609,6 +4633,14 @@ mod controlled_pipeline_tests {
                 "distinct measurements must not collapse to the first seat"
             );
         }
+        assert!(
+            output
+                .stages
+                .windows(2)
+                .all(|passes| passes[0].search_profile.parameter_dimension
+                    < passes[1].search_profile.parameter_dimension),
+            "adaptive passes with more filters must report their larger dispatched vectors"
+        );
         assert_eq!(output.result.optimizer_evidence.len(), output.stages.len());
         assert!(
             output

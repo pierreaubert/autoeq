@@ -627,6 +627,7 @@ fn camilladsp_routing_graph(output: &DspGraph) -> Option<BassManagementRoutingGr
                     routes,
                     matrix,
                     input_trim_db: Default::default(),
+                    post_dsp_main_alignment_band_hz: None,
                     stereo_routing: serde_json::from_value(
                         metadata
                             .get("stereo_routing")

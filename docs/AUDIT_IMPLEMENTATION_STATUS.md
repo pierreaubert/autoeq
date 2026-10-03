@@ -1784,3 +1784,39 @@ the preserved GET /audio failure. Actual REW filter-engine/export consumer
 acceptance remains open; no hardware or playback occurred.
 Evidence: `/Volumes/home_tmp/tmp/rew-a11-beta132-api-20261003/`;
 root review: `/Users/pierre/rew-overlay-failure-independent-review.json`.
+
+
+## COBRA RoomEQ backend selection (2026-10-03)
+
+The requested math-optimisation COBRA solver is registered as `autoeq:cobra`
+with the `cobra` alias. It supports constrained PEQ fitting and the shared
+bounded scalar RoomEQ searches, including spatial FIR. Native inequality
+conversion preserves the installed tolerance. `optimizer.max_iter` supplies
+the objective-evaluation cap; `optimizer.seed` supplies reproducibility.
+The native Halton initial design does not accept a saved candidate.
+Callbacks run after surrogate infill following the initial design; model search
+and active objective calls are not interrupted. FIR evidence records
+`callback_cancellation=native_infill_boundaries` for this backend.
+Internal callback-free true-function polish is disabled; existing RoomEQ
+refinement remains separately configured. Budget exhaustion is not reported
+as numerical convergence.
+
+Candidate `50313d5` is integrated as `a22d7bef`. Its gates passed 370 optimizer,
+72 CLI, 8 actual CLI integration, 18 FIR-library, and 870 engine tests, with
+one existing engine test ignored. The new real CLI stereo run publishes a
+loadable bundle and retains actual COBRA optimizer evidence. Stop tests cover
+no scalar deliverable and no spatial FIR coefficients after observed Stop.
+The missing-registry negative control fails at its new alias assertion.
+Strict optimizer and scoped CLI/integration Clippy, selected-source rustfmt,
+and diff checks pass. An initial broad dependency Clippy invocation failed on
+11 pre-existing engine diagnostics; that failed log is preserved.
+
+All 17 final selected source/config identities match before/after gates and
+the integrated audit branch. The public math-optimisation pin remains
+`acdea21f853629a13b7f88f8baef51eb0394754c`; COBRA is already present there.
+The sole lock refresh is local-path math-dsp 0.5.31 to the currently installed
+0.5.32. No new dependency publication, hardware, listening, or UI work occurs.
+Broader A07 preset coverage and the complete backend audit remain open.
+Evidence: `/Volumes/home_tmp/tmp/roomeq-cobra-evidence-20261003/`;
+root review: `/Users/pierre/roomeq-cobra-independent-review.json`
+(SHA-256 `5fde9893d0f2270c26dd6954aef8b43860c351504f1b1d8706cf5e0ead873127`).

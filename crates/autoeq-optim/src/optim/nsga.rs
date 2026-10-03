@@ -255,8 +255,6 @@ impl FilterOptimizer for AutoeqNsgaBackend {
     }
 }
 
-/// Normalised frame for compromise selection: per-axis weights plus the
-/// ideal/nadir points spanning the front.
 fn objective_vectors_are_finite(front: &[ParetoSolution]) -> bool {
     let Some(first) = front.first() else {
         return false;
@@ -269,6 +267,8 @@ fn objective_vectors_are_finite(front: &[ParetoSolution]) -> bool {
         })
 }
 
+/// Normalized frame for compromise selection: per-axis weights plus the
+/// ideal/nadir points spanning the front.
 struct CompromiseFrame {
     weights: Vec<f64>,
     ideal: Vec<f64>,

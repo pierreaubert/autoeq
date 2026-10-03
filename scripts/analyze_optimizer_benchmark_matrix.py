@@ -306,7 +306,11 @@ def validate_stage_evidence(result: dict[str, Any], spec: dict[str, Any],
                             problems: list[dict[str, str]]) -> dict[str, Any]:
     cell_id = spec["cell_id"]
     rows = result.get("stage_evidence")
-    summary: dict[str, Any] = {"stage_count": 0, "search_started_by_stage": []}
+    summary: dict[str, Any] = {
+        "stage_count": 0,
+        "search_started_by_stage": [],
+        "search_started_total_by_stages": 0,
+    }
     if not isinstance(rows, list):
         add_problem(problems, "stage_schema", "stage_evidence is not an array", cell_id)
         return summary
@@ -738,7 +742,8 @@ def verify_result(receipt: dict[str, Any], spec: dict[str, Any], inventory_sha: 
             add_problem(problems, "purpose_outcome", "observer-stop cell did not stop at its callback", cell_id)
         if root_counts is not None and not root_counts["cancellation_requested"]:
             add_problem(problems, "stop_evidence", "observer stop has no latched cancellation evidence", cell_id)
-        if result.get("callback_invocations", 0) <= 0:
+        callback_count = result.get("callback_invocations")
+        if not exact_int(callback_count) or callback_count <= 0:
             add_problem(problems, "stop_evidence", "observer stop has no callback invocation", cell_id)
     elif outcome == "observer_stopped":
         add_problem(problems, "purpose_outcome", "observer-stop outcome used outside that purpose", cell_id)

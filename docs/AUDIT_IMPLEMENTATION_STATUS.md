@@ -1467,3 +1467,41 @@ consumer witness. Dependency package bytes were not freshly inventoried for
 this fixture-only cleanup.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-fixture-lint-evidence-20261003/`;
 literal review: `/Users/pierre/a06-apo-fixture-literal-review.json`.
+
+
+## Independent order-kernel synthetic diagnostic
+
+Standalone V7 run02 identifies five independently shaped kernels from five
+amplitude/phase-diverse raw sampled sweeps, then predicts a sixth held-out sweep.
+The model is additive parallel Hammerstein with independently declared 80 ms
+effective support, a separate 160 ms post-response guard and known sampled
+input identities. Fixture taps and gains stay outside the fit boundary. The
+declared 4 kHz acquisition uses 40–280 Hz sweeps and alias-safe 75/100 Hz tone
+oracles. No ESS inverse filter or production Rust is used.
+
+All four preregistered positives and nine refusal controls pass. The sampled
+design is full rank (1,605 columns), with scaled condition 39,253,441.7 under
+the unchanged 1e8 ceiling. Maximum normalized raw/guard/held-out residual is
+2.15e-15. Across signed formula, true PCM and fitted PCM comparisons, maximum
+amplitude error is 2.51e-9 dB, wrapped phase error 2.98e-8 degrees, total THD
+error 9.24e-14 percentage point and expected-zero leakage 1.19e-15 relative to
+H1. The fixed gates remain 0.01 dB, 0.01 degree, 0.01 percentage point and
+1e-12 leakage. Refusals cover absent support, short capture, beyond-horizon
+energy, excess noise against an independent dark reference, rate/hash mismatch,
+aliasing, constant-input rank deficiency and a single-tone rank deficiency.
+
+Run01's accumulator shape error occurred before scoring and remains preserved.
+Run02 fixes only the scored segment length, with byte-identical regenerated
+fixtures. Root verified all 28 fixture hashes/sizes and finite f64 values,
+source/preregistration/log/exit identities, execution manifest and matching
+before/after identities, then checked each numerical gate independently.
+
+This is synthetic evidence for the declared model and support horizon. The
+reported cross-order diagnostic is maximum atom coherence (up to 0.966);
+principal-angle correlations were not computed. General nonfinite-array
+refusal is not established by this probe. No arbitrary nonlinear-room model,
+physical support inference, production-source inventory or production ESS
+acceptance is claimed. Capture provenance and a suitable production contract
+remain required before integration; the existing ESS path remains fail-closed.
+Evidence: `/private/tmp/ess-v7-psf-probe-20261003/`;
+root review: `/Users/pierre/ess-v7-independent-review.json`.

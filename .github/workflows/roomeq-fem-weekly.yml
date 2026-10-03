@@ -65,4 +65,4 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-roomeq-fuzzer-weekly-${{ hashFiles('**/Cargo.lock') }}
       - name: Run required randomized scenario buckets across five seeds
-        run: cargo run --bin roomeq-fuzzer --release --features="qa,plotly" -- -n 21 --seed 42 --skip-kautz-modal
+        run: cargo run --bin roomeq-fuzzer --release --features qa -- -n 21 --seed 42 --skip-kautz-modal

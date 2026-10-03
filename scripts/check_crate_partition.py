@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import difflib
 import hashlib
+import io
 import json
 import os
 import pathlib
@@ -13,6 +14,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tarfile
 from collections import defaultdict
 from typing import Any
 
@@ -33,8 +35,19 @@ ENVIRONMENT_MUTATION = re.compile(
 NDARRAY_SLICE_MACRO = re.compile(r"\b(?:ndarray\s*::\s*)?s\s*!\s*\[")
 
 
+def unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate JSON object key: {key}")
+        result[key] = value
+    return result
+
+
 def load_json(path: pathlib.Path) -> dict[str, Any]:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(
+        path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object
+    )
 
 
 def cargo_metadata(repo_root: pathlib.Path) -> dict[str, Any]:
@@ -73,12 +86,15 @@ def workspace_packages(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return packages
 
 
+WorkspaceEdge = tuple[str, str, str]
+
+
 def workspace_edges(
     packages: dict[str, dict[str, Any]],
-) -> set[tuple[str, str]]:
+) -> set[WorkspaceEdge]:
     package_names = set(packages)
     return {
-        (package_name, dependency["name"])
+        (package_name, dependency["name"], dependency.get("kind") or "normal")
         for package_name, package in packages.items()
         for dependency in package["dependencies"]
         if dependency["name"] in package_names
@@ -86,11 +102,14 @@ def workspace_edges(
 
 
 def dependency_cycles(
-    package_names: set[str], edges: set[tuple[str, str]]
+    package_names: set[str],
+    edges: set[WorkspaceEdge],
+    kinds: frozenset[str] = frozenset({"normal", "build"}),
 ) -> list[list[str]]:
     graph = {name: set() for name in package_names}
-    for source, destination in edges:
-        graph[source].add(destination)
+    for source, destination, kind in edges:
+        if kind in kinds:
+            graph[source].add(destination)
 
     state = {name: 0 for name in package_names}
     stack: list[str] = []
@@ -116,28 +135,51 @@ def dependency_cycles(
     return cycles
 
 
-def exception_pairs(policy: dict[str, Any]) -> set[tuple[str, str]]:
+def exception_pairs(policy: dict[str, Any]) -> set[WorkspaceEdge]:
     return {
-        (exception["from"], exception["to"])
+        (
+            exception["from"],
+            exception["to"],
+            exception.get("kind", "normal"),
+        )
         for exception in policy["temporary_exceptions"]
     }
 
 
 def check_dependency_policy(
     packages: dict[str, dict[str, Any]], policy: dict[str, Any]
-) -> tuple[set[tuple[str, str]], list[str]]:
+) -> tuple[set[WorkspaceEdge], list[str]]:
     errors: list[str] = []
     edges = workspace_edges(packages)
     root_package = policy["root_package"]
     terminal_consumers = set(policy["terminal_consumers"])
-    allowed = {
-        package: set(dependencies)
-        for package, dependencies in policy["allowed_direct_dependencies"].items()
+    allowed_by_kind = {
+        "normal": policy["allowed_direct_dependencies"],
+        "dev": policy.get("allowed_dev_dependencies", {}),
+        "build": policy.get("allowed_build_dependencies", {}),
     }
+    allowed_by_kind = {
+        kind: {
+            package: set(dependencies)
+            for package, dependencies in package_dependencies.items()
+        }
+        for kind, package_dependencies in allowed_by_kind.items()
+    }
+    policy_packages = set().union(
+        *(set(package_dependencies) for package_dependencies in allowed_by_kind.values())
+    )
+    expected_package_count = policy.get("workspace_package_count")
+    if expected_package_count is not None and len(packages) != expected_package_count:
+        errors.append(
+            f"workspace package count changed: {len(packages)}, expected {expected_package_count}"
+        )
 
-    missing_policy = set(packages) - set(allowed) - terminal_consumers
+    missing_policy = set(packages) - policy_packages - terminal_consumers
     for package_name in sorted(missing_policy):
         errors.append(f"workspace package is missing from policy: {package_name}")
+    unknown_policy_packages = policy_packages | terminal_consumers
+    for package_name in sorted(unknown_policy_packages - set(packages)):
+        errors.append(f"dependency policy names absent package: {package_name}")
 
     exceptions = policy["temporary_exceptions"]
     temporary_edges = exception_pairs(policy)
@@ -145,7 +187,12 @@ def check_dependency_policy(
         errors.append("temporary exception edges must be unique")
 
     for exception in exceptions:
-        edge = (exception.get("from", ""), exception.get("to", ""))
+        kind = exception.get("kind", "normal")
+        edge = (exception.get("from", ""), exception.get("to", ""), kind)
+        if kind not in allowed_by_kind:
+            errors.append(
+                f"temporary exception {edge[0]} -> {edge[1]} has invalid dependency kind {kind!r}"
+            )
         if not re.fullmatch(r"WP(?:[1-9]|1[01])", exception.get("remove_by", "")):
             errors.append(
                 f"temporary exception {edge[0]} -> {edge[1]} has no valid remove_by WP"
@@ -158,12 +205,12 @@ def check_dependency_policy(
             errors.append(
                 f"stale temporary exception must be removed: {edge[0]} -> {edge[1]}"
             )
-        if edge[1] in allowed.get(edge[0], set()):
+        if kind in allowed_by_kind and edge[1] in allowed_by_kind[kind].get(edge[0], set()):
             errors.append(
                 f"temporary exception is already allowed: {edge[0]} -> {edge[1]}"
             )
 
-    for source, destination in sorted(edges):
+    for source, destination, kind in sorted(edges):
         if source != root_package and destination == root_package:
             errors.append(
                 f"workspace crate depends on root facade: {source} -> {destination}"
@@ -171,14 +218,43 @@ def check_dependency_policy(
             continue
         if source in terminal_consumers:
             continue
-        if destination in allowed.get(source, set()):
+        if destination in allowed_by_kind.get(kind, {}).get(source, set()):
             continue
-        if (source, destination) in temporary_edges:
+        if (source, destination, kind) in temporary_edges:
             continue
-        errors.append(f"forbidden workspace edge: {source} -> {destination}")
+        errors.append(
+            f"forbidden {kind} workspace edge: {source} -> {destination}"
+        )
 
     for cycle in dependency_cycles(set(packages), edges):
-        errors.append("workspace dependency cycle: " + " -> ".join(cycle))
+        errors.append(
+            "workspace dependency cycle (normal/build): " + " -> ".join(cycle)
+        )
+
+    required_external = policy.get("required_external_dependencies", {})
+    for package_name, required_by_kind in required_external.items():
+        package = packages.get(package_name)
+        if package is None:
+            errors.append(
+                f"external dependency policy names absent package: {package_name}"
+            )
+            continue
+        actual_external = {
+            (dependency["name"], dependency.get("kind") or "normal")
+            for dependency in package["dependencies"]
+            if dependency["name"] not in packages
+        }
+        for kind, dependency_names in required_by_kind.items():
+            if kind not in allowed_by_kind:
+                errors.append(
+                    f"external dependency policy for {package_name} has invalid kind {kind!r}"
+                )
+                continue
+            for dependency_name in dependency_names:
+                if (dependency_name, kind) not in actual_external:
+                    errors.append(
+                        f"required external dependency is missing: {package_name} -> {dependency_name} ({kind})"
+                    )
     return edges, errors
 
 
@@ -339,6 +415,37 @@ def check_focused_tests(
                 f"focused test command for {package_name} must start with "
                 + " ".join(expected)
             )
+        if "--locked" not in arguments:
+            errors.append(
+                f"focused test command for {package_name} must include --locked"
+            )
+        package = packages.get(package_name)
+        if package is not None:
+            features: set[str] = set()
+            for index, argument in enumerate(arguments):
+                if argument in ("--features", "-F") and index + 1 < len(arguments):
+                    features.update(arguments[index + 1].split(","))
+                elif argument.startswith("--features="):
+                    features.update(argument.split("=", 1)[1].split(","))
+                elif argument.startswith("-F") and argument != "-F":
+                    features.update(argument[2:].split(","))
+            if "--all-features" not in arguments:
+                unknown_features = features - set(package["features"])
+                for feature in sorted(unknown_features):
+                    errors.append(
+                        f"focused test command for {package_name} names unknown feature {feature}"
+                    )
+            if "--lib" in arguments and not any(
+                "lib" in target["kind"]
+                or any(
+                    crate_type in {"lib", "rlib", "cdylib"}
+                    for crate_type in target.get("crate_types", [])
+                )
+                for target in package["targets"]
+            ):
+                errors.append(
+                    f"focused test command for {package_name} selects a missing library target"
+                )
     return errors
 
 
@@ -473,32 +580,74 @@ def policy_from_git(
     )
     if shown.returncode:
         return None, f"cannot read policy from baseline ref {reference!r}"
-    return json.loads(shown.stdout), None
+    return json.loads(shown.stdout, object_pairs_hook=unique_json_object), None
 
 
 def check_monotonic_ratchets(
-    current: dict[str, Any], baseline: dict[str, Any]
+    current: dict[str, Any],
+    baseline: dict[str, Any],
+    baseline_source_metrics: dict[str, int],
 ) -> list[str]:
     errors: list[str] = []
     added_exceptions = exception_pairs(current) - exception_pairs(baseline)
-    for source, destination in sorted(added_exceptions):
+    for source, destination, kind in sorted(added_exceptions):
+        kind_suffix = "" if kind == "normal" else f" ({kind})"
         errors.append(
-            f"temporary exception list may only shrink: added {source} -> {destination}"
+            f"temporary exception list may only shrink: added {source} -> {destination}{kind_suffix}"
         )
     baseline_budgets = baseline.get("metric_budgets", {})
     for name, current_budget in current["metric_budgets"].items():
         baseline_budget = baseline_budgets.get(name)
         if baseline_budget is not None and current_budget > baseline_budget:
-            errors.append(
-                f"metric budget may only shrink: {name} {baseline_budget} -> {current_budget}"
-            )
+            observed_base = baseline_source_metrics.get(name)
+            if observed_base is None or current_budget > observed_base:
+                errors.append(
+                    f"metric budget increase exceeds measured base source: {name} "
+                    f"{baseline_budget} -> {current_budget}, base source {observed_base}"
+                )
     return errors
+
+
+def source_metrics_at_git_ref(repo_root: pathlib.Path, reference: str) -> dict[str, int]:
+    completed = subprocess.run(
+        ["git", "archive", "--format=tar", reference, "src"],
+        cwd=repo_root,
+        check=False,
+        capture_output=True,
+    )
+    if completed.returncode:
+        raise RuntimeError(
+            f"cannot read Rust source metrics from baseline ref {reference!r}: "
+            + completed.stderr.decode("utf-8", errors="replace").rstrip()
+        )
+    metrics = {
+        "root_rust_loc": 0,
+        "root_roomeq_rust_loc": 0,
+        "root_binary_rust_loc": 0,
+        "root_unit_tests": 0,
+    }
+    with tarfile.open(fileobj=io.BytesIO(completed.stdout), mode="r:") as archive:
+        for member in archive.getmembers():
+            if not member.isfile() or not member.name.endswith(".rs"):
+                continue
+            source_file = archive.extractfile(member)
+            if source_file is None:
+                continue
+            source = source_file.read().decode("utf-8", errors="replace")
+            line_count = len(source.splitlines())
+            metrics["root_rust_loc"] += line_count
+            if member.name.startswith("src/roomeq/"):
+                metrics["root_roomeq_rust_loc"] += line_count
+            if member.name.startswith("src/bin/"):
+                metrics["root_binary_rust_loc"] += line_count
+            metrics["root_unit_tests"] += len(TEST_ATTRIBUTE.findall(source))
+    return metrics
 
 
 def print_report(
     packages: dict[str, dict[str, Any]],
     policy: dict[str, Any],
-    edges: set[tuple[str, str]],
+    edges: set[WorkspaceEdge],
     metrics: dict[str, int],
 ) -> None:
     print("Crate-partition fitness report")
@@ -506,7 +655,10 @@ def print_report(
         f"workspace: {len(packages)} packages, {len(edges)} direct internal edges, "
         f"{len(policy['temporary_exceptions'])} temporary exceptions"
     )
-    print(f"dependency cycles: {len(dependency_cycles(set(packages), edges))}")
+    print(
+        "normal/build dependency cycles: "
+        f"{len(dependency_cycles(set(packages), edges))}"
+    )
     print("temporary dependency exceptions:")
     for exception in policy["temporary_exceptions"]:
         print(
@@ -522,8 +674,8 @@ def print_report(
         print(f"{package_name} | {lines} | {tests} | {command}")
 
     consumers: dict[str, list[str]] = defaultdict(list)
-    for source, destination in sorted(edges):
-        consumers[destination].append(source)
+    for source, destination, kind in sorted(edges):
+        consumers[destination].append(f"{source} ({kind})")
     print("\nDirect workspace consumers:")
     for package_name in sorted(packages):
         names = ", ".join(consumers[package_name]) or "none"
@@ -564,7 +716,14 @@ def main() -> int:
     if baseline_error:
         errors.append(baseline_error)
     elif baseline is not None:
-        errors.extend(check_monotonic_ratchets(policy, baseline))
+        try:
+            baseline_metrics = source_metrics_at_git_ref(REPO_ROOT, arguments.baseline_ref)
+        except RuntimeError as error:
+            errors.append(str(error))
+        else:
+            errors.extend(
+                check_monotonic_ratchets(policy, baseline, baseline_metrics)
+            )
     elif arguments.baseline_ref:
         print("baseline ref predates WP0 policy; monotonic comparison bootstrapped")
 

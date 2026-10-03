@@ -487,6 +487,68 @@ pub struct FinalPhysicalSeatPlayback {
     pub delivered_support: Vec<roomeq_model::SummationSupportEvidence>,
 }
 
+/// Exact curves and settings used for one final useful-output score.
+/// Routed physical-main scores use the main-only view; ordinary outputs use
+/// the same logical-output replay that produced their retained seat score.
+#[derive(Debug, Clone, serde::Serialize)]
+pub(super) struct PhysicalMeasurementContributor {
+    /// Physical output identity whose raw capture contributes to a logical input.
+    pub physical_output: String,
+    /// Raw captured response before routed playback processing.
+    pub measured_curve: Curve,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub(super) struct UsefulOutputReplayCapture {
+    pub logical_input: String,
+    pub partition: String,
+    pub seat_index: usize,
+    pub sample_rate_hz: f64,
+    pub baseline_kind: String,
+    /// Hash of the serialized graph projection emitted with the replay event.
+    pub replayed_serialized_dsp_graph_projection_sha256: Option<String>,
+    /// Hash of executable plugin/routing payloads; excludes evidence metadata.
+    pub replayed_playback_graph_sha256: Option<String>,
+    /// Raw physical captures used by baseline and delivered route sums.
+    pub baseline_measurement_contributors: Vec<PhysicalMeasurementContributor>,
+    pub delivered_measurement_contributors: Vec<PhysicalMeasurementContributor>,
+    pub baseline_curve: Curve,
+    pub delivered_curve: Curve,
+    pub target_curve: Option<Curve>,
+    pub min_freq_hz: f64,
+    pub max_freq_hz: f64,
+    pub schroeder_hz: Option<f64>,
+    pub normalize_level: bool,
+    pub permitted_gain_db: f64,
+    pub scorecard: roomeq_model::AcousticQualityScorecard,
+}
+
+fn capture_measurement_contributors(
+    physical: &BTreeMap<String, Vec<Curve>>,
+    outputs: &[String],
+    seat: usize,
+) -> Result<Vec<PhysicalMeasurementContributor>> {
+    outputs
+        .iter()
+        .map(|output| {
+            Ok(PhysicalMeasurementContributor {
+                physical_output: output.clone(),
+                measured_curve: measured(physical, output, seat)?.clone(),
+            })
+        })
+        .collect()
+}
+
+struct FinalSeatReplayContext<'a> {
+    baseline: Option<&'a RoomOptimizationResult>,
+    trace: Option<&'a mut Vec<UsefulOutputReplayCapture>>,
+}
+
+struct PhysicalMainReplayContext<'a> {
+    target: Option<&'a Curve>,
+    trace: Option<&'a mut Vec<UsefulOutputReplayCapture>>,
+}
+
 /// Resolve a pre-optimization capture snapshot using runtime output identities.
 pub fn training_physical_captures(
     captures: &[Capture],
@@ -1098,7 +1160,18 @@ pub(super) fn validate_final_seats(
     fs: f64,
     dir: &Path,
 ) -> Result<()> {
-    validate_final_seats_impl(result, captures, held_out, config, fs, dir, None)
+    validate_final_seats_impl(
+        result,
+        captures,
+        held_out,
+        config,
+        fs,
+        dir,
+        FinalSeatReplayContext {
+            baseline: None,
+            trace: None,
+        },
+    )
 }
 
 /// Final selection also checks single-seat systems: a single capture is not an
@@ -1113,7 +1186,43 @@ pub(super) fn validate_candidate_final_seats(
     fs: f64,
     dir: &Path,
 ) -> Result<()> {
-    validate_final_seats_impl(result, captures, held_out, config, fs, dir, Some(baseline))
+    validate_final_seats_impl(
+        result,
+        captures,
+        held_out,
+        config,
+        fs,
+        dir,
+        FinalSeatReplayContext {
+            baseline: Some(baseline),
+            trace: None,
+        },
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn validate_candidate_final_seats_with_diagnostic_trace(
+    result: &mut RoomOptimizationResult,
+    baseline: &RoomOptimizationResult,
+    captures: &[Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+    replay_trace: &mut Vec<UsefulOutputReplayCapture>,
+) -> Result<()> {
+    validate_final_seats_impl(
+        result,
+        captures,
+        held_out,
+        config,
+        fs,
+        dir,
+        FinalSeatReplayContext {
+            baseline: Some(baseline),
+            trace: Some(replay_trace),
+        },
+    )
 }
 
 /// Return the lowest frequency at which a deliberately configured excursion
@@ -1142,8 +1251,12 @@ fn physical_main_quality(
     input: &str,
     seat: usize,
     context: &ReplayContext<'_>,
-    target: Option<&Curve>,
+    replay_context: PhysicalMainReplayContext<'_>,
 ) -> Result<Option<roomeq_model::AcousticQualityScorecard>> {
+    let PhysicalMainReplayContext {
+        target,
+        trace: replay_trace,
+    } = replay_context;
     let main = baseline
         .metadata
         .bass_management
@@ -1176,7 +1289,7 @@ fn physical_main_quality(
         config: &observation,
         ..*context
     };
-    let (pre, _) = replay_output(
+    let (pre, baseline_outputs) = replay_output(
         baseline,
         physical,
         input,
@@ -1185,7 +1298,7 @@ fn physical_main_quality(
         &main_context,
         Some(&main.destination),
     )?;
-    let (post, _) = replay_output(
+    let (post, delivered_outputs) = replay_output(
         result,
         physical,
         input,
@@ -1194,28 +1307,60 @@ fn physical_main_quality(
         &main_context,
         Some(&main.destination),
     )?;
-    roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
-        &[pre.curve],
-        &[post.curve],
+    let permitted_gain_db = observation
+        .optimizer
+        .permitted_output_gain_db
+        .get(input)
+        .copied()
+        .unwrap_or(0.0);
+    let schroeder_hz = roomeq_model::auto_tune::resolved_schroeder_hz(&observation.optimizer);
+    let scorecard = roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
+        std::slice::from_ref(&pre.curve),
+        std::slice::from_ref(&post.curve),
         &[],
         &[],
         target,
         roomeq_engine::quality::QualityEvaluationConfig {
             min_freq_hz: low,
             max_freq_hz: high,
-            schroeder_hz: roomeq_model::auto_tune::resolved_schroeder_hz(&observation.optimizer),
+            schroeder_hz,
             normalize_level: true,
         },
         Default::default(),
-        observation
-            .optimizer
-            .permitted_output_gain_db
-            .get(input)
-            .copied()
-            .unwrap_or(0.0),
+        permitted_gain_db,
     )
-    .map(Some)
-    .map_err(invalid)
+    .map_err(invalid)?;
+    if let Some(replay_trace) = replay_trace {
+        replay_trace.push(UsefulOutputReplayCapture {
+            logical_input: input.to_string(),
+            partition: context.partition.to_string(),
+            seat_index: seat,
+            sample_rate_hz: context.fs,
+            baseline_kind: "pre_finalization_optimized_graph_without_tagged_correction".into(),
+            replayed_serialized_dsp_graph_projection_sha256: None,
+            replayed_playback_graph_sha256: None,
+            baseline_measurement_contributors: capture_measurement_contributors(
+                physical,
+                &baseline_outputs,
+                seat,
+            )?,
+            delivered_measurement_contributors: capture_measurement_contributors(
+                physical,
+                &delivered_outputs,
+                seat,
+            )?,
+            baseline_curve: pre.curve.clone(),
+            delivered_curve: post.curve.clone(),
+            target_curve: target.cloned(),
+            min_freq_hz: low,
+            max_freq_hz: high,
+            schroeder_hz,
+            normalize_level: true,
+            permitted_gain_db,
+            scorecard: scorecard.clone(),
+        });
+    }
+    Ok(Some(scorecard))
 }
 
 /// Validate shared support per input without inventing overlap between independent inputs.
@@ -1383,8 +1528,12 @@ fn validate_final_seats_impl(
     config: &RoomConfig,
     fs: f64,
     dir: &Path,
-    baseline: Option<&RoomOptimizationResult>,
+    replay_context: FinalSeatReplayContext<'_>,
 ) -> Result<()> {
+    let FinalSeatReplayContext {
+        baseline,
+        trace: mut replay_trace,
+    } = replay_context;
     crate::export::validate_final_routed_stage_ownership(result)?;
     if baseline.is_none() && !captures.iter().any(|c| c.curves.len() > 1) && held_out.is_empty() {
         return Ok(());
@@ -1567,7 +1716,8 @@ fn validate_final_seats_impl(
                     true,
                     &context,
                 )?;
-                let (post, _) = replay(result, physical, input, seat, false, &context)?;
+                let (post, delivered_outputs) =
+                    replay(result, physical, input, seat, false, &context)?;
                 let uncertainty_db = pre.uncertainty_db() + post.uncertainty_db();
                 let pre_support = pre.support;
                 let post_support = post.support;
@@ -1619,7 +1769,9 @@ fn validate_final_seats_impl(
                             .unwrap_or(0.0),
                     )
                     .map_err(invalid)?;
+                let scorecard_for_replay = score.clone();
                 score.correction_band_hz = Some(correction_band);
+                let replay_count_before = replay_trace.as_ref().map_or(0, |trace| trace.len());
                 if let Some(main_score) = physical_main_quality(
                     result,
                     baseline.unwrap_or(result),
@@ -1627,11 +1779,55 @@ fn validate_final_seats_impl(
                     input,
                     seat,
                     &context,
-                    target.as_ref(),
+                    PhysicalMainReplayContext {
+                        target: target.as_ref(),
+                        trace: replay_trace.as_deref_mut(),
+                    },
                 )? {
                     // Only replace the SPL-loss evidence. Combined-source
                     // shape, uncertainty, and crossover quality stay intact.
                     score.useful_output = main_score.useful_output;
+                }
+                // A logical output without a routed physical-main branch is
+                // scored directly from these same pre/post curves. Retain
+                // those inputs too; otherwise an opt-in diagnostic could
+                // claim the replay was visited while losing its actual score
+                // basis merely because this graph has no bass route.
+                if let Some(replay_trace) = replay_trace.as_deref_mut()
+                    && replay_trace.len() == replay_count_before
+                {
+                    replay_trace.push(UsefulOutputReplayCapture {
+                        logical_input: input.clone(),
+                        partition: partition.into(),
+                        seat_index: seat,
+                        sample_rate_hz: fs,
+                        baseline_kind: "pre_finalization_optimized_graph_without_tagged_correction"
+                            .into(),
+                        replayed_serialized_dsp_graph_projection_sha256: None,
+                        replayed_playback_graph_sha256: None,
+                        baseline_measurement_contributors: capture_measurement_contributors(
+                            physical, &outputs, seat,
+                        )?,
+                        delivered_measurement_contributors: capture_measurement_contributors(
+                            physical,
+                            &delivered_outputs,
+                            seat,
+                        )?,
+                        baseline_curve: pre.clone(),
+                        delivered_curve: post.clone(),
+                        target_curve: target.clone(),
+                        min_freq_hz: lo,
+                        max_freq_hz: hi,
+                        schroeder_hz,
+                        normalize_level: true,
+                        permitted_gain_db: config
+                            .optimizer
+                            .permitted_output_gain_db
+                            .get(input)
+                            .copied()
+                            .unwrap_or(0.0),
+                        scorecard: scorecard_for_replay,
+                    });
                 }
                 // Each evaluator invocation contains one seat, so its local index
                 // is zero. Restore physical capture identity before aggregation.
@@ -2267,8 +2463,7 @@ mod tests {
             Path::new("."),
             "training",
         )
-        .err()
-        .expect("full-range driver sums still require full-band evidence");
+        .expect_err("full-range driver sums still require full-band evidence");
         assert!(
             error
                 .to_string()
@@ -2409,7 +2604,10 @@ mod tests {
             &RoomConfig::default(),
             48_000.0,
             Path::new("."),
-            Some(&baseline),
+            FinalSeatReplayContext {
+                baseline: Some(&baseline),
+                trace: None,
+            },
         )
         .unwrap();
         let seats = &result
@@ -2436,7 +2634,10 @@ mod tests {
             &RoomConfig::default(),
             48_000.0,
             Path::new("."),
-            Some(&baseline),
+            FinalSeatReplayContext {
+                baseline: Some(&baseline),
+                trace: None,
+            },
         )
         .unwrap_err();
         assert!(
@@ -2520,7 +2721,10 @@ mod tests {
             &RoomConfig::default(),
             48_000.0,
             Path::new("."),
-            Some(&baseline),
+            FinalSeatReplayContext {
+                baseline: Some(&baseline),
+                trace: None,
+            },
         )
         .unwrap();
         let mut sub = result
@@ -3103,6 +3307,252 @@ mod tests {
         });
         result.metadata.bass_management = Some(report);
         (result, config, flat)
+    }
+
+    fn lfe_to_sub_fixture(
+        add_second_sub: bool,
+    ) -> (RoomOptimizationResult, RoomConfig, Curve, Vec<Capture>) {
+        let (mut result, config, flat) = routed_fixture();
+        let sub_chain = result.channels.remove("sub").unwrap();
+        let sub_response = result.channel_results.remove("sub").unwrap();
+        result.channels.insert("Sub1".into(), sub_chain);
+        result.channel_results.insert("Sub1".into(), sub_response);
+        let mut config = config;
+        config
+            .system
+            .as_mut()
+            .unwrap()
+            .speakers
+            .insert("LFE".into(), "Sub1".into());
+        let graph = result
+            .metadata
+            .bass_management
+            .as_mut()
+            .unwrap()
+            .routing_graph
+            .as_mut()
+            .unwrap();
+        let mut lfe_route = graph.routes[1].clone();
+        lfe_route.source_channel = "LFE".into();
+        lfe_route.source_index = 0;
+        lfe_route.pre_chain_channel = None;
+        lfe_route.destination = "Sub1".into();
+        lfe_route.post_chain_channel = Some("Sub1".into());
+        lfe_route.route_kind = "lfe_lowpass_to_sub".into();
+        lfe_route.low_pass_hz = Some(120.0);
+        graph.input_channels = vec!["LFE".into()];
+        graph.routes = vec![lfe_route.clone()];
+        if add_second_sub {
+            let sub_result = crate::test_fixtures::single_channel_room_result("Sub2");
+            result
+                .channels
+                .insert("Sub2".into(), sub_result.channels["Sub2"].clone());
+            result
+                .channel_results
+                .insert("Sub2".into(), sub_result.channel_results["Sub2"].clone());
+            let mut second_route = lfe_route;
+            second_route.destination = "Sub2".into();
+            second_route.destination_index = 2;
+            second_route.post_chain_channel = Some("Sub2".into());
+            second_route.gain_db = 0.0;
+            second_route.gain_linear = 1.0;
+            second_route.matrix_gain = 1.0;
+            graph.routes.push(second_route);
+            graph.output_channels = vec!["Sub1".into(), "Sub2".into()];
+            graph.physical_sub_output = "Sub1".into();
+            graph.physical_sub_outputs = vec!["Sub1".into(), "Sub2".into()];
+        }
+        let outputs = if add_second_sub {
+            vec!["Sub1", "Sub2"]
+        } else {
+            vec!["Sub1"]
+        };
+        let captures = outputs
+            .into_iter()
+            .map(|channel| Capture {
+                channel: channel.into(),
+                driver: None,
+                curves: vec![if channel == "Sub2" {
+                    let mut curve = flat.clone();
+                    curve.spl.mapv_inplace(|level| level - 3.0);
+                    curve
+                        .phase
+                        .as_mut()
+                        .unwrap()
+                        .mapv_inplace(|phase| phase + 17.0);
+                    curve
+                } else {
+                    flat.clone()
+                }],
+                seat_labels: None,
+            })
+            .collect();
+        (result, config, flat, captures)
+    }
+
+    fn assert_trace_is_observational(
+        result: RoomOptimizationResult,
+        config: &RoomConfig,
+        captures: &[Capture],
+    ) -> (RoomOptimizationResult, Vec<UsefulOutputReplayCapture>) {
+        let baseline = result.clone();
+        let mut normal = result.clone();
+        let mut traced = result;
+        let normal_result = validate_candidate_final_seats(
+            &mut normal,
+            &baseline,
+            captures,
+            &HashMap::new(),
+            config,
+            48_000.0,
+            Path::new("."),
+        );
+        let mut trace = Vec::new();
+        let traced_result = validate_candidate_final_seats_with_diagnostic_trace(
+            &mut traced,
+            &baseline,
+            captures,
+            &HashMap::new(),
+            config,
+            48_000.0,
+            Path::new("."),
+            &mut trace,
+        );
+        assert_eq!(
+            normal_result.as_ref().map_err(ToString::to_string),
+            traced_result.as_ref().map_err(ToString::to_string),
+            "diagnostic tracing changed validation outcome"
+        );
+        let normal_report = normal.metadata.correction_acceptance.as_ref().unwrap();
+        let traced_report = traced.metadata.correction_acceptance.as_ref().unwrap();
+        assert_eq!(
+            serde_json::to_value(normal_report).unwrap(),
+            serde_json::to_value(traced_report).unwrap(),
+            "diagnostic tracing changed score or acceptance evidence"
+        );
+        (traced, trace)
+    }
+
+    #[test]
+    fn diagnostic_trace_uses_lfe_sub1_physical_capture_without_changing_validation() {
+        let (result, config, raw_sub, captures) = lfe_to_sub_fixture(false);
+        let (traced, trace) = assert_trace_is_observational(result, &config, &captures);
+        assert_eq!(trace.len(), 1);
+        let replay = &trace[0];
+        assert_eq!(replay.logical_input, "LFE");
+        assert_eq!(
+            replay
+                .baseline_measurement_contributors
+                .iter()
+                .map(|contributor| contributor.physical_output.as_str())
+                .collect::<Vec<_>>(),
+            ["Sub1"]
+        );
+        assert_eq!(
+            replay
+                .delivered_measurement_contributors
+                .iter()
+                .map(|contributor| contributor.physical_output.as_str())
+                .collect::<Vec<_>>(),
+            ["Sub1"]
+        );
+        for contributor in replay
+            .baseline_measurement_contributors
+            .iter()
+            .chain(&replay.delivered_measurement_contributors)
+        {
+            assert_eq!(contributor.measured_curve.freq, raw_sub.freq);
+            assert_eq!(contributor.measured_curve.spl, raw_sub.spl);
+        }
+        assert!(
+            traced
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .unwrap()
+                .acoustic_quality
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn diagnostic_trace_records_every_physical_contributor_to_a_logical_sum() {
+        let (result, config, _, captures) = lfe_to_sub_fixture(true);
+        let (_, trace) = assert_trace_is_observational(result, &config, &captures);
+        assert_eq!(trace.len(), 1);
+        let replay = &trace[0];
+        for contributors in [
+            &replay.baseline_measurement_contributors,
+            &replay.delivered_measurement_contributors,
+        ] {
+            assert_eq!(
+                contributors
+                    .iter()
+                    .map(|contributor| contributor.physical_output.as_str())
+                    .collect::<Vec<_>>(),
+                ["Sub1", "Sub2"]
+            );
+            for contributor in contributors {
+                let expected = captures
+                    .iter()
+                    .find(|capture| capture.channel == contributor.physical_output)
+                    .unwrap()
+                    .curves
+                    .first()
+                    .unwrap();
+                assert_eq!(contributor.measured_curve.freq, expected.freq);
+                assert_eq!(contributor.measured_curve.spl, expected.spl);
+                assert_eq!(contributor.measured_curve.phase, expected.phase);
+            }
+        }
+    }
+
+    #[test]
+    fn diagnostic_trace_does_not_turn_missing_routed_capture_into_acceptance() {
+        let (result, config, flat, _) = lfe_to_sub_fixture(false);
+        let missing_sub_capture = [Capture {
+            channel: "left".into(),
+            driver: None,
+            curves: vec![flat],
+            seat_labels: None,
+        }];
+        let baseline = result.clone();
+        let mut normal = result.clone();
+        let mut traced = result;
+        let normal_error = validate_candidate_final_seats(
+            &mut normal,
+            &baseline,
+            &missing_sub_capture,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .unwrap_err()
+        .to_string();
+        let mut trace = Vec::new();
+        let traced_error = validate_candidate_final_seats_with_diagnostic_trace(
+            &mut traced,
+            &baseline,
+            &missing_sub_capture,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            Path::new("."),
+            &mut trace,
+        )
+        .unwrap_err()
+        .to_string();
+        assert_eq!(normal_error, traced_error);
+        assert!(
+            normal_error.contains("physical output 'Sub1'"),
+            "{normal_error}"
+        );
+        assert!(trace.is_empty());
+        assert_eq!(
+            serde_json::to_value(normal.metadata.correction_acceptance.as_ref().unwrap()).unwrap(),
+            serde_json::to_value(traced.metadata.correction_acceptance.as_ref().unwrap()).unwrap()
+        );
     }
 
     #[test]

@@ -7,6 +7,9 @@
 
 use std::path::PathBuf;
 
+#[path = "qa_contract/public_workflows.rs"]
+mod public_workflows;
+
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }

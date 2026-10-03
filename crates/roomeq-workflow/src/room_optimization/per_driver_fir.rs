@@ -1909,7 +1909,7 @@ mod tests {
             let mut source = grid.clone();
             source.spl += gain_db;
             source.phase.as_mut().unwrap().fill(phase_deg);
-            for i in 0..drivers.len() {
+            for (i, driver) in drivers.iter().enumerate() {
                 let render = |parent: &ChannelDspChain| {
                     let mut branch = parent.clone();
                     branch.plugins = parent.drivers.as_ref().unwrap()[i].plugins.clone();
@@ -1932,7 +1932,7 @@ mod tests {
                     assert!((a - b).abs() < 1e-9);
                 }
                 assert_eq!(
-                    drivers[i].plugins.last().unwrap().parameters["latency_samples"],
+                    driver.plugins.last().unwrap().parameters["latency_samples"],
                     2
                 );
             }

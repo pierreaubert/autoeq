@@ -264,9 +264,10 @@ fn preprocess_multisub_advanced(
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let mut room = roomeq_model::RoomConfig::default();
-    room.optimizer =
-        roomeq_engine::group_processing::sub_optimizer_config(&measurements, optimizer);
+    let room = roomeq_model::RoomConfig {
+        optimizer: roomeq_engine::group_processing::sub_optimizer_config(&measurements, optimizer),
+        ..Default::default()
+    };
     let resources = crate::prepare_eq_resources(&room.optimizer, None).map_err(|error| {
         AutoeqError::InvalidMeasurement {
             message: error.to_string(),

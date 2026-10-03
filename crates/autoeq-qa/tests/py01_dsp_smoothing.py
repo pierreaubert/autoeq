@@ -11,6 +11,8 @@ import json
 import sys
 from pathlib import Path
 
+from qa_support.metrics import maximum_error_metrics, require_finite_numbers
+
 CASE_ID = "autoeq-qa.py01-dsp-smoothing.v1"
 TOL_ABS = 1e-9
 
@@ -39,20 +41,28 @@ def main():
     expected = ref["smoothed_db"]
     if not (len(freqs) == len(spl) == len(expected)):
         fail("golden grid/spl/smoothed length mismatch")
+    try:
+        require_finite_numbers(
+            [*freqs, *spl, *expected, ref["octave_fraction"]],
+            "golden smoothing data",
+        )
+    except ValueError as error:
+        fail(f"invalid finite golden input: {error}")
     got = smooth_octave(list(freqs), list(spl), float(ref["octave_fraction"]))
     if len(got) != len(expected):
         fail(f"length {len(got)} != golden {len(expected)}")
-    max_err = 0.0
+    try:
+        max_err, max_rel_err = maximum_error_metrics(zip(got, expected))
+    except ValueError as error:
+        fail(f"invalid finite comparison: {error}")
     for f, g, e in zip(freqs, got, expected):
-        if not isinstance(g, float) or g != g:
-            fail(f"non-finite output at {f} Hz: {g!r}")
         err = abs(g - e)
-        max_err = max(max_err, err)
         if err > TOL_ABS:
             fail(f"f={f} Hz: got={g:.12f} expected={e:.12f} abs_err={err:.3e}")
     print(json.dumps({
         "QA_RESULT": True, "case": CASE_ID, "pass": True,
-        "max_abs_error": max_err, "tolerance": TOL_ABS,
+        "max_abs_error": max_err, "max_rel_error": max_rel_err,
+        "tolerance": TOL_ABS,
         "tolerance_kind": "abs", "provenance": "wolfram-engine-15.0.0",
     }))
 

@@ -33,5 +33,5 @@ web-sys = { version = "0.3", features = [
     "Node",
     "console",
 ] }
-gpui = { package = "gpui-toolkit-gpui", path = "../../../gpui-toolkit/crates/3rdparties/gpui", version = "0.2.3", default-features = false }
-gpui_web = { package = "gpui-toolkit-gpui-web", path = "../../../gpui-toolkit/crates/3rdparties/gpui_web", version = "0.1.1" }
+gpui = { package = "gpui-toolkit-gpui", git = "https://github.com/pierreaubert/gpui-toolkit", rev = "d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d", version = "=0.2.3", default-features = false }
+gpui_web = { package = "gpui-toolkit-gpui-web", git = "https://github.com/pierreaubert/gpui-toolkit", rev = "d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d", version = "=0.1.1" }

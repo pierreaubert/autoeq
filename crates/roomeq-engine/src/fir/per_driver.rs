@@ -330,8 +330,8 @@ pub fn generate_per_driver_firs(
     let score = |c: &Curve| {
         let mut error = 0.0;
         let mut weight = 0.0;
-        for i in 1..c.freq.len() {
-            if !combined_mask[i] && (active_min_freq..=active_max_freq).contains(&c.freq[i]) {
+        for (i, &masked) in combined_mask[..c.freq.len()].iter().enumerate().skip(1) {
+            if !masked && (active_min_freq..=active_max_freq).contains(&c.freq[i]) {
                 let w = (c.freq[i] / c.freq[i - 1]).ln();
                 error += w * (c.spl[i] - target.spl[i]).powi(2);
                 weight += w;
@@ -584,11 +584,21 @@ mod tests {
         let c = flat(80.0);
         let mut other = c.clone();
         other.freq[0] = 19.0;
-        assert!(generate_per_driver_firs(&[other], &[c.clone()], &c, &config(), 48000.0).is_err());
+        assert!(
+            generate_per_driver_firs(&[other], std::slice::from_ref(&c), &c, &config(), 48000.0)
+                .is_err()
+        );
         let mut config = config();
         config.fir.as_mut().unwrap().taps = 0;
         assert!(
-            generate_per_driver_firs(&[c.clone()], &[c.clone()], &c, &config, 48000.0).is_err()
+            generate_per_driver_firs(
+                std::slice::from_ref(&c),
+                std::slice::from_ref(&c),
+                &c,
+                &config,
+                48000.0
+            )
+            .is_err()
         );
     }
     #[test]

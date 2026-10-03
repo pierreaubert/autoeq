@@ -66,9 +66,8 @@ fn missing_low_driver_support_cannot_silently_remove_measured_bass() {
         Path::new("."),
         "training",
     );
-    let error = replay
-        .err()
-        .expect("unmeasured tweeter bass must not silently shrink final playback");
+    let error =
+        replay.expect_err("unmeasured tweeter bass must not silently shrink final playback");
     assert!(
         error
             .to_string()

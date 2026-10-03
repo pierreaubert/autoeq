@@ -33,6 +33,11 @@ use std::path::PathBuf;
 /// Contains device settings and signal parameters used during measurement capture
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct RecordingConfiguration {
+    /// Required acquisition inventory for newly exported capture configurations.
+    /// The canonical filename is `capture-handoff.json`; missing or changed
+    /// inventories are refused before correction. Absent on legacy imports.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_handoff_file: Option<String>,
     /// Playback device name
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub playback_device_name: Option<String>,

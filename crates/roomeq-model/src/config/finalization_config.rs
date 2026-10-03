@@ -28,6 +28,14 @@ pub struct FinalizationConfig {
     /// Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.
     /// Subwoofers are exempt. This is not input attenuation or PEQ boost.
     pub max_useful_output_loss_db: f64,
+    /// Optional cumulative additional static safety attenuation limits by physical output, in dB.
+    /// Only serial `room_eq_safety_gain` gains count; common pre-route cuts count for every
+    /// affected output. Baseline calibration and untagged trims remain separate. This is an
+    /// operator-declared output-loss budget, not calibrated SPL or hardware-capacity evidence.
+    /// Runtime limiting is never credited toward physical-drive attenuation. Unknown output IDs
+    /// are refused before search; omitted outputs keep the existing behavior.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub max_output_safety_attenuation_db: BTreeMap<String, f64>,
     /// Protect summed physical sub outputs with a runtime limiter instead of static cuts.
     /// Requires native playback to preserve the limiter and matching output delays.
     pub subwoofer_limiter: bool,
@@ -55,6 +63,7 @@ impl Default for FinalizationConfig {
             output_ceiling_dbfs: 0.0,
             max_attenuation_db: 12.0,
             max_useful_output_loss_db: 3.0,
+            max_output_safety_attenuation_db: BTreeMap::new(),
             subwoofer_limiter: false,
             min_improvement_lower_bound_db: 0.0,
         }
@@ -92,6 +101,17 @@ impl FinalizationConfig {
             || !(0.0..=60.0).contains(&self.max_useful_output_loss_db)
         {
             return Err("finalization.max_useful_output_loss_db must be in 0..=60".into());
+        }
+        if self
+            .max_output_safety_attenuation_db
+            .iter()
+            .any(|(output, limit_db)| {
+                output.trim().is_empty() || !limit_db.is_finite() || *limit_db < 0.0
+            })
+        {
+            return Err(
+                "finalization.max_output_safety_attenuation_db requires named outputs and finite nonnegative limits".into(),
+            );
         }
         if !self.min_improvement_lower_bound_db.is_finite() {
             return Err("finalization.min_improvement_lower_bound_db must be finite".into());
@@ -142,5 +162,35 @@ mod tests {
             config.max_useful_output_loss_db = value;
             assert!(config.validate().is_err());
         }
+    }
+
+    #[test]
+    fn per_output_safety_attenuation_budget_is_optional_and_validated() {
+        let mut config: FinalizationConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.max_output_safety_attenuation_db.is_empty());
+        assert!(config.validate().is_ok());
+
+        config
+            .max_output_safety_attenuation_db
+            .insert("Sub1".into(), 19.6);
+        assert!(config.validate().is_ok());
+        config
+            .max_output_safety_attenuation_db
+            .insert("Sub1".into(), 120.0);
+        assert!(
+            config.validate().is_ok(),
+            "do not impose an arbitrary ceiling"
+        );
+        for value in [-0.01, f64::NAN, f64::INFINITY] {
+            config
+                .max_output_safety_attenuation_db
+                .insert("Sub1".into(), value);
+            assert!(config.validate().is_err());
+        }
+        config.max_output_safety_attenuation_db.clear();
+        config
+            .max_output_safety_attenuation_db
+            .insert("  ".into(), 1.0);
+        assert!(config.validate().is_err());
     }
 }

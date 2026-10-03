@@ -45,6 +45,10 @@ pub(super) struct AreaEvaluator {
 }
 
 impl AreaEvaluator {
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Construction binds the source count, quadrature, frequency band, and worker budget"
+    )]
     pub(super) fn new(
         num_subs: usize,
         static_complex: Vec<Vec<Vec<Complex64>>>,

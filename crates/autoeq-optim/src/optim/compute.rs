@@ -271,6 +271,40 @@ pub fn compute_response_fitness(responses: &[Array1<f64>], data: &ObjectiveData)
 /// ordinary scalar objectives it returns a one-element vector containing the
 /// penalised scalar loss.
 pub fn compute_pareto_objectives(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
+    try_compute_pareto_objectives(x, data).unwrap_or_else(|_| {
+        let objective_count = data
+            .multi_objective
+            .as_ref()
+            .map_or(1, |multi| multi.objectives.len().max(1));
+        vec![f64::INFINITY; objective_count]
+    })
+}
+
+/// Why an explicitly tracked score could not start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ValidationScoreRefusal {
+    /// The invocation's cancellation or deadline gate refused the score.
+    TerminalStop,
+    /// A non-terminal search-budget or stage gate refused the score.
+    NonTerminal,
+}
+
+/// Compute Pareto objectives while preserving the validation gate's typed stop refusal.
+pub(crate) fn try_compute_pareto_objectives(
+    x: &[f64],
+    data: &ObjectiveData,
+) -> Result<Vec<f64>, ValidationScoreRefusal> {
+    let _evaluation_guard = begin_controlled_evaluation(data).map_err(|()| {
+        if data.terminal_stop_requested() {
+            ValidationScoreRefusal::TerminalStop
+        } else {
+            ValidationScoreRefusal::NonTerminal
+        }
+    })?;
+    Ok(compute_pareto_objectives_uncontrolled(x, data))
+}
+
+fn compute_pareto_objectives_uncontrolled(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
     if let Some(ref mo) = data.multi_objective {
         // Evaluate each per-measurement loss once; the scalarisation and the
         // shared penalty are pure reductions over those values, so no
@@ -292,7 +326,7 @@ pub fn compute_pareto_objectives(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
             .collect();
     }
 
-    vec![compute_fitness_penalties_ref(x, data)]
+    vec![compute_fitness_penalties_uncontrolled(x, data)]
 }
 
 /// Compute second-difference L1 (or Lp) penalty on cascaded magnitude in
@@ -580,7 +614,30 @@ fn penalty_terms(x: &[f64], data: &ObjectiveData) -> [f64; 3] {
     terms
 }
 
+pub(crate) fn compute_penalty_total(x: &[f64], data: &ObjectiveData) -> f64 {
+    penalty_terms(x, data).into_iter().sum()
+}
+
 pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
+    try_compute_fitness_penalties_ref(x, data).unwrap_or(f64::INFINITY)
+}
+
+/// Compute a scalar validation score while retaining a typed stop refusal.
+pub(crate) fn try_compute_fitness_penalties_ref(
+    x: &[f64],
+    data: &ObjectiveData,
+) -> Result<f64, ValidationScoreRefusal> {
+    let _evaluation_guard = begin_controlled_evaluation(data).map_err(|()| {
+        if data.terminal_stop_requested() {
+            ValidationScoreRefusal::TerminalStop
+        } else {
+            ValidationScoreRefusal::NonTerminal
+        }
+    })?;
+    Ok(compute_fitness_penalties_uncontrolled(x, data))
+}
+
+fn compute_fitness_penalties_uncontrolled(x: &[f64], data: &ObjectiveData) -> f64 {
     let fit = compute_base_fitness(x, data);
 
     // When penalties are enabled (weights > 0), add them to the base fit so that
@@ -591,6 +648,23 @@ pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
     }
 
     penalized
+}
+
+fn begin_controlled_evaluation(
+    data: &ObjectiveData,
+) -> Result<Option<super::run_control::ObjectiveEvaluationGuard>, ()> {
+    let prepared = data.prepared();
+    let Some(control) = prepared.run_control.as_ref() else {
+        return Ok(None);
+    };
+    let component_count = data
+        .multi_objective
+        .as_ref()
+        .map_or(1, |multi| multi.objectives.len().max(1));
+    control
+        .begin_evaluation(prepared.evaluation_stage, component_count)
+        .map(Some)
+        .ok_or(())
 }
 
 /// Compute objective function value including penalty terms for constraints
@@ -834,6 +908,7 @@ mod multi_objective_and_base_fitness_tests {
     use crate::loss::{HeadphoneLossData, LossType, SpeakerLossData};
     use crate::roomeq::MultiMeasurementStrategy;
     use ndarray::Array1;
+    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     fn freqs() -> Array1<f64> {
@@ -1183,6 +1258,52 @@ mod multi_objective_and_base_fitness_tests {
         let ref_val = compute_fitness_penalties_ref(&x(), &obj);
         let wrapped_val = compute_fitness_penalties(&x(), None, &mut obj);
         assert_eq!(ref_val, wrapped_val);
+    }
+
+    #[test]
+    fn controlled_scalar_scoring_enforces_the_candidate_budget() {
+        let source = base_objective(LossType::SpeakerFlat);
+        let source_prepared = source.prepared();
+        let control =
+            super::super::run_control::OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
+        let controlled = source.with_run_control(control.clone());
+
+        assert!(compute_fitness_penalties_ref(&x(), &controlled).is_finite());
+        assert!(compute_fitness_penalties_ref(&x(), &controlled).is_infinite());
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluations_started, 1);
+        assert_eq!(snapshot.evaluations_completed, 1);
+        assert_eq!(snapshot.evaluations_refused, 1);
+        assert!(source.prepared().run_control.is_none());
+        assert!(std::ptr::eq(source_prepared, source.prepared()));
+        assert!(!Arc::ptr_eq(&source.prepared, &controlled.prepared));
+    }
+
+    #[test]
+    fn controlled_pareto_scoring_counts_one_candidate_and_all_components() {
+        let objective = base_objective(LossType::SpeakerFlat);
+        let mut source = objective.clone();
+        source.multi_objective = Some(MultiObjectiveData {
+            objectives: vec![objective.clone(), objective],
+            weights: vec![0.5, 0.5],
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        let control =
+            super::super::run_control::OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
+        let controlled = source.with_run_control(control.clone());
+
+        let values = compute_pareto_objectives(&x(), &controlled);
+        assert_eq!(values.len(), 2);
+        assert!(values.iter().all(|value| value.is_finite()));
+        let refused = compute_pareto_objectives(&x(), &controlled);
+        assert_eq!(refused, vec![f64::INFINITY; 2]);
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluations_started, 1);
+        assert_eq!(snapshot.component_evaluations_started, 2);
+        assert_eq!(snapshot.component_evaluations_completed, 2);
+        assert_eq!(snapshot.evaluations_refused, 1);
     }
 
     #[test]

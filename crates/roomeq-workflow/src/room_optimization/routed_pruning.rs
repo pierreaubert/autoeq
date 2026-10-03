@@ -539,14 +539,34 @@ fn validate_trial(
     }
     seat_replay::validate_candidate_final_seats(trial, f0, captures, held, config, fs, dir)
         .map_err(|error| error.to_string())?;
-    if !trial
-        .metadata
-        .correction_acceptance
-        .as_ref()
-        .is_some_and(|report| report.accepted)
-    {
-        return Err(String::from(
-            "final acoustic acceptance rejected the removal",
+    let Some(report) = trial.metadata.correction_acceptance.as_ref() else {
+        return Err(String::from("final acoustic acceptance report unavailable"));
+    };
+    if !report.accepted {
+        let final_seats = report
+            .acoustic_quality
+            .as_ref()
+            .map(|quality| {
+                quality
+                    .final_seats
+                    .iter()
+                    .map(|seat| {
+                        (
+                            seat.partition.as_str(),
+                            seat.logical_input.as_str(),
+                            seat.seat_index,
+                            seat.improvement_lower_bound_db,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        return Err(format!(
+            "final acoustic acceptance rejected the removal: decision={:?}; violations={:?}; improvement_db={:.6}; correction_rms_db={:.6}; final_seat_lower_bounds={final_seats:?}",
+            report.decision,
+            report.violations,
+            report.metrics.improvement_db,
+            report.metrics.correction_rms_db,
         ));
     }
     let outputs = crate::electrical_headroom::assess_final_graph(
@@ -626,6 +646,10 @@ pub(super) fn apply(
         {
             return Err(String::from("invalid pruning limits"));
         }
+        let condition_context = format!(
+            "complete delivered conditions={:?}; aggregation={:?}",
+            baseline.ids, budget.aggregation
+        );
         let mut current =
             vec![Array1::zeros(baseline.frequencies.len()); baseline.conditions.len()];
         let mut retained_trial = f0.clone();
@@ -693,13 +717,18 @@ pub(super) fn apply(
                     step,
                     maximum,
                     format!(
-                        "frozen graph limit exceeded: step={step}, cumulative={total}, local={maximum}"
+                        "{condition_context}; frozen graph limit exceeded: step={step}, cumulative={total}, local={maximum}"
                     ),
                 );
                 break;
             }
             if let Err(reason) = validate_trial(&mut trial, &f0, captures, held, config, fs, dir) {
-                records[index] = (ReportOutcome::Keep, step, maximum, reason);
+                records[index] = (
+                    ReportOutcome::Keep,
+                    step,
+                    maximum,
+                    format!("{condition_context}; candidate validation rejected removal: {reason}"),
+                );
                 break;
             }
             records[index] = (
@@ -710,10 +739,7 @@ pub(super) fn apply(
                 },
                 step,
                 maximum,
-                format!(
-                    "complete delivered conditions={:?}; aggregation={:?}",
-                    baseline.ids, budget.aggregation
-                ),
+                condition_context.clone(),
             );
             removed.insert(index);
             current = responses;

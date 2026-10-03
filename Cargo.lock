@@ -607,6 +607,7 @@ name = "autoeq-artifacts"
 version = "0.5.1"
 dependencies = [
  "autoeq-core",
+ "sha2 0.11.0",
  "tempfile",
 ]
 
@@ -615,6 +616,7 @@ name = "autoeq-cli"
 version = "0.5.2"
 dependencies = [
  "anyhow",
+ "autoeq-artifacts",
  "autoeq-plot",
  "autoeq-workflow",
  "chrono",
@@ -668,11 +670,11 @@ version = "0.5.0"
 dependencies = [
  "autoeq",
  "gpui-builder",
- "gpui-d3rs",
+ "gpui-d3rs 0.9.19",
  "gpui-design",
  "gpui-miniapp",
  "gpui-px",
- "gpui-toolkit-gpui",
+ "gpui-toolkit-gpui 0.2.3",
  "gpui-ui-kit",
  "reqwest",
  "tokio",
@@ -754,6 +756,8 @@ dependencies = [
  "autoeq-optim",
  "autoeq-plot",
  "autoeq-workflow",
+ "clap",
+ "csv",
  "ndarray",
  "num-complex",
  "roomeq-analysis",
@@ -768,6 +772,8 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
+ "tokio",
 ]
 
 [[package]]
@@ -776,8 +782,8 @@ version = "0.5.0"
 dependencies = [
  "autoeq-report-wasm",
  "console_error_panic_hook",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-web",
+ "gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui-web 0.1.1 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
  "js-sys",
  "serde",
  "serde_json",
@@ -791,7 +797,7 @@ name = "autoeq-report-wasm"
 version = "0.5.0"
 dependencies = [
  "base64 0.22.1",
- "gpui-d3rs",
+ "gpui-d3rs 0.9.19 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
  "serde",
  "serde_json",
 ]
@@ -823,7 +829,10 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
+ "sha2 0.11.0",
+ "tempfile",
  "tokio",
+ "urlencoding",
 ]
 
 [[package]]
@@ -2802,8 +2811,8 @@ dependencies = [
  "android_logger",
  "anyhow",
  "futures",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-wgpu",
+ "gpui-toolkit-gpui 0.2.3",
+ "gpui-toolkit-gpui-wgpu 0.1.2",
  "jni",
  "libc",
  "log",
@@ -2836,10 +2845,10 @@ dependencies = [
  "fontique",
  "glam 0.33.12",
  "gpui-design",
- "gpui-profiler",
- "gpui-toolkit-gpui",
+ "gpui-profiler 0.9.3",
+ "gpui-toolkit-gpui 0.2.3",
  "gpui-toolkit-gpui-macos",
- "gpui-toolkit-gpui-wgpu",
+ "gpui-toolkit-gpui-wgpu 0.1.2",
  "image",
  "kurbo",
  "log",
@@ -2857,15 +2866,30 @@ dependencies = [
  "vello",
  "vello_cpu",
  "wasm-bindgen-futures",
- "web-time",
  "wgpu 29.0.3",
+]
+
+[[package]]
+name = "gpui-d3rs"
+version = "0.9.19"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "delaunator",
+ "gpui-profiler 0.9.3 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "math-delaunay",
+ "regex",
+ "serde",
+ "serde_json",
+ "smallvec",
+ "thiserror 2.0.21",
+ "wasm-bindgen-futures",
 ]
 
 [[package]]
 name = "gpui-design"
 version = "0.9.7"
 dependencies = [
- "gpui-toolkit-gpui",
+ "gpui-toolkit-gpui 0.2.3",
  "serde",
 ]
 
@@ -2880,8 +2904,8 @@ dependencies = [
  "core-graphics 0.24.0",
  "core-text",
  "futures",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-wgpu",
+ "gpui-toolkit-gpui 0.2.3",
+ "gpui-toolkit-gpui-wgpu 0.1.2",
  "log",
  "objc",
  "parking_lot",
@@ -2903,15 +2927,14 @@ dependencies = [
  "gpui-builder",
  "gpui-design",
  "gpui-ios",
- "gpui-toolkit-gpui",
+ "gpui-toolkit-gpui 0.2.3",
  "gpui-toolkit-gpui-linux",
  "gpui-toolkit-gpui-macos",
- "gpui-toolkit-gpui-web",
+ "gpui-toolkit-gpui-web 0.1.1",
  "gpui-toolkit-gpui-windows",
  "gpui-ui-kit",
  "libsqlite3-sys",
  "web-sys",
- "web-time",
 ]
 
 [[package]]
@@ -2928,27 +2951,41 @@ name = "gpui-profiler"
 version = "0.9.3"
 
 [[package]]
+name = "gpui-profiler"
+version = "0.9.3"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+
+[[package]]
 name = "gpui-px"
 version = "0.9.14"
 dependencies = [
  "glam 0.33.12",
  "gpui-builder",
- "gpui-d3rs",
+ "gpui-d3rs 0.9.19",
  "gpui-design",
  "gpui-miniapp",
- "gpui-toolkit-gpui",
+ "gpui-toolkit-gpui 0.2.3",
  "gpui-ui-kit",
  "image",
  "thiserror 2.0.21",
  "wasm-bindgen",
- "web-time",
 ]
 
 [[package]]
 name = "gpui-toolkit-collections"
 version = "0.1.0"
 dependencies = [
- "gpui-toolkit-gpui-util",
+ "gpui-toolkit-gpui-util 0.1.0",
+ "indexmap",
+ "rustc-hash 2.1.3",
+]
+
+[[package]]
+name = "gpui-toolkit-collections"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "gpui-toolkit-gpui-util 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
  "indexmap",
  "rustc-hash 2.1.3",
 ]
@@ -2956,6 +2993,16 @@ dependencies = [
 [[package]]
 name = "gpui-toolkit-derive-refineable"
 version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
+name = "gpui-toolkit-derive-refineable"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2990,16 +3037,16 @@ dependencies = [
  "futures",
  "futures-concurrency",
  "getrandom 0.3.4",
- "gpui-toolkit-collections",
- "gpui-toolkit-gpui-macros",
- "gpui-toolkit-gpui-shared-string",
- "gpui-toolkit-gpui-util",
- "gpui-toolkit-http-client",
- "gpui-toolkit-media",
- "gpui-toolkit-refineable",
- "gpui-toolkit-scheduler",
- "gpui-toolkit-sum-tree",
- "gpui-toolkit-util-macros",
+ "gpui-toolkit-collections 0.1.0",
+ "gpui-toolkit-gpui-macros 0.1.0",
+ "gpui-toolkit-gpui-shared-string 0.1.0",
+ "gpui-toolkit-gpui-util 0.1.0",
+ "gpui-toolkit-http-client 0.1.0",
+ "gpui-toolkit-media 0.1.0",
+ "gpui-toolkit-refineable 0.1.0",
+ "gpui-toolkit-scheduler 0.1.0",
+ "gpui-toolkit-sum-tree 0.1.0",
+ "gpui-toolkit-util-macros 0.1.0",
  "heapless",
  "image",
  "inventory",
@@ -3043,6 +3090,83 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-toolkit-gpui"
+version = "0.2.3"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "accesskit",
+ "anyhow",
+ "async-channel",
+ "async-task",
+ "bindgen",
+ "block",
+ "cbindgen",
+ "chrono",
+ "cocoa 0.26.0",
+ "cocoa-foundation 0.2.0",
+ "core-foundation 0.10.1",
+ "core-foundation-sys",
+ "core-graphics 0.24.0",
+ "core-text",
+ "core-video",
+ "ctor",
+ "derive_more",
+ "etagere",
+ "foreign-types",
+ "futures",
+ "futures-concurrency",
+ "getrandom 0.3.4",
+ "gpui-toolkit-collections 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui-macros 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui-shared-string 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui-util 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-http-client 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-media 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-refineable 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-scheduler 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-sum-tree 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-util-macros 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "heapless",
+ "image",
+ "inventory",
+ "itertools 0.15.0",
+ "log",
+ "lyon",
+ "mach2",
+ "metal",
+ "num_cpus",
+ "objc",
+ "parking",
+ "parking_lot",
+ "pathfinder_geometry",
+ "pin-project",
+ "pollster 0.4.0",
+ "postage",
+ "profiling",
+ "rand 0.9.5",
+ "raw-window-handle",
+ "regex",
+ "resvg",
+ "schemars",
+ "seahash",
+ "serde",
+ "serde_json",
+ "slotmap",
+ "smallvec",
+ "stacksafe",
+ "strum",
+ "taffy",
+ "thiserror 2.0.21",
+ "ttf-parser",
+ "url",
+ "usvg",
+ "uuid",
+ "waker-fn",
+ "web-time",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "gpui-toolkit-gpui-linux"
 version = "0.1.0"
 dependencies = [
@@ -3057,11 +3181,11 @@ dependencies = [
  "calloop-wayland-source",
  "filedescriptor",
  "futures",
- "gpui-toolkit-collections",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-util",
- "gpui-toolkit-gpui-wgpu",
- "gpui-toolkit-http-client",
+ "gpui-toolkit-collections 0.1.0",
+ "gpui-toolkit-gpui 0.2.3",
+ "gpui-toolkit-gpui-util 0.1.0",
+ "gpui-toolkit-gpui-wgpu 0.1.2",
+ "gpui-toolkit-http-client 0.1.0",
  "image",
  "itertools 0.15.0",
  "libc",
@@ -3114,10 +3238,10 @@ dependencies = [
  "etagere",
  "foreign-types",
  "futures",
- "gpui-toolkit-collections",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-util",
- "gpui-toolkit-media",
+ "gpui-toolkit-collections 0.1.0",
+ "gpui-toolkit-gpui 0.2.3",
+ "gpui-toolkit-gpui-util 0.1.0",
+ "gpui-toolkit-media 0.1.0",
  "image",
  "itertools 0.15.0",
  "libc",
@@ -3149,8 +3273,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-toolkit-gpui-macros"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
 name = "gpui-toolkit-gpui-shared-string"
 version = "0.1.0"
+dependencies = [
+ "schemars",
+ "serde",
+ "smol_str",
+]
+
+[[package]]
+name = "gpui-toolkit-gpui-shared-string"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "schemars",
  "serde",
@@ -3167,15 +3312,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-toolkit-gpui-util"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "anyhow",
+ "log",
+ "which",
+]
+
+[[package]]
 name = "gpui-toolkit-gpui-web"
 version = "0.1.1"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
  "futures",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-wgpu",
- "gpui-toolkit-http-client",
+ "gpui-toolkit-gpui 0.2.3",
+ "gpui-toolkit-gpui-wgpu 0.1.2",
+ "gpui-toolkit-http-client 0.1.0",
+ "js-sys",
+ "log",
+ "parking_lot",
+ "raw-window-handle",
+ "smallvec",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm_thread",
+ "web-sys",
+ "web-time",
+]
+
+[[package]]
+name = "gpui-toolkit-gpui-web"
+version = "0.1.1"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "anyhow",
+ "console_error_panic_hook",
+ "futures",
+ "gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui-wgpu 0.1.2 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-http-client 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
  "js-sys",
  "log",
  "parking_lot",
@@ -3197,9 +3376,9 @@ dependencies = [
  "bytemuck",
  "cosmic-text",
  "etagere",
- "gpui-toolkit-collections",
- "gpui-toolkit-gpui",
- "gpui-toolkit-gpui-util",
+ "gpui-toolkit-collections 0.1.0",
+ "gpui-toolkit-gpui 0.2.3",
+ "gpui-toolkit-gpui-util 0.1.0",
  "itertools 0.15.0",
  "js-sys",
  "log",
@@ -3217,14 +3396,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-toolkit-gpui-wgpu"
+version = "0.1.2"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "cosmic-text",
+ "etagere",
+ "gpui-toolkit-collections 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "gpui-toolkit-gpui-util 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "itertools 0.15.0",
+ "js-sys",
+ "log",
+ "parking_lot",
+ "pollster 0.4.0",
+ "profiling",
+ "raw-window-handle",
+ "smallvec",
+ "swash",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu 29.0.3",
+]
+
+[[package]]
 name = "gpui-toolkit-gpui-windows"
 version = "0.1.2"
 dependencies = [
  "anyhow",
  "etagere",
  "futures",
- "gpui-toolkit-collections",
- "gpui-toolkit-gpui",
+ "gpui-toolkit-collections 0.1.0",
+ "gpui-toolkit-gpui 0.2.3",
  "gpui-toolkit-util",
  "image",
  "itertools 0.15.0",
@@ -3260,8 +3466,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-toolkit-http-client"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "bytes",
+ "derive_more",
+ "futures",
+ "http",
+ "http-body",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "url",
+]
+
+[[package]]
 name = "gpui-toolkit-media"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "bindgen",
+ "core-foundation 0.10.1",
+ "core-video",
+ "ctor",
+ "foreign-types",
+ "metal",
+ "objc",
+]
+
+[[package]]
+name = "gpui-toolkit-media"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "anyhow",
  "bindgen",
@@ -3277,7 +3518,17 @@ dependencies = [
 name = "gpui-toolkit-perf"
 version = "0.1.0"
 dependencies = [
- "gpui-toolkit-collections",
+ "gpui-toolkit-collections 0.1.0",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "gpui-toolkit-perf"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "gpui-toolkit-collections 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
  "serde",
  "serde_json",
 ]
@@ -3286,12 +3537,34 @@ dependencies = [
 name = "gpui-toolkit-refineable"
 version = "0.1.0"
 dependencies = [
- "gpui-toolkit-derive-refineable",
+ "gpui-toolkit-derive-refineable 0.1.0",
+]
+
+[[package]]
+name = "gpui-toolkit-refineable"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "gpui-toolkit-derive-refineable 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
 ]
 
 [[package]]
 name = "gpui-toolkit-scheduler"
 version = "0.1.0"
+dependencies = [
+ "async-task",
+ "backtrace",
+ "chrono",
+ "futures",
+ "parking_lot",
+ "rand 0.9.5",
+ "web-time",
+]
+
+[[package]]
+name = "gpui-toolkit-scheduler"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
 dependencies = [
  "async-task",
  "backtrace",
@@ -3313,6 +3586,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "gpui-toolkit-sum-tree"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "heapless",
+ "log",
+ "rayon",
+ "tracing",
+]
+
+[[package]]
 name = "gpui-toolkit-util"
 version = "0.1.1"
 dependencies = [
@@ -3325,8 +3609,8 @@ dependencies = [
  "futures",
  "futures-lite 1.13.0",
  "globset",
- "gpui-toolkit-collections",
- "gpui-toolkit-gpui-util",
+ "gpui-toolkit-collections 0.1.0",
+ "gpui-toolkit-gpui-util 0.1.0",
  "itertools 0.15.0",
  "libc",
  "log",
@@ -3355,7 +3639,17 @@ dependencies = [
 name = "gpui-toolkit-util-macros"
 version = "0.1.0"
 dependencies = [
- "gpui-toolkit-perf",
+ "gpui-toolkit-perf 0.1.0",
+ "quote",
+ "syn 3.0.6",
+]
+
+[[package]]
+name = "gpui-toolkit-util-macros"
+version = "0.1.0"
+source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
+dependencies = [
+ "gpui-toolkit-perf 0.1.0 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
  "quote",
  "syn 3.0.6",
 ]
@@ -3365,9 +3659,9 @@ name = "gpui-ui-kit"
 version = "0.9.42"
 dependencies = [
  "gpui-builder",
- "gpui-d3rs",
+ "gpui-d3rs 0.9.19",
  "gpui-design",
- "gpui-toolkit-gpui",
+ "gpui-toolkit-gpui 0.2.3",
  "gpui-ui-kit-macros",
  "image",
  "libm",
@@ -4391,6 +4685,8 @@ dependencies = [
 [[package]]
 name = "math-delaunay"
 version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "421cbec083aba3ac68e8f2713673ce501302e932fa71f6b3738f828243621f7b"
 dependencies = [
  "delaunator",
 ]
@@ -4398,6 +4694,7 @@ dependencies = [
 [[package]]
 name = "math-dsp"
 version = "0.5.32"
+source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "clap",
  "hound",
@@ -4417,6 +4714,7 @@ dependencies = [
 [[package]]
 name = "math-iir-fir"
 version = "0.5.24"
+source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -4433,7 +4731,9 @@ dependencies = [
 [[package]]
 name = "math-optimisation"
 version = "0.5.15"
+source = "git+https://github.com/pierreaubert/math-audio?rev=acdea21f853629a13b7f88f8baef51eb0394754c#acdea21f853629a13b7f88f8baef51eb0394754c"
 dependencies = [
+ "chacha20",
  "clap",
  "directories",
  "math-test-functions",
@@ -4442,12 +4742,15 @@ dependencies = [
  "oxiblas-ndarray",
  "rand 0.10.3",
  "rayon",
+ "serde",
+ "sha2 0.10.9",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "math-rir"
 version = "0.5.11"
+source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -4456,6 +4759,7 @@ dependencies = [
 [[package]]
 name = "math-test-functions"
 version = "0.5.4"
+source = "git+https://github.com/pierreaubert/math-audio?rev=acdea21f853629a13b7f88f8baef51eb0394754c#acdea21f853629a13b7f88f8baef51eb0394754c"
 dependencies = [
  "clap",
  "directories",
@@ -6400,6 +6704,7 @@ dependencies = [
  "autoeq-artifacts",
  "autoeq-core",
  "autoeq-measurements",
+ "autoeq-optim",
  "chrono",
  "criterion",
  "hound",
@@ -6420,6 +6725,7 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
+ "sha2 0.11.0",
  "sofa-reader",
  "tempfile",
  "tokio",
@@ -7131,6 +7437,8 @@ dependencies = [
 [[package]]
 name = "sofa-reader"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19a8b8cfa8b0017575adc7989abbc7299f2228cbd734a75242390e1505a7619d"
 dependencies = [
  "bincode",
  "flate2",

@@ -14,6 +14,8 @@ import math
 import sys
 from pathlib import Path
 
+from qa_support.metrics import maximum_error_metrics, require_finite_numbers
+
 CASE_ID = "autoeq-qa.h02-scorer-sign.v1"
 TOL_REL = 1e-9
 TOL_COEFF = 1e-12
@@ -25,6 +27,38 @@ GOLDEN = ROOT / "crates/autoeq-qa/wolfram/goldens/h02_scorer_sign.json"
 def fail(message):
     print(f"FAIL {CASE_ID}: {message}", file=sys.stderr)
     sys.exit(1)
+
+
+def _h02_error_metrics(coefficients, expected_coefficients, complex_pairs):
+    """Measure coefficient and transfer errors with H02's zero-reference rules."""
+    if len(coefficients) != 5 or len(expected_coefficients) != 5:
+        raise ValueError("coefficient vectors must both contain five values")
+    coefficient_abs, coefficient_rel = maximum_error_metrics(
+        zip(coefficients, expected_coefficients)
+    )
+    response_abs = 0.0
+    response_rel = 0.0
+    if not complex_pairs:
+        raise ValueError("at least one complex response comparison is required")
+    for index, (actual, expected) in enumerate(complex_pairs):
+        require_finite_numbers(
+            (actual.real, actual.imag, expected.real, expected.imag),
+            f"complex response[{index}]",
+        )
+        absolute_error = abs(actual - expected)
+        if expected == 0:
+            if absolute_error != 0.0:
+                raise ValueError(
+                    f"complex response[{index}] has a zero reference and nonzero error"
+                )
+            relative_error = 0.0
+        else:
+            relative_error = absolute_error / abs(expected)
+        if not math.isfinite(absolute_error) or not math.isfinite(relative_error):
+            raise ValueError(f"complex response[{index}] produced a non-finite error")
+        response_abs = max(response_abs, absolute_error)
+        response_rel = max(response_rel, relative_error)
+    return max(coefficient_abs, response_abs), max(coefficient_rel, response_rel)
 
 
 def main():
@@ -39,9 +73,27 @@ def main():
     if ref.get("case") != CASE_ID or ref.get("schema_version") != 1:
         fail("golden case identity mismatch")
     sr = float(ref["sample_rate_hz"])
-    got = biquad_coefficients("peak", float(ref["center_hz"]), sr,
-                              float(ref["q"]), float(ref["gain_db"]))
+    center_hz = float(ref["center_hz"])
+    q = float(ref["q"])
+    gain_db = float(ref["gain_db"])
     expected_coeffs = ref["coeffs_a1_a2_b0_b1_b2"]
+    grid = ref["grid_hz"]
+    expected_responses = ref["response_re_im"]
+    if len(expected_coeffs) != 5:
+        fail(f"golden coefficient vector length {len(expected_coeffs)} != 5")
+    if len(grid) != len(expected_responses):
+        fail("golden grid/complex-response length mismatch")
+    if any(not isinstance(pair, list) or len(pair) != 2 for pair in expected_responses):
+        fail("golden complex responses must contain real/imaginary pairs")
+    try:
+        require_finite_numbers(
+            [sr, center_hz, q, gain_db, *expected_coeffs, *grid,
+             *(value for pair in expected_responses for value in pair)],
+            "golden biquad data",
+        )
+    except ValueError as error:
+        fail(f"invalid finite golden input: {error}")
+    got = biquad_coefficients("peak", center_hz, sr, q, gain_db)
     if len(got) != 5:
         fail(f"coefficient vector length {len(got)} != 5")
     for name, g, e in zip(("a1", "a2", "b0", "b1", "b2"), got, expected_coeffs):
@@ -50,19 +102,25 @@ def main():
         if err > TOL_COEFF:
             fail(f"{name}: got={g:.15f} expected={e:.15f} rel_err={err:.3e}")
     a1, a2, b0, b1, b2 = got
-    max_err = 0.0
-    for f, (re, im) in zip(ref["grid_hz"], ref["response_re_im"]):
+    complex_pairs = []
+    for f, (re, im) in zip(grid, expected_responses):
         z = cmath.exp(-1j * 2 * math.pi * f / sr)
         h = (b0 + b1 * z + b2 * z * z) / (1 + a1 * z + a2 * z * z)
-        ref_h = complex(re, im)
+        complex_pairs.append((h, complex(re, im)))
+    for f, (h, ref_h) in zip(grid, complex_pairs):
         num = abs(h - ref_h)
         err = 0.0 if num == 0.0 else (num / abs(ref_h) if ref_h != 0 else math.inf)
-        max_err = max(max_err, err)
         if err > TOL_REL:
             fail(f"H({f} Hz): got={h!r} expected={ref_h!r} rel_err={err:.3e}")
+    try:
+        max_abs_error, max_rel_error = _h02_error_metrics(
+            got, expected_coeffs, complex_pairs
+        )
+    except ValueError as error:
+        fail(f"invalid finite comparison: {error}")
     print(json.dumps({
         "QA_RESULT": True, "case": CASE_ID, "pass": True,
-        "max_abs_error": 0.0, "max_rel_error": max_err,
+        "max_abs_error": max_abs_error, "max_rel_error": max_rel_error,
         "tolerance": TOL_REL, "tolerance_kind": "rel",
         "provenance": "wolfram-engine-15.0.0",
     }))

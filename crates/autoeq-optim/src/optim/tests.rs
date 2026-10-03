@@ -2,31 +2,30 @@ use super::registry;
 
 #[cfg(test)]
 mod outcome_evidence_tests {
-    use super::super::{OptimizerConfidence, OptimizerRunEvidence, OptimizerTermination};
+    use super::super::run_control::{EvaluationStage, OptimizerRunControl};
+    use super::super::{
+        OptimizerBackendCompletion, OptimizerConfidence, OptimizerRunEvidence, OptimizerTermination,
+    };
+    use std::num::NonZeroUsize;
 
     #[test]
-    fn stopped_candidate_is_diagnostic_not_deployable_best_effort() {
-        for accepted in [false, true] {
-            let value = (
-                "optimization stopped by callback (nfev=3)".to_string(),
-                0.25,
-            );
-            let evidence = OptimizerRunEvidence::from_backend_result(
-                "autoeq:de",
-                if accepted { Ok(value) } else { Err(value) },
-                &[0.5],
-                &[0.0],
-                &[1.0],
-                40,
-                Some(42),
-            );
-            assert_eq!(evidence.termination, OptimizerTermination::UserStopped);
-            assert!(!evidence.converged);
-            assert!(!evidence.best_effort);
-            assert_eq!(evidence.confidence, OptimizerConfidence::Unusable);
-            assert_eq!(evidence.objective, Some(0.25));
-            assert_eq!(evidence.evaluation_count, Some(3));
-        }
+    fn legacy_stopped_status_is_not_proof_of_user_cancellation() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("optimization stopped by callback (nfev=3)".into(), 0.25)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            40,
+            Some(42),
+        );
+        assert_eq!(evidence.termination, OptimizerTermination::NonConverged);
+        assert!(!evidence.converged);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.confidence, OptimizerConfidence::Low);
+        assert_eq!(evidence.objective, Some(0.25));
+        assert_eq!(evidence.evaluation_count, Some(3));
+        assert_eq!(evidence.status, "optimization stopped by callback (nfev=3)");
     }
 
     #[test]
@@ -120,8 +119,8 @@ mod outcome_evidence_tests {
     }
 
     #[test]
-    fn clean_success_is_high_confidence_and_records_empty_restart_history() {
-        let evidence = OptimizerRunEvidence::from_backend_result(
+    fn typed_convergence_is_high_confidence_and_records_empty_restart_history() {
+        let mut evidence = OptimizerRunEvidence::from_backend_result(
             "autoeq:de",
             Ok(("relative tolerance reached".to_string(), 0.5)),
             &[0.5],
@@ -130,12 +129,147 @@ mod outcome_evidence_tests {
             200,
             Some(3),
         );
+        assert_eq!(evidence.termination, OptimizerTermination::NonConverged);
+        evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
 
         assert!(evidence.converged);
         assert!(!evidence.best_effort);
         assert_eq!(evidence.termination, OptimizerTermination::Converged);
         assert_eq!(evidence.confidence, OptimizerConfidence::High);
         assert!(evidence.restart_history.is_empty());
+    }
+
+    #[test]
+    fn fixed_generation_success_without_typed_completion_is_best_effort() {
+        let evidence = OptimizerRunEvidence::from_backend_result(
+            "mh:firefly",
+            Ok(("Metaheuristics(Firefly)".into(), 0.5)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            128,
+            Some(7),
+        );
+        assert_eq!(evidence.termination, OptimizerTermination::NonConverged);
+        assert!(!evidence.converged);
+        assert!(evidence.best_effort);
+        assert_eq!(evidence.status, "Metaheuristics(Firefly)");
+    }
+
+    #[test]
+    fn run_control_maps_budget_user_cancel_and_deadline_without_losing_finite_result() {
+        let make_evidence = || {
+            OptimizerRunEvidence::from_backend_result(
+                "autoeq:de",
+                Ok(("legacy callback status".into(), 0.5)),
+                &[0.5],
+                &[0.0],
+                &[1.0],
+                1,
+                Some(11),
+            )
+        };
+
+        let budget = OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
+        drop(budget.begin_evaluation(EvaluationStage::Search, 1).unwrap());
+        let mut budget_evidence = make_evidence();
+        budget_evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
+        budget_evidence.apply_run_control(&budget.snapshot());
+        budget_evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
+        assert_eq!(
+            budget_evidence.termination,
+            OptimizerTermination::EvaluationLimit
+        );
+        assert_eq!(budget_evidence.objective, Some(0.5));
+        assert!(budget_evidence.best_effort);
+
+        let user_stop = OptimizerRunControl::new(NonZeroUsize::new(4).unwrap());
+        user_stop.request_cancel();
+        let mut user_evidence = make_evidence();
+        user_evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
+        user_evidence.apply_run_control(&user_stop.snapshot());
+        user_evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
+        assert_eq!(user_evidence.termination, OptimizerTermination::UserStopped);
+        assert_eq!(user_evidence.objective, Some(0.5));
+        assert!(!user_evidence.best_effort);
+        assert!(user_evidence.has_valid_candidate());
+
+        let deadline = OptimizerRunControl::new(NonZeroUsize::new(4).unwrap());
+        deadline.request_deadline();
+        let mut timed_evidence = make_evidence();
+        timed_evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
+        timed_evidence.apply_run_control(&deadline.snapshot());
+        timed_evidence.apply_backend_completion(OptimizerBackendCompletion::Converged);
+        assert_eq!(timed_evidence.termination, OptimizerTermination::TimedOut);
+        assert_eq!(timed_evidence.objective, Some(0.5));
+        assert!(timed_evidence.best_effort);
+        assert!(timed_evidence.has_valid_candidate());
+    }
+
+    #[test]
+    fn refusal_without_callback_stop_reports_budget_limit() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(4).unwrap());
+        let mut snapshot = control.snapshot();
+        snapshot.evaluations_refused = 1;
+        let mut evidence = OptimizerRunEvidence::from_backend_result(
+            "nsga-ii",
+            Ok(("ordinary backend status".into(), 0.25)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            4,
+            Some(9),
+        );
+        evidence.apply_run_control(&snapshot);
+        assert_eq!(evidence.termination, OptimizerTermination::EvaluationLimit);
+        assert!(evidence.best_effort);
+    }
+
+    #[test]
+    fn backend_failure_and_invalid_result_outweigh_stop_requests() {
+        let control = OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
+        drop(
+            control
+                .begin_evaluation(EvaluationStage::Search, 1)
+                .unwrap(),
+        );
+        let _ = control
+            .begin_evaluation(EvaluationStage::Search, 1)
+            .is_none();
+        control.request_cancel();
+        control.request_deadline();
+        let snapshot = control.snapshot();
+
+        let mut failed = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Err((
+                "solver failed independently of the stop request".into(),
+                f64::INFINITY,
+            )),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            1,
+            Some(1),
+        );
+        failed.apply_run_control(&snapshot);
+        assert_eq!(failed.termination, OptimizerTermination::BackendFailure);
+        assert_eq!(
+            failed.status,
+            "solver failed independently of the stop request"
+        );
+
+        let mut invalid = OptimizerRunEvidence::from_backend_result(
+            "autoeq:de",
+            Ok(("solver returned a candidate".into(), f64::NAN)),
+            &[0.5],
+            &[0.0],
+            &[1.0],
+            1,
+            Some(1),
+        );
+        invalid.apply_run_control(&snapshot);
+        assert_eq!(invalid.termination, OptimizerTermination::InvalidResult);
     }
 }
 
@@ -411,6 +545,134 @@ mod backend_tests {
         let (lower, upper) = setup_bounds(&params);
         let x = initial_guess(&params, &lower, &upper);
         (obj, params, lower, upper, x)
+    }
+
+    #[test]
+    fn cobra_dispatch_is_seeded_bounded_and_counted() {
+        use super::super::optimize::optimize_filters_with_run_control_detailed;
+        use super::super::run_control::OptimizerRunControl;
+        use std::num::NonZeroUsize;
+
+        let run_once = || {
+            let (objective, mut params, lower, upper, mut x) = scalar_objective();
+            params.algo = "autoeq:cobra".into();
+            params.maxeval = 20;
+            params.seed = Some(42);
+            let control = OptimizerRunControl::new(NonZeroUsize::new(20).unwrap());
+            let result = optimize_filters_with_run_control_detailed(
+                &mut x, &lower, &upper, objective, &params, &control,
+            );
+            let (_, loss) = result
+                .result
+                .as_ref()
+                .expect("finite feasible COBRA winner");
+            assert!(loss.is_finite());
+            assert!(
+                x.iter()
+                    .zip(&lower)
+                    .zip(&upper)
+                    .all(|((&v, &lo), &hi)| v >= lo && v <= hi)
+            );
+            assert_eq!(result.snapshot.evaluations_started, 20);
+            assert_eq!(result.snapshot.evaluations_completed, 20);
+            assert_eq!(result.snapshot.evaluations_in_flight, 0);
+            assert_eq!(result.snapshot.evaluations_refused, 0);
+            assert!(!result.evidence.converged);
+            (x, loss.to_bits())
+        };
+        assert_eq!(run_once(), run_once());
+    }
+
+    #[test]
+    fn cobra_callback_stop_returns_after_first_infill_without_polish() {
+        use super::super::cobra::AutoeqCobraBackend;
+        let (objective, mut params, lower, upper, mut x) = scalar_objective();
+        params.maxeval = 100;
+        params.seed = Some(42);
+        let initial = (3 * x.len() + 1).min(params.maxeval);
+        let (status, loss) = AutoeqCobraBackend::new("autoeq:cobra")
+            .optimize(
+                &mut x,
+                &lower,
+                &upper,
+                objective,
+                &params,
+                Some(Box::new(|iteration, loss, epa| {
+                    assert_eq!(iteration, 1);
+                    assert!(loss.is_finite());
+                    assert!(epa.is_none());
+                    crate::de::CallbackAction::Stop
+                })),
+            )
+            .expect("callback stop retains a feasible candidate");
+        assert!(status.contains("stopped by callback"), "{status}");
+        assert!(
+            status.contains(&format!("nfev={}", initial + 1)),
+            "{status}"
+        );
+        assert!(loss.is_finite());
+    }
+
+    #[test]
+    fn detailed_controlled_dispatch_identifies_budget_refusal_before_backend_start() {
+        use super::super::optimize::{
+            OptimizerDispatchOutcome, OptimizerTermination,
+            optimize_filters_with_run_control_detailed,
+        };
+        use super::super::run_control::OptimizerRunControl;
+        use std::num::NonZeroUsize;
+
+        let (objective, mut params, lower, upper, mut x) = scalar_objective();
+        params.algo = "autoeq:de".to_string();
+        params.population = 6;
+        params.maxeval = 1;
+        let control = OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
+
+        let run = optimize_filters_with_run_control_detailed(
+            &mut x, &lower, &upper, objective, &params, &control,
+        );
+
+        let OptimizerDispatchOutcome::NotStartedBudgetRefusal(refusal) = run.dispatch else {
+            panic!("expected typed preflight refusal, got {:?}", run.dispatch);
+        };
+        assert_eq!(refusal.requested_evaluations, 1);
+        assert!(refusal.required_evaluations > refusal.requested_evaluations);
+        assert_eq!(run.snapshot.evaluations_started, 0);
+        assert_eq!(run.evidence.evaluation_count, Some(0));
+        assert_eq!(
+            run.evidence.termination,
+            OptimizerTermination::EvaluationLimit
+        );
+        assert!(run.result.is_err());
+    }
+
+    #[test]
+    fn detailed_controlled_dispatch_distinguishes_unresolved_backend() {
+        use super::super::optimize::{
+            OptimizerDispatchOutcome, OptimizerTermination,
+            optimize_filters_with_run_control_detailed,
+        };
+        use super::super::run_control::OptimizerRunControl;
+        use std::num::NonZeroUsize;
+
+        let (objective, mut params, lower, upper, mut x) = scalar_objective();
+        params.algo = "not-a-registered-backend".to_string();
+        let control = OptimizerRunControl::new(NonZeroUsize::new(100).unwrap());
+
+        let run = optimize_filters_with_run_control_detailed(
+            &mut x, &lower, &upper, objective, &params, &control,
+        );
+
+        assert_eq!(
+            run.dispatch,
+            OptimizerDispatchOutcome::NotStartedDispatchFailure
+        );
+        assert_eq!(run.snapshot.evaluations_started, 0);
+        assert_eq!(
+            run.evidence.termination,
+            OptimizerTermination::BackendFailure
+        );
+        assert!(run.result.is_err());
     }
 
     fn multi_objective() -> (ObjectiveData, OptimParams, Vec<f64>, Vec<f64>, Vec<f64>) {

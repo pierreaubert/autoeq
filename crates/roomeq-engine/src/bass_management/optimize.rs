@@ -1756,12 +1756,13 @@ pub fn optimize_bass_management_joint_solution_with_matrix(
             ]);
         }
 
-        let evaluate = |params: &[f64]| -> Option<(
+        type CrossoverEvaluation = (
             f64,
             Vec<f64>,
             Vec<f64>,
             Vec<roomeq_model::CrossoverCancellationEvidence>,
-        )> {
+        );
+        let evaluate = |params: &[f64]| -> Option<CrossoverEvaluation> {
             let frequency = params[0].clamp(minimum_frequency, maximum_frequency);
             let type_index = params[1]
                 .round()

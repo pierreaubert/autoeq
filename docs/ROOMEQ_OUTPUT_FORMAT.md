@@ -822,12 +822,22 @@ survived the translation (see the per-format rows below).
 | `wavelet` | Wavelet GraphicEQ text | Serial single-channel-compatible magnitude EQ only. |
 | `pipewire` | PipeWire filter-chain configuration | Serial chains and supported convolution sidecars. |
 | `roon` | Roon DSP Engine JSON | Serial Roon-supported IIR/FIR stages, with Roon limits enforced. |
-| `rew` | REW Generic EQ filter-settings text | Exactly one channel; gain plus supported biquads; no delay, FIR, crossover, or routing. |
+| `rew` | REW Generic EQ reference text for manual entry | Exactly one channel; gain plus supported biquads; no delay, FIR, crossover, or routing. REW cannot reload this text. |
 | `coefficients` | Normalized biquad JSON | Any number of serial channels; gain, delay, and all 12 canonical RoomEQ biquad types; no FIR, crossover, or routing. Alias: `biquad-coefficients`. |
 
 ### REW Generic EQ
 
-The REW export contains an explicit preamp followed by ordered filter rows:
+The REW export provides a reference for manual filter entry, with an explicit
+preamp followed by ordered filter rows. REW saves and reloads filter settings
+using its binary `.req` format; its Generic EQ text cannot be reloaded. RoomEQ
+does not produce `.req` files. Check the resulting response when entering filters
+into REW, including its filter type and shelf parameter conventions.
+
+Export capability fields `supported` and `ready_to_export` describe RoomEQ
+rendering and resource availability. They do not verify external application
+import or playback.
+
+Example reference text:
 
 ```text
 Filter Settings file

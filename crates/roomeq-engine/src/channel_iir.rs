@@ -179,7 +179,7 @@ fn optimize_kautz_modal(
     }
     let (min_frequency, max_frequency) = if let Some(band) = &optimizer.correction_band {
         band.validate_against(optimizer.min_freq, optimizer.max_freq)
-            .map_err(&invalid)?;
+            .map_err(invalid)?;
         (band.min_hz, band.max_hz)
     } else {
         (optimizer.min_freq, optimizer.max_freq)

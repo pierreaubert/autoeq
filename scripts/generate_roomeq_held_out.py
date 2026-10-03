@@ -167,6 +167,11 @@ def main() -> None:
                 {
                     "channel": channel,
                     "path": path,
+                    "evidence_class": (
+                        "fem_generated"
+                        if scenario["provenance"] == "fem"
+                        else "deterministic_perturbation"
+                    ),
                     **({"seat_id": f"synthetic-heldout-{position}"}
                        if scenario["provenance"] == "fem" else {}),
                 }

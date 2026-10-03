@@ -114,7 +114,7 @@ roomeq-engine`; no workspace crate depends on the root facade.
 |---------|------------|-------------------|
 | **Metaheuristics** | DE, PSO, RGA, TLBO, Firefly | Penalty-based |
 | **AutoEQ Custom** | Adaptive Differential Evolution | Nonlinear constraints |
-| **Pure-Rust** | COBYLA, ISRES, CMA-ES | Nonlinear/bound constraints |
+| **Pure-Rust** | COBRA, COBYLA, ISRES, CMA-ES | Nonlinear/bound constraints |
 
 ### Loss Functions
 
@@ -138,6 +138,12 @@ roomeq-engine`; no workspace crate depends on the root facade.
 ## AutoEQ CLI
 
 The `autoeq` binary optimizes EQ for individual speakers (anechoic) or headphones.
+
+Run `autoeq --product-renderer-capabilities` by itself for a versioned JSON
+report before supplying measurements or a device profile. Equalizer APO has
+checked profile export; RME and Apple AU report their current legacy serializer
+limits and refusal reasons for profiled export. Device limits remain explicit
+per-machine parameters. This query opens no audio device.
 
 See the [AutoEQ Manual](docs/AUTOEQ_MANUAL.md) for usage, parameters, algorithm selection, and examples.
 
@@ -173,16 +179,20 @@ uses the `roomeq` binary as the sole validation and optimization authority.
 ## Installation
 
 If you do not have cargo already, install it with [rustup](https://rustup.rs/). Cargo is a Rust package manager.
-Then:
+From a source checkout, install the shipping commands with the locked dependencies:
 
 ```bash
-cargo install autoeq \
+cargo install --path . --locked \
    --features cli \
    --bin autoeq \
    --bin roomeq \
    --bin autoeq-download-speakers \
    --bin convert-recording
 ```
+
+The current workspace requires its owning crates to be published before registry
+installation is available. Registry package preparation currently fails because
+`autoeq-cli` is absent from the refreshed crates.io index.
 
 The root package keeps terminal adapters opt-in: use `--features cli` for the
 shipping commands and `--features qa` for QA/fuzzer binaries. Default library
@@ -211,25 +221,36 @@ cargo install just
 
 ```bash
 just                  # List available commands
-just prod             # Build all release binaries
-just prod-autoeq      # Build autoeq only
-just prod-roomeq      # Build roomeq only
+just prod             # Build CLI commands and RoomEQ QA commands
+just prod-autoeq      # Build speaker/headphone CLI commands
+just prod-roomeq      # Build roomeq, conversion and RoomEQ QA commands
 just dev              # Build debug binaries
 ```
 
-The optional `plotly_static` feature writes deterministic PNG charts in-process
-through SVG rasterization. It has no browser, WebDriver, display-server, or
-runtime network dependency:
+Reports embed the checked-in HTML/WASM assets from
+`crates/autoeq-report-wasm/dist/`. Ordinary CLI builds use those assets;
+`just report-dist` rebuilds the 2D bundle with the WASM target and
+`wasm-bindgen` version specified in the Justfile. The GPUI report bundle has
+its own `just report-dist-gpui` recipe and nightly toolchain requirement. Both
+recipes use Cargo’s resolved target directory, including `CARGO_TARGET_DIR`
+and `.cargo/config.toml`, and require Python 3 to read Cargo metadata.
 
-```bash
-cargo build -p autoeq --features plotly_static
-```
+### Cargo features and binaries
+
+| Feature | Binaries |
+| --- | --- |
+| `cli` | `autoeq`, `benchmark-autoeq-speaker`, `autoeq-download-speakers`, `roomeq`, `convert-recording` |
+| `qa` (includes `cli`) | All CLI binaries, `roomeq-fuzzer`, `roomeq-qa-quality`, `roomeq-qa-coverage`, `roomeq-qa-features`, `roomeq-qa-synthetic`, `roomeq-qa-acoustic` |
+| Default | Library compatibility API |
+
+QA commands that use recordings or generated fixtures require a workspace
+checkout: those data directories are excluded from the published package.
 
 ### Testing
 
 ```bash
 # Check all targets
-cargo check --lib --bins --tests --examples
+cargo check --workspace --all-targets --all-features
 
 # Run all tests
 just test
@@ -291,6 +312,26 @@ just qa-beyerdynamic-dt1990pro  # Headphone tests
 just qa-edifierw830nb        # Multiple algorithm comparison
 ```
 
+#### Exact continuation across CLI process interruption
+
+On a POSIX host, build the CLI and run the device-free process contracts with a
+new evidence directory:
+
+```bash
+cargo build --locked --features cli --bin autoeq
+python3 scripts/run_autoeq_exact_resume_process_contracts.py \
+  --binary target/debug/autoeq --output target/qa/exact-process-new
+```
+
+Set `--binary` to the resolved Cargo target directory when using a custom
+`CARGO_TARGET_DIR`. The runner requires SIGINT and SIGKILL interruption after a
+saved generation, full final-state equality with an uninterrupted seeded run,
+and refusal of changed seed/budget or malformed state. It records source, binary
+and input hashes and fails if they change. Logs and `results.json` remain in the
+new directory, including on a contract failure. These checks cover the same
+executable and numeric environment; they do not establish cross-build resume or
+every filesystem crash window.
+
 ### Benchmarking
 
 ```bash
@@ -306,7 +347,7 @@ just bench-autoeq-speaker
 ```bash
 just fmt              # Format code
 just lint             # Run clippy with warnings as errors
-cargo check --lib --bins --tests --examples
+cargo check --workspace --all-targets --all-features
 cargo clippy --all -- -D warnings
 ```
 

@@ -13,6 +13,8 @@ import json
 import sys
 from pathlib import Path
 
+from qa_support.metrics import maximum_error_metrics, require_finite_numbers
+
 CASE_ID = "autoeq-qa.py04-converter-decode.v1"
 TOL_ABS = 1e-9
 
@@ -39,16 +41,29 @@ def main():
     except Exception as error:
         fail(f"cannot load msop2csv: {error}")
     freq = ref["grid_hz"]
+    try:
+        require_finite_numbers(
+            [*freq, *ref["re"], *ref["im"], *ref["spl_db"], *ref["phase_deg"]],
+            "golden converter data",
+        )
+    except ValueError as error:
+        fail(f"invalid finite golden input: {error}")
     pairs = [v for pair in zip(ref["re"], ref["im"]) for v in pair]
     spl, phase = mod.decode_response(list(freq), list(pairs))
     if not (len(spl) == len(phase) == len(freq)):
         fail("decode_response length mismatch")
-    max_err = 0.0
+    compared = []
+    for i, f in enumerate(freq):
+        compared.extend(((spl[i], ref["spl_db"][i]),
+                         (phase[i], ref["phase_deg"][i])))
+    try:
+        max_err, max_rel_err = maximum_error_metrics(compared)
+    except ValueError as error:
+        fail(f"invalid finite comparison: {error}")
     for i, f in enumerate(freq):
         for name, g, e in (("spl", spl[i], ref["spl_db"][i]),
                            ("phase", phase[i], ref["phase_deg"][i])):
             err = abs(g - e)
-            max_err = max(max_err, err)
             if err > TOL_ABS:
                 fail(f"{name}[{f} Hz]: got={g:.12f} expected={e:.12f} abs_err={err:.3e}")
     for i in range(len(freq)):
@@ -58,7 +73,8 @@ def main():
             fail(f"phase rounding row {i}: {phase[i]:.6f} != {ref['phase_rounded'][i]}")
     print(json.dumps({
         "QA_RESULT": True, "case": CASE_ID, "pass": True,
-        "max_abs_error": max_err, "tolerance": TOL_ABS,
+        "max_abs_error": max_err, "max_rel_error": max_rel_err,
+        "tolerance": TOL_ABS,
         "tolerance_kind": "abs", "provenance": "wolfram-engine-15.0.0",
     }))
 

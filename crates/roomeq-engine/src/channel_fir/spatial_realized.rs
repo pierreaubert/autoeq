@@ -69,7 +69,7 @@ pub(super) fn optimize(
         .collect();
     basis.push(Array1::zeros(grid.len()));
     let neutral = if kirkeby {
-        if &curve.freq != grid {
+        if curve.freq != grid {
             return Err(fail(
                 "Kirkeby spatial FIR needs its phase-reference curve on the objective grid".into(),
             ));

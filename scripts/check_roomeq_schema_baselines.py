@@ -28,7 +28,7 @@ def generate_schema(kind: str) -> object:
     environment["CARGO_TERM_COLOR"] = "never"
     completed = subprocess.run(
         [
-            "cargo",
+            environment.get("CARGO", "cargo"),
             "run",
             "--quiet",
             "--locked",

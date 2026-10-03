@@ -90,3 +90,34 @@ fn setup_de_common_respects_large_maxeval() {
     let expected = (1_000_000 - setup.population_size) / setup.population_size;
     assert_eq!(setup.max_iter, expected);
 }
+
+#[test]
+fn explicit_initial_candidate_rejects_invalid_shape_values_and_bounds() {
+    let mut args = crate::cli::Args::speaker_defaults();
+    args.num_filters = 1;
+    let mut params = crate::OptimParams::from(&args);
+    params.algo = "autoeq:de".to_string();
+    let lower = vec![1.0, 0.5, -6.0];
+    let upper = vec![4.0, 8.0, 6.0];
+    let objective = test_objective_data();
+
+    for (candidate, expected) in [
+        (vec![2.0], "dimensions"),
+        (vec![2.0, f64::NAN, 0.0], "not finite"),
+        (vec![2.0, 1.0, 7.0], "outside bounds"),
+    ] {
+        let mut x = vec![2.0, 1.0, 0.0];
+        let result = super::optimize_filters_autoeq_with_callback_and_initial(
+            &mut x,
+            &lower,
+            &upper,
+            objective.clone(),
+            "autoeq:de",
+            &params,
+            Some(&candidate),
+            Box::new(|_| crate::de::CallbackAction::Continue),
+        );
+        let error = result.expect_err("invalid explicit warm-start candidate must fail");
+        assert!(error.0.contains(expected), "unexpected error: {}", error.0);
+    }
+}

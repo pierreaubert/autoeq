@@ -5,6 +5,8 @@
 
 pub use crate::optim::setup::*;
 
+pub mod exact_resume;
+pub mod product;
 pub mod resume;
 
 mod build;
@@ -20,4 +22,5 @@ pub use build::*;
 pub use config::*;
 pub use load::*;
 pub use optimize::*;
+pub use product::*;
 pub use types::*;

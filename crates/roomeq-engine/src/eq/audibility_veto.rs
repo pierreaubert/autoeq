@@ -521,6 +521,10 @@ impl VetoAdjudication {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The assessment record carries explicit outcome, provenance, and threshold fields"
+)]
 fn acceptance_record(
     outcome: ReportOutcome,
     enforcement: EnforcementState,

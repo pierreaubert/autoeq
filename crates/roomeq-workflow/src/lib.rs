@@ -1,6 +1,7 @@
 //! RoomEQ application workflows and resource adapters.
 
 pub mod arrival;
+pub mod capture_handoff;
 pub mod cea2034;
 pub mod channel;
 pub mod channel_acoustics;
@@ -32,11 +33,11 @@ pub mod pruning_audit;
 pub mod room_optimization;
 pub mod sidecar;
 pub mod supporting_source;
+pub mod symmetric_report;
 pub mod target_enforcement;
 pub mod topology;
 pub mod verification;
 mod wav;
-pub mod symmetric_report;
 
 pub use arrival::{prepare_channel_arrival_time, prepare_channel_input};
 pub use channel::{ChannelWorkflowResult, process_single_channel};
@@ -47,7 +48,9 @@ pub use config_loader::{
 };
 pub use eq_resources::{prepare_eq_resources, prepare_eq_target};
 pub use export::{
-    export_dsp_chain, export_dsp_chain_with_convolution_sidecars, package_convolution_sidecars,
+    export_dsp_chain, export_dsp_chain_with_convolution_sidecars,
+    export_dsp_chain_with_convolution_sidecars_to_staging, package_convolution_sidecars,
+    publish_staged_export_package_with, publish_staged_export_package_with_native_bundle,
 };
 pub use group_measurements::load_multisub_seat_measurements;
 pub use group_processing::{
@@ -62,17 +65,30 @@ pub use measurement::{
 };
 pub use output::save_dsp_chain;
 pub use output_bundle::{
-    MEASUREMENTS_INDEX_FILENAME, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
-    candidate_asset_dirs, load_output_bundle, manifest_path_for as bundle_manifest_path_for,
-    read_convolution_bytes, resolve_convolution_path, run_log_path_for, save_output_bundle,
+    FrozenBundleResource, FrozenOutputBundle, MEASUREMENTS_INDEX_FILENAME,
+    OutputBundleVerification, RUN_LOG_FILENAME, RUN_MANIFEST_FILENAME, assets_dir_for,
+    candidate_asset_dirs, load_output_bundle, load_output_bundle_frozen,
+    manifest_path_for as bundle_manifest_path_for, native_output_sha256,
+    publish_output_bundle_from,
+    publish_output_bundle_from_during_external_transaction_with_source_recovery,
+    read_convolution_bytes, recover_output_bundle_transactions, resolve_convolution_path,
+    run_log_path_for, save_output_bundle, save_output_bundle_with_resources,
+    save_output_bundle_with_resources_and_prepare,
 };
-pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
+pub use pipeline::{
+    FinalizationDiagnosticSink, FinalizationDiagnosticTrial, RoomPipeline, RoomPipelineRequest,
+    WorkflowContext,
+};
 pub use room_optimization::{
     CallbackAction, ChannelOptimizationResult, RoomOptimizationCallback, RoomOptimizationProgress,
     RoomOptimizationResult, SpeakerOptimizationCallback, SpeakerOptimizationResult, optimize_room,
     optimize_room_with_probe_arrivals, optimize_speaker,
 };
-pub use roomeq_export::ExportFormat;
+pub use roomeq_export::{
+    ExportCapability, ExportCapabilityCode, ExportCapabilityReason, ExportFormat,
+    query_export_capabilities, query_export_capabilities_at_sample_rate, query_export_capability,
+    query_export_capability_at_sample_rate,
+};
 pub use sidecar::{
     ReservedConvolutionSidecar, persist_convolution_sidecar, reserve_channel_convolution_sidecar,
     reserve_mixed_crossover_sidecar,

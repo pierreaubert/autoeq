@@ -198,11 +198,13 @@ mod tests {
     #[test]
     fn legacy_derivation_prefers_system_sub_boost_ceiling() {
         let mut config = RoomConfig::default();
-        let mut system = crate::SystemConfig::default();
-        system.bass_management = Some(crate::BassManagementConfig {
-            max_sub_boost_db: 6.0,
+        let system = crate::SystemConfig {
+            bass_management: Some(crate::BassManagementConfig {
+                max_sub_boost_db: 6.0,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
         config.system = Some(system);
         let budget = HeadroomBudget::from_legacy_config(&config);
         assert_eq!(budget.max_route_trim_up_db, 6.0);

@@ -1,6 +1,54 @@
 use super::misc::mean_std;
 use super::misc::percentile_sorted;
 use clap::Parser;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::sync::watch;
+
+/// Broadcasts a latched shutdown request to queued and active benchmark work.
+#[derive(Clone)]
+pub(super) struct ShutdownSignal {
+    requested: Arc<AtomicBool>,
+    changed: watch::Sender<bool>,
+}
+
+impl ShutdownSignal {
+    pub(super) fn new() -> Self {
+        let (changed, _receiver) = watch::channel(false);
+        Self {
+            requested: Arc::new(AtomicBool::new(false)),
+            changed,
+        }
+    }
+
+    pub(super) fn request(&self) {
+        if !self.requested.swap(true, Ordering::AcqRel) {
+            self.changed.send_replace(true);
+        }
+    }
+
+    pub(super) fn is_requested(&self) -> bool {
+        self.requested.load(Ordering::Acquire)
+    }
+
+    pub(super) async fn cancelled(&self) {
+        let mut receiver = self.changed.subscribe();
+        loop {
+            if *receiver.borrow_and_update() || self.is_requested() {
+                return;
+            }
+            if receiver.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+}
+
+impl Default for ShutdownSignal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(

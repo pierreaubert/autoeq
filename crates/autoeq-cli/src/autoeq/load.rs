@@ -1,6 +1,13 @@
 use autoeq::Curve;
+use autoeq::OptimParams;
 use autoeq::read;
+use autoeq_workflow::workflow::{
+    PreparedProduct, ProductCurves, ProductRequest, ProductSourceAdapters,
+};
 use std::collections::HashMap;
+use std::fs;
+use std::io::Read;
+use std::path::Path;
 
 /// Load input data and prepare frequency grid and curves
 pub(super) async fn load_and_prepare(
@@ -102,4 +109,72 @@ pub(super) async fn load_and_prepare(
         deviation_curve,
         spin_data,
     ))
+}
+
+pub(super) struct LoadedProductInput {
+    pub(super) request: ProductRequest,
+    pub(super) prepared: PreparedProduct,
+    pub(super) curves: ProductCurves,
+}
+
+/// Load the product manifest through injectable measurement/cache adapters,
+/// then prepare source and target curves on one optimizer grid.
+pub(super) async fn load_product_config(
+    path: &Path,
+    params: &OptimParams,
+) -> Result<LoadedProductInput, Box<dyn std::error::Error>> {
+    const MAX_PRODUCT_CONFIG_BYTES: u64 = 1024 * 1024;
+    let request_bytes = read_product_config_bytes(fs::File::open(path)?, MAX_PRODUCT_CONFIG_BYTES)?;
+    let request: ProductRequest = serde_json::from_slice(&request_bytes)?;
+    let cache_root = read::cache_root();
+    let backend = read::ReqwestMeasurementBackend::new();
+    let cache = read::FsMeasurementCache::new();
+    let adapters = ProductSourceAdapters {
+        cache_root: &cache_root,
+        backend: &backend,
+        cache: &cache,
+    };
+    let prepared = PreparedProduct::load(&request, params, &adapters).await?;
+    let curves = prepared.curves_for_optimizer(params)?;
+    Ok(LoadedProductInput {
+        request,
+        prepared,
+        curves,
+    })
+}
+
+fn read_product_config_bytes<R: Read>(
+    reader: R,
+    maximum_bytes: u64,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut bytes = Vec::new();
+    reader
+        .take(maximum_bytes.saturating_add(1))
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > maximum_bytes {
+        return Err(
+            format!("product configuration exceeds the {maximum_bytes}-byte safety limit").into(),
+        );
+    }
+    Ok(bytes)
+}
+
+#[cfg(test)]
+mod product_config_read_tests {
+    use super::read_product_config_bytes;
+    use std::io::Cursor;
+
+    #[test]
+    fn bounded_product_config_reader_accepts_limit_and_rejects_one_more_byte() {
+        assert_eq!(
+            read_product_config_bytes(Cursor::new(b"12345678"), 8).unwrap(),
+            b"12345678"
+        );
+        assert!(
+            read_product_config_bytes(Cursor::new(b"123456789"), 8)
+                .unwrap_err()
+                .to_string()
+                .contains("8-byte safety limit")
+        );
+    }
 }

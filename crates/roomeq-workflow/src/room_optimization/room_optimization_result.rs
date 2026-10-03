@@ -3100,8 +3100,11 @@ mod tests {
 
     #[test]
     fn final_safety_gate_rejects_selected_stopped_candidate() {
+        use autoeq_optim::optim::run_control::OptimizerRunControl;
+        use std::num::NonZeroUsize;
+
         let mut result = single_channel_room_result("left");
-        let evidence = OptimizerRunEvidence::from_backend_result(
+        let mut evidence = OptimizerRunEvidence::from_backend_result(
             "autoeq:de",
             Ok(("stopped by callback".to_string(), 0.5)),
             &[0.0],
@@ -3109,6 +3112,14 @@ mod tests {
             &[1.0],
             40,
             Some(7),
+        );
+        // Legacy status text alone is not evidence of user cancellation.
+        let control = OptimizerRunControl::new(NonZeroUsize::new(40).unwrap());
+        control.request_cancel();
+        evidence.apply_run_control(&control.snapshot());
+        assert_eq!(
+            evidence.termination,
+            autoeq_optim::optim::OptimizerTermination::UserStopped
         );
         result
             .channel_results

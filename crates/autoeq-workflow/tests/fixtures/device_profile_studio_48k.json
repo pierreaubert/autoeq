@@ -1,0 +1,13 @@
+{
+  "id": "studio-room-48k",
+  "playback_device_id": "coreaudio:external-dac-a",
+  "renderer": "equalizer_apo",
+  "sample_rate_hz": 48000.0,
+  "maximum_filter_count": 10,
+  "supported_peq_models": ["pk"],
+  "supported_filter_types": ["PK"],
+  "frequency_hz": { "minimum": 20.0, "maximum": 20000.0 },
+  "q": { "minimum": 0.5, "maximum": 10.0 },
+  "gain_db": { "minimum": -12.0, "maximum": 12.0 },
+  "preamp_db": -3.5
+}

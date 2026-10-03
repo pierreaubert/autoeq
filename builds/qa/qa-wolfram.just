@@ -12,32 +12,32 @@
 # WOLFRAMSCRIPT points at a live engine).
 [group('qa-wolfram')]
 qa-wolfram-smoke:
-	mbx test -p autoeq-qa --release --test qa_contract --test wolfram_peq_response --test wolfram_fir_response --test wolfram_log_interp --test wolfram_erb_quadrature
+	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract --test wolfram_peq_response --test wolfram_fir_response --test wolfram_log_interp --test wolfram_erb_quadrature
 
-# Full autoeq-qa suite (contract + all comparisons + lib unit tests).
+# Full AutoEQ numerical QA. The runner checks manifest/target membership,
+# executes all 118 Rust cases plus the library tests, and records per-case evidence.
 [group('qa-wolfram')]
 qa-wolfram:
-	mbx test -p autoeq-qa --release
+	python3 scripts/run_crate_test_matrix.py --qa-runner rust --release
 
 # Contract gate only: manifest <-> oracle/golden/test completeness.
 [group('qa-wolfram')]
 qa-wolfram-contract:
-	mbx test -p autoeq-qa --release --test qa_contract
+	python3 scripts/run_crate_test_matrix.py --check-qa-manifest
+	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract
 
-# Python-runner comparisons (PY/H families): each tests/*.py loads its
-# golden, asserts, and prints QA_RESULT; any failure exits nonzero.
+# The manifest runner executes exactly its six Python cases and verifies
+# identity, result count, tolerance kind, and expected/executed case totals.
 [group('qa-wolfram')]
 qa-wolfram-python:
-	#!/usr/bin/env bash
-	set -euo pipefail
-	pass=0; fail=0
-	for t in crates/autoeq-qa/tests/*.py; do
-		[ -e "$t" ] || continue
-		echo "--- $t"
-		if python3 "$t"; then pass=$((pass+1)); else fail=$((fail+1)); fi
-	done
-	echo "python comparisons: $pass passed, $fail failed"
-	[ "$fail" -eq 0 ]
+	python3 scripts/run_crate_test_matrix.py --qa-runner python
+	# This helper is a negative control, not a seventh manifest case.
+	python3 crates/autoeq-qa/tests/negative_controls_tailpy.py
+
+[group('qa-wolfram')]
+qa-wolfram-validation:
+	just qa-wolfram
+	just qa-wolfram-python
 
 # Regenerate engine-blessed goldens (needs an activated Wolfram Engine:
 # WOLFRAMSCRIPT=wolframscript just qa-wolfram-goldens).
@@ -45,6 +45,7 @@ qa-wolfram-python:
 qa-wolfram-goldens:
 	#!/usr/bin/env bash
 	set -euo pipefail
+	python3 scripts/run_crate_test_matrix.py --check-qa-manifest --allow-missing-goldens
 	mkdir -p crates/autoeq-qa/wolfram/goldens
 	engine="${WOLFRAMSCRIPT:-wolframscript}"
 	kernel_default="/Applications/Wolfram Engine.app/Contents/Resources/Wolfram Player.app/Contents/MacOS/WolframKernel"
@@ -56,4 +57,4 @@ qa-wolfram-goldens:
 		echo "--- $base"
 		"$engine" -file "$script" | tail -n 1 > "crates/autoeq-qa/wolfram/goldens/$base.json"
 	done
-	mbx test -p autoeq-qa --release --test qa_contract
+	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract

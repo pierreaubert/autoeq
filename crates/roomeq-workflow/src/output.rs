@@ -32,6 +32,7 @@ mod tests {
         let path = directory.path().join("dsp.json");
         let output = DspChainOutput {
             version: "1".to_string(),
+            artifact_bundle_schema_version: None,
             global_plugins: Vec::new(),
             channels: std::collections::HashMap::new(),
             deployed_source_curves: Default::default(),
@@ -92,6 +93,7 @@ mod tests {
         .expect("routing metadata");
         let output = DspChainOutput {
             version: "1".to_string(),
+            artifact_bundle_schema_version: None,
             global_plugins: Vec::new(),
             channels: std::collections::HashMap::new(),
             deployed_source_curves: Default::default(),

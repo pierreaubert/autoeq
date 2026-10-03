@@ -898,7 +898,7 @@ pub struct OptimizationMetadata {
     /// Optimization algorithm used
     pub algorithm: String,
     /// Loss function that the optimizer minimized.
-    /// One of `"flat"`, `"score"`, `"epa"`.
+    /// One of `"flat"`, `"headphone_flat"`, `"score"`, `"epa"`.
     ///
     /// Note: `pre_score` and `post_score` are *not* values of this loss
     /// function — they are always computed by

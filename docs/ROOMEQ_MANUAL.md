@@ -905,7 +905,10 @@ cargo run --features cli --bin roomeq -- --config <config.json> --output <output
 - `--verbose`: Enable verbose output
 - `--help`: Print help information
 
-`rew` emits a single-channel REW Generic EQ filter-settings file.
+`rew` emits single-channel REW Generic EQ reference text for manual entry.
+REW cannot reload this text; it saves and reloads filter settings as binary
+`.req` files. RoomEQ does not produce `.req` files. Check filter type and shelf
+parameter conventions against the resulting response when entering filters.
 `coefficients` emits normalized `a0=1, a1, a2, b0, b1, b2` sections using the
 same canonical biquad implementation as runtime DSP. Both formats reject
 convolution, crossovers, routing, or unknown stages instead of silently
@@ -931,6 +934,35 @@ directory. The assets directory holds every run-generated file:
   `<channel>__resonance_decays.json`) when the run produced them;
 - `manifest.json` (run status and exact asset ownership) and `roomeq.log`
   (run summary lines; detailed logs remain on stderr via `RUST_LOG`).
+
+### Bundle validation and recovery
+
+New native bundles include `artifact_bundle_manifest.json` with the producer,
+producer version, graph schema version, generation ID, exact saved-JSON hash,
+and the size and SHA-256 of every immutable asset. The run log and run-status
+manifest remain mutable and have separate ownership. Curve JSON companions
+preserve full precision, normalization range, noise-floor and coherence data
+alongside the CSV files used by existing consumers.
+
+`roomeq_workflow::load_output_bundle` checks the root and asset hashes before
+restoring external data. It recovers an interrupted publication using the
+sibling transaction journal. The Python backend adapter in
+`scripts/src/loaders.py` checks integrity and refuses an outstanding transaction
+until the native loader has recovered it. New bundles carry an explicit bundle
+schema marker and fail if their integrity manifest is missing or unsupported.
+Legacy bundles keep their existing loading behavior.
+
+Optimization and fallback attempts use private staging directories. The selected
+attempt is published only after it succeeds. External export files are staged and
+preflighted before publication, with rollback on ordinary publication failures.
+Combined native/external recovery after process interruption is still incomplete;
+a consumer may see a new external file before its matching native bundle.
+
+Publication stages a complete generation and retains the previous generation
+until the root JSON is committed. Unix builds flush files and directory
+entries. Directory-entry durability on other platforms depends on the OS.
+Concurrent readers can encounter a brief unavailable support directory during
+the canonical directory swap; use the supported loader and retry after recovery.
 
 ### HTML report format
 
@@ -1504,6 +1536,21 @@ RoomEQ feature remains representable.
 | **REW (`rew`)** | Importing one channel of IIR EQ into REW or another compatible tool | One channel of gain plus supported biquad filters, with an explicit preamp | Exactly one channel. No delay, FIR, crossover, bass routing, matrix, or other graph stage. |
 | **Normalized coefficients (`coefficients`)** | Integrating RoomEQ filters into custom DSP | Any number of serial channels, gain, delay, and the 12 canonical RoomEQ biquad types | No FIR, crossover, matrix, bass routing, or plugin graph. The host must apply `preamp_gain_db`, `delay_ms`, section order, and the documented coefficient convention. |
 
+### Query export compatibility
+
+The backend API `roomeq_export::query_export_capabilities` returns one
+serializable capability record for each of the eight formats. Use
+`query_export_capability_at_sample_rate` to check a selected format at the
+intended playback rate. The query validates the graph and runs the actual
+renderer, returning stable reason codes for refusals.
+
+Records include the checked rate, required convolution resources, whether
+resources were verified, and whether the graph is ready to export. A graph
+containing a runtime sub-output limiter is refused by every external format
+until that backend can preserve its protection behavior. Convolution resources
+require verification before packaging. Consumer PCM and acoustic verification
+retain their separate evidence requirements.
+
 ### Practical Target Selection
 
 - For a 5.1/7.1 system with redirected bass, separate main/sub delays, or
@@ -1742,11 +1789,13 @@ its geometric half of the correction band. The stage requires
 
 Hybrid spatial FIR searches retain the caller's progress/stop callback after
 the IIR stage. DE and CMA-ES check it at native generation boundaries as well
-as scored FIR basis boundaries. COBYLA and ISRES currently check only at stage
+as scored FIR basis boundaries. COBRA checks after surrogate infill evaluations.
+COBYLA and ISRES currently check only at stage
 boundaries because the pinned scalar backends lack native stop hooks; their
 search can finish before a pending Stop is observed. A result is discarded
 once Stop is observed. Completed FIR optimizer evidence records
-`callback_cancellation=native_generation_boundaries` or
+`callback_cancellation=native_generation_boundaries`,
+`callback_cancellation=native_infill_boundaries`, or
 `callback_cancellation=stage_boundaries_only` when a callback was supplied.
 These checks do not interrupt FIR template construction, an initial population,
 or an in-flight objective evaluation, and do not promise a maximum stop latency.
@@ -1755,7 +1804,16 @@ or an in-flight objective evaluation, and do not promise a maximum stop latency.
 - `autoeq:de`: Differential Evolution
 - `autoeq:cobyla`: COBYLA (Constrained Optimization BY Linear Approximations)
 - `autoeq:isres`: Improved Stochastic Ranking Evolution Strategy
+- `autoeq:cobra` (or `cobra`): COBRA surrogate optimization with native inequalities
 - Other AutoEQ and metaheuristics algorithms supported by autoeq
+
+Set `optimizer.algorithm` to `"autoeq:cobra"` to use the math-optimisation
+COBRA solver. `optimizer.max_iter` supplies its objective-evaluation budget and
+`optimizer.seed` makes its initial design and exploration reproducible. COBRA
+starts from a Halton design, so saved-candidate warm starts are unsupported.
+Callbacks run after surrogate infill evaluations, following the initial design.
+RoomEQ owns optional local refinement; COBRA's internal true-function polish
+is disabled to preserve evaluation accounting and callback stop behavior.
 
 ### Loss Types
 
@@ -2550,7 +2608,7 @@ optimization, not an unrestricted FIR optimum. The displayed channel target
 remains a representative target, not a replacement for the per-seat objective
 bank. Optimizer evidence identifies this search and its selected candidate.
 The bounded scalar backends currently supported by this stage are DE, CMA-ES,
-COBYLA and ISRES; another requested backend fails explicitly rather than being
+COBYLA, COBRA and ISRES; another requested backend fails explicitly rather than being
 silently substituted. Multi-measurement minimum-phase Hybrid uses an aligned
 per-objective dB-correction basis instead: each trial is realized through the
 minimum-phase generator before its actual finite-tap response is scored.

@@ -1,15 +1,25 @@
 # autoeq-qa
 
-Independent cross-validation of AutoEQ / RoomEQ against the Wolfram Engine.
+Independent numerical cross-validation for AutoEQ and RoomEQ. The checked-in
+[`validation-manifest.toml`](validation-manifest.toml) owns 124 cases: 118 Rust
+integration-test cases and six Python runner cases. Every case records its
+oracle, family, owner, tolerance, and expected test entrypoint.
 
-Each case pairs a closed-form Wolfram oracle (`wolfram/*.wls`) with a
-Rust comparison test (`tests/wolfram_*.rs`). References resolve live
-when `WOLFRAMSCRIPT` is set, otherwise from checked-in goldens
-(`wolfram/goldens/`, produced with `just qa-wolfram-goldens`).
+Rust cases compare implementation results with closed-form Wolfram oracles in
+`wolfram/*.wls`. They use a live Wolfram Engine when `WOLFRAMSCRIPT` is set and
+otherwise compare against checked-in files under `wolfram/goldens/`. Python
+cases use the same manifest and emit one machine-readable `QA_RESULT` line so
+the runner can reject missing, duplicate, or incorrectly named results.
 
-Covered (catalogue families from `reviews/catalogue-20260923.md`):
-C01 PEQ + FIR complex transfer, C03 log-frequency interpolation,
-C06 ERB quadrature and timing conversion.
+Run the full Rust and Python case set with:
 
-See [AGENTS.md](AGENTS.md) and `validation-manifest.toml` for the case
-list, tiers, and tolerances.
+```bash
+just qa-wolfram-validation
+```
+
+Install the pinned Python numerical requirements from
+[`scripts/autoeq-qa-requirements.txt`](../../scripts/autoeq-qa-requirements.txt)
+before running the Python cases. Manifest validation also verifies that every
+Rust case maps to a Cargo test target and that every oracle/golden is present.
+The `negative_controls_tailpy.py` helper is a separate supplemental check, not
+one of the 124 manifest cases.

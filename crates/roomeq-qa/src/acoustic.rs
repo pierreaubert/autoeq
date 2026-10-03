@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -7,16 +9,20 @@ use roomeq_model::Curve;
 use roomeq_quality::{
     AcousticBaselinePlatform, AcousticCorpusBaseline, AcousticCorpusBaselineEntry,
     AcousticCorpusManifest, AcousticCorpusScenario, AcousticQualityScorecard,
-    HeadPositionPerturbationConfig, QaTier, QualityBaselineComparison, QualityBaselineMetrics,
-    QualityBaselinePartition, QualityEvaluationConfig, QualityGateMode, QualityGatePolicy,
-    QualityGateReport, QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
+    CandidateRecommendationStatus, HeadPositionPerturbationConfig, HeldOutEvidenceStatus, QaTier,
+    QualityBaselineComparison, QualityBaselineMetrics, QualityBaselinePartition,
+    QualityEvaluationConfig, QualityGateMode, QualityGatePolicy, QualityGateReport,
+    QualityRegressionPolicy, TemporalChannelEvidence, TemporalQualityEvidence,
     compare_quality_to_baseline, derive_temporal_quality_evidence, evaluate_acoustic_quality,
     evaluate_quality_gate,
 };
 #[cfg(test)]
 use roomeq_workflow::ctc::apply_channel_dsp_chain_to_curve;
-use roomeq_workflow::{load_config, load_curve_from_csv_with_frequency_samples};
-use serde::Serialize;
+use roomeq_workflow::{
+    load_config, load_curve_from_csv_with_frequency_samples, load_merged_config_strict,
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 enum TierArg {
@@ -83,11 +89,14 @@ struct Args {
 
 #[derive(Debug, Serialize)]
 struct ScenarioReport {
+    input_files: Vec<InputFileIdentity>,
+    held_out_measurements: Vec<HeldOutEvidenceReport>,
     playback_evidence:
         Vec<roomeq_workflow::room_optimization::seat_replay::FinalPhysicalSeatPlayback>,
     seed_distribution: Option<roomeq_model::QaSeedDistribution>,
     id: String,
     provenance: String,
+    held_out_evidence_status: HeldOutEvidenceStatus,
     topology: String,
     scorecard: AcousticQualityScorecard,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,15 +109,28 @@ struct ScenarioReport {
 }
 
 #[derive(Debug, Serialize)]
+struct HeldOutEvidenceReport {
+    channel: String,
+    seat_id: Option<String>,
+    path: String,
+    evidence_class: roomeq_quality::HeldOutEvidenceClass,
+}
+
+#[derive(Debug, Serialize)]
 struct CandidateReport {
     playback_evidence:
         Vec<roomeq_workflow::room_optimization::seat_replay::FinalPhysicalSeatPlayback>,
     seed_distribution: Option<roomeq_model::QaSeedDistribution>,
     config: String,
     scorecard: AcousticQualityScorecard,
+    quality_gate: QualityGateReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     robustness: Option<RobustnessSummary>,
     deltas: CandidateDeltas,
+    /// Numeric preference before checking whether the evidence can support promotion.
+    numeric_preference: bool,
+    held_out_evidence_status: HeldOutEvidenceStatus,
+    recommendation_status: CandidateRecommendationStatus,
     recommended: bool,
 }
 
@@ -168,6 +190,10 @@ struct VariantEvaluation {
 
 #[derive(Debug, Serialize)]
 struct CorpusReport {
+    manifest_input: InputFileIdentity,
+    baseline_input: InputFileIdentity,
+    input_inventory_sha256: String,
+    input_files: Vec<InputFileIdentity>,
     version: String,
     tier: String,
     platform: AcousticBaselinePlatform,
@@ -177,6 +203,423 @@ struct CorpusReport {
     scenario_count: usize,
     passed: bool,
     scenarios: Vec<ScenarioReport>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+struct InputFileIdentity {
+    role: String,
+    path: String,
+    sha256: String,
+    size_bytes: u64,
+}
+
+#[derive(Debug, Clone)]
+struct InputSnapshot {
+    identity: InputFileIdentity,
+    requested_path: PathBuf,
+    resolved_path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+struct ChangedInput {
+    role: String,
+    path: String,
+    expected_sha256: String,
+    observed_sha256: Option<String>,
+    error: Option<String>,
+}
+
+fn workspace_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+}
+
+fn path_label(path: &Path) -> String {
+    let root = workspace_root().canonicalize().ok();
+    let labeled = root
+        .as_deref()
+        .and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+    labeled.to_string_lossy().replace('\\', "/")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn snapshot_file(role: impl Into<String>, path: &Path) -> Result<InputSnapshot> {
+    let resolved_path = path
+        .canonicalize()
+        .with_context(|| format!("failed to resolve acoustic QA input {}", path.display()))?;
+    anyhow::ensure!(
+        resolved_path.is_file(),
+        "acoustic QA input is not a file: {}",
+        resolved_path.display()
+    );
+    let mut file = File::open(&resolved_path).with_context(|| {
+        format!(
+            "failed to open acoustic QA input {}",
+            resolved_path.display()
+        )
+    })?;
+    let before = file.metadata()?;
+    let mut hasher = Sha256::new();
+    let mut size_bytes = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        size_bytes += read as u64;
+        hasher.update(&buffer[..read]);
+    }
+    let after = file.metadata()?;
+    anyhow::ensure!(
+        before.len() == size_bytes && after.len() == size_bytes,
+        "acoustic QA input changed while it was being hashed: {}",
+        resolved_path.display()
+    );
+    anyhow::ensure!(
+        before.modified().ok() == after.modified().ok(),
+        "acoustic QA input changed while it was being hashed: {}",
+        resolved_path.display()
+    );
+    let digest = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(InputSnapshot {
+        identity: InputFileIdentity {
+            role: role.into(),
+            path: path_label(&resolved_path),
+            sha256: digest,
+            size_bytes,
+        },
+        requested_path: path.to_path_buf(),
+        resolved_path,
+    })
+}
+
+fn add_config_path(
+    paths: &mut Vec<(String, PathBuf)>,
+    role: impl Into<String>,
+    path: impl AsRef<Path>,
+    config_dir: &Path,
+) {
+    let path = path.as_ref();
+    let path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        config_dir.join(path)
+    };
+    paths.push((role.into(), path));
+}
+
+fn collect_measurement_reference_paths(
+    reference: &roomeq_model::MeasurementRef,
+    config_dir: &Path,
+    variant: &str,
+    paths: &mut Vec<(String, PathBuf)>,
+) {
+    use roomeq_model::MeasurementRef;
+
+    match reference.original() {
+        MeasurementRef::Loaded { .. } => unreachable!("original removes loaded snapshots"),
+        MeasurementRef::Path(path) | MeasurementRef::Named { path, .. } => {
+            paths.push((format!("{variant}_training_measurement"), path.clone()));
+        }
+        MeasurementRef::Inline(inline) => {
+            if let Some(path) = &inline.csv_path {
+                add_config_path(
+                    paths,
+                    format!("{variant}_inline_measurement_csv"),
+                    path,
+                    config_dir,
+                );
+            }
+            if let Some(path) = &inline.wav_path {
+                add_config_path(
+                    paths,
+                    format!("{variant}_inline_measurement_wav"),
+                    path,
+                    config_dir,
+                );
+            }
+        }
+    }
+}
+
+fn capture_artifact_role_name(
+    role: autoeq_core::capture_handoff::CaptureArtifactRole,
+) -> &'static str {
+    use autoeq_core::capture_handoff::CaptureArtifactRole;
+
+    match role {
+        CaptureArtifactRole::Configuration => "configuration",
+        CaptureArtifactRole::RawAudio => "raw_audio",
+        CaptureArtifactRole::ProcessedAudio => "processed_audio",
+        CaptureArtifactRole::MagnitudeResponse => "magnitude_response",
+        CaptureArtifactRole::ComplexResponse => "complex_response",
+        CaptureArtifactRole::Calibration => "calibration",
+        CaptureArtifactRole::SupportingEvidence => "supporting_evidence",
+    }
+}
+
+fn collect_capture_handoff_paths(
+    config: &roomeq_model::RoomConfig,
+    config_path: &Path,
+    variant: &str,
+    paths: &mut Vec<(String, PathBuf)>,
+) -> Result<()> {
+    let Some(marker) = config
+        .recording_config
+        .as_ref()
+        .and_then(|recording| recording.capture_handoff_file.as_deref())
+    else {
+        return Ok(());
+    };
+    let config_dir = config_path.parent().unwrap_or(Path::new("."));
+    let handoff_path = config_dir.join(marker);
+    paths.push((format!("{variant}_capture_handoff"), handoff_path.clone()));
+    let handoff: autoeq_core::capture_handoff::CaptureHandoff =
+        serde_json::from_slice(&std::fs::read(&handoff_path).with_context(|| {
+            format!(
+                "failed to read declared capture handoff {}",
+                handoff_path.display()
+            )
+        })?)
+        .with_context(|| format!("failed to parse capture handoff {}", handoff_path.display()))?;
+    handoff.validate().map_err(anyhow::Error::msg)?;
+    for artifact in handoff.artifacts {
+        paths.push((
+            format!(
+                "{variant}_capture_artifact:{}",
+                capture_artifact_role_name(artifact.role)
+            ),
+            config_dir.join(artifact.file),
+        ));
+    }
+    Ok(())
+}
+
+fn collect_room_config_file_references(
+    config: &roomeq_model::RoomConfig,
+    config_path: &Path,
+    variant: &str,
+    paths: &mut Vec<(String, PathBuf)>,
+) -> Result<()> {
+    use roomeq_model::TargetCurveConfig;
+
+    let config_dir = config_path.parent().unwrap_or(Path::new("."));
+    for speaker in config.speakers.values() {
+        for source in roomeq_model::validation_rules::collect_sources(speaker) {
+            match source {
+                roomeq_model::MeasurementSource::Single(single) => {
+                    collect_measurement_reference_paths(
+                        &single.measurement,
+                        config_dir,
+                        variant,
+                        paths,
+                    );
+                }
+                roomeq_model::MeasurementSource::Multiple(multiple) => {
+                    for reference in &multiple.measurements {
+                        collect_measurement_reference_paths(reference, config_dir, variant, paths);
+                    }
+                }
+                roomeq_model::MeasurementSource::InMemory(_)
+                | roomeq_model::MeasurementSource::InMemoryMultiple(_) => {}
+            }
+        }
+    }
+    if let Some(TargetCurveConfig::Path(path)) = &config.target_curve {
+        paths.push((format!("{variant}_target_curve"), path.clone()));
+    }
+    if let Some(path) = config
+        .optimizer
+        .target_response
+        .as_ref()
+        .and_then(|target| target.curve_path.as_ref())
+    {
+        paths.push((format!("{variant}_target_response_curve"), path.clone()));
+    }
+    for reference in config.provenance.measurements.values() {
+        if let Some(path) = &reference.sidecar_path {
+            paths.push((format!("{variant}_measurement_provenance"), path.clone()));
+        }
+    }
+    if let Some(recording) = &config.recording_config {
+        for path in recording
+            .mic_calibration_path
+            .iter()
+            .chain(recording.mic_calibration_paths.iter().flatten().flatten())
+            .chain(recording.mic_phase_calibration_path.iter())
+            .chain(
+                recording
+                    .mic_phase_calibration_paths
+                    .iter()
+                    .flatten()
+                    .flatten(),
+            )
+            .chain(recording.probe_wav_relative.iter())
+            .chain(recording.bass_anchor_wav_relative.iter())
+        {
+            add_config_path(
+                paths,
+                format!("{variant}_recording_resource"),
+                path,
+                config_dir,
+            );
+        }
+    }
+    for source in config.measured_impulse_responses.values() {
+        paths.push((
+            format!("{variant}_measured_impulse_response"),
+            source.path.clone(),
+        ));
+    }
+    if let Some(ctc) = &config.ctc {
+        if let Some(path) = &ctc.reference_sweep {
+            paths.push((format!("{variant}_ctc_reference_sweep"), path.clone()));
+        }
+        if let Some(hrtf) = &ctc.hrtf {
+            paths.push((format!("{variant}_ctc_hrtf"), hrtf.hrtf_file.clone()));
+        }
+        if let Some(measurements) = &ctc.measurements {
+            for measurement in &measurements.files {
+                for path in [
+                    measurement.ir.as_ref(),
+                    measurement.raw_sweep.as_ref(),
+                    measurement.loopback.as_ref(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    paths.push((format!("{variant}_ctc_measurement"), path.clone()));
+                }
+            }
+        }
+    }
+    collect_capture_handoff_paths(config, config_path, variant, paths)
+}
+
+fn scenario_input_snapshots(scenario: &AcousticCorpusScenario) -> Result<Vec<InputSnapshot>> {
+    let mut paths = vec![("scenario_config".to_string(), scenario.config.clone())];
+    if let Some(path) = &scenario.override_config {
+        paths.push(("current_override_config".to_string(), path.clone()));
+    }
+    if let Some(path) = &scenario.candidate_override_config {
+        paths.push(("candidate_override_config".to_string(), path.clone()));
+    }
+
+    let variants = [
+        ("current", scenario.override_config.as_deref()),
+        ("candidate", scenario.candidate_override_config.as_deref()),
+    ];
+    for (variant, override_path) in variants {
+        if variant == "candidate" && override_path.is_none() {
+            continue;
+        }
+        let (config, _) = load_merged_config_strict(&scenario.config, override_path)
+            .with_context(|| format!("failed to inventory {variant} inputs for {}", scenario.id))?;
+        let mut referenced_paths = Vec::new();
+        collect_room_config_file_references(
+            &config,
+            &scenario.config,
+            variant,
+            &mut referenced_paths,
+        )?;
+        paths.extend(referenced_paths);
+    }
+
+    for measurement in &scenario.held_out {
+        let seat = measurement.seat_id.as_deref().unwrap_or("unnamed");
+        paths.push((
+            format!("held_out_measurement:{}:{seat}", measurement.channel),
+            measurement.path.clone(),
+        ));
+    }
+
+    paths.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+    paths.dedup();
+    paths
+        .into_iter()
+        .map(|(role, path)| snapshot_file(role, &path))
+        .collect()
+}
+
+fn input_identities(snapshots: &[InputSnapshot]) -> Vec<InputFileIdentity> {
+    let mut identities: Vec<_> = snapshots
+        .iter()
+        .map(|snapshot| snapshot.identity.clone())
+        .collect();
+    identities.sort_by(|left, right| {
+        left.path
+            .cmp(&right.path)
+            .then_with(|| left.role.cmp(&right.role))
+    });
+    identities
+}
+
+fn input_inventory_sha256(inputs: &[InputFileIdentity]) -> Result<String> {
+    Ok(sha256_hex(&serde_json::to_vec(inputs)?))
+}
+
+fn changed_inputs(snapshots: &[InputSnapshot]) -> Vec<ChangedInput> {
+    snapshots
+        .iter()
+        .filter_map(|snapshot| {
+            let current_path = match snapshot.requested_path.canonicalize() {
+                Ok(path) => path,
+                Err(error) => {
+                    return Some(ChangedInput {
+                        role: snapshot.identity.role.clone(),
+                        path: snapshot.identity.path.clone(),
+                        expected_sha256: snapshot.identity.sha256.clone(),
+                        observed_sha256: None,
+                        error: Some(format!("input path no longer resolves: {error}")),
+                    });
+                }
+            };
+            if current_path != snapshot.resolved_path {
+                return Some(ChangedInput {
+                    role: snapshot.identity.role.clone(),
+                    path: snapshot.identity.path.clone(),
+                    expected_sha256: snapshot.identity.sha256.clone(),
+                    observed_sha256: None,
+                    error: Some(format!(
+                        "input path now resolves to {}",
+                        current_path.display()
+                    )),
+                });
+            }
+            match snapshot_file(&snapshot.identity.role, &snapshot.requested_path) {
+                Ok(current)
+                    if current.identity.sha256 == snapshot.identity.sha256
+                        && current.identity.size_bytes == snapshot.identity.size_bytes
+                        && current.identity.path == snapshot.identity.path =>
+                {
+                    None
+                }
+                Ok(current) => Some(ChangedInput {
+                    role: snapshot.identity.role.clone(),
+                    path: snapshot.identity.path.clone(),
+                    expected_sha256: snapshot.identity.sha256.clone(),
+                    observed_sha256: Some(current.identity.sha256),
+                    error: None,
+                }),
+                Err(error) => Some(ChangedInput {
+                    role: snapshot.identity.role.clone(),
+                    path: snapshot.identity.path.clone(),
+                    expected_sha256: snapshot.identity.sha256.clone(),
+                    observed_sha256: None,
+                    error: Some(format!("{error:#}")),
+                }),
+            }
+        })
+        .collect()
 }
 
 fn record_variant_failure(
@@ -194,6 +637,7 @@ fn record_variant_failure(
         "candidate_override_config": scenario.candidate_override_config,
         "evaluation_band_hz": scenario.evaluation_band_hz,
         "held_out": scenario.held_out,
+        "held_out_evidence_status": scenario.held_out_evidence_status(),
         "error": format!("{error:#}"), "completed": completed,
     });
     let serialized = match serde_json::to_string_pretty(&record) {
@@ -234,6 +678,8 @@ pub fn run() -> Result<()> {
         .baseline
         .clone()
         .unwrap_or_else(|| default_baseline_path_for(&platform.os, &platform.arch));
+    let manifest_snapshot = snapshot_file("manifest", &args.manifest)?;
+    let baseline_snapshot = snapshot_file("baseline", &baseline_path)?;
     let manifest = AcousticCorpusManifest::load(&args.manifest).map_err(|error| anyhow!(error))?;
     let registry = crate::registry::load_registry()?;
     let suite = registry
@@ -280,6 +726,17 @@ pub fn run() -> Result<()> {
         });
     }
 
+    let mut scenario_snapshots = Vec::with_capacity(selected.len());
+    for scenario in &selected {
+        scenario_snapshots.push((scenario.id.clone(), scenario_input_snapshots(scenario)?));
+    }
+    let mut all_input_snapshots = vec![manifest_snapshot.clone(), baseline_snapshot.clone()];
+    for (_, snapshots) in &scenario_snapshots {
+        all_input_snapshots.extend(snapshots.iter().cloned());
+    }
+    let input_files = input_identities(&all_input_snapshots);
+    let input_digest = input_inventory_sha256(&input_files)?;
+
     let mut scenarios = Vec::with_capacity(selected.len());
     for scenario in selected {
         eprintln!("Acoustic corpus: {}", scenario.id);
@@ -294,6 +751,7 @@ pub fn run() -> Result<()> {
                 )
             })?;
         let scorecard = current.scorecard;
+        let enforce = args.enforce || scenario.gate_mode == QualityGateMode::Enforce;
         let candidate = scenario
             .candidate_override_config
             .as_deref()
@@ -307,7 +765,20 @@ pub fn run() -> Result<()> {
                             }})))?;
                 let candidate_scorecard = candidate_evaluation.scorecard;
                 let deltas = candidate_deltas(&scorecard, &candidate_scorecard);
-                let recommended = candidate_is_recommended(&candidate_scorecard, &deltas);
+                let numeric_preference =
+                    candidate_numeric_preference(&candidate_scorecard, &deltas);
+                let candidate_gate = evaluate_quality_gate(
+                    &candidate_scorecard,
+                    QualityGatePolicy::default(),
+                    true,
+                );
+                let held_out_evidence_status = scenario.held_out_evidence_status();
+                let recommendation_status = candidate_recommendation_status(
+                    numeric_preference,
+                    candidate_gate.passed,
+                    held_out_evidence_status,
+                    enforce,
+                );
                 Ok::<_, anyhow::Error>(CandidateReport {
                     playback_evidence: candidate_evaluation.playback_evidence,
                     seed_distribution: candidate_evaluation.seed_distribution,
@@ -317,13 +788,16 @@ pub fn run() -> Result<()> {
                         .to_string_lossy()
                         .into_owned(),
                     scorecard: candidate_scorecard,
+                    quality_gate: candidate_gate,
                     robustness: candidate_evaluation.robustness,
                     deltas,
-                    recommended,
+                    numeric_preference,
+                    held_out_evidence_status,
+                    recommendation_status,
+                    recommended: recommendation_status.is_recommended(),
                 })
             })
             .transpose()?;
-        let enforce = args.enforce || scenario.gate_mode == QualityGateMode::Enforce;
         let mut gate = evaluate_quality_gate(&scorecard, QualityGatePolicy::default(), enforce);
         let baseline_comparison = if let Some(snapshot) = baseline.get(&scenario.id) {
             let comparison = compare_quality_to_baseline(
@@ -351,11 +825,28 @@ pub fn run() -> Result<()> {
             gate.advisories.push("corpus_baseline_missing".to_string());
             None
         };
+        let scenario_inputs = scenario_snapshots
+            .iter()
+            .find(|(id, _)| id == &scenario.id)
+            .map(|(_, snapshots)| input_identities(snapshots))
+            .ok_or_else(|| anyhow!("missing input inventory for scenario {}", scenario.id))?;
         scenarios.push(ScenarioReport {
+            input_files: scenario_inputs,
+            held_out_measurements: scenario
+                .held_out
+                .iter()
+                .map(|measurement| HeldOutEvidenceReport {
+                    channel: measurement.channel.clone(),
+                    seat_id: measurement.seat_id.clone(),
+                    path: path_label(&measurement.path),
+                    evidence_class: measurement.evidence_class,
+                })
+                .collect(),
             seed_distribution: current.seed_distribution,
             playback_evidence: current.playback_evidence,
             id: scenario.id.clone(),
             provenance: scenario.provenance.as_str().to_string(),
+            held_out_evidence_status: scenario.held_out_evidence_status(),
             topology: scenario.topology.clone(),
             scorecard,
             baseline_comparison,
@@ -365,7 +856,42 @@ pub fn run() -> Result<()> {
         });
     }
 
+    let changed = changed_inputs(&all_input_snapshots);
+    if !changed.is_empty() {
+        let failure = serde_json::json!({
+            "status": "failed",
+            "passed": false,
+            "reason": "acoustic_corpus_input_changed_during_scoring",
+            "version": manifest.version,
+            "tier": format!("{:?}", args.tier).to_lowercase(),
+            "platform": platform,
+            "rustc_version": rustc_version(),
+            "input_inventory_sha256": input_digest,
+            "input_files": input_files,
+            "changed_inputs": changed,
+            "completed_scenarios": scenarios,
+        });
+        let json = serde_json::to_string_pretty(&failure)?;
+        println!("{json}");
+        if let Some(path) = &args.output {
+            write_report(path, &json)?;
+        }
+        if let Some(path) = &args.markdown_output {
+            write_report(
+                path,
+                "# RoomEQ acoustic quality\n\nResult: **FAIL**\n\nInput files changed while scoring. See the JSON report for changed identities.\n",
+            )?;
+        }
+        return Err(anyhow!(
+            "acoustic corpus input files changed during scoring; refusing to report a passing run"
+        ));
+    }
+
     let report = CorpusReport {
+        manifest_input: manifest_snapshot.identity,
+        baseline_input: baseline_snapshot.identity,
+        input_inventory_sha256: input_digest,
+        input_files,
         version: manifest.version,
         tier: format!("{:?}", args.tier).to_lowercase(),
         platform,
@@ -1074,7 +1600,7 @@ fn candidate_deltas(
     }
 }
 
-fn candidate_is_recommended(
+fn candidate_numeric_preference(
     candidate: &AcousticQualityScorecard,
     deltas: &CandidateDeltas,
 ) -> bool {
@@ -1102,6 +1628,54 @@ fn candidate_is_recommended(
     candidate.finite && ((no_regression && material_improvement) || headroom_tradeoff)
 }
 
+fn candidate_recommendation_status(
+    numeric_preference: bool,
+    candidate_quality_gate_passed: bool,
+    evidence: HeldOutEvidenceStatus,
+    enforced: bool,
+) -> CandidateRecommendationStatus {
+    use CandidateRecommendationStatus as Recommendation;
+    use HeldOutEvidenceStatus as Evidence;
+
+    if !candidate_quality_gate_passed {
+        return Recommendation::CandidateQualityGateFailed;
+    }
+    match evidence {
+        Evidence::NoHeldOutMeasurements => Recommendation::NoHeldOutEvidence,
+        Evidence::MixedEvidenceClasses => Recommendation::MixedEvidenceNotPromoted,
+        Evidence::UnknownEvidenceNotAuthorizingGeneralization => {
+            Recommendation::UnknownEvidenceNotPromoted
+        }
+        Evidence::DeterministicPerturbationRobustnessOnly => {
+            Recommendation::DeterministicPerturbationsNotIndependentMeasuredEvidence
+        }
+        Evidence::IndependentMeasuredSeatsIncomplete => {
+            Recommendation::IndependentMeasuredSeatsIncomplete
+        }
+        Evidence::IndependentMeasuredSeatsReportOnly => {
+            Recommendation::IndependentMeasuredSeatsReportOnly
+        }
+        Evidence::IndependentMeasuredSeatsEnforced if numeric_preference => {
+            Recommendation::RecommendedForMeasuredGeneralization
+        }
+        Evidence::IndependentMeasuredSeatsEnforced => {
+            Recommendation::CandidateNotNumericallyPreferred
+        }
+        Evidence::FemGeneratedModelSpaceOnly if !enforced => {
+            Recommendation::FemModelSpaceReportOnly
+        }
+        Evidence::FemGeneratedModelSpaceOnly if numeric_preference => {
+            Recommendation::RecommendedForFemModelSpace
+        }
+        Evidence::FemGeneratedModelSpaceOnly => Recommendation::CandidateNotNumericallyPreferred,
+        Evidence::SyntheticControlOnly if !enforced => Recommendation::SyntheticControlReportOnly,
+        Evidence::SyntheticControlOnly if numeric_preference => {
+            Recommendation::RecommendedForSyntheticControl
+        }
+        Evidence::SyntheticControlOnly => Recommendation::CandidateNotNumericallyPreferred,
+    }
+}
+
 fn print_terminal_summary(report: &CorpusReport) {
     let enforced = report
         .scenarios
@@ -1123,29 +1697,41 @@ fn print_terminal_summary(report: &CorpusReport) {
                 .is_some_and(|candidate| candidate.recommended)
         })
         .count();
+    let numeric_preferences_not_promoted = report
+        .scenarios
+        .iter()
+        .filter(|scenario| {
+            scenario
+                .candidate
+                .as_ref()
+                .is_some_and(|candidate| candidate.numeric_preference && !candidate.recommended)
+        })
+        .count();
     eprintln!(
-        "Acoustic summary: {} scenarios, {} enforced, {} violations, {} candidate wins, {}",
+        "Acoustic summary: {} scenarios, {} enforced, {} violations, {} candidate promotions, {} numeric preferences not promoted, {}",
         report.scenario_count,
         enforced,
         violations,
         recommended,
+        numeric_preferences_not_promoted,
         if report.passed { "PASS" } else { "FAIL" }
     );
 }
 
 fn render_markdown(report: &CorpusReport) -> String {
     let mut markdown = format!(
-        "# RoomEQ acoustic quality\n\nTier: {}  \nPlatform: {}  \nCompiler: {}  \nBaseline: `{}`  \nResult: **{}**\n\n",
+        "# RoomEQ acoustic quality\n\nTier: {}  \nPlatform: {}  \nCompiler: {}  \nBaseline: `{}`  \nInput inventory SHA-256: `{}`  \nResult: **{}**\n\n",
         report.tier,
         report.platform.label(),
         report.rustc_version.as_deref().unwrap_or("unknown"),
         report.baseline,
+        report.input_inventory_sha256,
         if report.passed { "PASS" } else { "FAIL" }
     );
     markdown.push_str(
-        "| Scenario | Topology | Post RMS (dB) | P95 (dB) | Modal roughness (dB/oct²) | Gate | Candidate |\n",
+        "| Scenario | Topology | Held-out evidence | Post RMS (dB) | P95 (dB) | Modal roughness (dB/oct²) | Gate | Candidate recommendation |\n",
     );
-    markdown.push_str("|---|---|---:|---:|---:|---|---|\n");
+    markdown.push_str("|---|---|---|---:|---:|---:|---|---|\n");
     for scenario in &report.scenarios {
         let partition = scenario
             .scorecard
@@ -1159,18 +1745,13 @@ fn render_markdown(report: &CorpusReport) -> String {
         let candidate = scenario
             .candidate
             .as_ref()
-            .map(|candidate| {
-                if candidate.recommended {
-                    "recommended"
-                } else {
-                    "not promoted"
-                }
-            })
+            .map(|candidate| candidate.recommendation_status.as_str())
             .unwrap_or("not run");
         markdown.push_str(&format!(
-            "| {} | {} | {:.3} | {:.3} | {} | {} | {} |\n",
+            "| {} | {} | {} | {:.3} | {:.3} | {} | {} | {} |\n",
             scenario.id,
             scenario.topology,
+            scenario.held_out_evidence_status.as_str(),
             partition.post_weighted_rms_median_db,
             partition.post_p95_abs_residual_db,
             modal,
@@ -1219,6 +1800,7 @@ fn append_history(
         "platform": report.platform,
         "rustc_version": report.rustc_version,
         "baseline": report.baseline,
+        "input_inventory_sha256": report.input_inventory_sha256,
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "passed": report.passed,
         "elapsed_ms": elapsed_ms,
@@ -1355,9 +1937,447 @@ mod tests {
         );
         assert!(format!("{error:#}").contains("original failure"));
     }
+
+    #[test]
+    fn candidate_promotion_requires_absolute_gate_and_independent_evidence() {
+        use roomeq_quality::{
+            CandidateRecommendationStatus as Recommendation, HeldOutEvidenceStatus as Evidence,
+        };
+
+        let partition = |post_rms, post_p95, improvement| roomeq_quality::QualityPartitionMetrics {
+            curve_count: 2,
+            pre_weighted_rms_median_db: post_rms + improvement,
+            post_weighted_rms_median_db: post_rms,
+            improvement_median_db: improvement,
+            worst_position_improvement_db: improvement,
+            pre_p95_abs_residual_db: post_p95 + improvement,
+            post_p95_abs_residual_db: post_p95,
+            post_worst_abs_residual_db: post_p95,
+            mean_normalized_seat_spread_db: 0.0,
+            max_normalized_seat_spread_db: 0.0,
+            bass_post_weighted_rms_db: None,
+            upper_pre_weighted_rms_db: None,
+            upper_post_weighted_rms_db: None,
+            bass_pre_modal_roughness_db_per_octave2: None,
+            bass_post_modal_roughness_db_per_octave2: None,
+            bass_modal_roughness_improvement_db_per_octave2: None,
+        };
+        let scorecard = |post_rms, post_p95, improvement, max_boost_db| AcousticQualityScorecard {
+            useful_output: vec![roomeq_model::UsefulOutputEvidence {
+                logical_input: None,
+                partition: "held_out".into(),
+                seat_index: 0,
+                permitted_gain_db: 0.0,
+                evaluated_band_hz: [20.0, 500.0],
+                mean_level_change_db: 0.0,
+                unexplained_loss_rms_db: 0.0,
+                worst_unexplained_loss_db: None,
+                worst_loss_frequency_hz: None,
+                loss_band_threshold_db: None,
+                loss_bands: Vec::new(),
+                bass_evaluated_band_hz: None,
+                bass_unexplained_loss_rms_db: None,
+                extension_band_hz: None,
+                extension_loss_db: None,
+                peak_demand_change_db: None,
+                target_shortfall_rms_db: None,
+            }],
+            final_seats: Vec::new(),
+            training: partition(post_rms, post_p95, improvement),
+            held_out: Some(partition(post_rms, post_p95, improvement)),
+            correction_rms_db: 1.0,
+            max_boost_db,
+            max_electrical_boost_db: None,
+            max_cut_db: -1.0,
+            induced_group_delay_rms_ms: Some(0.0),
+            temporal: TemporalQualityEvidence {
+                pre_ringing_audible_db: None,
+                latency_ms: Some(0.0),
+                available_headroom_db: None,
+                phase_evidence_available: true,
+                temporal_evidence_available: true,
+                coherent_timing: roomeq_quality::CoherentTimingEvidence::Unassessed,
+                alignment_delay_ms: None,
+                total_latency_ms: None,
+            },
+            correction_band_hz: None,
+            evaluated_band_hz: [20.0, 500.0],
+            measurement_overlap_hz: Some([20.0, 500.0]),
+            finite: true,
+        };
+
+        let current = scorecard(2.0, 3.0, 1.0, 12.9);
+        let candidate = scorecard(1.0, 1.5, 2.0, 13.0);
+        let deltas = super::candidate_deltas(&current, &candidate);
+        let numeric_preference = super::candidate_numeric_preference(&candidate, &deltas);
+        assert!(
+            numeric_preference,
+            "relative metrics should prefer this candidate"
+        );
+
+        let gate = super::evaluate_quality_gate(
+            &candidate,
+            roomeq_quality::QualityGatePolicy::default(),
+            true,
+        );
+        assert!(!gate.passed);
+        assert!(
+            gate.violations
+                .contains(&"maximum_boost_exceeded".to_string())
+        );
+        assert_eq!(
+            roomeq_quality::QualityGatePolicy::default().max_boost_db,
+            12.0
+        );
+
+        let failed_gate_status = super::candidate_recommendation_status(
+            numeric_preference,
+            gate.passed,
+            Evidence::IndependentMeasuredSeatsEnforced,
+            true,
+        );
+        assert_eq!(
+            failed_gate_status,
+            Recommendation::CandidateQualityGateFailed
+        );
+        let report = CandidateReport {
+            playback_evidence: Vec::new(),
+            seed_distribution: None,
+            config: "candidate.json".into(),
+            scorecard: candidate,
+            quality_gate: gate,
+            robustness: None,
+            deltas,
+            numeric_preference,
+            held_out_evidence_status: Evidence::IndependentMeasuredSeatsEnforced,
+            recommendation_status: failed_gate_status,
+            recommended: failed_gate_status.is_recommended(),
+        };
+        let serialized = serde_json::to_value(report).unwrap();
+        assert_eq!(serialized["numeric_preference"], true);
+        assert_eq!(serialized["recommended"], false);
+        assert_eq!(serialized["quality_gate"]["passed"], false);
+        assert_eq!(
+            serialized["recommendation_status"],
+            "candidate_quality_gate_failed"
+        );
+
+        let derived = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::DeterministicPerturbationRobustnessOnly,
+            true,
+        );
+        assert_eq!(
+            derived,
+            Recommendation::DeterministicPerturbationsNotIndependentMeasuredEvidence
+        );
+        assert!(!derived.is_recommended());
+        assert_eq!(
+            derived.as_str(),
+            "deterministic_perturbations_not_independent_measured_evidence"
+        );
+
+        let unknown = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::UnknownEvidenceNotAuthorizingGeneralization,
+            true,
+        );
+        assert_eq!(unknown, Recommendation::UnknownEvidenceNotPromoted);
+        assert!(!unknown.is_recommended());
+
+        let fem = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::FemGeneratedModelSpaceOnly,
+            true,
+        );
+        assert_eq!(fem, Recommendation::RecommendedForFemModelSpace);
+        assert!(fem.is_recommended());
+        assert_ne!(fem, Recommendation::RecommendedForMeasuredGeneralization);
+
+        let synthetic_report_only = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::SyntheticControlOnly,
+            false,
+        );
+        assert_eq!(
+            synthetic_report_only,
+            Recommendation::SyntheticControlReportOnly
+        );
+        assert!(!synthetic_report_only.is_recommended());
+
+        let independent = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::IndependentMeasuredSeatsEnforced,
+            true,
+        );
+        assert_eq!(
+            independent,
+            Recommendation::RecommendedForMeasuredGeneralization
+        );
+        assert!(independent.is_recommended());
+        let report_only_independent = super::candidate_recommendation_status(
+            true,
+            true,
+            Evidence::IndependentMeasuredSeatsReportOnly,
+            true,
+        );
+        assert_eq!(
+            report_only_independent,
+            Recommendation::IndependentMeasuredSeatsReportOnly
+        );
+        assert!(!report_only_independent.is_recommended());
+    }
+
     use super::*;
     use ndarray::Array1;
     use roomeq_engine::output::{build_channel_dsp_chain, create_gain_plugin};
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn acoustic_input_identity_roundtrips_with_content_digest() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("capture.csv");
+        std::fs::write(&path, b"frequency_hz,spl_db\n40,80\n").unwrap();
+
+        let snapshot = snapshot_file("held_out_measurement", &path).unwrap();
+        let encoded = serde_json::to_vec(&snapshot.identity).unwrap();
+        let decoded: InputFileIdentity = serde_json::from_slice(&encoded).unwrap();
+
+        assert_eq!(decoded, snapshot.identity);
+        assert_eq!(decoded.size_bytes, 26);
+        assert_eq!(decoded.sha256, sha256_hex(b"frequency_hz,spl_db\n40,80\n"));
+        assert_eq!(decoded.role, "held_out_measurement");
+    }
+
+    #[test]
+    fn acoustic_input_mutation_is_detected_after_scoring() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("training.csv");
+        std::fs::write(&path, b"original training bytes").unwrap();
+        let snapshot = snapshot_file("training_measurement", &path).unwrap();
+
+        assert!(changed_inputs(std::slice::from_ref(&snapshot)).is_empty());
+        std::fs::write(&path, b"mutated training bytes").unwrap();
+        let changed = changed_inputs(std::slice::from_ref(&snapshot));
+
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].role, "training_measurement");
+        assert_eq!(changed[0].path, snapshot.identity.path);
+        assert_ne!(
+            changed[0].observed_sha256.as_deref(),
+            Some(snapshot.identity.sha256.as_str())
+        );
+        assert!(changed[0].error.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn acoustic_input_symlink_retarget_is_detected_after_scoring() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().unwrap();
+        let first_path = directory.path().join("first.csv");
+        let second_path = directory.path().join("second.csv");
+        let link_path = directory.path().join("measurement.csv");
+        std::fs::write(&first_path, b"first measurement").unwrap();
+        std::fs::write(&second_path, b"second measurement").unwrap();
+        symlink(&first_path, &link_path).unwrap();
+        let snapshot = snapshot_file("training_measurement", &link_path).unwrap();
+
+        std::fs::remove_file(&link_path).unwrap();
+        symlink(&second_path, &link_path).unwrap();
+        let changed = changed_inputs(std::slice::from_ref(&snapshot));
+
+        assert_eq!(changed.len(), 1);
+        assert!(changed[0].error.as_deref().unwrap().contains("resolves to"));
+        assert_eq!(changed[0].observed_sha256, None);
+    }
+
+    #[test]
+    fn typed_config_inventory_ignores_dotted_metadata_and_binds_handoff_artifacts() {
+        use autoeq_core::measurement_contracts::MeasurementProvenance;
+        use roomeq_model::{
+            InlineMeasurement, MeasurementRef, MeasurementSingle, MeasurementSource, RoomConfig,
+            SpeakerConfig,
+        };
+
+        let directory = tempfile::tempdir().unwrap();
+        let config_path = directory.path().join("recording.json");
+        std::fs::write(&config_path, b"{}").unwrap();
+        std::fs::write(directory.path().join("response.csv"), b"response").unwrap();
+        std::fs::write(directory.path().join("response.wav"), b"wav").unwrap();
+        let calibration_sha = "a".repeat(64);
+        let artifact_specs = [
+            (
+                "recording.json",
+                autoeq_core::capture_handoff::CaptureArtifactRole::Configuration,
+            ),
+            (
+                "raw.wav",
+                autoeq_core::capture_handoff::CaptureArtifactRole::RawAudio,
+            ),
+            (
+                "processed.wav",
+                autoeq_core::capture_handoff::CaptureArtifactRole::ProcessedAudio,
+            ),
+            (
+                "response.csv",
+                autoeq_core::capture_handoff::CaptureArtifactRole::MagnitudeResponse,
+            ),
+            (
+                "calibration.txt",
+                autoeq_core::capture_handoff::CaptureArtifactRole::Calibration,
+            ),
+            (
+                "capture.notes.txt",
+                autoeq_core::capture_handoff::CaptureArtifactRole::SupportingEvidence,
+            ),
+        ];
+        for (file, _) in artifact_specs {
+            std::fs::write(directory.path().join(file), b"artifact").unwrap();
+        }
+        let handoff = autoeq_core::capture_handoff::CaptureHandoff {
+            version: 1,
+            producer: "fixture".into(),
+            producer_version: "1".into(),
+            session_id: "session-1".into(),
+            completion: autoeq_core::capture_handoff::CaptureCompletion::Complete,
+            sample_rate_hz: 48_000,
+            source_ids: vec!["L".into()],
+            microphone_ids: vec!["mic-1".into()],
+            repeat_count: 1,
+            selected_take_ids: None,
+            parent_inventory_file: None,
+            configuration_file: "recording.json".into(),
+            artifacts: artifact_specs
+                .into_iter()
+                .map(
+                    |(file, role)| autoeq_core::capture_handoff::CaptureArtifactIdentity {
+                        file: file.into(),
+                        role,
+                        bytes: 1,
+                        sha256: calibration_sha.clone(),
+                    },
+                )
+                .collect(),
+            takes: vec![autoeq_core::capture_handoff::CaptureTakeIdentity {
+                take_id: "take-1".into(),
+                source_id: "L".into(),
+                repeat_index: 0,
+                raw_audio_file: "raw.wav".into(),
+                processed_audio_file: "processed.wav".into(),
+                response_file: Some("response.csv".into()),
+                calibration_file: "calibration.txt".into(),
+                provenance: autoeq_core::capture_provenance::CaptureTakeProvenance {
+                    microphone_id: "mic-1".into(),
+                    device_id: "input-1".into(),
+                    offset_samples: None,
+                    skew_ppm: None,
+                    residual_uncertainty_us: None,
+                    correction_applied: autoeq_core::capture_provenance::CaptureCorrection::None,
+                    timing_reference_id: None,
+                    calibration_id: calibration_sha,
+                    gain_db: 0.0,
+                    calibration_orientation: "on_axis".into(),
+                    position_m: [0.0; 3],
+                    position_uncertainty_mm: 1.0,
+                    preserves_acoustic_delay: false,
+                    quality_passed: true,
+                },
+            }],
+        };
+        let sidecar = directory
+            .path()
+            .join(autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME);
+        std::fs::write(&sidecar, serde_json::to_vec(&handoff).unwrap()).unwrap();
+
+        let mut config = RoomConfig::default();
+        config.speakers.insert(
+            "L".into(),
+            SpeakerConfig::Single(MeasurementSource::Single(MeasurementSingle {
+                measurement: MeasurementRef::Inline(InlineMeasurement {
+                    frequencies: Vec::new(),
+                    magnitude_db: Vec::new(),
+                    phase_deg: None,
+                    name: Some("seat.1".into()),
+                    wav_path: Some("response.wav".into()),
+                    csv_path: Some("response.csv".into()),
+                }),
+                speaker_name: None,
+                provenance: MeasurementProvenance::default(),
+            })),
+        );
+        config.recording_config = Some(roomeq_model::RecordingConfiguration {
+            capture_handoff_file: Some(
+                autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME.into(),
+            ),
+            ..Default::default()
+        });
+
+        let mut paths = Vec::new();
+        collect_room_config_file_references(&config, &config_path, "current", &mut paths).unwrap();
+        let identities: Vec<_> = paths
+            .iter()
+            .map(|(role, path)| snapshot_file(role.clone(), path).unwrap().identity)
+            .collect();
+        let inventory: Vec<_> = identities
+            .iter()
+            .map(|identity| {
+                (
+                    identity.role.as_str(),
+                    Path::new(&identity.path)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            })
+            .collect();
+
+        assert!(inventory.contains(&("current_inline_measurement_csv", "response.csv".into())));
+        assert!(inventory.contains(&("current_inline_measurement_wav", "response.wav".into())));
+        assert!(inventory.contains(&("current_capture_handoff", "capture-handoff.json".into())));
+        assert!(inventory.contains(&(
+            "current_capture_artifact:supporting_evidence",
+            "capture.notes.txt".into()
+        )));
+        assert!(inventory.contains(&("current_capture_artifact:raw_audio", "raw.wav".into())));
+        assert!(inventory.iter().all(|(_, file)| file.as_str() != "seat.1"));
+    }
+
+    #[test]
+    fn repository_scenario_inventory_binds_training_and_held_out_files() {
+        let manifest_path =
+            workspace_root().join("data_tests/roomeq/acoustic_corpus/manifest.json");
+        let manifest = AcousticCorpusManifest::load(&manifest_path).unwrap();
+        let scenario = manifest
+            .scenarios
+            .iter()
+            .find(|scenario| scenario.id == "measured_stereo_8361a")
+            .unwrap();
+
+        let inputs = scenario_input_snapshots(scenario).unwrap();
+        let roles: BTreeSet<_> = inputs
+            .iter()
+            .map(|input| input.identity.role.as_str())
+            .collect();
+
+        assert!(roles.contains("scenario_config"));
+        assert!(roles.contains("current_training_measurement"));
+        assert!(roles.contains("held_out_measurement:L:unnamed"));
+        assert!(roles.contains("held_out_measurement:R:unnamed"));
+        assert!(inputs.iter().all(|input| input.identity.size_bytes > 0));
+        assert!(
+            inputs
+                .iter()
+                .all(|input| !Path::new(&input.identity.path).is_absolute())
+        );
+    }
 
     fn baseline_entry(id: &str, post_rms: f64) -> AcousticCorpusBaselineEntry {
         AcousticCorpusBaselineEntry {
@@ -1380,6 +2400,7 @@ mod tests {
             channel: channel.into(),
             path: "unused.csv".into(),
             seat_id: Some(seat.into()),
+            evidence_class: roomeq_quality::HeldOutEvidenceClass::Unknown,
         };
         let curve = |value| Curve {
             freq: vec![20.0, 100.0].into(),
@@ -1634,6 +2655,7 @@ mod tests {
                         channel: channel.into(),
                         path: "unused.csv".into(),
                         seat_id: Some(label.into()),
+                        evidence_class: roomeq_quality::HeldOutEvidenceClass::Unknown,
                     });
             }
         }

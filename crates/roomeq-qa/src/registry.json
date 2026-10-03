@@ -91,12 +91,86 @@
 { "id": "decision/modal_phase", "kind": "modal_phase", "tier": "nightly", "seed": 771011, "seats": 2, "subs": 2, "claims": ["modal_basis", "synthetic_modal_phase", "deterministic_seed", "final_realization"], "expect": { "improvement_min_pct": 1.0, "max_post_score": 20.0, "max_boost_db": 12.0, "allow_safe_revert": false, "gate_purpose": "quality" } },
 { "id": "decision/modal_fallback_safety", "kind": "modal_phase", "tier": "nightly", "seed": 771013, "seats": 2, "subs": 2, "claims": ["modal_basis", "synthetic_modal_phase", "deterministic_seed", "final_realization"], "expect": { "improvement_min_pct": 1.0, "max_post_score": 20.0, "max_boost_db": 12.0, "allow_safe_revert": true, "gate_purpose": "safety" } }
   ],
+  "public_workflow_cases": [
+    {
+      "id": "workflow/ctc_public_api",
+      "kind": "ctc",
+      "evidence_class": "synthetic_analytic",
+      "fixture_id": "analytic-ctc-two-ear-impulses-v1",
+      "input_sha256": "432e7f7475d170fee49ef8f9a251b652084e48a7577400f6bdc11c8fd75bdf13",
+      "refusal_fixture_id": "analytic-ctc-missing-system-roles-v1",
+      "refusal_input_sha256": "432e7f7475d170fee49ef8f9a251b652084e48a7577400f6bdc11c8fd75bdf13",
+      "refusal_trigger": "system roles omitted while measured CTC inputs remain present",
+      "sample_rate_hz": 48000.0,
+      "seed": 30801,
+      "controls": {
+        "optimizer": { "algorithm": "autoeq:de", "max_iter": 10, "population": 6, "num_filters": 1, "min_freq_hz": 80.0, "max_freq_hz": 8000.0, "min_gain_db": -12.0, "max_gain_db": 12.0 },
+        "ctc": { "fir_taps": 64, "minimax_iterations": 8 }
+      },
+      "expected_positive_artifact": "ctc_workflow_artifact_with_finite_reported_diagnostic",
+      "expected_refusal": "missing_system_roles_rejected"
+    },
+    {
+      "id": "workflow/dba_public_api",
+      "kind": "dba",
+      "evidence_class": "synthetic_analytic",
+      "fixture_id": "analytic-dba-front-rear-phase-v1",
+      "input_sha256": "acb1dd0b3ea7250e13ea72cda13396c4114e4ef2f6271a9f6b8ccc2a8b8b2e6e",
+      "refusal_fixture_id": "analytic-dba-missing-phase-v1",
+      "refusal_input_sha256": "37673d9b6cadf3a2a28f2cea6db2363315203a9ae2e7bfbc860cecee5f29b43d",
+      "refusal_trigger": "front and rear measurement phase omitted",
+      "sample_rate_hz": 48000.0,
+      "seed": 18018,
+      "controls": {
+        "optimizer": { "algorithm": "autoeq:de", "max_iter": 10, "population": 6, "num_filters": 1, "min_freq_hz": 20.0, "max_freq_hz": 120.0, "min_gain_db": -20.0, "max_gain_db": 12.0 },
+        "dba": { "frequency_samples": 64 }
+      },
+      "expected_positive_artifact": "bounded_dba_controls_with_recomputed_coherent_transfer",
+      "expected_refusal": "missing_phase_refused"
+    },
+    {
+      "id": "workflow/supporting_source_public_api",
+      "kind": "supporting_source",
+      "evidence_class": "synthetic_analytic",
+      "fixture_id": "analytic-supporting-source-primary-notch-v1",
+      "input_sha256": "759525056fe3baab151d87e70499e5a94a1eb1cc6907949d659bf0cef951fa5c",
+      "refusal_fixture_id": "analytic-supporting-source-no-acknowledgement-v1",
+      "refusal_input_sha256": "759525056fe3baab151d87e70499e5a94a1eb1cc6907949d659bf0cef951fa5c",
+      "refusal_trigger": "allow_unverified_acoustics disabled with no shared timing/phase evidence",
+      "sample_rate_hz": 48000.0,
+      "seed": null,
+      "controls": {
+        "supporting_source": { "delay_ms": 5.0, "fir_taps": 256 }
+      },
+      "expected_positive_artifact": "supporting_source_fir_sidecar_with_explicit_unverified_acoustic_advisories",
+      "expected_refusal": "unverified_acoustics_without_operator_acknowledgement_refused"
+    },
+    {
+      "id": "workflow/multiway_public_api",
+      "kind": "multiway",
+      "evidence_class": "synthetic_analytic",
+      "fixture_id": "analytic-flat-phase-known-two-way-v1",
+      "input_sha256": "3889fc9159e225dfe5b9fcb39c7b08fc6a08ad154eaef80558d9dbd3ce9f9b25",
+      "refusal_fixture_id": "analytic-magnitude-only-two-way-v1",
+      "refusal_input_sha256": "dc859481bf49a572494035c2b0829309552816ef03c05ff6afaf9fe57afc94ca",
+      "refusal_trigger": "phase removed from both multiway driver responses",
+      "sample_rate_hz": 48000.0,
+      "seed": 18023,
+      "controls": {
+        "optimizer": { "algorithm": "autoeq:de", "max_iter": 12, "population": 6, "num_filters": 1, "min_freq_hz": 100.0, "max_freq_hz": 10000.0, "min_gain_db": -12.0, "max_gain_db": 12.0 },
+        "multiway": { "crossover_type": "LR24", "crossover_frequency_hz": 800.0 }
+      },
+      "expected_positive_artifact": "two_driver_crossover_graph_with_realized_response",
+      "expected_refusal": "magnitude_only_topology_retained_as_insufficient_evidence"
+    }
+  ],
   "suites": [
     { "id": "synthetic/pairwise", "runner": "synthetic", "tier": "pr", "claims": ["pairwise_options", "topology_mode_cartesian", "multi_seed"], "cases": ["psychoacoustic", "asymmetric_loss", "broadband", "excursion", "schroeder", "spatial_robustness", "pre_ringing", "decomposed_correction"] },
 { "id": "features/progression", "runner": "features", "tier": "nightly", "claims": ["mandatory_epa", "feature_progression"], "cases": ["baseline", "psychoacoustic", "asymmetric_loss", "broadband", "excursion_protection", "schroeder_split"] },
-{ "id": "acoustic/held_out", "runner": "acoustic", "tier": "pr", "claims": ["held_out_generalization", "measured_timbre"], "cases": ["fem_medium_multiseat_20", "measured_stereo_8361a", "fem_medium_stereo_21", "fem_large_multiseat_21", "measured_stereo_d3v", "measured_stereo_t7v", "fem_small_stereo_22_mso", "fem_medium_home_cinema_51", "measured_stereo_fidelia", "measured_stereo_ascilab1", "measured_stereo_ascilab2", "measured_stereo_ascilab3"] },
+{ "id": "acoustic/held_out", "runner": "acoustic", "tier": "pr", "claims": ["held_out_robustness", "response_quality"], "cases": ["fem_medium_multiseat_20", "measured_stereo_8361a", "fem_medium_stereo_21", "fem_large_multiseat_21", "measured_stereo_d3v", "measured_stereo_t7v", "fem_small_stereo_22_mso", "fem_medium_home_cinema_51", "measured_stereo_fidelia", "measured_stereo_ascilab1", "measured_stereo_ascilab2", "measured_stereo_ascilab3"] },
 { "id": "fem/e2e", "runner": "integration", "tier": "weekly", "claims": ["fem_end_to_end", "multi_seed"] },
 { "id": "quality/scorecard", "runner": "quality", "tier": "nightly", "claims": ["blocking_scorecard", "option_effects", "cross_mode", "workflow_overrides"] },
-{ "id": "fuzzer/randomized_quality", "runner": "fuzzer", "tier": "nightly", "claims": ["finite_scores", "strict_improvement", "corrective_filter", "multi_seed"] }
+{ "id": "fuzzer/randomized_quality", "runner": "fuzzer", "tier": "nightly", "claims": ["finite_scores", "strict_improvement", "corrective_filter", "multi_seed"] },
+{ "id": "workflow/public_contracts", "runner": "public_workflows", "tier": "pr", "claims": ["synthetic_analytic", "public_workflow_execution", "delivered_artifact", "intentional_refusal"], "cases": ["workflow/ctc_public_api", "workflow/dba_public_api", "workflow/supporting_source_public_api", "workflow/multiway_public_api"] }
   ]
 }

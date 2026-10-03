@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; cross-platform and clean installation evidence remain |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; registry package installation and cross-platform evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -2942,3 +2942,40 @@ Evidence: `/Volumes/home_tmp/tmp/autoeq-a00-public-source-install-20261003/`.
 record the corrected binary hashes and results. This proves source installation
 and CLI behavior on this host; registry package installation and cross-platform
 execution remain open. No audio device or network downloader was run.
+
+
+### A00 current registry preparation failure retained (2026-10-03)
+
+At **c45a4a5**, local `cargo package --locked --no-verify --features cli`
+failed with exit 101 after refreshing the crates.io index: no matching
+`autoeq-cli` package was found. An earlier offline invocation failed identically;
+the online retry distinguishes this from a missing local index cache. No package
+was uploaded. This is the first resolver failure, not a complete inventory of
+all publication prerequisites.
+
+The README now documents the verified source-checkout installation command.
+Registry installation remains open until the owning crates and required
+public dependencies are released. Logs are in
+`/Volumes/home_tmp/tmp/autoeq-a00-registry-package-20261003/`;
+root receipt is `/Users/pierre/a00-registry-package-verification.json`.
+
+### A09 diagnostic patch integrated; derived-trim recalculation underway
+
+Reviewed diagnostic commit **651e910** is integrated as **c45a4a5**. Focused routed
+trace tests pass 3/3 with distinct Sub1/Sub2 curves, finalization capture 1/1,
+QA helper module 5/5, preserved run02 artifact-only check 1/1, and strict scoped
+all-target Clippy for both packages. Earlier failed Clippy logs remain retained.
+The artifact-only check validates Loaded response snapshots against inventoried
+CSV bytes and preserved graph links; it does not turn the original two-record
+trace or failed run into a successful measured acceptance run.
+
+Root independently traced both captured useful-output losses to the unchanged
+`post_dsp_output_headroom_safety` and `post_dsp_input_level_alignment` gains;
+the gain sums agree to 4.44e-16 dB. Removing the safety cut in a static sampled
+peak calculation leaves all nine mains below or at the ceiling within roundoff.
+The cut originates in the configured correlated-bus policy, so actual trial
+recalculation must still satisfy that model. A separate production fix is underway
+to reset only generated trims and their duplicated routing metadata, then reuse
+the topology calibration and safety logic on the changed correction.
+Root receipts: `/Users/pierre/a09-run02-derived-trim-diagnosis.json` and
+`/Users/pierre/a09-run02-stale-safety-peak-analysis.json`.

@@ -2784,9 +2784,22 @@ These tests used the isolated math checkpoint revision through a command-only
 Cargo override. Later metadata inspection found the old worktree configuration
 also resolved DSP/IIR from a sibling checkout containing two dirty crossover
 files. The reported test results remain observations of that local build; they
-do not establish clean public-dependency reproducibility. A fresh integration
-check with the public DSP/IIR/RIR pins and only the isolated NSGA override is
-required before relying on that stronger claim. The source commit contains no
-lockfile or path dependency change. Main integration still requires the published
-math NSGA dependency; these results do not establish recovery of an entire
-multi-stage RoomEQ job.
+do not establish clean public-dependency reproducibility.
+
+Fresh integration checkout **b1a6a44** combines the feature with public-pin commit
+**6d6ffc2**. Root verified retained Cargo metadata resolves DSP/IIR/RIR at public
+**bc3afa2**, with only `math-optimisation` and its `math-test-functions` companion
+from clean checkpoint worktree **6a15f7a**. The unused dirty sibling checkout is
+listed in observation snapshots but is absent from resolved dependencies. The
+metadata snapshots match. The committed manifest/config/lock and clean source
+status match before and after; the command-generated lock overlay is separately
+recorded and restored.
+
+On that integration checkout, retained gates pass: CLI 90/90, NSGA 14/14, NSGA
+state 2/2, bounded I/O 1/1, DE exact-resume compatibility 3/3, and strict Clippy.
+Root checked log hashes and exit records under
+`/Users/pierre/a08-nsga-exact-final-evidence/public-pin-integration/`; independent
+receipt is `root-verification.json` in that directory. No path dependency or
+lockfile change is committed. Main integration still requires the published math
+NSGA dependency; these results do not establish recovery of an entire multi-stage
+RoomEQ job.

@@ -2385,3 +2385,40 @@ open, and the full matrix is still pending watchdog review.
   failures when a deadline also latches. That classification fix is in progress;
   it does not affect the six smoke classifications, whose stage records agree
   with their reported outcomes. UI remains deferred.
+
+
+### A07 full matrix launched; A09 review evidence (2026-10-03)
+
+- Main audit branch integrates the controlled harness as `3d604b1`, authoritative
+  failure precedence as `9e756c1`, and retained observer-failure records as
+  `61a15ea`. These preserve invalid-result/backend-failure evidence over coincident
+  deadlines and observer cancellation, while retaining expected callback refusals.
+- Final combined benchmark gates with the local math stop dependency pass:
+  **19 QA library tests**, strict library/benchmark Clippy, and CLI build.
+  Logs and unchanged before/after source hashes:
+  `/Volumes/home_tmp/tmp/autoeq-a07-bo-stop-evidence/final2-*`.
+  Inventory remains 841 cells with content SHA
+  `427643cb51f91cc6c74645b18f6a4cb199d9f383ccd597f91a9c4ad82598ebd5`.
+- Full matrix execution has started in
+  `/Volumes/home_tmp/tmp/autoeq-a07-full-matrix-v1`. It uses a copied frozen
+  executable SHA `743a69979d06ab476a4a6e18b331ea31a4681b5148c245c17f2935fa61b71d65`,
+  AutoEQ integration commit `52ab84d`, and local math commit `e97e924`.
+  The launch receipt records a clean integration worktree and command-only local
+  dependency override; public dependency publication remains pending. At launch,
+  the owned supervising process was PID 64408, tool session 28303. Poll that
+  session and `run/matrix-run.json`; do not infer completion from this launch.
+  No full-matrix success or optimizer-quality result is claimed yet.
+- A09 independent review confirms the production attenuation helper agrees with
+  the retained four-graph counterfactual within the probe's 1e-12 dB tolerance,
+  covers ten physical outputs per graph, and leaves all graph hashes unchanged.
+  Hypothetical Sub1 3 dB budget passes only graph 0; graphs 1–3 retain
+  19.58527860758979 dB static cuts and fail. Receipt:
+  `/Users/pierre/a09-output-budget-production-independent-review.json`.
+  This does not resolve the original acoustic/electrical canary failures.
+- CLI review found and corrected reliance on a stored acceptance outcome:
+  `--convert` now derives the outcome from report details. Both actual subprocess
+  refusal tests preserve existing export bytes; log
+  `/Volumes/home_tmp/tmp/a09-output-budget-cli-convert-derived-final.log`.
+  Native review additionally requires marked published graphs to provide acceptance
+  even through compatibility builders/direct rack apply; that follow-up and its
+  final gates are still in progress. The A09 slices are not yet integrated.

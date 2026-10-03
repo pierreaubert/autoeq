@@ -405,20 +405,62 @@ class OptimizerBenchmarkAnalyzerTests(unittest.TestCase):
                 )
 
     def test_malformed_root_and_stage_containers_are_reported_not_raised(self) -> None:
-        fixture = AnalyzerFixture(self.root, selected_count=1, outcomes=("completed",))
-        result = fixture.results[0]
-        result["root_counters"] = []
-        result["stage_evidence"] = None
-        fixture.refresh_after_result_edit(0, result)
-        output = self.root / "malformed-counters"
-        self.assertEqual(
-            analyzer.main(["--run", str(fixture.run), "--output", str(output), "--require-complete"]),
-            1,
+        cases = (
+            ({"root_counters": []}, {"counter_schema"}),
+            ({"stage_evidence": None}, {"stage_schema"}),
+            ({"root_counters": [], "stage_evidence": None}, {"counter_schema", "stage_schema"}),
         )
-        report = json.loads((output / "matrix-analysis.json").read_bytes())
-        codes = {issue["code"] for issue in report["integrity_and_validation_problems"]}
-        self.assertIn("counter_schema", codes)
-        self.assertIn("stage_schema", codes)
+        for index, (mutation, expected_codes) in enumerate(cases):
+            with self.subTest(fields=list(mutation)):
+                case_root = self.root / str(index)
+                case_root.mkdir()
+                fixture = AnalyzerFixture(case_root, selected_count=1, outcomes=("completed",))
+                result = fixture.results[0]
+                result.update(mutation)
+                fixture.refresh_after_result_edit(0, result)
+                output = case_root / "malformed-counters"
+                self.assertEqual(
+                    analyzer.main(["--run", str(fixture.run), "--output", str(output), "--require-complete"]),
+                    1,
+                )
+                report = json.loads((output / "matrix-analysis.json").read_bytes())
+                codes = {issue["code"] for issue in report["integrity_and_validation_problems"]}
+                self.assertTrue(expected_codes <= codes)
+                self.assertFalse(report["strict_gate_pass"])
+                self.assertEqual(report["quality_eligible_completed_count"], 0)
+
+    def test_malformed_observer_count_retains_failed_report(self) -> None:
+        class ObserverFixture(AnalyzerFixture):
+            def _spec(self, index: int) -> dict[str, object]:
+                spec = super()._spec(index)
+                spec["purpose"] = "observer_stop"
+                return spec
+
+        for index, count in enumerate((None, "1", [], True)):
+            with self.subTest(count=count):
+                case_root = self.root / str(index)
+                case_root.mkdir()
+                fixture = ObserverFixture(case_root, outcomes=("observer_stopped", "observer_stopped"))
+                for row, result in enumerate(fixture.results):
+                    result["root_counters"]["cancellation_requested"] = True
+                    result["callback_invocations"] = 1
+                    fixture.refresh_after_result_edit(row, result)
+                valid_output = case_root / "valid"
+                self.assertEqual(analyzer.main([
+                    "--run", str(fixture.run), "--output", str(valid_output), "--require-complete"
+                ]), 0)
+                result = fixture.results[0]
+                result["callback_invocations"] = count
+                fixture.refresh_after_result_edit(0, result)
+                output = case_root / "invalid"
+                self.assertEqual(analyzer.main([
+                    "--run", str(fixture.run), "--output", str(output), "--require-complete"
+                ]), 1)
+                report = json.loads((output / "matrix-analysis.json").read_bytes())
+                codes = {issue["code"] for issue in report["integrity_and_validation_problems"]}
+                self.assertIn("result_metrics", codes)
+                self.assertIn("stop_evidence", codes)
+                self.assertFalse(report["strict_gate_pass"])
 
     def test_duplicate_inventory_ids_and_nonfinite_json_are_refused(self) -> None:
         duplicate_root = self.root / "duplicate"

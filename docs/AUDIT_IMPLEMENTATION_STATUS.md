@@ -2642,3 +2642,18 @@ Shared-host elapsed times remain descriptive. Deterministic backend seed labels
 are not independent trials, and 8361 holdouts are perturbations of measured base
 curves rather than independent measured captures. No product preset is justified
 by this gate alone.
+
+
+### A07 malformed analysis evidence follow-up (2026-10-03)
+
+Independent review reproduced two uncaught exceptions: a missing stage array
+with valid root counters, and a null callback count in an observer-stop result.
+The analyzer now initializes every stage-summary field before validation and
+checks callback-count type before comparison. Tests mutate root and stage
+containers independently and verify valid observer reports before replacing the
+callback count with null, a string, an array or a boolean. All **11 analyzer
+contracts** pass. A separate 180-case single-field mutation sweep produced no
+uncaught exceptions; this is a robustness check, not a claim that every mutation
+must be rejected. Its receipt is
+`/Volumes/home_tmp/tmp/a07-analyzer-malformed-fields-jgnr8un_/mutation-summary.json`.
+The retained benchmark inputs and completed-result calculations were not changed.

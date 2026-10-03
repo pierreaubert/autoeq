@@ -794,6 +794,39 @@ fn io_invalid(message: impl Into<String>) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message.into())
 }
 
+#[cfg(test)]
+fn pause_after_test_publication_phase(phase: &str) {
+    const CHILD_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_CHILD";
+    const PHASE_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_PHASE";
+    const READY_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_READY_FILE";
+
+    if std::env::var(CHILD_ENV).as_deref() != Ok("1")
+        || std::env::var(PHASE_ENV).as_deref() != Ok(phase)
+    {
+        return;
+    }
+
+    let ready_path = std::env::var_os(READY_ENV)
+        .map(PathBuf::from)
+        .expect("child process barrier path is provided");
+    let temporary_path = ready_path.with_extension("ready.tmp");
+    let mut marker = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary_path)
+        .expect("create child process barrier marker");
+    writeln!(marker, "{phase}").expect("write child process barrier marker");
+    marker
+        .sync_all()
+        .expect("sync child process barrier marker");
+    drop(marker);
+    std::fs::rename(&temporary_path, &ready_path).expect("publish child process barrier marker");
+
+    loop {
+        std::thread::park_timeout(std::time::Duration::from_millis(100));
+    }
+}
+
 fn sha256_file_bounded(path: &Path, maximum_bytes: u64) -> io::Result<(u64, String)> {
     let file = std::fs::File::open(path)?;
     let mut file = file.take(maximum_bytes.saturating_add(1));
@@ -2398,9 +2431,15 @@ fn publish_prepared_bundle(
         let backup = transaction_root.join("previous_output.json");
         std::fs::write(&backup, bytes)?;
         std::fs::File::open(backup)?.sync_all()?;
+        #[cfg(test)]
+        pause_after_test_publication_phase("previous_output_backup_synced");
     }
     sync_tree(stage_assets)?;
+    #[cfg(test)]
+    pause_after_test_publication_phase("stage_assets_synced");
     sync_directory(&transaction_root)?;
+    #[cfg(test)]
+    pause_after_test_publication_phase("transaction_root_synced");
     let transaction_directory_name = generation.clone();
     let journal = BundleTransactionJournal {
         schema_version: BUNDLE_MANIFEST_SCHEMA_VERSION,
@@ -2422,19 +2461,33 @@ fn publish_prepared_bundle(
         }
         return Err(error);
     }
+    #[cfg(test)]
+    pause_after_test_publication_phase("journal_written");
     // The journal may already be visible even when its parent sync fails.
     // Keep the transaction directory and backups so the next loader can
     // recover it; deleting them here would leave a durable dangling journal.
     (hooks.sync_parent)(parent)?;
+    #[cfg(test)]
+    pause_after_test_publication_phase("journal_parent_synced");
 
     let transaction = (|| -> io::Result<()> {
         if had_assets {
             (hooks.rename)(&assets, &kept_transaction_root.join("previous_assets"))?;
+            #[cfg(test)]
+            pause_after_test_publication_phase("previous_assets_renamed");
         }
         (hooks.rename)(stage_assets, &assets)?;
+        #[cfg(test)]
+        pause_after_test_publication_phase("candidate_assets_installed");
         (hooks.sync_parent)(parent)?;
+        #[cfg(test)]
+        pause_after_test_publication_phase("assets_parent_synced");
         (hooks.write_root)(output_path, output_bytes)?;
+        #[cfg(test)]
+        pause_after_test_publication_phase("root_written");
         (hooks.sync_parent)(parent)?;
+        #[cfg(test)]
+        pause_after_test_publication_phase("root_parent_synced");
         Ok(())
     })();
     if let Err(error) = transaction {
@@ -2454,10 +2507,17 @@ fn publish_prepared_bundle(
         }
     }
 
-    if remove_if_exists(&kept_transaction_root).is_ok()
-        && remove_if_exists(&bundle_transaction_path(output_path)).is_ok()
-    {
-        let _ = sync_directory(parent);
+    if remove_if_exists(&kept_transaction_root).is_ok() {
+        #[cfg(test)]
+        pause_after_test_publication_phase("transaction_directory_removed");
+        if remove_if_exists(&bundle_transaction_path(output_path)).is_ok() {
+            #[cfg(test)]
+            pause_after_test_publication_phase("journal_removed");
+            if sync_directory(parent).is_ok() {
+                #[cfg(test)]
+                pause_after_test_publication_phase("cleanup_parent_synced");
+            }
+        }
     }
     Ok(())
 }
@@ -3823,6 +3883,381 @@ mod tests {
             .expect("optimization metadata"),
         );
         output
+    }
+
+    const PUBLICATION_CHILD_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_CHILD";
+    const PUBLICATION_PHASE_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_PHASE";
+    const PUBLICATION_READY_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_READY_FILE";
+    const PUBLICATION_SOURCE_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_SOURCE_FILE";
+    const PUBLICATION_DESTINATION_ENV: &str = "ROOMEQ_BUNDLE_CRASH_TEST_DESTINATION_FILE";
+    const PUBLICATION_PHASES: &[&str] = &[
+        "previous_output_backup_synced",
+        "stage_assets_synced",
+        "transaction_root_synced",
+        "journal_written",
+        "journal_parent_synced",
+        "previous_assets_renamed",
+        "candidate_assets_installed",
+        "assets_parent_synced",
+        "root_written",
+        "root_parent_synced",
+        "transaction_directory_removed",
+        "journal_removed",
+        "cleanup_parent_synced",
+    ];
+
+    struct ChildProcessGuard(Option<std::process::Child>);
+
+    impl Drop for ChildProcessGuard {
+        fn drop(&mut self) {
+            if let Some(mut child) = self.0.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+
+    fn test_float_pcm_wav(samples: &[f32]) -> Vec<u8> {
+        let data_len = u32::try_from(std::mem::size_of_val(samples))
+            .expect("fixture PCM length fits a WAV chunk");
+        let sample_rate = 48_000_u32;
+        let data_capacity =
+            usize::try_from(data_len).expect("fixture PCM length fits this host's address space");
+        let mut bytes = Vec::with_capacity(44 + data_capacity);
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36_u32 + data_len).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&3_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate.to_le_bytes());
+        bytes.extend_from_slice(&(sample_rate * 4).to_le_bytes());
+        bytes.extend_from_slice(&4_u16.to_le_bytes());
+        bytes.extend_from_slice(&32_u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&data_len.to_le_bytes());
+        for sample in samples {
+            bytes.extend_from_slice(&sample.to_le_bytes());
+        }
+        bytes
+    }
+
+    fn save_process_recovery_fixture(
+        output_path: &Path,
+        version: &str,
+        frequencies_hz: [f64; 2],
+        levels_db: [f64; 2],
+        pcm_samples: &[f32],
+    ) -> (FrozenOutputBundle, BundleManifest) {
+        let source_assets = output_path.with_file_name(format!(
+            "{}-source-assets",
+            output_path
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .expect("fixture output has a UTF-8 file stem")
+        ));
+        std::fs::create_dir_all(&source_assets).expect("create fixture source assets");
+        let pcm = test_float_pcm_wav(pcm_samples);
+        std::fs::write(source_assets.join("impulse.wav"), &pcm)
+            .expect("write fixture convolution PCM");
+        let pcm_sha256 = sha256_hex(&pcm);
+        let mut graph = convolution_graph("impulse.wav", &pcm_sha256);
+        graph.version = version.to_string();
+        graph
+            .channels
+            .get_mut("L")
+            .expect("fixture channel")
+            .initial_curve = Some(curve(frequencies_hz.to_vec(), levels_db.to_vec()));
+        save_output_bundle_with_resources(&mut graph, output_path, &source_assets)
+            .expect("save manifested fixture bundle");
+
+        let frozen = load_output_bundle_frozen(output_path).expect("load fixture bundle");
+        let resource_path = frozen.output().channels["L"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .expect("bound fixture resource path");
+        let resource = frozen
+            .resource(resource_path)
+            .expect("fixture resource is captured");
+        assert_eq!(resource.bytes(), pcm);
+        assert_eq!(resource.sha256(), pcm_sha256);
+        let manifest = load_manifest(&assets_dir_for(output_path))
+            .expect("read fixture manifest")
+            .expect("fixture manifest exists");
+        (frozen, manifest)
+    }
+
+    fn assert_recovered_generation(
+        output_path: &Path,
+        expected: &FrozenOutputBundle,
+        expected_manifest: &BundleManifest,
+    ) {
+        let recovered = load_output_bundle_frozen(output_path).expect("recover native bundle");
+        assert_eq!(
+            recovered.verification(),
+            OutputBundleVerification::ManifestVerified
+        );
+        assert_eq!(recovered.slim_graph_bytes(), expected.slim_graph_bytes());
+        assert_eq!(recovered.raw_graph_sha256(), expected.raw_graph_sha256());
+        assert_eq!(
+            sha256_hex(recovered.slim_graph_bytes()),
+            recovered.raw_graph_sha256()
+        );
+        assert_eq!(recovered.output().version, expected.output().version);
+        let recovered_curve = recovered.output().channels["L"]
+            .initial_curve
+            .as_ref()
+            .expect("recovered curve");
+        let expected_curve = expected.output().channels["L"]
+            .initial_curve
+            .as_ref()
+            .expect("expected curve");
+        assert_eq!(recovered_curve.freq, expected_curve.freq);
+        assert_eq!(recovered_curve.spl, expected_curve.spl);
+
+        let recovered_reference = recovered.output().channels["L"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .expect("recovered convolution reference");
+        let expected_reference = expected.output().channels["L"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .expect("expected convolution reference");
+        assert_eq!(recovered_reference, expected_reference);
+        let recovered_resource = recovered
+            .resource(recovered_reference)
+            .expect("recovered convolution PCM");
+        let expected_resource = expected
+            .resource(expected_reference)
+            .expect("expected convolution PCM");
+        assert_eq!(recovered_resource.sha256(), expected_resource.sha256());
+        assert_eq!(recovered_resource.bytes(), expected_resource.bytes());
+
+        let recovered_manifest = load_manifest(&assets_dir_for(output_path))
+            .expect("read recovered manifest")
+            .expect("recovered manifest exists");
+        assert_eq!(recovered_manifest.graph_sha256, expected.raw_graph_sha256());
+        assert_eq!(recovered_manifest.files, expected_manifest.files);
+    }
+
+    fn kill_child_at_publication_phase(
+        phase: &str,
+        source_path: &Path,
+        destination_path: &Path,
+        ready_path: &Path,
+    ) {
+        let executable = std::env::current_exe().expect("current test executable");
+        let child = std::process::Command::new(executable)
+            .arg("--exact")
+            .arg("output_bundle::tests::publication_child_process_pause_helper")
+            .arg("--nocapture")
+            .arg("--test-threads=1")
+            .env(PUBLICATION_CHILD_ENV, "1")
+            .env(PUBLICATION_PHASE_ENV, phase)
+            .env(PUBLICATION_READY_ENV, ready_path)
+            .env(PUBLICATION_SOURCE_ENV, source_path)
+            .env(PUBLICATION_DESTINATION_ENV, destination_path)
+            .spawn()
+            .expect("start child publication process");
+        let mut child = ChildProcessGuard(Some(child));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            if ready_path.is_file() {
+                let marker = std::fs::read_to_string(ready_path)
+                    .expect("read child publication barrier marker");
+                assert_eq!(
+                    marker.trim_end(),
+                    phase,
+                    "child reached a different publication phase"
+                );
+                let process = child.0.as_mut().expect("child process remains owned");
+                process.kill().expect("kill child at publication barrier");
+                let status = process.wait().expect("wait for killed child");
+                assert!(
+                    !status.success(),
+                    "child should have been killed at {phase}"
+                );
+                child.0.take();
+                return;
+            }
+            if let Some(status) = child
+                .0
+                .as_mut()
+                .expect("child process remains owned")
+                .try_wait()
+                .expect("check child process")
+            {
+                panic!("child exited before publication barrier {phase}: {status}");
+            }
+            if std::time::Instant::now() >= deadline {
+                let process = child.0.as_mut().expect("child process remains owned");
+                let _ = process.kill();
+                let _ = process.wait();
+                child.0.take();
+                panic!("child did not reach publication barrier {phase}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
+    #[test]
+    fn publication_child_process_pause_helper() {
+        if std::env::var(PUBLICATION_CHILD_ENV).as_deref() != Ok("1") {
+            return;
+        }
+        let source_path = PathBuf::from(
+            std::env::var_os(PUBLICATION_SOURCE_ENV).expect("candidate source path is provided"),
+        );
+        let destination_path = PathBuf::from(
+            std::env::var_os(PUBLICATION_DESTINATION_ENV)
+                .expect("publication destination path is provided"),
+        );
+        let mut candidate = load_output_bundle(&source_path).expect("load candidate bundle");
+        let source_assets = assets_dir_for(&source_path);
+        let mut prepare = |_: &mut DspGraph, _: &Path| Ok(());
+        let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
+        let mut write_root = |path: &Path, bytes: &[u8]| write_file_atomically(path, bytes);
+        let mut write_journal = |path: &Path, bytes: &[u8]| write_file_atomically(path, bytes);
+        let mut sync_parent = |path: &Path| sync_directory(path);
+        let mut hooks = BundleHooks {
+            prepare: &mut prepare,
+            rename: &mut rename,
+            write_root: &mut write_root,
+            write_journal: &mut write_journal,
+            sync_parent: &mut sync_parent,
+        };
+        save_output_bundle_using_hooks_and_assets(
+            &mut candidate,
+            &destination_path,
+            Some(&source_assets),
+            true,
+            &mut hooks,
+        )
+        .expect("child publication should pause before returning");
+        panic!("child publication returned without reaching its requested barrier");
+    }
+
+    #[test]
+    fn process_death_at_each_publication_boundary_recovers_one_complete_generation() {
+        for phase in PUBLICATION_PHASES {
+            let directory = tempfile::tempdir().expect("temporary fixture root");
+            let destination_dir = directory.path().join("destination");
+            let candidate_dir = directory.path().join("candidate");
+            std::fs::create_dir_all(&destination_dir).expect("create destination directory");
+            std::fs::create_dir_all(&candidate_dir).expect("create candidate directory");
+            let destination_path = destination_dir.join("dsp.json");
+            let candidate_path = candidate_dir.join("dsp.json");
+            let ready_path = directory.path().join(format!("{phase}.ready"));
+            let (previous, previous_manifest) = save_process_recovery_fixture(
+                &destination_path,
+                "previous-generation",
+                [90.0, 180.0],
+                [78.0, 81.0],
+                &[0.25, -0.5, 0.125],
+            );
+            let (candidate, candidate_manifest) = save_process_recovery_fixture(
+                &candidate_path,
+                "candidate-generation",
+                [125.0, 250.0],
+                [83.0, 79.0],
+                &[-0.75, 0.33, 0.11],
+            );
+
+            kill_child_at_publication_phase(phase, &candidate_path, &destination_path, &ready_path);
+
+            let journal_path = bundle_transaction_path(&destination_path);
+            let before_journal = matches!(
+                *phase,
+                "previous_output_backup_synced" | "stage_assets_synced" | "transaction_root_synced"
+            );
+            let journal_removed = matches!(*phase, "journal_removed" | "cleanup_parent_synced");
+            assert_eq!(
+                journal_path.is_file(),
+                !before_journal && !journal_removed,
+                "unexpected journal state after child death at {phase}"
+            );
+            let journal_transaction_root = if journal_path.is_file() {
+                let journal: BundleTransactionJournal = serde_json::from_slice(
+                    &std::fs::read(&journal_path).expect("read interrupted journal"),
+                )
+                .expect("parse interrupted journal");
+                Some(
+                    transaction_directory(&destination_dir, &journal.transaction_directory)
+                        .expect("validate interrupted transaction path"),
+                )
+            } else {
+                None
+            };
+
+            let committed = matches!(
+                *phase,
+                "root_written"
+                    | "root_parent_synced"
+                    | "transaction_directory_removed"
+                    | "journal_removed"
+                    | "cleanup_parent_synced"
+            );
+            let (expected, expected_manifest) = if committed {
+                (&candidate, &candidate_manifest)
+            } else {
+                (&previous, &previous_manifest)
+            };
+            assert_recovered_generation(&destination_path, expected, expected_manifest);
+            recover_output_bundle_transactions(&destination_path)
+                .expect("second recovery is idempotent");
+            let recovered_again =
+                load_output_bundle_frozen(&destination_path).expect("load after second recovery");
+            assert_recovered_generation(&destination_path, expected, expected_manifest);
+            assert_eq!(
+                recovered_again.slim_graph_bytes(),
+                expected.slim_graph_bytes(),
+                "second load changed the selected generation at {phase}"
+            );
+            assert!(
+                !journal_path.exists(),
+                "journal remains after recovery at {phase}"
+            );
+
+            let transaction_directories = std::fs::read_dir(&destination_dir)
+                .expect("list destination directory")
+                .collect::<std::io::Result<Vec<_>>>()
+                .expect("read every destination directory entry")
+                .into_iter()
+                .filter(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with(".autoeq-bundle-")
+                })
+                .map(|entry| entry.path())
+                .collect::<Vec<_>>();
+            if before_journal {
+                assert!(
+                    transaction_directories.iter().any(|path| path.is_dir()),
+                    "a killed pre-journal staging directory should remain unowned at {phase}"
+                );
+            } else {
+                assert!(
+                    transaction_directories.is_empty(),
+                    "recovery left a transaction directory at {phase}"
+                );
+            }
+            if let Some(transaction_root) = journal_transaction_root {
+                assert!(
+                    !transaction_root.exists(),
+                    "recovery left the journal-owned directory at {phase}"
+                );
+            }
+
+            let relocated_path = directory.path().join("relocated/dsp.json");
+            publish_output_bundle_from(&destination_path, &relocated_path)
+                .expect("relocate recovered generation");
+            assert_recovered_generation(&relocated_path, expected, expected_manifest);
+            let relocated =
+                load_output_bundle_frozen(&relocated_path).expect("load relocated generation");
+            assert_eq!(
+                relocated.slim_graph_bytes(),
+                expected.slim_graph_bytes(),
+                "relocation changed the selected root at {phase}"
+            );
+        }
     }
 
     #[test]

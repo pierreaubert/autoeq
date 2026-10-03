@@ -2830,3 +2830,35 @@ A local 112-cell run is authorized on the frozen feature commit **c04b736**, usi
 committed public dependencies without path overrides. Execution and independent
 response verification are pending; inventory tests alone do not establish
 optimizer correctness or acoustic acceptance at these rates.
+
+
+### A16 public-pin rate run: BO Pareto watchdog failures retained (2026-10-03)
+
+The frozen **c04b736** release binary has SHA-256
+`e7006ba616705990f0b7502bb45cd934c1ac8d48dcdfe05379a3e2792e5af1ec`.
+Root independently checked both binary copies and inventory hashes. Rate inventory
+SHA-256 is `9722cd09056948905302d5d43b79e3d74e8b8d2354fc1320c97f48278d5edd1a`.
+Pre-build metadata resolves math optimization at public **acdea21**, DSP/IIR/RIR
+at **bc3afa2**, and report dependencies at **d52e2bc**; no local BO fix was used.
+
+The local run attempted all **112** cells and ended **incomplete**: **102** returned
+completed optimizations, **2** callback stops, **2** callback refusals, and **6**
+process watchdog failures. All six failures are BO Pareto searches: each of the
+three fixtures at both rates exceeded the 30-second limit, was reaped with exit
+-9, and returned no optimizer result. They must not be counted as cooperative
+optimizer timeouts or excluded from the overall gate.
+
+Root independently recalculated the 102 delivered PEQ cascades. Largest response
+summary disagreement was **6.2875e-10 dB**, within the 1e-6 dB check tolerance.
+The checker also processed 24 retained Pareto reports with 143 candidate rows.
+Its overall status remains **failed**: 11 reported issues describe the six missing
+BO result files and consequent matrix completeness failures. The frozen run tree
+was unchanged during this check. This is numerical response consistency evidence,
+not acoustic acceptance, a preset recommendation, or a passing full matrix.
+
+Evidence directory:
+`/Volumes/home_tmp/tmp/autoeq-a16-rate-canary-evidence-20261003/`.
+Root receipt: `/Users/pierre/a16-independent-peq-rate-results-v1.json`, SHA-256
+`f14ce132cc7316b4adf95f3c1c350705544eb227ca58531a2b09b7acd5a00300`.
+Strict repository analysis and final source/metadata comparison are being retained
+separately. The dependency publication and BO cooperative-stop fix remain open.

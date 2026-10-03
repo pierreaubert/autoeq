@@ -1846,3 +1846,76 @@ match the reviewed candidates and remain unchanged across combined gates.
 Evidence: `/Volumes/home_tmp/tmp/roomeq-cobra-evidence-20261003/integrated/`
 and `/Volumes/home_tmp/tmp/room-pass-stop-root-evidence-20261003/`;
 root review: `/Users/pierre/roomeq-cobra-integrated-review.json`.
+
+
+## 2026-10-03 continuation: ESS run03 resource refusal and current CI evidence
+
+The goal remains active. UI implementation is deferred until the AutoEQ/RoomEQ
+backend audit is complete. COBRA is integrated at `dd2f6384077744d058bf7ce95a979d226fd860f2`;
+A07 shared-stage accounting and controlled RoomEQ wiring are being implemented
+in isolated worktrees, and have not yet passed integration gates.
+
+### ESS run03: partial numerical success, overall resource failure
+
+The reviewed five numerical source files were staged unchanged in
+`/Volumes/home_tmp/tmp/ess-matrixfree-qr-run03-20261003`. An initial sandbox
+attempt failed before the fit; its runner/evaluator logs were preserved. The
+owner's permission-corrected attempt used the same sources, fixtures, one-thread
+environment, 600-second deadline, and 1,536 MiB (1,610,612,736-byte) RSS cap.
+
+All four synthetic cases completed in two LSQR iterations and saved little-endian
+5-by-320 fitted taps. The owner independently reloaded and hash-checked those
+files and recomputed the frozen formula/PCM harmonic scores, including all three
+comparison pairs at both drive frequencies. All four reserialized scores match;
+removing a tone is refused. These are partial synthetic diagnostic results.
+
+The numerical child was terminated during frozen V7 dense-reference preparation:
+peak sampled RSS was 1,727,070,208 bytes, exceeding the fixed cap by 116,457,472
+bytes. The execution record reports SIGTERM (`-15`), no timeout, unchanged input
+inventories, and no final result JSON. The V7 comparison and full evaluator did
+not complete, so the overall result is **FAIL_RESOURCE_CAP**. A successful
+harmonic row does not override this failure. No production or hardware claim is
+made.
+
+Read-only allocation inspection found that the frozen reference retains its
+`design` and `scaled` matrices through QR/SVD; native QR allocations and resident
+allocator pages can increase RSS beyond the original estimate. The fit's retained
+callbacks also keep the smaller R matrix alive after `del r`. A separately
+declared run04 is being prepared with two sequential numerical children so the
+fit process is reaped before a fresh frozen-reference process starts. Its limits,
+fixtures, oracle, and numerical thresholds remain unchanged. No run04 numerical
+child has been launched.
+
+Owner review: `/Users/pierre/ess-qr-run03-independent-failure-review.json`, SHA-256
+`369ea6b819ee211d5ff20fce569518bb1efa8245739dd7a2251ee2b1895601c4`.
+The authoritative execution interval is
+`2026-10-03T07:30:46.326335+00:00`–`2026-10-03T07:30:58.302871+00:00`.
+The owner receipt's `started_utc` was populated after completion and represents
+receipt creation; use the execution record's start/end timestamps instead.
+Original receipts and failed-run artifacts were preserved.
+
+### A00: latest server run still fails on the older source revision
+
+Read-only Gitea inspection found scheduled run 359 on
+`6ccc6a3cf4e880853e354955a84a558ebef65773`, completed with failure on
+2026-10-03. Its acoustic-quality job 1053 used `ubuntu-latest`, runner ID 3;
+retained logs still contain setup-just, Bad credentials, and missing-artifact
+messages. This run does not execute the current audit branch or prove that its
+CI changes work on the server.
+
+The local macOS executable reports `gitea-runner version v4.1.0`. Its registration
+is runner ID 5 with `m4:macos:host`; it is a different runner from the failed
+Linux job. The observed daemon has no `--config` argument. The nearby
+`gitea-runner-config.yaml` is hashed but is not proven active; its declared
+settings must not be attributed to the running daemon.
+
+Repository, user, and admin runner metadata endpoints all returned HTTP 401,
+`token is required`, while Tea returned process exit code 0. Neither the empty
+CLI output nor its exit code proves successful metadata access. Runner ID 3's
+version and action-patch configuration remain unverified, as does actual
+artifact-payload upload. No CI run was triggered and no runner or credential
+configuration was changed.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a00-runner-inventory-20261003`.
+Owner review: `/Users/pierre/a00-runner-independent-review.json`, SHA-256
+`f25627ccd558cc0d837676f9940fa7b7580a1a7ed0796791cba91aaba3e3b5e2`.

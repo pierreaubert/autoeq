@@ -1412,3 +1412,58 @@ independently justified room-response support and physical calibration are
 still open.
 Evidence: `/private/tmp/ess-v6-hammerstein-oracle-20261003/`;
 root review: `/Users/pierre/ess-v6-independent-review.json`.
+
+
+## Isolated exact-DE pause integration
+
+Local commit `a737f59c` implements an additive typed pause outcome in six
+AutoEQ optimizer, workflow and CLI files. The exact path registers its Ctrl-C
+listener before synchronous preparation, runs optimization in a joined blocking
+worker and saves exact state before acknowledging pause at a generation barrier.
+A paused run returns before final projection, scoring, reports or preset
+publication. Legacy completion paths remain available.
+
+CLI, optimizer and workflow library suites pass 88, 365 and 51 tests (504 total)
+using a command-only local `math-optimisation` override at `8cedac8` in a scratch
+build tree. Tests cover initial/generation barriers, durable save/load/resume,
+outer and math-build identity refusal before scoring, prior-output preservation,
+callback save failure and terminal precedence. A Unix child-process SIGINT test
+checks the actual listener bridge with bounded readiness/exit waits and owned
+process cleanup. It does not yet exercise the entire CLI process pausing and
+resuming optimization.
+
+Root independently verified matched before/after inputs, seven Git/path roots
+(15,161 ordinary files and six symlinks), all 31 non-registry package identities,
+seven final logs and preserved intermediate logs. All six source files equal
+the scratch bytes. Registry package bytes were excluded from this inventory.
+Cargo metadata used `--locked`; the recorded test/Clippy gates did not, and the
+scratch/source lockfiles remained stable. Production Clippy and scoped format
+and diff checks pass. Test-target Clippy at this frozen revision exits 101 on
+16 lints in unchanged `apo_profile_verifier.rs`.
+
+The source public manifest and lockfile are unchanged. This candidate is not
+integrated into the backend audit branch: publication approval for the new math
+pause dependency remains pending. Earlier math publication approval covered
+`ea9da7f` and `acdea21`; the approved GPUI `d52e2bc` branch is already published
+and verified. Full CLI process pause/resume and broader recovery remain open.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a08-pause-integration-evidence/`;
+root review: `/Users/pierre/a08-pause-integration-independent-review.json`.
+
+## APO golden fixture lint cleanup
+
+Commit `b1cb446`, integrated as `79312ff6`, replaces one cloned single-element
+slice with `std::slice::from_ref` and rewrites 15 excessive-precision literals
+using bit-equivalent f64 spellings. All numeric expectations and assertions are
+unchanged. Root verified every replacement's IEEE-754 bit pattern, reviewed the
+diff and confirmed production bytes before the test module are unchanged.
+
+The current CLI library suite passes all 84 tests. Strict library/test Clippy,
+scoped formatting and diff checks pass. All six recorded commands exit zero;
+source, manifest, lock and resolved metadata identities match before/after, and
+the integrated file equals the tested candidate bytes. These gates use offline
+locked Cargo resolution. This removes the existing fixture lint blocker; it
+does not rerun the separate pause candidate or establish an installed APO
+consumer witness. Dependency package bytes were not freshly inventoried for
+this fixture-only cleanup.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a06-fixture-lint-evidence-20261003/`;
+literal review: `/Users/pierre/a06-apo-fixture-literal-review.json`.

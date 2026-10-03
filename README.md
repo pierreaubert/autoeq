@@ -179,16 +179,20 @@ uses the `roomeq` binary as the sole validation and optimization authority.
 ## Installation
 
 If you do not have cargo already, install it with [rustup](https://rustup.rs/). Cargo is a Rust package manager.
-Then:
+From a source checkout, install the shipping commands with the locked dependencies:
 
 ```bash
-cargo install autoeq \
+cargo install --path . --locked \
    --features cli \
    --bin autoeq \
    --bin roomeq \
    --bin autoeq-download-speakers \
    --bin convert-recording
 ```
+
+The current workspace requires its owning crates to be published before registry
+installation is available. Registry package preparation currently fails because
+`autoeq-cli` is absent from the refreshed crates.io index.
 
 The root package keeps terminal adapters opt-in: use `--features cli` for the
 shipping commands and `--features qa` for QA/fuzzer binaries. Default library

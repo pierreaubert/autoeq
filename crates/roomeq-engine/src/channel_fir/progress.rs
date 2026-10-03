@@ -49,8 +49,15 @@ impl FirProgress {
     where
         F: Fn(&[f64]) -> f64 + Sync,
     {
-        let native = autoeq_optim::optim::registry::resolve(&config.algorithm)
-            .is_some_and(|backend| matches!(backend.name(), "autoeq:de" | "autoeq:cmaes"));
+        let native_boundary =
+            autoeq_optim::optim::registry::resolve(&config.algorithm).and_then(|backend| {
+                match backend.name() {
+                    "autoeq:de" | "autoeq:cmaes" => Some("native_generation_boundaries"),
+                    "autoeq:cobra" => Some("native_infill_boundaries"),
+                    _ => None,
+                }
+            });
+        let native = native_boundary.is_some();
         let mut result = if native {
             optimize_bounded_scalar_with_callback(
                 bounds,
@@ -75,11 +82,10 @@ impl FirProgress {
         self.check(0, result.fun)
             .map_err(|error| error.to_string())?;
         if self.0.is_some() {
-            result.message.push_str(if native {
-                "; callback_cancellation=native_generation_boundaries"
-            } else {
-                "; callback_cancellation=stage_boundaries_only"
-            });
+            result.message.push_str(&format!(
+                "; callback_cancellation={}",
+                native_boundary.unwrap_or("stage_boundaries_only")
+            ));
         }
         Ok(result)
     }
@@ -94,6 +100,7 @@ mod tests {
         for (algorithm, capability) in [
             ("autoeq:de", "native_generation_boundaries"),
             ("autoeq:cmaes", "native_generation_boundaries"),
+            ("cobra", "native_infill_boundaries"),
             ("autoeq:cobyla", "stage_boundaries_only"),
             ("autoeq:isres", "stage_boundaries_only"),
         ] {

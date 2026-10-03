@@ -548,6 +548,72 @@ mod backend_tests {
     }
 
     #[test]
+    fn cobra_dispatch_is_seeded_bounded_and_counted() {
+        use super::super::optimize::optimize_filters_with_run_control_detailed;
+        use super::super::run_control::OptimizerRunControl;
+        use std::num::NonZeroUsize;
+
+        let run_once = || {
+            let (objective, mut params, lower, upper, mut x) = scalar_objective();
+            params.algo = "autoeq:cobra".into();
+            params.maxeval = 20;
+            params.seed = Some(42);
+            let control = OptimizerRunControl::new(NonZeroUsize::new(20).unwrap());
+            let result = optimize_filters_with_run_control_detailed(
+                &mut x, &lower, &upper, objective, &params, &control,
+            );
+            let (_, loss) = result
+                .result
+                .as_ref()
+                .expect("finite feasible COBRA winner");
+            assert!(loss.is_finite());
+            assert!(
+                x.iter()
+                    .zip(&lower)
+                    .zip(&upper)
+                    .all(|((&v, &lo), &hi)| v >= lo && v <= hi)
+            );
+            assert_eq!(result.snapshot.evaluations_started, 20);
+            assert_eq!(result.snapshot.evaluations_completed, 20);
+            assert_eq!(result.snapshot.evaluations_in_flight, 0);
+            assert_eq!(result.snapshot.evaluations_refused, 0);
+            assert!(!result.evidence.converged);
+            (x, loss.to_bits())
+        };
+        assert_eq!(run_once(), run_once());
+    }
+
+    #[test]
+    fn cobra_callback_stop_returns_after_first_infill_without_polish() {
+        use super::super::cobra::AutoeqCobraBackend;
+        let (objective, mut params, lower, upper, mut x) = scalar_objective();
+        params.maxeval = 100;
+        params.seed = Some(42);
+        let initial = (3 * x.len() + 1).min(params.maxeval);
+        let (status, loss) = AutoeqCobraBackend::new("autoeq:cobra")
+            .optimize(
+                &mut x,
+                &lower,
+                &upper,
+                objective,
+                &params,
+                Some(Box::new(|iteration, loss, epa| {
+                    assert_eq!(iteration, 1);
+                    assert!(loss.is_finite());
+                    assert!(epa.is_none());
+                    crate::de::CallbackAction::Stop
+                })),
+            )
+            .expect("callback stop retains a feasible candidate");
+        assert!(status.contains("stopped by callback"), "{status}");
+        assert!(
+            status.contains(&format!("nfev={}", initial + 1)),
+            "{status}"
+        );
+        assert!(loss.is_finite());
+    }
+
+    #[test]
     fn detailed_controlled_dispatch_identifies_budget_refusal_before_backend_start() {
         use super::super::optimize::{
             OptimizerDispatchOutcome, OptimizerTermination,

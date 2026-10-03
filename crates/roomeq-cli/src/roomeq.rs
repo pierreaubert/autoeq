@@ -3631,6 +3631,8 @@ mod tests {
     fn known_algorithms_resolve_and_unknown_ones_do_not() {
         assert!(is_known_algorithm("autoeq:cmaes"));
         assert!(is_known_algorithm("autoeq:de"));
+        assert!(is_known_algorithm("autoeq:cobra"));
+        assert!(is_known_algorithm("cobra"));
         assert!(!is_known_algorithm("bogus-algorithm"));
     }
 

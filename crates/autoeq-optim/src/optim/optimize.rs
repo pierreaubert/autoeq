@@ -454,9 +454,11 @@ pub fn optimize_filters_with_run_control(
         upper_bounds,
         objective_data,
         params,
-        None,
-        None,
-        run_control,
+        RunControlDispatchOptions {
+            algo_override: None,
+            callback: None,
+            run_control,
+        },
     )
     .result
 }
@@ -467,16 +469,25 @@ struct ControlledOptimizationDispatch {
     evaluation_limit: usize,
 }
 
+struct RunControlDispatchOptions<'a> {
+    algo_override: Option<&'a str>,
+    callback: Option<OptimProgressCallback>,
+    run_control: &'a OptimizerRunControl,
+}
+
 fn optimize_filters_with_run_control_dispatch(
     x: &mut [f64],
     lower_bounds: &[f64],
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
     params: &crate::OptimParams,
-    algo_override: Option<&str>,
-    mut callback: Option<OptimProgressCallback>,
-    run_control: &OptimizerRunControl,
+    options: RunControlDispatchOptions<'_>,
 ) -> ControlledOptimizationDispatch {
+    let RunControlDispatchOptions {
+        algo_override,
+        mut callback,
+        run_control,
+    } = options;
     let evaluation_limit = run_control.effective_evaluation_limit();
     let not_started = |message: String, dispatch| ControlledOptimizationDispatch {
         result: Err((message, f64::INFINITY)),
@@ -647,6 +658,10 @@ pub fn optimize_filters_with_run_control_detailed(
 /// The returned tuple is an error when resolution, budget profiling, callback
 /// support, or backend execution fails. The typed `dispatch` field identifies
 /// preflight failures without parsing the legacy error string.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the public dispatch keeps objective, bounds, algorithm override, observer, and shared run-control explicit"
+)]
 pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     x: &mut [f64],
     lower_bounds: &[f64],
@@ -663,9 +678,11 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
         upper_bounds,
         objective_data,
         params,
-        algo_override,
-        callback,
-        run_control,
+        RunControlDispatchOptions {
+            algo_override,
+            callback,
+            run_control,
+        },
     );
     let result = dispatch_result.result;
     let dispatch = dispatch_result.dispatch;
@@ -961,12 +978,6 @@ mod staged_run_control_tests {
         params.algo = "autoeq:cobra".to_owned();
         params.maxeval = 60;
         let root = OptimizerRunControl::new(NonZeroUsize::new(30).unwrap());
-        for _ in 0..12 {
-            drop(
-                root.begin_evaluation(super::super::run_control::EvaluationStage::Search, 1)
-                    .unwrap(),
-            );
-        }
 
         let first_stage = root.with_stage_budget(NonZeroUsize::new(12).unwrap());
         assert_eq!(first_stage.remaining_evaluations(), 12);
@@ -982,22 +993,26 @@ mod staged_run_control_tests {
         assert_eq!(first.evidence.evaluation_limit, 12);
         assert_eq!(first.evidence.evaluation_count, Some(12));
         assert_eq!(first.stage_snapshot.unwrap().evaluations_started, 12);
-        assert_eq!(first.snapshot.evaluations_started, 24);
+        assert_eq!(first.snapshot.evaluations_started, 12);
 
+        params.algo = "autoeq:cobyla".to_owned();
         let second_stage = root.with_stage_budget(NonZeroUsize::new(25).unwrap());
-        assert_eq!(second_stage.effective_evaluation_limit(), 6);
-        let second = optimize_filters_with_run_control_detailed(
+        assert_eq!(second_stage.effective_evaluation_limit(), 18);
+        let second = optimize_filters_with_run_control_and_algo_override_detailed(
             &mut initial,
             &lower,
             &upper,
             objective,
             &params,
+            Some("autoeq:cobra"),
+            None,
             &second_stage,
         );
         assert!(second.result.is_ok(), "{:?}", second.result);
-        assert_eq!(second.evidence.evaluation_limit, 6);
-        assert_eq!(second.evidence.evaluation_count, Some(6));
-        assert_eq!(second.stage_snapshot.unwrap().evaluations_started, 6);
+        assert_eq!(second.evidence.algorithm, "autoeq:cobra");
+        assert_eq!(second.evidence.evaluation_limit, 18);
+        assert_eq!(second.evidence.evaluation_count, Some(18));
+        assert_eq!(second.stage_snapshot.unwrap().evaluations_started, 18);
         assert_eq!(second.snapshot.evaluations_started, 30);
         assert_eq!(second.snapshot.evaluation_budget, 30);
     }
@@ -1084,5 +1099,29 @@ mod staged_run_control_tests {
         assert_eq!(run.evidence.termination, OptimizerTermination::UserStopped);
         assert!(run.snapshot.evaluations_started > 0);
         assert_eq!(run.dispatch, OptimizerDispatchOutcome::BackendInvoked);
+    }
+
+    #[test]
+    fn prelatched_stop_returns_before_backend_and_finalization_scoring() {
+        let (objective, mut params, lower, upper, mut initial) = scalar_fixture();
+        params.algo = "autoeq:cobra".to_owned();
+        let control = OptimizerRunControl::new(NonZeroUsize::new(20).unwrap());
+        control.request_cancel();
+
+        let run = optimize_filters_with_run_control_detailed(
+            &mut initial,
+            &lower,
+            &upper,
+            objective,
+            &params,
+            &control,
+        );
+
+        assert_eq!(run.dispatch, OptimizerDispatchOutcome::NotStartedRunStopped);
+        assert!(run.result.is_err());
+        assert_eq!(run.evidence.termination, OptimizerTermination::UserStopped);
+        assert_eq!(run.evidence.evaluation_count, Some(0));
+        assert_eq!(run.snapshot.evaluations_started, 0);
+        assert_eq!(run.snapshot.validation_evaluations_started, 0);
     }
 }

@@ -2482,3 +2482,45 @@ The worktree is clean and its original lockfile SHA remains
 `f9504495efae1f70c543dd19fdaa96f620b2f89e8adc51c67bc9bcb55200a053`.
 No public push was made. Original Genelec acoustic/electrical failures and successful
 CTC/XTC routing remain open; the budget guard does not establish their acceptance.
+
+
+### A07 complete release matrix; A09 integrated gates; COBRA alias (2026-10-03)
+
+The optimized matrix completed all **841/841** planned cells with **zero runner
+failures**, no missing results, and outer exit zero. Tool session 42467 is now
+terminal. The copied executable hash stayed unchanged across the run; elapsed
+outer time was 954.415 seconds under shared host load. Outcomes are **746 completed,
+79 timed out, three budget refusals, nine observer stops, and four unsupported
+callback refusals**. Complete recording does not make timeouts successful searches.
+
+Root independently verified all 841 inventory/spec identities, evaluation budget
+and stage accounting, finite completed comparison metrics, and zero scoring for
+unsupported callbacks. Receipt:
+`/Users/pierre/a07-release-full-accounting-independent-review.json`.
+The final analysis snapshot in
+`/Users/pierre/a07_full_matrix_analysis_20261003_final/` retains outcome denominators,
+completed-only distributions, child receipt integrity and source artifact identities.
+It reports zero receipt integrity failures. The three budget refusals are DE
+refinement at root cap 128: the stage allocation of 64 is below the 97 evaluations
+needed for its first complete search unit; no objective or validation call started.
+
+The build still uses the unpublished command-only math stop override. Public
+pin/integration remains pending. Runtime rankings are limited by concurrent host
+load, and the measured fixture perturbations are not independent seat captures.
+Broader delivered-transfer evidence and justified Fast/Balanced/Thorough presets
+remain open; this run alone does not close A07 or the overall audit.
+
+Combined A09 integration gates passed: **339 model tests**, **1027 workflow tests
+with seven ignored**, **two CLI refusal tests**, **one schema test**, and strict
+scoped model/workflow/CLI Clippy. Logs and argv are retained under
+`/Volumes/home_tmp/tmp/a09-root-integration-757c274/`. Root confirmed identical hashes
+for the seven A09 changed files and Cargo.lock before/after; inventory metadata
+records the intervening docs-only commit. SOTF committed source identities and
+unchanged lockfile are independently recorded in
+`/Users/pierre/a09-native-commit-independent-review.json`.
+
+COBRA reachability review confirmed the public solver pin and RoomEQ config path.
+Follow-up **46b2f1b** removes a false unknown-algorithm warning for the documented
+bare `cobra` alias, tests both spellings, and updates the README backend list.
+Six focused model validation tests and strict model library/test Clippy passed.
+Use `optimizer.algorithm: "autoeq:cobra"` (or `"cobra"`). UI remains deferred.

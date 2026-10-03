@@ -1663,3 +1663,68 @@ finite-design conditioning are being investigated separately; no production
 analyzer or physical acceptance is established.
 Evidence: `/Volumes/home_tmp/tmp/ess-matrixfree-probe-20261003/`;
 root review: `/Users/pierre/ess-matrixfree-run01-independent-review.json`.
+
+
+## RoomEQ signal readiness and stereo SIGINT integration
+
+Integrated candidate `3326f16` as `5d9fb961`. The CLI waits for the first poll
+of its Ctrl-C listener before starting synchronous command preparation. A
+registration error returns before command admission; an immediately ready
+signal sets shutdown before listener readiness is announced. The command's
+blocking task is awaited before listener cleanup and process return.
+
+The actual CLI test first creates a valid 48 kHz stereo bundle using the
+checked-in left/right curves, three PEQs, 64 frequency samples, seeded native
+DE and two Rayon workers. Its second run changes only the iteration ceiling.
+After both channels report iteration 100, the test sends SIGINT to its owned
+PID and observes a normal nonzero exit with an explicit observer cancellation.
+The previous graph, manifest and assets remain byte-identical and loadable;
+private attempt/artifact/fallback stages are absent. Reader buffers, progress
+lines, queue and waits are bounded, with owned-child kill/reap cleanup.
+
+Two binary listener tests, seven CLI integration tests and the internal
+parallel-channel cancellation/drain test pass. Scoped strict Clippy,
+formatting, diff and locked offline host metadata checks pass. Root verified
+all six gate log hashes, 11 selected file identities, 362 normalized package
+identities, and 27 retained child files including the hash-valid asset bundle.
+Integrated source, manifests, lock and Cargo configuration match the tested
+candidate. Raw metadata hashes differ before/after; before raw bytes were not
+retained, so only normalized package equality is established. Fresh external
+dependency file bytes are outside this inventory.
+
+The existing rejected multi-driver diagnostic test now checks its retained
+attempt directory and absence of canonical publication, preserving its phase,
+acceptance and topology assertions. No acceptance criterion was waived.
+
+The retained SIGINT log also shows subsequent local COBYLA refinement after
+global DE stops. This integration proves listener readiness, observed DE stop,
+joined command exit and bundle preservation for this fixture. Immediate local
+refinement cancellation, other optimizers, hardware and other platforms remain
+open. UI work remains deferred.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a08-room-cancel-evidence-20261003/`;
+root review: `/Users/pierre/a08-room-signal-independent-review.json`.
+
+## COBYLA cooperative cancellation candidate
+
+Local math commit `e34b6c5` adds an additive cooperative stop API. Local AutoEQ
+candidate `d9a9c930` invokes it, publishes progress after each completed
+objective evaluation, and polls callback stop/run control before the next
+objective. An active score and its constraints finish before return. A
+pre-cancelled controlled run admits no Search scores and reports typed
+UserStopped. This is cooperative cancellation, with no exact COBYLA pause or
+resume claim. Existing separately counted final validation remains permitted.
+
+The regression fails against unchanged production because its callback never
+runs. With the candidate, five focused tests and all 367 optimizer tests pass;
+the full workflow library passes 1,019 tests with seven ignored. Strict scoped
+Clippy, formatting, diff and locked offline metadata checks pass. Root verified
+eight gate log hashes and 18 frozen candidate/scratch/math file identities.
+Verification uses a command-local math path override and a scratch-only lock
+change. Candidate manifests and lock are unchanged; external registry file
+bytes are outside the inventory.
+
+The candidate remains isolated until the new math dependency publication is
+approved and a reproducible public pin is available. This dependency affects
+this integration only; other backend audit work can continue.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a08-cobyla-cancel-evidence-20261003/`;
+root review: `/Users/pierre/a08-cobyla-adapter-independent-review.json`.

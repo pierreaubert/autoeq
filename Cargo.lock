@@ -3200,6 +3200,7 @@ dependencies = [
 [[package]]
 name = "math-dsp"
 version = "0.5.32"
+source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "clap",
  "hound",
@@ -3219,6 +3220,7 @@ dependencies = [
 [[package]]
 name = "math-iir-fir"
 version = "0.5.24"
+source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "base64 0.22.1",
  "byteorder",
@@ -3254,7 +3256,7 @@ dependencies = [
 [[package]]
 name = "math-rir"
 version = "0.5.11"
-source = "git+https://github.com/pierreaubert/math-audio#9174ba7edd52de7349a141a9d173ed9d6b63edca"
+source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "math-iir-fir",
  "rayon",

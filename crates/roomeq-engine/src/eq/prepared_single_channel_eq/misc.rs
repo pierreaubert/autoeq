@@ -3,6 +3,9 @@ use super::super::misc::build_optim_params;
 use super::super::optimize::{OptimizerStopped, latch_observer_stop};
 use super::super::representative::measure_bass_rt60;
 use super::super::resources::{self, EqResources};
+use super::super::run_control::{
+    EqBudgetRefusal, EqRunControl, no_search_remaining, run_optimizer,
+};
 use super::super::types::PreparedSingleChannelEq;
 use crate::Curve;
 use crate::PeqModel;
@@ -728,6 +731,7 @@ pub(in super::super) fn run_optimization_pass(
     config: &OptimizerConfig,
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
 ) -> Result<
     (
         Vec<Biquad>,
@@ -781,38 +785,21 @@ pub(in super::super) fn run_optimization_pass(
 
     // Global optimization
     let (callback, observer_stopped) = latch_observer_stop(callback);
-    let opt_result = if let Some(cb) = callback {
-        backend.optimize_filters_with_callback(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            prep.objective_data.clone(),
-            &optim_params,
-            cb,
-        )
-    } else {
-        backend.optimize_filters(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            prep.objective_data.clone(),
-            &optim_params,
-        )
-    };
-
+    let mut global_evidence = run_optimizer(
+        backend,
+        &mut x,
+        &lower_bounds,
+        &upper_bounds,
+        prep.objective_data.clone(),
+        &optim_params,
+        None,
+        callback,
+        control,
+    )?;
     if observer_stopped.load(std::sync::atomic::Ordering::Acquire) {
         return Err(Box::new(OptimizerStopped));
     }
 
-    let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-        &optim_params.algo,
-        opt_result,
-        &x,
-        &lower_bounds,
-        &upper_bounds,
-        optim_params.maxeval,
-        optim_params.seed,
-    );
     if !global_evidence.converged {
         if global_evidence.best_effort {
             log::warn!(
@@ -849,44 +836,50 @@ pub(in super::super) fn run_optimization_pass(
     let mut optimizer_evidence = vec![global_evidence];
 
     // Local refinement (COBYLA)
-    let _optimizer_loss = if config.refine {
+    let _optimizer_loss = if config.refine && !no_search_remaining(control) {
         log::info!(
             "  Running local refinement ({}) from global loss={:.6}",
             config.local_algo,
             global_loss
         );
         let x_before_refine = x.to_vec();
-        let local_result = backend.optimize_filters_with_algo_override(
+        let (mut local_evidence, local_refused) = match run_optimizer(
+            backend,
             &mut x,
             &lower_bounds,
             &upper_bounds,
             prep.objective_data.clone(),
             &optim_params,
             Some(&optim_params.local_algo),
-        );
-        let mut local_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-            &optim_params.local_algo,
-            local_result,
-            &x,
-            &lower_bounds,
-            &upper_bounds,
-            optim_params.maxeval,
-            optim_params.seed,
-        );
+            None,
+            control,
+        ) {
+            Ok(evidence) => (evidence, false),
+            Err(error) if error.is::<EqBudgetRefusal>() => (
+                error
+                    .downcast::<EqBudgetRefusal>()
+                    .expect("checked refusal type")
+                    .0,
+                true,
+            ),
+            Err(error) => return Err(error),
+        };
         if !local_evidence.converged {
             log::warn!(
                 "  Local refinement did not fully converge: {}",
                 local_evidence.status
             );
         }
-        crate::evidence_gate::verify_emission_candidate(
-            "prepared-single-refine",
-            &x,
-            &prep.objective_data,
-            &optim_params,
-            &mut local_evidence,
-        )
-        .map_err(|reason| format!("prepared refine candidate refused at emission: {reason}"))?;
+        if !local_refused {
+            crate::evidence_gate::verify_emission_candidate(
+                "prepared-single-refine",
+                &x,
+                &prep.objective_data,
+                &optim_params,
+                &mut local_evidence,
+            )
+            .map_err(|reason| format!("prepared refine candidate refused at emission: {reason}"))?;
+        }
         let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
         let use_local = local_evidence.confidence
             != autoeq_optim::optim::OptimizerConfidence::Unusable

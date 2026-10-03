@@ -1,3 +1,4 @@
+use super::backend::FilterOptimizerOutput;
 use super::constraint_envelope::finalize_candidate;
 use super::objective_data::ObjectiveData;
 use super::objective_data::run_autoeq_de_with_epa_callback;
@@ -143,6 +144,9 @@ pub struct OptimizerRunEvidence {
     pub selected_for_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restart_history: Vec<OptimizerRestartEvidence>,
+    /// Pareto selection evidence emitted by this exact optimizer invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     /// Envelope finalization report for the emitted parameters, when the
     /// emitter ran the shared choke-point. Dispatchers finalize before
     /// returning; engine emission re-checks and attaches the diagnostics
@@ -228,6 +232,7 @@ impl OptimizerRunEvidence {
             selected_for_output: true,
             restart_history: Vec::new(),
             constraint_report: None,
+            pareto_report: None,
         };
         evidence.refresh_quality_flags();
         evidence
@@ -332,12 +337,9 @@ impl OptimizerRunEvidence {
     fn apply_validation_refusal_stop(
         &mut self,
         snapshot: &super::run_control::OptimizerRunSnapshot,
-        confirmed_finalization_refusal: bool,
+        confirmed_typed_refusal: bool,
     ) {
-        if !confirmed_finalization_refusal
-            || self.termination != OptimizerTermination::BackendFailure
-            || snapshot.validation_evaluations_refused == 0
-        {
+        if !confirmed_typed_refusal || self.termination != OptimizerTermination::BackendFailure {
             return;
         }
         self.termination = if snapshot.cancellation_requested {
@@ -525,6 +527,83 @@ struct ControlledOptimizationDispatch {
     dispatch: OptimizerDispatchOutcome,
     evaluation_limit: usize,
     validation_stop_refusal: bool,
+    pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+}
+
+struct NormalizedBackendOutput {
+    result: Result<(String, f64), (String, f64)>,
+    pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    validation_stop_refusal: bool,
+}
+
+fn normalize_backend_output(
+    output: FilterOptimizerOutput,
+    expected_backend: &str,
+    parameters: &[f64],
+) -> NormalizedBackendOutput {
+    match output {
+        FilterOptimizerOutput::StoppedDuringValidation { reason } => NormalizedBackendOutput {
+            result: Err((reason, f64::INFINITY)),
+            pareto_report: None,
+            validation_stop_refusal: true,
+        },
+        FilterOptimizerOutput::Completed {
+            result,
+            pareto_report,
+        } => {
+            if result.is_err() && pareto_report.is_some() {
+                return NormalizedBackendOutput {
+                    result: Err((
+                        "optimizer backend attached Pareto evidence to a failed result".to_string(),
+                        f64::INFINITY,
+                    )),
+                    pareto_report: None,
+                    validation_stop_refusal: false,
+                };
+            }
+            let Some(report) = pareto_report.as_ref() else {
+                return NormalizedBackendOutput {
+                    result,
+                    pareto_report: None,
+                    validation_stop_refusal: false,
+                };
+            };
+            let invalid = report.validate().err().or_else(|| {
+                (report.backend != expected_backend).then(|| {
+                    "optimizer Pareto report backend does not match the resolved backend".to_string()
+                })
+            }).or_else(|| {
+                (report.returned_parameters != parameters).then(|| {
+                    "optimizer Pareto report does not match its returned parameters".to_string()
+                })
+            }).or_else(|| {
+                let selected_scalar = report
+                    .candidates
+                    .get(report.selection.selected_candidate_index)
+                    .and_then(|candidate| candidate.scalar_loss);
+                result.as_ref().ok().and_then(|(_, loss)| {
+                    selected_scalar
+                        .filter(|scalar| scalar != loss)
+                        .map(|_| "optimizer Pareto report selected scalar loss does not match the returned score".to_string())
+                })
+            });
+            match invalid {
+                Some(reason) => NormalizedBackendOutput {
+                    result: Err((
+                        format!("optimizer returned malformed Pareto evidence: {reason}"),
+                        f64::INFINITY,
+                    )),
+                    pareto_report: None,
+                    validation_stop_refusal: false,
+                },
+                None => NormalizedBackendOutput {
+                    result,
+                    pareto_report,
+                    validation_stop_refusal: false,
+                },
+            }
+        }
+    }
 }
 
 struct RunControlDispatchOptions<'a> {
@@ -552,6 +631,7 @@ fn optimize_filters_with_run_control_dispatch(
         dispatch,
         evaluation_limit,
         validation_stop_refusal: false,
+        pareto_report: None,
     };
     let algorithm = algo_override.unwrap_or(&params.algo);
     let Some(backend) = super::registry::resolve(algorithm) else {
@@ -621,6 +701,7 @@ fn optimize_filters_with_run_control_dispatch(
             dispatch: OptimizerDispatchOutcome::NotStartedBudgetRefusal(refusal),
             evaluation_limit,
             validation_stop_refusal: false,
+            pareto_report: None,
         };
     }
 
@@ -652,7 +733,7 @@ fn optimize_filters_with_run_control_dispatch(
         } else {
             None
         };
-    let result = backend.optimize(
+    let backend_output = backend.optimize_with_report(
         x,
         lower_bounds,
         upper_bounds,
@@ -660,16 +741,21 @@ fn optimize_filters_with_run_control_dispatch(
         &controlled_params,
         backend_callback,
     );
+    let NormalizedBackendOutput {
+        result: backend_result,
+        pareto_report,
+        validation_stop_refusal: typed_validation_stop,
+    } = normalize_backend_output(backend_output, backend.name(), x);
     let snapshot = run_control.snapshot();
     let stage_snapshot_before_finalization = run_control.stage_snapshot();
     let stop_before_finalization = snapshot.cancellation_requested
         || snapshot.deadline_reached
+        || typed_validation_stop
         || stage_snapshot_before_finalization
             .as_ref()
             .is_some_and(|stage| stage.cancellation_requested || stage.deadline_reached);
-    let backend_result = result;
     let (finalized, validation_stop_refusal) = if stop_before_finalization {
-        (backend_result, false)
+        (backend_result, typed_validation_stop)
     } else {
         let finalized = finalize_dispatch_winner(
             backend.name(),
@@ -693,11 +779,18 @@ fn optimize_filters_with_run_control_dispatch(
         );
         (finalized, validation_stop_refusal)
     };
+    let pareto_report = pareto_report.filter(|report| {
+        finalized.is_ok()
+            && !snapshot.cancellation_requested
+            && !snapshot.deadline_reached
+            && report.returned_parameters == x
+    });
     ControlledOptimizationDispatch {
         result: finalized,
         dispatch: OptimizerDispatchOutcome::BackendInvoked,
         evaluation_limit,
         validation_stop_refusal,
+        pareto_report,
     }
 }
 
@@ -770,6 +863,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     let dispatch = dispatch_result.dispatch;
     let evaluation_limit = dispatch_result.evaluation_limit;
     let validation_stop_refusal = dispatch_result.validation_stop_refusal;
+    let pareto_report = dispatch_result.pareto_report;
     let snapshot = run_control.snapshot();
     let stage_snapshot = run_control.stage_snapshot();
     let algorithm = algo_override.unwrap_or(&params.algo);
@@ -805,6 +899,14 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     if validation_stop_refusal {
         evidence.apply_validation_refusal_stop(&snapshot, true);
     }
+    evidence.pareto_report = if result.is_ok()
+        && evidence.termination != OptimizerTermination::UserStopped
+        && evidence.termination != OptimizerTermination::TimedOut
+    {
+        pareto_report.filter(|report| report.returned_parameters == x)
+    } else {
+        None
+    };
     ControlledOptimizerRun {
         result,
         evidence,
@@ -927,6 +1029,129 @@ pub fn optimize_filters_with_callback_detailed(
 #[cfg(test)]
 mod evidence_validation_tests {
     use super::*;
+
+    fn pareto_report(parameters: Vec<f64>) -> roomeq_model::ParetoDispatchReport {
+        roomeq_model::ParetoDispatchReport {
+            schema: "roomeq.pareto_dispatch/v1".into(),
+            backend: "autoeq:nsga2".into(),
+            submitted_count: 1,
+            refused_source_indices: Vec::new(),
+            candidates: vec![roomeq_model::ParetoCandidateEvidence {
+                source_index: 0,
+                search_parameters: parameters.clone(),
+                search_objectives: vec![1.0],
+                validated_parameters: parameters.clone(),
+                validated_objectives: vec![1.0],
+                rank: Some(0),
+                crowding_distance: Some(roomeq_model::ParetoCrowdingDistance::Unbounded),
+                scalar_loss: Some(1.0),
+            }],
+            selection: roomeq_model::ParetoSelectionEvidence {
+                rule: "normalized_compromise".into(),
+                weights: vec![1.0],
+                ideal: vec![1.0],
+                nadir: vec![1.0],
+                selected_candidate_index: 0,
+                selected_source_index: 0,
+                scalar_baseline_rule: Some("configured_scalar:single".into()),
+                scalar_best_source_index: Some(0),
+                scalar_best_loss: Some(1.0),
+            },
+            returned_parameters: parameters,
+            search_evaluations: Some(16),
+            generations: Some(1),
+        }
+    }
+
+    #[test]
+    fn backend_output_accepts_only_a_valid_report_matching_the_returned_vector() {
+        let parameters = vec![0.25];
+        let valid = normalize_backend_output(
+            FilterOptimizerOutput::Completed {
+                result: Ok(("done".into(), 1.0)),
+                pareto_report: Some(pareto_report(parameters.clone())),
+            },
+            "autoeq:nsga2",
+            &parameters,
+        );
+        assert!(valid.result.is_ok());
+        assert_eq!(valid.pareto_report.unwrap().returned_parameters, parameters);
+        assert!(!valid.validation_stop_refusal);
+
+        let mismatched = normalize_backend_output(
+            FilterOptimizerOutput::Completed {
+                result: Ok(("done".into(), 1.0)),
+                pareto_report: Some(pareto_report(vec![0.5])),
+            },
+            "autoeq:nsga2",
+            &[0.25],
+        );
+        assert!(mismatched.result.is_err());
+        assert!(mismatched.pareto_report.is_none());
+        assert!(!mismatched.validation_stop_refusal);
+
+        let wrong_backend = normalize_backend_output(
+            FilterOptimizerOutput::Completed {
+                result: Ok(("done".into(), 2.0)),
+                pareto_report: Some(pareto_report(parameters.clone())),
+            },
+            "autoeq:bo",
+            &parameters,
+        );
+        assert!(
+            wrong_backend
+                .result
+                .unwrap_err()
+                .0
+                .contains("resolved backend")
+        );
+        assert!(wrong_backend.pareto_report.is_none());
+
+        let wrong_score = normalize_backend_output(
+            FilterOptimizerOutput::Completed {
+                result: Ok(("done".into(), 2.0)),
+                pareto_report: Some(pareto_report(parameters.clone())),
+            },
+            "autoeq:nsga2",
+            &parameters,
+        );
+        assert!(wrong_score.result.unwrap_err().0.contains("scalar loss"));
+        assert!(wrong_score.pareto_report.is_none());
+    }
+
+    #[test]
+    fn backend_output_never_keeps_reports_on_errors_or_typed_stops() {
+        let parameters = vec![0.25];
+        let failed = normalize_backend_output(
+            FilterOptimizerOutput::Completed {
+                result: Err(("real backend failure".into(), f64::INFINITY)),
+                pareto_report: Some(pareto_report(parameters.clone())),
+            },
+            "autoeq:nsga2",
+            &parameters,
+        );
+        assert!(failed.result.is_err());
+        assert!(
+            failed
+                .result
+                .unwrap_err()
+                .0
+                .contains("attached Pareto evidence")
+        );
+        assert!(failed.pareto_report.is_none());
+        assert!(!failed.validation_stop_refusal);
+
+        let stopped = normalize_backend_output(
+            FilterOptimizerOutput::StoppedDuringValidation {
+                reason: "cancelled during front validation".into(),
+            },
+            "autoeq:nsga2",
+            &parameters,
+        );
+        assert!(stopped.result.is_err());
+        assert!(stopped.pareto_report.is_none());
+        assert!(stopped.validation_stop_refusal);
+    }
 
     #[test]
     fn converged_backend_cannot_authorize_nonfinite_parameters_or_invalid_bounds() {

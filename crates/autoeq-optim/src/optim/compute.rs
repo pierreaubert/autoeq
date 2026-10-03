@@ -271,15 +271,37 @@ pub fn compute_response_fitness(responses: &[Array1<f64>], data: &ObjectiveData)
 /// ordinary scalar objectives it returns a one-element vector containing the
 /// penalised scalar loss.
 pub fn compute_pareto_objectives(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
-    let Ok(_evaluation_guard) = begin_controlled_evaluation(data) else {
+    try_compute_pareto_objectives(x, data).unwrap_or_else(|_| {
         let objective_count = data
             .multi_objective
             .as_ref()
             .map_or(1, |multi| multi.objectives.len().max(1));
-        return vec![f64::INFINITY; objective_count];
-    };
+        vec![f64::INFINITY; objective_count]
+    })
+}
 
-    compute_pareto_objectives_uncontrolled(x, data)
+/// Why an explicitly tracked score could not start.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ValidationScoreRefusal {
+    /// The invocation's cancellation or deadline gate refused the score.
+    TerminalStop,
+    /// A non-terminal search-budget or stage gate refused the score.
+    NonTerminal,
+}
+
+/// Compute Pareto objectives while preserving the validation gate's typed stop refusal.
+pub(crate) fn try_compute_pareto_objectives(
+    x: &[f64],
+    data: &ObjectiveData,
+) -> Result<Vec<f64>, ValidationScoreRefusal> {
+    let _evaluation_guard = begin_controlled_evaluation(data).map_err(|()| {
+        if data.terminal_stop_requested() {
+            ValidationScoreRefusal::TerminalStop
+        } else {
+            ValidationScoreRefusal::NonTerminal
+        }
+    })?;
+    Ok(compute_pareto_objectives_uncontrolled(x, data))
 }
 
 fn compute_pareto_objectives_uncontrolled(x: &[f64], data: &ObjectiveData) -> Vec<f64> {
@@ -592,12 +614,27 @@ fn penalty_terms(x: &[f64], data: &ObjectiveData) -> [f64; 3] {
     terms
 }
 
-pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
-    let Ok(_evaluation_guard) = begin_controlled_evaluation(data) else {
-        return f64::INFINITY;
-    };
+pub(crate) fn compute_penalty_total(x: &[f64], data: &ObjectiveData) -> f64 {
+    penalty_terms(x, data).into_iter().sum()
+}
 
-    compute_fitness_penalties_uncontrolled(x, data)
+pub fn compute_fitness_penalties_ref(x: &[f64], data: &ObjectiveData) -> f64 {
+    try_compute_fitness_penalties_ref(x, data).unwrap_or(f64::INFINITY)
+}
+
+/// Compute a scalar validation score while retaining a typed stop refusal.
+pub(crate) fn try_compute_fitness_penalties_ref(
+    x: &[f64],
+    data: &ObjectiveData,
+) -> Result<f64, ValidationScoreRefusal> {
+    let _evaluation_guard = begin_controlled_evaluation(data).map_err(|()| {
+        if data.terminal_stop_requested() {
+            ValidationScoreRefusal::TerminalStop
+        } else {
+            ValidationScoreRefusal::NonTerminal
+        }
+    })?;
+    Ok(compute_fitness_penalties_uncontrolled(x, data))
 }
 
 fn compute_fitness_penalties_uncontrolled(x: &[f64], data: &ObjectiveData) -> f64 {
@@ -1227,9 +1264,8 @@ mod multi_objective_and_base_fitness_tests {
     fn controlled_scalar_scoring_enforces_the_candidate_budget() {
         let source = base_objective(LossType::SpeakerFlat);
         let source_prepared = source.prepared();
-        let control = super::super::run_control::OptimizerRunControl::new(
-            NonZeroUsize::new(1).unwrap(),
-        );
+        let control =
+            super::super::run_control::OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
         let controlled = source.with_run_control(control.clone());
 
         assert!(compute_fitness_penalties_ref(&x(), &controlled).is_finite());
@@ -1254,9 +1290,8 @@ mod multi_objective_and_base_fitness_tests {
             variance_lambda: 0.0,
             uncertainty_cvar_alpha: None,
         });
-        let control = super::super::run_control::OptimizerRunControl::new(
-            NonZeroUsize::new(1).unwrap(),
-        );
+        let control =
+            super::super::run_control::OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
         let controlled = source.with_run_control(control.clone());
 
         let values = compute_pareto_objectives(&x(), &controlled);

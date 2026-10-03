@@ -1109,6 +1109,25 @@ pub struct JudgedParetoFront {
     pub submitted: usize,
     /// Refused (infeasible) member count.
     pub refused: usize,
+    /// Original submitted-front indices refused by the shared envelopes.
+    pub refused_source_indices: Vec<usize>,
+}
+
+/// Typed outcome from validation of one submitted Pareto front.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParetoValidationError {
+    /// Invalid vectors, incoherent constraints, or no feasible members.
+    Invalid(String),
+    /// This invocation's terminal gate refused a validation score.
+    Stopped(String),
+}
+
+impl std::fmt::Display for ParetoValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(reason) | Self::Stopped(reason) => formatter.write_str(reason),
+        }
+    }
 }
 
 /// Judge every submitted Pareto vector through the shared choke-point
@@ -1130,15 +1149,56 @@ pub fn judge_pareto_members(
     data: &ObjectiveData,
     spec: &ConstraintSpec<'_>,
 ) -> Result<JudgedParetoFront, String> {
+    judge_pareto_members_with_stop(backend_name, xs, data, spec).map_err(|error| error.to_string())
+}
+
+/// Judge a Pareto front while preserving terminal score-gate refusals.
+///
+/// The typed stop variant is produced only by this invocation's validation
+/// boundary, never inferred from shared score counters or another dispatch.
+///
+/// # Errors
+///
+/// Returns `Stopped` when the validation score gate observes this invocation's
+/// cancellation/deadline, and `Invalid` for malformed or entirely refused fronts.
+pub fn judge_pareto_members_with_stop(
+    backend_name: &str,
+    xs: &[Vec<f64>],
+    data: &ObjectiveData,
+    spec: &ConstraintSpec<'_>,
+) -> Result<JudgedParetoFront, ParetoValidationError> {
     let mut members = Vec::with_capacity(xs.len());
-    let mut refused = 0_usize;
+    let mut refused_source_indices = Vec::new();
     for (index, raw) in xs.iter().enumerate() {
-        let constrained = constrain_candidate(&format!("{backend_name}-{index}"), raw, data, spec)?;
+        let constrained = constrain_candidate(&format!("{backend_name}-{index}"), raw, data, spec)
+            .map_err(ParetoValidationError::Invalid)?;
         if !constrained.feasible {
-            refused += 1;
+            refused_source_indices.push(index);
             continue;
         }
-        let objectives = super::compute::compute_pareto_objectives(&constrained.params, data);
+        if data.terminal_stop_requested() {
+            return Err(ParetoValidationError::Stopped(format!(
+                "{backend_name} validation stopped before member {index}"
+            )));
+        }
+        let objectives = super::compute::try_compute_pareto_objectives(&constrained.params, data)
+            .map_err(|refusal| match refusal {
+                super::compute::ValidationScoreRefusal::TerminalStop => {
+                    ParetoValidationError::Stopped(format!(
+                        "{backend_name} validation score gate stopped at member {index}"
+                    ))
+                }
+                super::compute::ValidationScoreRefusal::NonTerminal => {
+                    ParetoValidationError::Invalid(format!(
+                        "{backend_name} Pareto validation used a non-validation score gate at member {index}"
+                    ))
+                }
+            })?;
+        if objectives.is_empty() || objectives.iter().any(|value| !value.is_finite()) {
+            return Err(ParetoValidationError::Invalid(format!(
+                "{backend_name} validation produced non-finite objectives for member {index}"
+            )));
+        }
         members.push(JudgedParetoMember {
             index,
             params: constrained.params,
@@ -1146,15 +1206,16 @@ pub fn judge_pareto_members(
         });
     }
     if members.is_empty() {
-        return Err(format!(
+        return Err(ParetoValidationError::Invalid(format!(
             "{backend_name} refused all {} front member(s): no feasible candidate under the envelopes",
             xs.len()
-        ));
+        )));
     }
     Ok(JudgedParetoFront {
         members,
         submitted: xs.len(),
-        refused,
+        refused: refused_source_indices.len(),
+        refused_source_indices,
     })
 }
 
@@ -1360,6 +1421,28 @@ mod constraint_envelope_tests {
     use crate::optim::ObjectiveDataBuilder;
     use ndarray::Array1;
 
+    struct CancelOnFirstScore {
+        control: super::super::run_control::OptimizerRunControl,
+        scores: std::sync::atomic::AtomicUsize,
+    }
+
+    impl super::super::loss::Objective for CancelOnFirstScore {
+        fn compute(
+            &self,
+            _parameters: &[f64],
+            _context: &super::super::loss::ObjectiveContext<'_>,
+        ) -> f64 {
+            if self
+                .scores
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                == 0
+            {
+                self.control.request_cancel();
+            }
+            1.0
+        }
+    }
+
     fn flat_objective(freqs: Vec<f64>) -> ObjectiveData {
         let freqs = Array1::from_vec(freqs);
         let n = freqs.len();
@@ -1399,6 +1482,83 @@ mod constraint_envelope_tests {
             50,
             Some(3),
         )
+    }
+
+    #[test]
+    fn pareto_front_validation_propagates_its_own_mid_pass_stop_without_partial_members() {
+        use std::num::NonZeroUsize;
+
+        let control = super::super::run_control::OptimizerRunControl::new(
+            NonZeroUsize::new(8).expect("positive score budget"),
+        );
+        let mut data = flat_objective(log_grid());
+        // SpeakerScore takes the custom Objective path in compute_base_fitness_single;
+        // SpeakerFlat uses the prepared flat scorer and would never request cancellation.
+        data.loss_type = LossType::SpeakerScore;
+        data.objective = Some(std::sync::Arc::new(CancelOnFirstScore {
+            control: control.clone(),
+            scores: std::sync::atomic::AtomicUsize::new(0),
+        }));
+        let validation = data.with_validation_tracking(control.clone());
+        let candidate = vec![500.0_f64.log10(), 1.0, 0.0];
+        let result = judge_pareto_members_with_stop(
+            "cancel-during-pareto",
+            &[candidate.clone(), candidate],
+            &validation,
+            &ConstraintSpec::unconstrained(),
+        );
+
+        assert!(matches!(result, Err(ParetoValidationError::Stopped(_))));
+        let snapshot = control.snapshot();
+        assert!(snapshot.cancellation_requested);
+        assert_eq!(snapshot.validation_evaluations_started, 1);
+        assert_eq!(snapshot.validation_evaluations_completed, 1);
+        assert_eq!(snapshot.validation_evaluations_refused, 0);
+    }
+
+    #[test]
+    fn terminal_stop_does_not_mask_malformed_or_infeasible_front_errors() {
+        use std::num::NonZeroUsize;
+
+        let control = super::super::run_control::OptimizerRunControl::new(
+            NonZeroUsize::new(8).expect("positive score budget"),
+        );
+        control.request_cancel();
+        let data = flat_objective(log_grid()).with_validation_tracking(control.clone());
+        let spec = ConstraintSpec::unconstrained();
+
+        let malformed = judge_pareto_members_with_stop(
+            "cancelled-malformed-front",
+            &[vec![f64::NAN]],
+            &data,
+            &spec,
+        );
+        assert!(matches!(malformed, Err(ParetoValidationError::Invalid(_))));
+
+        let empty = judge_pareto_members_with_stop("cancelled-empty-front", &[], &data, &spec);
+        assert!(matches!(empty, Err(ParetoValidationError::Invalid(_))));
+
+        let zero_boost = [(20.0, 0.0), (20_000.0, 0.0)];
+        let restrictive = ConstraintSpec {
+            boost_knots: Some(&zero_boost),
+            ..ConstraintSpec::unconstrained()
+        };
+        let infeasible_front = vec![
+            vec![500.0_f64.log10(), 1.0, 6.0],
+            vec![1_000.0_f64.log10(), 1.0, 6.0],
+        ];
+        let infeasible = judge_pareto_members_with_stop(
+            "cancelled-infeasible-front",
+            &infeasible_front,
+            &data,
+            &restrictive,
+        );
+        assert!(matches!(infeasible, Err(ParetoValidationError::Invalid(_))));
+        assert!(infeasible.unwrap_err().to_string().contains("refused all"));
+
+        let snapshot = control.snapshot();
+        assert!(snapshot.cancellation_requested);
+        assert_eq!(snapshot.validation_evaluations_started, 0);
     }
 
     #[test]

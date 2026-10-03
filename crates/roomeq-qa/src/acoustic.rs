@@ -2511,6 +2511,7 @@ mod tests {
             routes: vec![route("left", false), route("sub", true)],
             matrix: None,
             input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: vec![],
         });
         let mut metadata: roomeq_model::OptimizationMetadata = serde_json::from_value(serde_json::json!({

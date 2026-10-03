@@ -3303,6 +3303,7 @@ mod tests {
             routes: vec![route("left", 0.0, 0.0), route("sub", -6.0, 2.0)],
             matrix: None,
             input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: Vec::new(),
         });
         result.metadata.bass_management = Some(report);

@@ -14,8 +14,8 @@ reports:
   conditioned differently.
 
 With ``--check``, exits non-zero when any combination is missing its
-result or any scenario's pre-metrics disagree. Default mode only writes
-reports and always exits zero.
+result, finite pre-metrics, or effective configuration is missing, or shared
+playback controls differ. Default mode only writes reports and always exits zero.
 
 With ``--expect PATH``, additionally compares every combination against
 a frozen expectations file (see
@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import pathlib
 import re
@@ -37,9 +38,14 @@ import sys
 FAILED_RE = re.compile(r"FAILED RoomEQ measured: .* \(roomeq exit (\d+)\)")
 
 
+def reject_nonfinite_json(token):
+    raise ValueError(f"nonfinite JSON number: {token}")
+
+
 def load_json(path: pathlib.Path):
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        value = json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_nonfinite_json)
+        return value if isinstance(value, dict) else None
     except (OSError, ValueError):
         return None
 
@@ -81,17 +87,23 @@ def combo_status(out_dir: pathlib.Path, scenario: str, mode: str) -> dict:
             entry["notes"].append("DSP result unreadable")
         return entry
     entry["dsp_json"] = str(result.relative_to(out_dir))
-    acceptance = (data.get("metadata") or {}).get("correction_acceptance") or {}
+    metadata = data.get("metadata")
+    acceptance = metadata.get("correction_acceptance") if isinstance(metadata, dict) else None
+    if not isinstance(acceptance, dict):
+        entry["notes"].append("correction acceptance metadata unavailable")
+        return entry
     outcome = acceptance.get("outcome")
     entry["outcome"] = outcome
-    metrics = acceptance.get("metrics") or {}
+    metrics = acceptance.get("metrics")
+    if not isinstance(metrics, dict):
+        metrics = {}
     for key in (
         "improvement_db",
         "pre_target_weighted_rms_db",
         "post_target_weighted_rms_db",
     ):
         value = metrics.get(key)
-        if isinstance(value, (int, float)):
+        if finite_metric(value):
             entry[key] = value
     if outcome in ("accepted", "unchanged", "rejected"):
         entry["status"] = outcome
@@ -125,58 +137,129 @@ def diff_effective(a, b, path=""):
     return diffs
 
 
+def finite_metric(value) -> bool:
+    """A metric must be a finite number rather than a boolean or missing value."""
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
+
+
+def shared_playback_controls(config: dict) -> dict:
+    """Select the declared input, topology, target, and finalization controls.
+
+    Mode-specific FIR/hybrid design settings remain in the complete diff. This
+    equality check does not validate external measurement bytes or establish
+    equal optimizer budgets, filter families, or physical capture conditions.
+    """
+    keys = (
+        "version", "system", "speakers", "crossovers", "target_curve",
+        "provenance", "recording_config", "measured_impulse_responses", "ctc",
+    )
+    controls = {key: config.get(key) for key in keys}
+    optimizer = config.get("optimizer")
+    if isinstance(optimizer, dict):
+        controls["optimizer"] = {
+            key: optimizer.get(key) for key in ("finalization",)
+        }
+    else:
+        controls["optimizer"] = optimizer
+    return controls
+
+
 def compare_scenario(out_dir: pathlib.Path, scenario: str, modes: list[str]) -> dict:
-    """Compare pre-metrics and effective configs across one scenario's modes."""
-    present: dict[str, dict] = {}
+    """Check complete pre-metrics and declared shared playback controls."""
+    present = {}
+    report = {
+        "scenario": scenario,
+        "modes_requested": modes,
+        "modes_compared": [],
+        "mode_results_complete": False,
+        "pre_metrics_equal": None,
+        "pre_metrics": {},
+        "shared_playback_controls_equal": None,
+        "shared_playback_control_diffs": [],
+        "effective_config_diffs": [],
+        "verdict": "fail",
+        "notes": [],
+    }
+    if len(modes) < 2 or len(set(modes)) != len(modes):
+        report["notes"].append("comparison requires at least two distinct requested modes")
+        return report
     for mode in modes:
         data = load_json(out_dir / scenario / mode / f"dsp-{mode}.json")
         if data is not None:
             present[mode] = data
-    report: dict = {
-        "scenario": scenario,
-        "modes_compared": sorted(present),
-        "pre_metrics_equal": None,
-        "pre_metrics": {},
-        "effective_config_diffs": [],
-        "verdict": "pass",
-        "notes": [],
-    }
-    if len(present) < 2:
-        report["notes"].append("fewer than two mode results present")
-        return report
+    report["modes_compared"] = sorted(present)
+    missing = sorted(set(modes) - set(present))
+    report["mode_results_complete"] = not missing
+    if missing:
+        report["notes"].append(f"mode results unavailable: {', '.join(missing)}")
+
+    configs = {}
     for mode, data in sorted(present.items()):
-        metrics = ((data.get("metadata") or {}).get("correction_acceptance") or {}).get(
-            "metrics"
-        ) or {}
-        report["pre_metrics"][mode] = metrics.get("pre_target_weighted_rms_db")
-    values = [v for v in report["pre_metrics"].values() if isinstance(v, (int, float))]
-    if len(values) < 2:
-        report["notes"].append("pre-metrics unavailable for comparison")
-        return report
-    report["pre_metrics_equal"] = all(v == values[0] for v in values)
-    if not report["pre_metrics_equal"]:
-        report["verdict"] = "fail"
-        report["notes"].append("pre-correction metrics differ across modes")
-    baseline_mode = sorted(present)[0]
-    baseline_cfg = (present[baseline_mode].get("metadata") or {}).get("effective_config")
-    for mode in sorted(present)[1:]:
-        cfg = (present[mode].get("metadata") or {}).get("effective_config")
-        if baseline_cfg is None or cfg is None:
-            report["notes"].append(f"effective config missing for {baseline_mode}/{mode}")
-            continue
-        for path, left, right in diff_effective(baseline_cfg, cfg):
-            report["effective_config_diffs"].append(
-                {
-                    "path": path,
-                    baseline_mode: left,
-                    mode: right,
-                }
-            )
+        metadata = data.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        acceptance = metadata.get("correction_acceptance")
+        metrics = acceptance.get("metrics") if isinstance(acceptance, dict) else None
+        value = metrics.get("pre_target_weighted_rms_db") if isinstance(metrics, dict) else None
+        valid_pre_metric = finite_metric(value) and value >= 0.0
+        report["pre_metrics"][mode] = value if valid_pre_metric else None
+        if not valid_pre_metric:
+            report["notes"].append(f"finite pre-metric unavailable for {mode}")
+        config = metadata.get("effective_config")
+        optimizer = config.get("optimizer") if isinstance(config, dict) else None
+        finalization = optimizer.get("finalization") if isinstance(optimizer, dict) else None
+        if (not isinstance(config, dict)
+                or not isinstance(config.get("version"), str)
+                or not config.get("version")
+                or not isinstance(config.get("speakers"), dict)
+                or not config.get("speakers")
+                or not isinstance(finalization, dict)
+                or not isinstance(finalization.get("subwoofer_limiter"), bool)
+                or not finite_metric(finalization.get("output_ceiling_dbfs"))):
+            report["notes"].append(f"effective shared controls unavailable for {mode}")
+        else:
+            configs[mode] = config
+
+    values = list(report["pre_metrics"].values())
+    if not missing and all(finite_metric(v) for v in values):
+        report["pre_metrics_equal"] = all(v == values[0] for v in values)
+        if not report["pre_metrics_equal"]:
+            report["notes"].append("pre-correction metrics differ across modes")
+
+    if len(configs) == len(modes):
+        baseline_mode = sorted(configs)[0]
+        baseline = configs[baseline_mode]
+        for mode in sorted(configs)[1:]:
+            cfg = configs[mode]
+            for path, left, right in diff_effective(baseline, cfg):
+                report["effective_config_diffs"].append(
+                    {"path": path, baseline_mode: left, mode: right}
+                )
+            for path, left, right in diff_effective(
+                shared_playback_controls(baseline), shared_playback_controls(cfg)
+            ):
+                report["shared_playback_control_diffs"].append(
+                    {"path": path, baseline_mode: left, mode: right}
+                )
+        report["shared_playback_controls_equal"] = not report["shared_playback_control_diffs"]
+        if not report["shared_playback_controls_equal"]:
+            report["notes"].append("declared shared playback controls differ across modes")
     if report["effective_config_diffs"]:
         report["notes"].append(
-            f"{len(report['effective_config_diffs'])} effective-config leaf diffs "
-            f"vs {baseline_mode} (explicit intentional differences)"
+            f"{len(report['effective_config_diffs'])} effective-config leaf diffs; "
+            "differences are recorded without assuming they are intentional"
         )
+    if report["pre_metrics_equal"] and report["shared_playback_controls_equal"]:
+        report["verdict"] = "pass"
+    report["notes"].append(
+        "config equality does not verify external measurement bytes, optimizer "
+        "budget parity, filter-family equivalence, or physical capture conditions"
+    )
     return report
 
 
@@ -242,7 +325,7 @@ def main() -> int:
     print(f"scanned {len(entries)} combinations: {counts}")
     fails = [c["scenario"] for c in comparisons if c["verdict"] == "fail"]
     if fails:
-        print(f"pre-metric mismatch in: {', '.join(fails)}")
+        print(f"comparison evidence failed in: {', '.join(fails)}")
     if args.expect:
         frozen = load_json(pathlib.Path(args.expect))
         if frozen is None:

@@ -9,6 +9,7 @@ is a roomeq/math-audio requirement, not a viewer estimate.
 
 import math
 from html import escape
+from itertools import pairwise
 
 from dsp import smooth_octave
 
@@ -21,6 +22,8 @@ SUMMARY_THRESHOLDS = {
                                       "yellow": lambda v: v >= 80.0},
     "t60_flatness_pct": {"green": lambda v: v > 80.0,
                           "yellow": lambda v: v >= 50.0},
+    "t60_itu_pct": {"green": lambda v: v > 80.0,
+                    "yellow": lambda v: v >= 50.0},
     "notch_db": {"green": lambda v: v > -10.0, "yellow": lambda v: v >= -20.0},
     "early_late_ratio_db": {"green": lambda v: v > 3.0, "yellow": lambda v: v >= 0.0},
     "early_reflection_level_db": {"green": lambda v: v < -10.0,
@@ -98,14 +101,15 @@ def _predicted_band_mean(channel, lo_hz, hi_hz):
 
 
 def level_compensation(channels):
-    """Proposed attenuation to align measured monitor band levels.
+    """Remaining downstream trim to align predicted monitor band levels.
 
-    Monitor reference band 0.5-3 kHz, sub band 30-80 Hz. Use the quietest
-    monitor as reference so monitor proposals only attenuate. The residual
-    is the predicted post-DSP band offset vs the reference, read off the
-    optimizer's predicted curve (final_curve) — not an independent
-    post-calibration measurement, so it stays None when no predicted
-    curve exists.
+    Monitor reference band 0.5-3 kHz, sub band 30-80 Hz. Predicted
+    post-DSP band means (final_curve) already contain any in-chain level
+    alignment, so the trim is measured against the quietest predicted
+    monitor instead of the pre-DSP levels; without predicted curves it
+    falls back to the pre-DSP proposal. Residual and balance include the
+    shown trim, so the balance column verifies the loop closes near
+    zero. Predictions only, not verification captures.
     """
     rows = []
     monitor_means = {}
@@ -121,9 +125,10 @@ def level_compensation(channels):
     if not monitor_means:
         return []
     reference = min(monitor_means.values())
+    reference_name = min(monitor_means, key=monitor_means.get)
     predicted_means = {name: _predicted_band_mean(channels[name], 500.0, 3000.0)
                        for name in monitor_means}
-    predicted_reference = predicted_means.get(min(monitor_means, key=monitor_means.get))
+    predicted_reference = predicted_means.get(reference_name)
     for name, ch in channels.items():
         curve = (ch or {}).get("initial_curve")
         if not curve or not curve.get("freq"):
@@ -131,19 +136,24 @@ def level_compensation(channels):
             continue
         if is_sub_channel(name):
             mean = band_mean(curve["freq"], curve.get("spl"), 30.0, 80.0)
-            comp = (reference - mean) if mean is not None else None
+            pre_comp = (reference - mean) if mean is not None else None
             predicted = _predicted_band_mean(ch, 30.0, 80.0)
         else:
             mean = monitor_means.get(name)
-            comp = reference - mean if mean is not None else None
+            pre_comp = reference - mean if mean is not None else None
             predicted = _predicted_band_mean(ch, 500.0, 3000.0)
-        residual = (predicted - reference) if predicted is not None else None
+        if predicted is not None and predicted_reference is not None:
+            comp = predicted_reference - predicted
+        else:
+            comp = pre_comp
+        landed = (predicted + comp) if predicted is not None and comp is not None else None
+        residual = (landed - reference) if landed is not None else None
         rows.append({
             "speaker": str(name),
             "comp_db": comp,
             "residual_db": residual,
-            "balance_db": (predicted - predicted_reference
-                           if predicted is not None and predicted_reference is not None else None),
+            "balance_db": (landed - predicted_reference
+                           if landed is not None and predicted_reference is not None else None),
         })
     return rows
 
@@ -259,14 +269,14 @@ def landmarks_table_html(data):
         return ""
     parts = [
         '<div class="filters-section">\n<h3>Frequency landmarks — peaks, notches, LF extension</h3>\n',
-        '<p class="epa-footer">1/3-octave-smoothed measured response. '
+        ('<p class="epa-footer">1/3-octave-smoothed measured response. '
         "Extrema need 3 dB prominence, 1/12 octave apart (top 3 each). "
-        "LF extension is the −6 dB point below the 30–200 Hz peak.</p>\n",
-        '<table class="epa-table"><thead><tr><th>Speaker</th>'
+        "LF extension is the −6 dB point below the 30–200 Hz peak.</p>\n"),
+        ('<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>LF extension (−6 dB)</th>"
         "<th>Strongest peaks (freq / level)</th>"
         "<th>Strongest notches (freq / level)</th>"
-        "</tr></thead><tbody>\n",
+        "</tr></thead><tbody>\n"),
     ]
     for name in sorted(channels.keys()):
         marks = response_landmarks(channels[name])
@@ -534,8 +544,8 @@ def room_t60_table_html(data):
         return ""
     channels = [(name, bands) for name, channel in (data.get("channels") or {}).items()
                 if (bands := t60_rows(channel)) is not None]
-    parts = ['<h3>Octave-band T60 — room and speakers</h3><table class="epa-table">'
-             '<thead><tr><th>Centre (Hz)</th><th>Room mean (s)</th><th>Valid speakers</th>']
+    parts = [('<h3>Octave-band T60 — room and speakers</h3><table class="epa-table">'
+             '<thead><tr><th>Centre (Hz)</th><th>Room mean (s)</th><th>Valid speakers</th>')]
     parts.extend(f'<th>{escape(name)} T60 (s)</th>' for name, _ in channels)
     parts.append('</tr></thead><tbody>')
     for i, row in enumerate(rows):
@@ -557,10 +567,10 @@ def t60_table_html(channel_data):
                 't60_octaves from a measured room impulse response.</p>')
     parts = [
         '<div class="filters-section"><h3>Octave-band T60</h3>',
-        '<p class="epa-footer">Measured room IR; T30 preferred, T20 fallback. '
-        'Invalid bands are excluded from the curve.</p>',
-        '<table class="epa-table"><thead><tr><th>Centre (Hz)</th><th>T60 (s)</th>'
-        '<th>Fit</th><th>R²</th><th>Status</th></tr></thead><tbody>',
+        ('<p class="epa-footer">Measured room IR; T30 preferred, T20 fallback. '
+        'Invalid bands are excluded from the curve.</p>'),
+        ('<table class="epa-table"><thead><tr><th>Centre (Hz)</th><th>T60 (s)</th>'
+        '<th>Fit</th><th>R²</th><th>Status</th></tr></thead><tbody>'),
     ]
     for row in rows:
         value = f"{row['t60_s']:.3f}" if row["t60_s"] is not None else "n/a"
@@ -587,7 +597,7 @@ def early_late_ratio_db(channel_data):
     if (not isinstance(freq, list) or len(freq) < 2
             or any(isinstance(f, bool) or not isinstance(f, (int, float))
                    or not math.isfinite(f) or f <= 0 for f in freq)
-            or any(a >= b for a, b in zip(freq, freq[1:]))
+            or any(a >= b for a, b in pairwise(freq))
             or freq[0] > 1000.0 or freq[-1] < 8000.0):
         return None
     for curve in curves:
@@ -666,9 +676,9 @@ def early_reflections_html(channel_data, label):
              'at or above −15 dB relative to direct sound. Before uses the measured '
              'room IR; after is predicted through the saved DSP chain, not a new measurement. '
              'Reference: ' + escape(report["direct_reference"]) + '.</p>',
-             '<p>The exported data contains candidate peaks, not a continuous '
+             ('<p>The exported data contains candidate peaks, not a continuous '
              '1–8 kHz energy-time curve. Two-path first-dip and ripple values are '
-             'estimates, not confirmed acoustic nulls.</p>']
+             'estimates, not confirmed acoustic nulls.</p>')]
     for side, title in (("pre", "Before"), ("post", "Predicted after EQ")):
         events = report[side]
         parts.append(f'<h4>{title} ({len(events)} candidates)</h4>')
@@ -695,7 +705,7 @@ def early_reflections_html(channel_data, label):
 
 def early_reflection_figures(channel_data, label, tab=None):
     """Plot exported candidate stems and frequency responses, without inventing an ETC."""
-    from wasm_report import axis, series, figure, annotation
+    from wasm_report import annotation, axis, figure, series
 
     report = _validated_early_reflections(channel_data)
     if report is None:
@@ -735,7 +745,7 @@ def early_reflection_figures(channel_data, label, tab=None):
                            and math.isfinite(f) and f > 0 for f in freqs)
                 or not all(isinstance(v, (int, float)) and not isinstance(v, bool)
                            and math.isfinite(v) for v in levels)
-                or not all(a < b for a, b in zip(freqs, freqs[1:]))):
+                or not all(a < b for a, b in pairwise(freqs))):
             continue
         curves.append(series(name, freqs, levels, color=color))
     if curves:
@@ -832,7 +842,10 @@ def t60_itu_cell(data, channel_name):
         return ('<td style="background:#eee;color:#666" title="Requires valid '
                 'recording_config.room_dimensions and all eight measured octave '
                 'T60 fits from 63 Hz to 8 kHz">Not assessed</td>')
-    return (f'<td title="{round(metric * 8 / 100)}/8 octave centers within ITU-R '
+    th = SUMMARY_THRESHOLDS["t60_itu_pct"]
+    color = "#2ecc71" if th["green"](metric) else "#f1c40f" if th["yellow"](metric) else "#e74c3c"
+    return (f'<td style="background:{color}33" '
+            f'title="{round(metric * 8 / 100)}/8 octave centers within ITU-R '
             'BS.1116-3 Figure 1 limits around the volume recommendation; '
             '63 Hz has only an upper bound; 4 kHz uses the midband limits; '
             f'16 kHz is excluded. Not overall room compliance.">{metric:.1f}</td>')
@@ -966,19 +979,19 @@ def summary_table_html(data):
     summaries_by_channel = operational_summaries_by_channel(data)
     names = sorted(channels.keys())
     parts = [
-        '<div class="filters-section">\n<h3>Section 1 — Results summary</h3>\n',
-        '<p class="epa-footer">Acoustic values use the imported room impulse response. '
+        '<div class="filters-section">\n<h3>Results summary</h3>\n',
+        ('<p class="epa-footer">Acoustic values use the imported room impulse response. '
         'Operational response is the share of final EQ decisions confirmed as delivered; '
         '“Not assessed” means the saved ledger has no final EQ assessment. '
-        'Missing acoustic values require a measured room IR and valid analysis.</p>\n',
-        '<table class="epa-table"><thead><tr><th>Speaker</th>'
+        'Missing acoustic values require a measured room IR and valid analysis.</p>\n'),
+        ('<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>Operational room response (%)</th>"
         "<th>Early reflection level (dB)</th>"
         "<th>Early vs late ratio (dB)</th>"
         "<th>T60 flatness in window (%)</th>"
         "<th>T60 within ITU recommendation (%)</th>"
         "<th>Deepest notch &lt; 300 Hz (dB)</th>"
-        "</tr></thead><tbody>\n",
+        "</tr></thead><tbody>\n"),
     ]
     for name in names:
         notch = deepest_notch_db(channels[name])
@@ -1002,18 +1015,20 @@ def level_compensation_html(data):
         return ""
     parts = [
         '<div class="filters-section">\n<h3>Relative level compensation</h3>\n',
-        '<p class="epa-footer">Monitor band 0.5–3 kHz, sub band 30–80 Hz. '
-        "Reference: quietest monitor before correction. Compensation is proposed attenuation. "
-        "The proposal is not added to the post-DSP columns, which read the delivered "
-        "chain's predicted curve as-is. The post-DSP level offset includes EQ, time "
-        "alignment and headroom attenuation; a negative value does not by itself indicate "
-        "channel imbalance. The balance column compares against that same monitor after DSP. "
-        "These are predictions, not verification captures.</p>\n",
-        '<table class="epa-table"><thead><tr><th>Speaker</th>'
+        ('<p class="epa-footer">Monitor band 0.5–3 kHz, sub band 30–80 Hz. '
+        "Compensation is the attenuation still needed downstream, measured on the "
+        "predicted post-DSP curves so any in-chain level alignment is not applied "
+        "twice. The post-DSP columns include that trim: the offset is the predicted "
+        "landing level versus the quietest monitor before correction (it includes EQ, "
+        "time alignment and headroom attenuation; a negative value does not by itself "
+        "indicate channel imbalance), and the balance column verifies the remaining "
+        "spread against the quietest monitor after DSP. "
+        "These are predictions, not verification captures.</p>\n"),
+        ('<table class="epa-table"><thead><tr><th>Speaker</th>'
         "<th>Level compensation (dB)</th>"
         "<th>Post-DSP offset from original reference (dB)</th>"
         "<th>Post-DSP balance vs reference monitor (dB)</th>"
-        "</tr></thead><tbody>\n",
+        "</tr></thead><tbody>\n"),
     ]
     for r in rows:
         comp = f"{r['comp_db']:+.1f}" if r["comp_db"] is not None else "n/a"
@@ -1030,15 +1045,15 @@ def tof_html(metadata):
     if not rows:
         return ""
     parts = [
-        '<div class="filters-section">\n<h3>Section 3 — Time of flight</h3>\n',
-        '<p class="epa-footer">After-DSP arrival adds the deployed chain delay '
-        'to the measured input arrival; it is not a post-playback capture.</p>',
-        '<table class="epa-table"><thead><tr><th>Monitor</th>'
+        '<div class="filters-section">\n<h3>Time of flight</h3>\n',
+        ('<p class="epa-footer">After-DSP arrival adds the deployed chain delay '
+        'to the measured input arrival; it is not a post-playback capture.</p>'),
+        ('<table class="epa-table"><thead><tr><th>Monitor</th>'
         "<th>Measured arrival before DSP (ms)</th>"
         "<th>Applied delay (ms)</th>"
         "<th>Calculated arrival after DSP (ms)</th>"
         "<th>Offset vs reference (ms)</th>"
-        "</tr></thead><tbody>\n",
+        "</tr></thead><tbody>\n"),
     ]
     for r in rows:
         def _f(v):

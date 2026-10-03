@@ -1,56 +1,39 @@
 """HTML report generation for roomeq visualization."""
 
-from html import escape
 import datetime
 import math
 import re
+from html import escape
 from pathlib import Path
 
-from capture_clock_views import capture_clock_qa_html, gated_lr_channel
-from capture_reflection_views import capture_reflections_html
+import wasm_report
+from acceptance_views import acceptance_views_html, waveform_status_html
 from acoustic_report import (
-    early_reflections_html,
     early_reflection_figures,
+    early_reflections_html,
     landmarks_table_html,
-    response_landmarks,
-    smooth_curve,
     level_compensation_html,
-    pair_sum_difference,
+    response_landmarks,
     room_t60_rows,
     room_t60_table_html,
-    t60_itu_reference,
-    t60_itu_note,
+    smooth_curve,
     summary_table_html,
     symmetric_groups,
+    t60_itu_note,
+    t60_itu_reference,
     t60_rows,
     t60_table_html,
     tof_html,
 )
-from figures import (
-    create_channel_figure,
-    add_channel_response_overlays,
-    create_zoomed_figure,
-    create_eq_figure,
-    create_multipass_eq_figure,
-    create_ir_figure,
-    create_smoothed_figure,
-    create_symmetric_pair_figure,
-    create_early_late_figure,
-    create_t60_octaves_figure,
-    create_combined_figure,
-    create_bass_management_routing_figure,
-    create_bass_management_headroom_figure,
-    create_comparison_overlay_figure,
-    create_comparison_zoomed_figure,
-    create_comparison_eq_overlay_figure,
-    create_comparison_phase_figure,
-    create_comparison_group_delay_figure,
-    create_comparison_ir_figure,
-    create_mode_subplots_figure,
-    create_score_comparison_figure,
-    _mode_label,
-    _mode_color,
+from capture_clock_views import capture_clock_qa_html, gated_lr_channel
+from capture_reflection_views import capture_reflections_html
+from capture_views import (
+    capture_views_html,
+    optimization_waterfall_html,
+    optimization_wavelet_html,
+    resonance_summary_html,
 )
+from correction_explanation import correction_explanation_html
 from data_extract import (
     channel_has_eq,
     clip_curve_to_measured_band,
@@ -61,9 +44,9 @@ from data_extract import (
     get_plottable_drivers,
 )
 from dsp import (
-    kautz_sections,
     build_post_dsp_source_curves,
     driver_destination_route,
+    kautz_sections,
     per_driver_chain_plugins,
     per_driver_corrected_curve,
     per_driver_effective_eq,
@@ -71,19 +54,38 @@ from dsp import (
     sum_driver_initial_curves,
     symmetric_complex_sum,
 )
+from figures import (
+    _mode_color,
+    _mode_label,
+    add_channel_response_overlays,
+    create_bass_management_headroom_figure,
+    create_bass_management_routing_figure,
+    create_channel_figure,
+    create_combined_figure,
+    create_comparison_eq_overlay_figure,
+    create_comparison_group_delay_figure,
+    create_comparison_ir_figure,
+    create_comparison_overlay_figure,
+    create_comparison_phase_figure,
+    create_comparison_zoomed_figure,
+    create_early_late_figure,
+    create_eq_figure,
+    create_ir_figure,
+    create_mode_subplots_figure,
+    create_multipass_eq_figure,
+    create_score_comparison_figure,
+    create_symmetric_pair_figure,
+    create_t60_octaves_figure,
+)
+from loaders import RoomEqData
+from payload_binding import verify_payload_binding
+from signal_flow import signal_flow_sections
 from target_overlay import (
     TARGET_LEVEL_MATCH_BAND_HZ,
     build_target_overlay_curves,
     global_target_offset_for_pair,
     shift_target_to_reference_band_mean,
 )
-from correction_explanation import correction_explanation_html
-from acceptance_views import acceptance_views_html, waveform_status_html
-from payload_binding import verify_payload_binding
-from capture_views import capture_views_html, optimization_waterfall_html, optimization_wavelet_html, resonance_summary_html
-from loaders import RoomEqData
-import wasm_report
-from signal_flow import signal_flow_sections
 
 
 def _emit_html(sections: list[dict], html: str | None, tab: str | None = None,
@@ -318,12 +320,12 @@ def _driver_eq_filters_html(
     safe_driver = escape(driver_name)
     safe_channel = escape(str(channel_name))
     parts = [
-        '\n                <div class="filters-section">\n'
+        ('\n                <div class="filters-section">\n'
         "                    <h3>EQ Filters</h3>\n"
         '                    <p class="epa-footer">'
         f"{total} PEQ filter(s) total: {driver_count} driver + "
         f"{shared_count} shared channel. Numbering restarts in each tab; "
-        "the EQ plot shows the combined response.</p>\n"
+        "the EQ plot shows the combined response.</p>\n")
     ]
     if driver_count > 0 and shared_count > 0:
         drv_id = f"{id_prefix}_drv"
@@ -481,13 +483,13 @@ def _all_eq_filters_html(data: dict) -> str:
     if not panels:
         return ""
     parts = [
-        '        <div class="plot-container">\n'
+        ('        <div class="plot-container">\n'
         "            <h2>All EQ Filters</h2>\n"
         '            <p class="epa-footer">Complete PEQ listing for every '
         "channel and driver (same data and numbering as the per-tab "
         "sections below). Select a channel to show its filters.</p>\n"
         '            <div class="eq-tabs">\n'
-        '                <div class="eq-tab-header">\n',
+        '                <div class="eq-tab-header">\n'),
     ]
     for index, (label, total, _) in enumerate(panels):
         active = " active" if index == 0 else ""
@@ -578,8 +580,8 @@ def _crossover_config_html(data: dict) -> str:
     if not plugin_rows and not route_rows:
         return ""
     parts = [
-        '        <div class="plot-container">\n'
-        "            <h2>Crossover Configuration</h2>\n"
+        ('        <div class="plot-container">\n'
+        "            <h2>Crossover Configuration</h2>\n")
     ]
     if plugin_rows:
         parts.append(
@@ -1232,8 +1234,8 @@ def _playback_status_html(metadata: dict, label: str = "", *, data: dict | None 
         eligibility = [f"Recorded verdict: {outcome}."]
     elif outcome in ("accepted", "unchanged"):
         eligibility_color = _STATUS_BAD
-        eligibility = ["Recorded verdict is contradictory: outcome "
-                       f"'{outcome}' without matching accepted/decision flags."]
+        eligibility = [("Recorded verdict is contradictory: outcome "
+                       f"'{outcome}' without matching accepted/decision flags.")]
     elif outcome == "rejected":
         eligibility_color = _STATUS_BAD
         eligibility = ["Recorded verdict: rejected."]
@@ -1683,8 +1685,8 @@ def create_html_report(
             )
         elif has_labeled and passes:
             filter_parts = [
-                '<div class="filters-section">\n'
-                '    <h3>EQ Filters (3-Pass Pipeline)</h3>\n'
+                ('<div class="filters-section">\n'
+                '    <h3>EQ Filters (3-Pass Pipeline)</h3>\n')
             ]
             for p in passes:
                 filter_parts.append(
@@ -1699,9 +1701,9 @@ def create_html_report(
             _emit_html(sections, "".join(filter_parts), tab=tab_label)
         elif eq_filters:
             filter_parts = [
-                '<div class="filters-section">\n'
+                ('<div class="filters-section">\n'
                 '    <h3>EQ Filters</h3>\n'
-                '    <div class="filter-list">\n'
+                '    <div class="filter-list">\n')
             ]
             for j, f in enumerate(eq_filters, 1):
                 filter_parts.append(_format_eq_filter_line(f, j))
@@ -1735,7 +1737,7 @@ def create_html_report(
 
     # Assemble the self-contained HTML+WASM report.
     time_domain.insert(0, wasm_report.html_section(
-        '<p>Arrival timing and applied delays are in Section 3: Time of Flight. '
+        '<p>Arrival timing and applied delays are in Time of Flight. '
         'The diagnostics below describe the measured room impulse responses.</p>'))
     epa.insert(0, wasm_report.html_section(
         '<p>EPA scores are model-based psychoacoustic estimates before and after DSP. '

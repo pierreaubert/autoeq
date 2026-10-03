@@ -364,6 +364,29 @@ class WizardAppTests(unittest.TestCase):
         app.on_action(make_event(""), ctx)
         self.assertEqual(len(ctx.errors), errors_before)
 
+    def test_select_choice_patches_dropdown_value(self):
+        # The host rebuilds dropdowns from the IR value every frame; the
+        # handler must echo the choice or the display snaps back.
+        from gpui_toolkit import Event
+        for node_id, action, choices in (
+                ("wizard-output-device", "wizard_output_device",
+                 ["Fake Speakers"]),
+                ("wizard-input-device", "wizard_input_device",
+                 ["Fake Microphone"]),
+                ("wizard-signal-type", "wizard_signal_type",
+                 ["pink-noise"]),
+                ("wizard-room-unit", "wizard_room_unit", ["imperial"])):
+            app, _, _ = self._app()
+            ctx = FakeContext()
+            event = Event(id="e1", sequence=0, node_id=node_id,
+                          event="change", action=action,
+                          payload={"value": choices[0]})
+            app.on_action(event, ctx)
+            echoed = [op for op in ctx.patches
+                      if op.get("id") == node_id
+                      and op.get("property") == "value"]
+            self.assertEqual([op["value"] for op in echoed], choices)
+
     def test_evaluating_charts_from_preloaded_curves(self):
         from recording_gui.app import build_app
         fake = be.FakeCaptureBackend()

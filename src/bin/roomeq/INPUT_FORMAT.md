@@ -243,7 +243,7 @@ an explicit operator statement. It changes no acceptance math; absent policies
 leave the corresponding viewer summary cells pending.
 
 - `reporting.t60_flatness_tolerance_s`: declared ±tolerance in seconds for
-  the report Section 1 "T60 flatness in window" share (nine measured octave
+  the report Results summary "T60 flatness in window" share (nine measured octave
   fits within tolerance of the complete-channel room mean). A present value
   must be finite and positive, otherwise structural validation fails. When
   absent, the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband

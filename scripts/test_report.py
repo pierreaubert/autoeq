@@ -10,15 +10,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.src.data_extract import display_channel_entries
-from scripts.src.dsp import split_driver_eq_plugins
 from scripts.src.acoustic_report import (
     band_mean,
     deepest_notch_db,
+    early_late_ratio_db,
+    early_reflection_figures,
     early_reflection_level_db,
     early_reflections_html,
-    early_reflection_figures,
-    early_late_ratio_db,
     landmarks_table_html,
     level_compensation,
     operational_summaries_by_channel,
@@ -34,26 +32,26 @@ from scripts.src.acoustic_report import (
     tof_html,
     tof_table,
 )
+from scripts.src.data_extract import display_channel_entries
+from scripts.src.dsp import split_driver_eq_plugins
 from scripts.src.figures import (
     create_comparison_zoomed_figure,
     create_tof_figure,
     create_zoomed_figure,
 )
-from scripts.src.target_overlay import (
-    band_mean_spl,
-    shift_target_to_reference_band_mean,
-)
+from scripts.src.loaders import RoomEqData
+from scripts.src.payload_binding import ALGORITHM, payload_digest
 from scripts.src.report import (
     BUCKET_ACOUSTICS,
     BUCKET_DSP,
     BUCKET_PSYCHOACOUSTIC,
     _all_eq_filters_html,
-    _gain_plugins_html,
     _channel_display_final_curve,
     _comparison_source_label,
     _crossover_config_html,
     _driver_eq_filters_html,
     _driver_shaping_summary_html,
+    _gain_plugins_html,
     _has_redirected_bass_route,
     _mixed_phase_summary_html,
     _playback_status_html,
@@ -63,11 +61,13 @@ from scripts.src.report import (
     create_comparison_html_report,
     create_html_report,
 )
-from scripts.test_figures import two_sub_overview_data
-from scripts.test_capture_views import fixture as capture_verification_fixture
-from scripts.src.payload_binding import ALGORITHM, payload_digest
-from scripts.src.loaders import RoomEqData
+from scripts.src.target_overlay import (
+    band_mean_spl,
+    shift_target_to_reference_band_mean,
+)
 from scripts.src.wasm_report import grid_figure
+from scripts.test_capture_views import fixture as capture_verification_fixture
+from scripts.test_figures import two_sub_overview_data
 
 
 def _driver_eq_split_data():
@@ -612,8 +612,50 @@ class SummarySectionTests(unittest.TestCase):
             "R": {"initial_curve": init_r},
         })
         by_name = {r["speaker"]: r for r in rows}
-        self.assertAlmostEqual(by_name["L"]["residual_db"], 1.0)
+        # Without R's predicted curve there is no predicted reference, so the
+        # trim falls back to the pre-DSP proposal (-2.0) and the residual is
+        # the landing level with that trim: 0.0 - 2.0 - (-1.0).
+        self.assertAlmostEqual(by_name["L"]["residual_db"], -1.0)
         self.assertIsNone(by_name["R"]["residual_db"])
+        self.assertIsNone(by_name["L"]["balance_db"])
+
+    def test_level_compensation_is_remaining_trim_against_predicted_curves(self):
+        # L measures 2 dB louder than R before DSP; the delivered chain
+        # already aligned them in-chain, so no downstream trim remains.
+        init_l, init_r = _stereo_curves([83.0, 83.0, 83.0, 83.0],
+                                        [81.0, 81.0, 81.0, 81.0])
+        post_l, post_r = _stereo_curves([78.0, 78.0, 78.0, 78.0],
+                                        [78.0, 78.0, 78.0, 78.0])
+        rows = level_compensation({
+            "L": {"initial_curve": init_l, "final_curve": post_l},
+            "R": {"initial_curve": init_r, "final_curve": post_r},
+        })
+        by_name = {r["speaker"]: r for r in rows}
+        self.assertAlmostEqual(by_name["L"]["comp_db"], 0.0)
+        self.assertAlmostEqual(by_name["R"]["comp_db"], 0.0)
+        self.assertAlmostEqual(by_name["L"]["balance_db"], 0.0)
+        self.assertAlmostEqual(by_name["L"]["residual_db"],
+                               by_name["R"]["residual_db"])
+
+    def test_level_compensation_closes_predicted_spread(self):
+        # The delivered chain left 0.5 dB of predicted spread: the trim
+        # covers exactly that remainder and both monitors land together.
+        init_l, init_r = _stereo_curves([83.5, 83.5, 83.5, 83.5],
+                                        [83.0, 83.0, 83.0, 83.0])
+        post_l, post_r = _stereo_curves([78.5, 78.5, 78.5, 78.5],
+                                        [78.0, 78.0, 78.0, 78.0])
+        rows = level_compensation({
+            "L": {"initial_curve": init_l, "final_curve": post_l},
+            "R": {"initial_curve": init_r, "final_curve": post_r},
+        })
+        by_name = {r["speaker"]: r for r in rows}
+        self.assertAlmostEqual(by_name["L"]["comp_db"], -0.5)
+        self.assertAlmostEqual(by_name["R"]["comp_db"], 0.0)
+        self.assertAlmostEqual(by_name["L"]["balance_db"], 0.0)
+        self.assertAlmostEqual(by_name["R"]["balance_db"], 0.0)
+        self.assertAlmostEqual(by_name["L"]["residual_db"],
+                               by_name["R"]["residual_db"])
+        self.assertAlmostEqual(by_name["L"]["residual_db"], -5.0)
 
     def test_landmarks_report_peaks_and_lf_extension(self):
         freq = [20.0, 30.0, 40.0, 60.0, 100.0, 200.0, 400.0, 1000.0, 2000.0]
@@ -707,7 +749,7 @@ def report_payload(html):
     """Decode the embedded report payload (HTML inside is JSON-escaped on disk)."""
     match = re.search(
         r'<script id="report-payload" type="application/json">(.*?)</script>',
-        html, re.S,
+        html, re.DOTALL,
     )
     assert match is not None, "report payload script tag missing"
     return json.loads(match.group(1))
@@ -715,7 +757,7 @@ def report_payload(html):
 
 class AcousticReportTests(unittest.TestCase):
     def test_itu_summary_column_counts_eight_bands_and_requires_volume(self):
-        from scripts.src.acoustic_report import t60_itu_pct, t60_itu_cell
+        from scripts.src.acoustic_report import t60_itu_cell, t60_itu_pct
         bands = [{"centre_hz": hz, "t60_s": 0.25, "fit_range": "T30",
                   "r2": 0.96, "valid": True, "reason": ""}
                  for hz in [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]]
@@ -733,6 +775,17 @@ class AcousticReportTests(unittest.TestCase):
             band["t60_s"] = 1.0
         self.assertEqual(t60_itu_pct(data, "L"), 0.0)
         self.assertIn("0/8 octave centers", t60_itu_cell(data, "L"))
+        self.assertIn("#e74c3c", t60_itu_cell(data, "L"))  # 0% -> red.
+        for band in bands[:7]:
+            band["t60_s"] = 0.25
+        bands[7]["t60_s"] = 1.0  # 7/8 inside -> 87.5% -> green.
+        self.assertIn("#2ecc71", t60_itu_cell(data, "L"))
+        bands[5]["t60_s"] = 1.0
+        bands[6]["t60_s"] = 1.0  # 5/8 inside -> 62.5% -> yellow.
+        self.assertIn("#f1c40f", t60_itu_cell(data, "L"))
+        bands[5]["t60_s"] = 0.25
+        bands[6]["t60_s"] = 0.25
+        bands[7]["t60_s"] = 0.25
         self.assertIn("T60 within ITU recommendation (%)", summary_table_html(data))
         bands[2].update(t60_s=None, valid=False, fit_range="None", reason="poor fit")
         self.assertIsNone(t60_itu_pct(data, "L"))
@@ -760,7 +813,7 @@ class AcousticReportTests(unittest.TestCase):
             self.assertAlmostEqual(actual, expected)
 
     def test_itu_t60_missing_volume_uses_only_complete_measured_midbands(self):
-        from scripts.src.acoustic_report import t60_itu_reference, t60_itu_note
+        from scripts.src.acoustic_report import t60_itu_note, t60_itu_reference
         bands = [{"centre_hz": hz, "t60_s": 0.3 if 200 <= hz <= 4000 else 2.0,
                   "fit_range": "T30", "r2": 0.96, "valid": True, "reason": ""}
                  for hz in [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]]
@@ -917,8 +970,8 @@ class AcousticReportTests(unittest.TestCase):
             self.assertIn(f">{pct:.1f}</td>", html, f"pct={pct}")
 
     def test_t60_requires_measured_basis_and_preserves_invalid_band_reason(self):
-        from scripts.src.figures import create_t60_octaves_figure
         from scripts.src.acoustic_report import room_t60_table_html, t60_flatness_window
+        from scripts.src.figures import create_t60_octaves_figure
         centers = [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
         bands = [{"centre_hz": hz, "t60_s": 0.4, "fit_range": "T30",
                   "r2": 0.96, "valid": True, "reason": ""} for hz in centers]
@@ -1121,7 +1174,7 @@ class AcousticReportTests(unittest.TestCase):
             output = Path(directory) / "report.html"
             create_html_report(data, output, None)
             html = output.read_text(encoding="utf-8")
-        for expected in ("Section 1 — Results summary",
+        for expected in ("Results summary",
                          "Relative level compensation",
                          "Time of flight",
                          "Details per speaker",
@@ -1139,6 +1192,8 @@ class AcousticReportTests(unittest.TestCase):
         # Removed duplications: no repeated Section 4 heading, no per-channel
         # T60 figure (the room block above carries per-speaker columns).
         self.assertNotIn("Section 4 — Symmetric monitors", html)
+        self.assertNotIn("Section 1", html)
+        self.assertNotIn("Section 3", html)
         self.assertNotIn("L: measured octave-band T60", html)
         # The flatness cell quotes live inside payload HTML (JSON-escaped on
         sections = report_payload(html)["sections"]
@@ -1351,11 +1406,7 @@ class SymmetricComplexSumReportTests(unittest.TestCase):
             "metadata": {},
         }
         wrapped = RoomEqData(data, Path("."))
-        setattr(wrapped, "symmetric_pairs", {"L+R": {
-            "freq": list(freq),
-            "sum_spl": [abs_level, abs_level],
-            "diff_spl": [-120.0, -120.0],
-        }})
+        wrapped.symmetric_pairs = {"L+R": {"freq": list(freq), "sum_spl": [abs_level, abs_level], "diff_spl": [-120.0, -120.0]}}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "report.html"
             create_html_report(wrapped, output, None)
@@ -1393,11 +1444,7 @@ class SymmetricComplexSumReportTests(unittest.TestCase):
             "metadata": {},
         }
         wrapped = RoomEqData(data, Path("."))
-        setattr(wrapped, "symmetric_pairs", {"L+R": {
-            "freq": list(freq),
-            "sum_spl": [86.0, 86.0],
-            "diff_spl": [-120.0, -120.0],
-        }})
+        wrapped.symmetric_pairs = {"L+R": {"freq": list(freq), "sum_spl": [86.0, 86.0], "diff_spl": [-120.0, -120.0]}}
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "report.html"
             create_html_report(wrapped, output, None)

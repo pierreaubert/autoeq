@@ -521,6 +521,10 @@ class WizardApp(App):
             return
         apply(value)
         context.acknowledge(event)
+        # The host rebuilds the dropdown from the IR value every frame, so
+        # echo the choice back or the display snaps to the previous value.
+        context.patch([_set(event.node_id, "value", value)],
+                      request_id=event.id)
         self._patch_status(context, event.id, status_id,
                            f"selected {value}")
 

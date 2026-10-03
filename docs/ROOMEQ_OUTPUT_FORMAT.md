@@ -66,7 +66,7 @@ them as unverified, never as delivered correction.
 
 `correction_decisions.channel_summaries` carries one entry per delivered
 physical output with decided final equalization scope, derived by workflow
-reconciliation from the ledger's own final records (report Section 1,
+reconciliation from the ledger's own final records (report Results summary,
 "Operational room response (%)"):
 
 - scope: final-stage records (`stage: final` with a delivered-graph identity)
@@ -659,7 +659,7 @@ Information about the optimization process.
 | `playback_summary` | object | Claim-level projection of the acceptance report: outcome, seat counts, worst seat, latency/headroom echoes, limits in force, and templated headlines. See [Playback Summary](#playback-summary). |
 | `optimizer_evidence` | object or null | Versioned room-level optimizer confidence plus every per-channel backend run. Each run records termination, convergence/best-effort status, objective, evaluation count/limit, seed, bound violation, restart history, and whether it supplied the emitted parameters. Selected `unusable` evidence cannot pass production acceptance. |
 | `stage_outcomes` | array | Machine-readable applied/skipped/degraded/failed outcomes for optional processing and safety stages. Each outcome may include additive `checks` entries (`id`, `kind`, `passed`, optional `observed`/`limit`, and diagnostic). |
-| `t60_flatness_tolerance_s` | number or null | Declared ±tolerance in seconds for the report Section 1 T60 flatness share, carried from the input `reporting` policy. When absent the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of ±0.05 s and labels the cell accordingly; it changes no acceptance math. |
+| `t60_flatness_tolerance_s` | number or null | Declared ±tolerance in seconds for the report Results summary T60 flatness share, carried from the input `reporting` policy. When absent the viewer applies the ITU-R BS.1116-2 §8.2.3.1 Fig. 1 midband default of ±0.05 s and labels the cell accordingly; it changes no acceptance math. |
 
 `optimizer_evidence.confidence` is derived only from runs with
 `selected_for_output: true`. Superseded adaptive passes and rejected local

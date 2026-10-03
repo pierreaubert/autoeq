@@ -123,21 +123,16 @@ pub(super) fn verify_declared_physical_drive(
 }
 
 /// Verify realized playback, not the last successful alignment stage's cache.
+///
+/// Runs for routed and plain channel results alike: per-output headroom
+/// gains can rebalance plain channels after the last alignment replay, so
+/// non-routed graphs need the same delivered-spread gate.
 fn verify_delivered_channel_alignment(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
     fs: f64,
     dir: &Path,
 ) -> Result<()> {
-    if result
-        .metadata
-        .bass_management
-        .as_ref()
-        .and_then(|bass| bass.routing_graph.as_ref())
-        .is_none()
-    {
-        return Ok(());
-    }
     refresh_responses(result, fs, dir)?;
     let reference_curves = result
         .channel_results
@@ -148,7 +143,7 @@ fn verify_delivered_channel_alignment(
         final_role_level_alignment_gains(config, &result.deployed_source_curves, &reference_curves);
     if !spread.is_finite() {
         return Err(failed(format!(
-            "delivered routed channel-level spread {spread:.3} dB exceeds {:.3} dB over {:.1}-{:.1} Hz",
+            "delivered channel-level spread {spread:.3} dB exceeds {:.3} dB over {:.1}-{:.1} Hz",
             FINAL_CHANNEL_LEVEL_TOLERANCE_DB, band.0, band.1,
         )));
     }
@@ -165,7 +160,7 @@ fn verify_delivered_channel_alignment(
         .is_some_and(|report| !report.accepted);
     if spread > FINAL_CHANNEL_LEVEL_TOLERANCE_DB && !structural_fallback {
         return Err(failed(format!(
-            "delivered routed channel-level spread {spread:.3} dB exceeds {:.3} dB over {:.1}-{:.1} Hz",
+            "delivered channel-level spread {spread:.3} dB exceeds {:.3} dB over {:.1}-{:.1} Hz",
             FINAL_CHANNEL_LEVEL_TOLERANCE_DB, band.0, band.1,
         )));
     }
@@ -1492,6 +1487,23 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
                 fs,
                 dir,
             )?;
+    } else if result.deployed_source_curves.is_empty()
+        && result.channels.values().any(|chain| chain.drivers.is_some())
+    {
+        // Generic driver groups use an empty deployed map to signal that their
+        // reported aggregate owns final level validation (see
+        // refresh_non_routed_deployed_source_curves); keep the sentinel.
+    } else {
+        // Non-routed sources are their channel curves. Publish the
+        // just-replayed finals so later alignment and verification read
+        // realized playback, not a pre-attenuation cache: per-output
+        // headroom gains installed after an earlier alignment would
+        // otherwise stay invisible to the final level check.
+        result.deployed_source_curves = result
+            .channel_results
+            .iter()
+            .map(|(name, channel)| (name.clone(), channel.final_curve.clone()))
+            .collect();
     }
     Ok(())
 }
@@ -2915,6 +2927,67 @@ mod tests {
                 .violations
                 .contains(&"baseline_delivered_channel_level_spread".to_string())
         );
+    }
+
+    #[test]
+    fn non_routed_refresh_replaces_stale_deployed_cache_before_level_alignment() {
+        let (mut result, config) = fixture();
+        let mut right_chain = result.channels["L"].clone();
+        right_chain.channel = "R".into();
+        result.channels.insert("R".into(), right_chain);
+        let mut right_result = result.channel_results["L"].clone();
+        right_result.name = "R".into();
+        result.channel_results.insert("R".into(), right_result);
+        // A stale success claims matched speakers while the serialized graph
+        // carries a differential per-output headroom gain installed later.
+        let matched = result.channel_results["L"].final_curve.clone();
+        result.deployed_source_curves =
+            HashMap::from([("L".into(), matched.clone()), ("R".into(), matched)]);
+        let mut headroom = roomeq_engine::output::create_gain_plugin(-2.0);
+        headroom.parameters["label"] = serde_json::json!("final_electrical_headroom");
+        result.channels.get_mut("R").unwrap().plugins.push(headroom);
+
+        let dir = tempfile::tempdir().unwrap();
+        refresh_responses(&mut result, 48_000.0, dir.path()).unwrap();
+        let spread = (result.deployed_source_curves["L"].spl[0]
+            - result.deployed_source_curves["R"].spl[0])
+            .abs();
+        assert!(
+            (spread - 2.0).abs() < 1e-9,
+            "stale deployed cache survived refresh: {spread}"
+        );
+
+        let error =
+            verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path())
+                .expect_err("a stale matched cache must not authorize an imbalanced graph");
+        assert!(error.to_string().contains("2.000 dB"), "{error}");
+
+        let outcome =
+            apply_final_channel_level_alignment(&mut result, &config, 48_000.0, dir.path())
+                .unwrap();
+        assert_eq!(outcome.status, StageStatus::Applied);
+        assert!(
+            outcome.advisories[0].contains("spread_before_db=2.000"),
+            "{:?}",
+            outcome.advisories
+        );
+        assert!(
+            outcome.advisories[0].contains("spread_after_db=0.000"),
+            "{:?}",
+            outcome.advisories
+        );
+        // The delivered gate passes on the same realized playback.
+        verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path()).unwrap();
+    }
+
+    #[test]
+    fn non_routed_refresh_preserves_generic_driver_sentinel() {
+        let (mut result, _) = fixture();
+        result.channels.get_mut("L").unwrap().drivers = Some(Vec::new());
+        assert!(result.deployed_source_curves.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        refresh_responses(&mut result, 48_000.0, dir.path()).unwrap();
+        assert!(result.deployed_source_curves.is_empty());
     }
 
     #[test]

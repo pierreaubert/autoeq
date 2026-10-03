@@ -1,5 +1,19 @@
 # Unreleased
 
+- Fix non-routed channel-level alignment reading a stale pre-headroom cache:
+  response refresh now republishes the just-replayed channel curves as the
+  deployed source curves, so the final alignment pass sees differential
+  per-output headroom gains and the delivered-spread gate (previously
+  routed-only) verifies plain channel graphs too. Shipped stereo graphs no
+  longer carry the full pre-DSP imbalance the report used to show.
+- Redefine the report relative-level compensation as the remaining
+  downstream trim measured on the predicted post-DSP curves, and include
+  it in the post-DSP offset and balance columns so the balance verifies
+  the loop closes near zero instead of echoing the input imbalance.
+- Drop the remaining `Section 1` / `Section 3` headings in the Acoustics
+  analysis report (`Results summary`, `Time of flight`) and color the
+  `T60 within ITU recommendation (%)` column green/yellow/red with the
+  same >80 / ≥50 thresholds as the flatness column.
 - Add an optimizer tilt stage: `optimizer.tilt_stage` appends an
   optimizer-driven low-shelf plus high-shelf pair at the end of the DSP
   chain (new `pk-ls-hs` layout) to fit broadband bass/treble tilt. The pair

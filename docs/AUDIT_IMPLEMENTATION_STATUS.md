@@ -2093,3 +2093,21 @@ Later observation SHA-256:
 `46b18c469c9631eda696914a9d3cb2bed29d560decd3cad59a61f68bb2480f19`.
 This proves the declared synthetic typed API DSP cases only. Actual APO text
 import, complete routing/protection behavior and hardware evidence remain open.
+
+### A07 headphone objective preserved through RoomEQ preparation
+
+Integrated `8e9c422` adds the explicit `headphone_flat` loss name to model
+validation and both single/multi measurement preparation, preserving the
+HeadphoneFlat objective in the controlled benchmark path. Existing loss names
+retain their mappings. Focused worker tests passed (three engine, one model).
+Root full engine verification passed 887 tests with one ignored; strict engine
+library/test Clippy passed. Source hashes remained unchanged during both gates.
+
+Evidence receipts under
+`/Volumes/home_tmp/tmp/a07-multi-adaptive-integrated-evidence-20261003`:
+- `headphone-integrated-engine-v1.json`: `c7413c3bc52534f7a1565270e7554540d2e76fcb9fe8823999fecf0171e61186`.
+- `headphone-integrated-clippy-v1.json`: `e06e012689f80bc3d16b960a3367f24f5cbed4ae923ca26ccb908b67b5940d36`.
+
+Model production-library Clippy passed in the worker. Model test-target Clippy
+retains an unrelated pre-existing field-reassignment lint in headroom.rs:201;
+this mapping change does not claim that broader gate passed.

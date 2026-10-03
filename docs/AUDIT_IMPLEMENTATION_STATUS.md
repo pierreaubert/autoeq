@@ -1311,3 +1311,34 @@ independent test consumer. Installed third-party application parsing/PCM for
 all advertised formats, hardware deployment and the remaining interruption
 matrix are still open. No production exporter, manifest/lock, hardware or UI
 behavior changed.
+
+
+## Gitea setup failure and pinned Just installation
+
+Private-service Actions run [325](http://192.168.1.32:3001/pierre/autoeq/actions/runs/325)
+failed on runner `spin` at main commit `6ccc6a3c`, before this audit branch.
+The retained log shows `extractions/setup-just@v4` failing its GitHub release
+request with `401 Bad credentials`. Its nested composite-action input values
+appear unexpanded in that log; the precise credential/input propagation cause
+is not established. The same run's Cargo metadata references the old missing
+GPUI sibling checkout. The audit branch already uses a public GPUI revision,
+but that repair has not been verified in a server run.
+
+Commit `4d189a8`, integrated as `76078de6`, replaces all six Just setup steps
+per provider with `cargo install --locked --version 1.58.0 just`, followed by
+`just --version`. GitHub and Gitea job bodies still match after ignoring trailing
+whitespace. Both workflow pairs parse as YAML; all four existing parity tests,
+shell syntax and diff checks pass. A fresh isolated offline Cargo installation
+on macOS builds and reports Just 1.58.0 using the packaged lockfile. Root verified
+all 16 raw command logs, six unchanged input hashes and byte equality of the
+integrated workflow/parity files. This establishes local installation and
+workflow structure; Linux execution and a successful Gitea run remain open.
+
+The server reports version 28.0.0. Run 325 executes `upload-artifact@v4` but
+reports no files under `target/qa/` and uploads no artifact. This does not prove
+or disprove payload upload compatibility. Runner binary version and action
+patching configuration remain unknown. No workflow was triggered or published.
+Evidence: `/private/tmp/autoeq-a00-ci-just-evidence-20261003-final/` and
+`/private/tmp/autoeq-gitea-325-evidence-20261003/`.
+The earlier exact-whitespace assertion failure is preserved separately as a
+review-helper diagnostic; the final check uses the existing parity policy.

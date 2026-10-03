@@ -5,6 +5,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 import tempfile
 import unittest
@@ -140,6 +144,61 @@ result_path.write_text(json.dumps(result, separators=(",", ":")))
         )
         self.assertTrue(process["watchdog_timed_out"])
         self.assertLess(process["exit_code"], 0)
+
+    @unittest.skipUnless(os.name == "posix", "real SIGINT requires POSIX")
+    def test_sigint_reaps_active_child_and_persists_partial_run(self):
+        binary = self.binary("hang", watchdog_millis=30_000)
+        pid_path = self.root / "interrupt-child.pid"
+        output = self.root / "interrupt-run"
+        process = subprocess.Popen(
+            [sys.executable, str(Path(matrix.__file__).resolve()),
+             "--binary", str(binary), "--output", str(output),
+             "--cell-id", "cell-000", "--cell-id", "cell-001"],
+            env={**os.environ, "MATRIX_TEST_PID_FILE": str(pid_path)},
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        child_pid = None
+        try:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                if pid_path.exists():
+                    value = pid_path.read_text().strip()
+                    if value:
+                        child_pid = int(value)
+                        break
+                if process.poll() is not None:
+                    break
+                time.sleep(0.01)
+            self.assertIsNotNone(child_pid, "benchmark child must be running before SIGINT")
+            os.kill(child_pid, 0)
+            process.send_signal(signal.SIGINT)
+            stdout, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 130, (stdout, stderr))
+            with self.assertRaises(ProcessLookupError):
+                os.kill(child_pid, 0)
+            receipt = self.run_record(output)
+            self.assertEqual(receipt["status"], "interrupted")
+            self.assertFalse(receipt["complete_matrix"])
+            self.assertEqual(receipt["attempted_cell_ids"], ["cell-000"])
+            self.assertEqual(receipt["missing_cell_ids"], ["cell-001"])
+            self.assertEqual(receipt["unresolved_result_cell_ids"], ["cell-000", "cell-001"])
+            self.assertEqual(receipt["cells"][0]["runner_status"], "interrupted")
+            cell_receipt = json.loads((
+                Path(receipt["cells"][0]["cell_directory"]) / "cell-process.json"
+            ).read_bytes())
+            self.assertFalse(cell_receipt["watchdog_timed_out"])
+            self.assertIsNone(cell_receipt["result_sha256"])
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.communicate(timeout=10)
+            if child_pid is not None:
+                try:
+                    os.killpg(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
 
     def test_nonzero_exit_and_invalid_json_keep_failure_artifacts(self):
         for mode, expected_code in (("exit-failure", 7), ("invalid-json", 0)):

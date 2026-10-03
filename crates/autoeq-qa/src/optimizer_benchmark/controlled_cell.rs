@@ -13,6 +13,30 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 const CELL_SPEC_SCHEMA: &str = "autoeq.optimizer_benchmark_cell/v1";
 const CELL_RESULT_SCHEMA: &str = "autoeq.optimizer_benchmark_cell_result/v1";
+const RATE_CANARY_SPEC_SCHEMA: &str = "autoeq.optimizer_rate_canary_cell/v1";
+const RATE_CANARY_INVENTORY_SCHEMA: &str = "autoeq.optimizer_rate_canary_cell_inventory/v1";
+const RATE_CANARY_SAMPLE_RATES_HZ: [u32; 2] = [44_100, 96_000];
+const RATE_CANARY_CELL_COUNT: usize = 112;
+const RATE_CANARY_CASE_IDS: [&str; 3] = [
+    "analytic_headphone_peq",
+    "asr_beyerdynamic_dt1990pro",
+    "measured_stereo_8361a",
+];
+const RATE_CANARY_BACKEND_NAMES: [&str; 13] = [
+    "autoeq:bo",
+    "autoeq:cmaes",
+    "autoeq:cobra",
+    "autoeq:cobyla",
+    "autoeq:de",
+    "autoeq:isres",
+    "autoeq:nsga2",
+    "autoeq:nsga3",
+    "mh:de",
+    "mh:firefly",
+    "mh:pso",
+    "mh:rga",
+    "mh:tlbo",
+];
 // These axes are code-pinned benchmark policy, not fixture-manifest inputs.
 // Every concrete combination is serialized into the hashed cell inventory.
 const ROOT_CAPS: [usize; 3] = [128, 512, 2048];
@@ -26,8 +50,23 @@ struct CellSpecBuildContext<'a> {
     manifest_sha256: &'a str,
 }
 
+#[derive(Clone, Copy)]
+struct CellSpecPlan {
+    seed: u64,
+    root_search_budget: usize,
+    purpose: CellPurpose,
+}
+
+#[derive(Clone, Copy)]
+struct CellSpecFormat {
+    sample_rate_hz: f64,
+    schema: &'static str,
+    rate_tag_hz: Option<u32>,
+}
+
 struct InvalidCandidateResultInput {
     spec: BenchmarkCellSpec,
+    expected_cell_count: usize,
     spec_inventory_sha256: String,
     executable_path: String,
     executable_sha256: String,
@@ -95,6 +134,18 @@ pub struct CellSpecInventory {
     pub cells: Vec<BenchmarkCellSpec>,
 }
 
+/// Separate inventory for filter-realization-rate canary cells.
+#[derive(Debug, Clone, Serialize)]
+pub struct RateCanaryCellSpecInventory {
+    pub schema: &'static str,
+    pub expected_cell_count: usize,
+    pub spec_inventory_sha256: String,
+    /// States that rates describe digital filter realization, not capture hardware.
+    pub sample_rate_scope: &'static str,
+    pub sample_rates_hz: Vec<u32>,
+    pub cells: Vec<BenchmarkCellSpec>,
+}
+
 impl BenchmarkCellSpec {
     fn new(
         declaration: &FixtureDeclaration,
@@ -105,6 +156,65 @@ impl BenchmarkCellSpec {
         root_search_budget: usize,
         purpose: CellPurpose,
     ) -> Result<Self, String> {
+        Self::new_with_format(
+            declaration,
+            fixture_sha256,
+            context,
+            backend,
+            CellSpecPlan {
+                seed,
+                root_search_budget,
+                purpose,
+            },
+            CellSpecFormat {
+                sample_rate_hz: context.manifest.sample_rate_hz,
+                schema: CELL_SPEC_SCHEMA,
+                rate_tag_hz: None,
+            },
+        )
+    }
+
+    fn new_for_rate_canary(
+        declaration: &FixtureDeclaration,
+        fixture_sha256: &str,
+        context: &CellSpecBuildContext<'_>,
+        backend: &str,
+        plan: CellSpecPlan,
+        sample_rate_hz: u32,
+    ) -> Result<Self, String> {
+        Self::new_with_format(
+            declaration,
+            fixture_sha256,
+            context,
+            backend,
+            plan,
+            CellSpecFormat {
+                sample_rate_hz: f64::from(sample_rate_hz),
+                schema: RATE_CANARY_SPEC_SCHEMA,
+                rate_tag_hz: Some(sample_rate_hz),
+            },
+        )
+    }
+
+    fn new_with_format(
+        declaration: &FixtureDeclaration,
+        fixture_sha256: &str,
+        context: &CellSpecBuildContext<'_>,
+        backend: &str,
+        plan: CellSpecPlan,
+        format: CellSpecFormat,
+    ) -> Result<Self, String> {
+        let CellSpecPlan {
+            seed,
+            root_search_budget,
+            purpose,
+        } = plan;
+        let CellSpecFormat {
+            sample_rate_hz,
+            schema,
+            rate_tag_hz,
+        } = format;
+        validate_sample_rate_support(declaration, sample_rate_hz)?;
         let divisor = match purpose {
             CellPurpose::Adaptive => 4,
             CellPurpose::Refinement => 2,
@@ -116,16 +226,26 @@ impl BenchmarkCellSpec {
             ));
         }
         let stage_search_budget = root_search_budget / divisor;
-        let cell_id = format!(
-            "{}:{}:{}:seed{}:cap{}",
-            purpose.as_str(),
-            declaration.id,
-            backend,
-            seed,
-            root_search_budget
-        );
+        let cell_id = match rate_tag_hz {
+            Some(rate_hz) => format!(
+                "rate{rate_hz}hz:{}:{}:{}:seed{}:cap{}",
+                purpose.as_str(),
+                declaration.id,
+                backend,
+                seed,
+                root_search_budget
+            ),
+            None => format!(
+                "{}:{}:{}:seed{}:cap{}",
+                purpose.as_str(),
+                declaration.id,
+                backend,
+                seed,
+                root_search_budget
+            ),
+        };
         Ok(Self {
-            schema: CELL_SPEC_SCHEMA.to_string(),
+            schema: schema.to_string(),
             cell_id,
             manifest_sha256: context.manifest_sha256.to_string(),
             fixture_sha256: fixture_sha256.to_string(),
@@ -140,7 +260,7 @@ impl BenchmarkCellSpec {
             process_watchdog_millis: PROCESS_WATCHDOG_MILLIS,
             filter_count: context.manifest.filter_count,
             population_size: context.manifest.population_size,
-            sample_rate_hz_bits: context.manifest.sample_rate_hz.to_bits(),
+            sample_rate_hz_bits: sample_rate_hz.to_bits(),
             frequency_min_hz_bits: declaration.frequency_min_hz.to_bits(),
             frequency_max_hz_bits: declaration.frequency_max_hz.to_bits(),
             min_q_bits: context.manifest.filter_limits.min_q.to_bits(),
@@ -549,8 +669,209 @@ pub fn benchmark_cell_spec_inventory() -> Result<CellSpecInventory, String> {
     })
 }
 
+/// Generate the bounded 44.1/96 kHz filter-realization canary inventory.
+///
+/// The rates in this inventory describe digital filter synthesis and numerical
+/// realization only; fixture acquisition rates remain unknown where unrecorded.
+///
+/// # Errors
+/// Returns an error if the fixed manifest, registry, fixture provenance, or
+/// sample-rate support does not match the declared 112-cell matrix.
+pub fn rate_canary_cell_spec_inventory() -> Result<RateCanaryCellSpecInventory, String> {
+    let cells = rate_canary_cell_specs()?;
+    let bytes = serde_json::to_vec(&cells).map_err(|error| error.to_string())?;
+    Ok(RateCanaryCellSpecInventory {
+        schema: RATE_CANARY_INVENTORY_SCHEMA,
+        expected_cell_count: cells.len(),
+        spec_inventory_sha256: sha256_hex(&bytes),
+        sample_rate_scope: "digital_filter_realization_hz; measurement_capture_rate_not_asserted",
+        sample_rates_hz: RATE_CANARY_SAMPLE_RATES_HZ.to_vec(),
+        cells,
+    })
+}
+
+/// Generate all declared ordinary, adaptive, refinement, Pareto, and observer rate cells.
+///
+/// # Errors
+/// Returns an error if registry cardinality, fixture identity, or rate/band
+/// validation differs from the fixed canary contract.
+pub fn rate_canary_cell_specs() -> Result<Vec<BenchmarkCellSpec>, String> {
+    let manifest = benchmark_manifest()?;
+    if !manifest.seed_set.contains(&42) {
+        return Err("the rate canary requires seed 42".to_string());
+    }
+    ensure_unique_case_ids(&manifest.cases)?;
+    let mut case_ids = manifest
+        .cases
+        .iter()
+        .map(|case| case.id.as_str())
+        .collect::<Vec<_>>();
+    case_ids.sort_unstable();
+    let mut expected_case_ids = RATE_CANARY_CASE_IDS.to_vec();
+    expected_case_ids.sort_unstable();
+    if case_ids != expected_case_ids {
+        return Err(format!(
+            "rate canary manifest cases differ from the fixed three-case plan: {case_ids:?}"
+        ));
+    }
+
+    let root = repository_root();
+    let manifest_sha = sha256_hex(FIXED_MANIFEST.as_bytes());
+    let fixture_ids = manifest
+        .cases
+        .iter()
+        .map(|case| {
+            let sources = snapshot_declared_sources(&root, &case.source_paths)?;
+            let provenance = fixture_provenance(case, &sources)?;
+            let bytes = serde_json::to_vec(&provenance).map_err(|error| error.to_string())?;
+            Ok((case.id.as_str(), sha256_hex(&bytes)))
+        })
+        .collect::<Result<BTreeMap<_, _>, String>>()?;
+    let mut backends = autoeq_optim::optim::registry::all_algorithms()
+        .into_iter()
+        .map(|backend| {
+            let name = backend.name().to_string();
+            let supports_callback = backend.capabilities().iteration_callback;
+            (name, supports_callback)
+        })
+        .collect::<Vec<_>>();
+    backends.sort_by(|left, right| left.0.cmp(&right.0));
+    let backend_names = backends
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    let mut expected_backends = RATE_CANARY_BACKEND_NAMES.to_vec();
+    expected_backends.sort_unstable();
+    if backend_names != expected_backends {
+        return Err(format!(
+            "registered backend set differs from fixed rate-canary plan: {backend_names:?}"
+        ));
+    }
+    let analytic_case = manifest
+        .cases
+        .iter()
+        .find(|case| case.kind == "analytic_peq" && case.domain == "headphone")
+        .ok_or_else(|| "fixed manifest has no analytic headphone case".to_string())?;
+    let context = CellSpecBuildContext {
+        manifest: &manifest,
+        manifest_sha256: &manifest_sha,
+    };
+    let mut specs = Vec::with_capacity(RATE_CANARY_CELL_COUNT);
+
+    for sample_rate_hz in RATE_CANARY_SAMPLE_RATES_HZ {
+        for case in &manifest.cases {
+            let fixture_hash = fixture_ids
+                .get(case.id.as_str())
+                .ok_or_else(|| format!("missing source identity for {}", case.id))?;
+            for (backend, _) in &backends {
+                specs.push(BenchmarkCellSpec::new_for_rate_canary(
+                    case,
+                    fixture_hash,
+                    &context,
+                    backend,
+                    CellSpecPlan {
+                        seed: 42,
+                        root_search_budget: 128,
+                        purpose: CellPurpose::Ordinary,
+                    },
+                    sample_rate_hz,
+                )?);
+            }
+
+            if !backends.iter().any(|(name, _)| name == "autoeq:de") {
+                return Err("rate canary requires registered autoeq:de".to_string());
+            }
+            for (purpose, cap) in [(CellPurpose::Adaptive, 512), (CellPurpose::Refinement, 512)] {
+                specs.push(BenchmarkCellSpec::new_for_rate_canary(
+                    case,
+                    fixture_hash,
+                    &context,
+                    "autoeq:de",
+                    CellSpecPlan {
+                        seed: 42,
+                        root_search_budget: cap,
+                        purpose,
+                    },
+                    sample_rate_hz,
+                )?);
+            }
+
+            for backend in ["autoeq:nsga2", "autoeq:nsga3", "autoeq:bo"] {
+                if !backends.iter().any(|(name, _)| name == backend) {
+                    return Err(format!("rate canary requires registered {backend}"));
+                }
+                specs.push(BenchmarkCellSpec::new_for_rate_canary(
+                    case,
+                    fixture_hash,
+                    &context,
+                    backend,
+                    CellSpecPlan {
+                        seed: 42,
+                        root_search_budget: 512,
+                        purpose: CellPurpose::ParetoFront,
+                    },
+                    sample_rate_hz,
+                )?);
+            }
+        }
+
+        let fixture_hash = fixture_ids
+            .get(analytic_case.id.as_str())
+            .ok_or_else(|| "missing analytic fixture source identity".to_string())?;
+        for (backend, purpose) in [
+            ("autoeq:cobra", CellPurpose::ObserverStop),
+            ("autoeq:cobyla", CellPurpose::ObserverUnsupported),
+        ] {
+            let supports_callback = backends
+                .iter()
+                .find(|(name, _)| name == backend)
+                .map(|(_, supports)| *supports)
+                .ok_or_else(|| format!("rate canary requires registered {backend}"))?;
+            let expected_support = purpose == CellPurpose::ObserverStop;
+            if supports_callback != expected_support {
+                return Err(format!(
+                    "rate canary callback expectation for {backend} changed"
+                ));
+            }
+            specs.push(BenchmarkCellSpec::new_for_rate_canary(
+                analytic_case,
+                fixture_hash,
+                &context,
+                backend,
+                CellSpecPlan {
+                    seed: 42,
+                    root_search_budget: 128,
+                    purpose,
+                },
+                sample_rate_hz,
+            )?);
+        }
+    }
+
+    ensure_unique_spec_ids(&specs)?;
+    if specs.len() != RATE_CANARY_CELL_COUNT {
+        return Err(format!(
+            "rate canary produced {} cells, expected {RATE_CANARY_CELL_COUNT}",
+            specs.len()
+        ));
+    }
+    Ok(specs)
+}
+
 /// Read and execute a bounded JSON cell specification after exact registry validation.
 pub fn run_benchmark_cell_spec_file(path: &Path) -> Result<ControlledCellResult, String> {
+    run_cell_spec_file(path, false)
+}
+
+/// Read and execute one rate-canary cell specification.
+///
+/// # Errors
+/// Returns an error if the file is invalid, stale, or outside the fixed rate inventory.
+pub fn run_rate_canary_cell_spec_file(path: &Path) -> Result<ControlledCellResult, String> {
+    run_cell_spec_file(path, true)
+}
+
+fn run_cell_spec_file(path: &Path, rate_canary: bool) -> Result<ControlledCellResult, String> {
     let file = File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut bytes = Vec::new();
     file.take(SPEC_FILE_MAX_BYTES + 1)
@@ -563,7 +884,11 @@ pub fn run_benchmark_cell_spec_file(path: &Path) -> Result<ControlledCellResult,
     }
     let supplied: BenchmarkCellSpec = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid cell spec JSON: {error}"))?;
-    run_benchmark_cell_spec(supplied)
+    if rate_canary {
+        run_rate_canary_cell_spec(supplied)
+    } else {
+        run_benchmark_cell_spec(supplied)
+    }
 }
 
 /// Execute one exact generated spec; modified or stale specs refuse before input scoring.
@@ -580,12 +905,42 @@ pub fn run_benchmark_cell_spec(spec: BenchmarkCellSpec) -> Result<ControlledCell
             spec.cell_id
         ));
     }
-    execute_cell(spec, inventory.spec_inventory_sha256)
+    execute_cell(spec, inventory.spec_inventory_sha256, EXPECTED_CELL_COUNT)
+}
+
+/// Execute one exact rate-canary spec after validating its separate inventory identity.
+///
+/// # Errors
+/// Returns an error if the spec is not an exact member of the fixed 112-cell inventory.
+pub fn run_rate_canary_cell_spec(spec: BenchmarkCellSpec) -> Result<ControlledCellResult, String> {
+    let inventory = rate_canary_cell_spec_inventory()?;
+    let expected = inventory
+        .cells
+        .iter()
+        .find(|candidate| candidate.cell_id == spec.cell_id)
+        .ok_or_else(|| {
+            format!(
+                "rate-canary cell ID is not in the fixed matrix: {}",
+                spec.cell_id
+            )
+        })?;
+    if expected != &spec {
+        return Err(format!(
+            "rate-canary cell spec {} differs from the current fixed manifest or registry",
+            spec.cell_id
+        ));
+    }
+    execute_cell(
+        spec,
+        inventory.spec_inventory_sha256,
+        RATE_CANARY_CELL_COUNT,
+    )
 }
 
 fn execute_cell(
     spec: BenchmarkCellSpec,
     spec_inventory_sha256: String,
+    expected_cell_count: usize,
 ) -> Result<ControlledCellResult, String> {
     let started = Instant::now();
     let manifest = benchmark_manifest()?;
@@ -594,6 +949,7 @@ fn execute_cell(
         .iter()
         .find(|case| case.id == spec.case_id)
         .ok_or_else(|| format!("unknown case in validated cell spec {}", spec.cell_id))?;
+    validate_sample_rate_support(declaration, spec.sample_rate_hz())?;
     let root = repository_root();
     let source_snapshot = snapshot_declared_sources(&root, &declaration.source_paths)?;
     let provenance = fixture_provenance(declaration, &source_snapshot)?;
@@ -605,8 +961,8 @@ fn execute_cell(
         ));
     }
     let (executable_path, executable_sha256) = executable_identity()?;
-    let case = load_case(declaration, &manifest, &source_snapshot)?;
     let sample_rate_hz = spec.sample_rate_hz();
+    let case = load_case(declaration, &manifest, &source_snapshot, sample_rate_hz)?;
     let frequency_bounds_hz = spec.frequency_bounds_hz();
     let q_bounds = spec.q_bounds();
     let gain_bounds_db = spec.gain_bounds_db();
@@ -859,6 +1215,7 @@ fn execute_cell(
                 Err(reason) => {
                     return build_invalid_candidate_result(InvalidCandidateResultInput {
                         spec,
+                        expected_cell_count,
                         spec_inventory_sha256,
                         executable_path,
                         executable_sha256,
@@ -936,7 +1293,7 @@ fn execute_cell(
     };
     Ok(ControlledCellResult {
         schema: CELL_RESULT_SCHEMA,
-        matrix_expected_cell_count: EXPECTED_CELL_COUNT,
+        matrix_expected_cell_count: expected_cell_count,
         matrix_spec_inventory_sha256: spec_inventory_sha256,
         cell_id: spec.cell_id.clone(),
         spec_sha256: spec.hash()?,
@@ -990,7 +1347,7 @@ fn build_invalid_candidate_result(
     );
     Ok(ControlledCellResult {
         schema: CELL_RESULT_SCHEMA,
-        matrix_expected_cell_count: EXPECTED_CELL_COUNT,
+        matrix_expected_cell_count: input.expected_cell_count,
         matrix_spec_inventory_sha256: input.spec_inventory_sha256,
         cell_id: input.spec.cell_id.clone(),
         spec_sha256: input.spec.hash()?,
@@ -1186,6 +1543,16 @@ pub fn write_cell_specs() -> Result<(), String> {
         .map_err(|error| format!("cannot write controlled cell specs: {error}"))
 }
 
+/// Print the separate 44.1/96 kHz canary inventory for an external supervisor.
+///
+/// # Errors
+/// Returns an error if the fixed inventory cannot be generated or written.
+pub fn write_rate_canary_cell_specs() -> Result<(), String> {
+    let inventory = rate_canary_cell_spec_inventory()?;
+    serde_json::to_writer(std::io::stdout(), &inventory)
+        .map_err(|error| format!("cannot write rate-canary cell specs: {error}"))
+}
+
 fn classify_failed_pipeline(
     terminations: impl IntoIterator<Item = OptimizerTermination>,
     deadline_reached: bool,
@@ -1305,14 +1672,18 @@ fn executable_identity() -> Result<(String, String), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        CellPurpose, ControlledCellOutcome, StageDispatchRecord, authoritative_failure_outcome,
-        benchmark_cell_spec_inventory, benchmark_cell_specs, classify_failed_pipeline,
-        ensure_unique_spec_ids, observer_outcome_matches_purpose, run_benchmark_cell_spec,
+        CellPurpose, ControlledCellOutcome, RATE_CANARY_BACKEND_NAMES, RATE_CANARY_CASE_IDS,
+        RATE_CANARY_INVENTORY_SCHEMA, RATE_CANARY_SAMPLE_RATES_HZ, StageDispatchRecord,
+        authoritative_failure_outcome, benchmark_cell_spec_inventory, benchmark_cell_specs,
+        classify_failed_pipeline, ensure_unique_spec_ids, observer_outcome_matches_purpose,
+        rate_canary_cell_spec_inventory, rate_canary_cell_specs, run_benchmark_cell_spec,
+        run_rate_canary_cell_spec,
     };
     use crate::optimizer_benchmark::{
         benchmark_manifest, ensure_unique_case_ids, ensure_unique_seeds,
     };
     use autoeq_optim::optim::OptimizerTermination;
+    use std::collections::BTreeSet;
 
     #[test]
     fn generated_matrix_has_exact_declared_cells_and_stage_quotas() {
@@ -1409,8 +1780,131 @@ mod tests {
         let second = benchmark_cell_spec_inventory().expect("same fixed inventory");
         assert_eq!(first.expected_cell_count, 841);
         assert_eq!(first.cells.len(), first.expected_cell_count);
+        assert_eq!(
+            first.spec_inventory_sha256,
+            "427643cb51f91cc6c74645b18f6a4cb199d9f383ccd597f91a9c4ad82598ebd5"
+        );
         assert_eq!(first.spec_inventory_sha256, second.spec_inventory_sha256);
         assert_eq!(first.cells, second.cells);
+    }
+
+    #[test]
+    fn multirate_canary_has_a_distinct_complete_inventory_and_ids() {
+        let inventory = rate_canary_cell_spec_inventory().expect("rate canary inventory");
+        let specs = rate_canary_cell_specs().expect("rate canary specs");
+        assert_eq!(inventory.schema, RATE_CANARY_INVENTORY_SCHEMA);
+        assert_eq!(inventory.expected_cell_count, 112);
+        assert_eq!(inventory.sample_rates_hz, RATE_CANARY_SAMPLE_RATES_HZ);
+        assert_eq!(inventory.cells, specs);
+        assert_eq!(specs.len(), 112);
+        assert_eq!(
+            specs
+                .iter()
+                .map(|spec| spec.case_id.as_str())
+                .collect::<BTreeSet<_>>(),
+            RATE_CANARY_CASE_IDS.into_iter().collect::<BTreeSet<_>>()
+        );
+        assert_eq!(
+            specs
+                .iter()
+                .filter(|spec| spec.purpose == CellPurpose::Ordinary)
+                .map(|spec| spec.backend.as_str())
+                .collect::<BTreeSet<_>>(),
+            RATE_CANARY_BACKEND_NAMES
+                .into_iter()
+                .collect::<BTreeSet<_>>()
+        );
+        assert!(
+            specs
+                .iter()
+                .all(|spec| spec.schema == "autoeq.optimizer_rate_canary_cell/v1")
+        );
+        assert!(specs.iter().all(|spec| {
+            spec.cell_id.starts_with("rate44100hz:") || spec.cell_id.starts_with("rate96000hz:")
+        }));
+        ensure_unique_spec_ids(&specs).expect("rate-qualified IDs are unique");
+
+        for (purpose, expected) in [
+            (CellPurpose::Ordinary, 78),
+            (CellPurpose::Adaptive, 6),
+            (CellPurpose::Refinement, 6),
+            (CellPurpose::ParetoFront, 18),
+            (CellPurpose::ObserverStop, 2),
+            (CellPurpose::ObserverUnsupported, 2),
+        ] {
+            assert_eq!(
+                specs.iter().filter(|spec| spec.purpose == purpose).count(),
+                expected
+            );
+        }
+        assert!(
+            specs
+                .iter()
+                .filter(|spec| {
+                    matches!(
+                        spec.purpose,
+                        CellPurpose::Adaptive | CellPurpose::Refinement
+                    )
+                })
+                .all(|spec| {
+                    spec.backend == "autoeq:de"
+                        && spec.root_search_budget == 512
+                        && spec.stage_search_budget
+                            == if spec.purpose == CellPurpose::Adaptive {
+                                128
+                            } else {
+                                256
+                            }
+                })
+        );
+    }
+
+    #[test]
+    fn analytic_fixture_and_objective_use_the_requested_realization_rate() {
+        let manifest = benchmark_manifest().expect("fixed manifest");
+        let declaration = manifest
+            .cases
+            .iter()
+            .find(|case| case.id == "analytic_headphone_peq")
+            .expect("analytic headphone fixture");
+        let low = super::super::load_analytic_case(declaration, &manifest, 44_100.0)
+            .expect("44.1 kHz analytic plant");
+        let high = super::super::load_analytic_case(declaration, &manifest, 96_000.0)
+            .expect("96 kHz analytic plant");
+        assert_eq!(low.training[0].data.srate, 44_100.0);
+        assert_eq!(high.training[0].data.srate, 96_000.0);
+        assert!(
+            low.training[0]
+                .source_curve
+                .spl
+                .iter()
+                .zip(high.training[0].source_curve.spl.iter())
+                .any(|(left, right)| (left - right).abs() > 1e-8)
+        );
+    }
+
+    #[test]
+    fn rate_loader_rejects_a_correction_band_at_nyquist() {
+        let manifest = benchmark_manifest().expect("fixed manifest");
+        let mut declaration = manifest.cases[0].clone();
+        declaration.frequency_max_hz = 22_050.0;
+        let error = super::super::validate_sample_rate_support(&declaration, 44_100.0)
+            .expect_err("upper edge at Nyquist must refuse");
+        assert!(error.contains("Nyquist"));
+        assert!(super::super::validate_sample_rate_support(&declaration, f64::NAN).is_err());
+    }
+
+    #[test]
+    fn modified_rate_canary_spec_refuses_before_execution() {
+        let mut spec = rate_canary_cell_specs()
+            .expect("rate canary specs")
+            .remove(0);
+        spec.sample_rate_hz_bits = f64::from(22_050_u32).to_bits();
+        assert!(
+            run_rate_canary_cell_spec(spec)
+                .expect_err("modified rate must refuse")
+                .contains("differs from the current fixed manifest")
+        );
     }
 
     #[test]

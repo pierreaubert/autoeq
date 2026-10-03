@@ -2312,3 +2312,35 @@ with source hashes unchanged. Logs, exact argv and hashes are retained in
 This fixes the callback contract; it does not add cancellation checks inside
 GP fitting or EHVI proposal computation. The observed deadline failure remains
 open, and the full matrix is still pending watchdog review.
+
+
+### A07 EHVI cancellation and real supervisor smoke (2026-10-03)
+
+- Local math commit `e80880a` on `fix/a07-bo-cooperative-stop` adds
+  `bayesian_multi_objective_with_stop`. It latches stop requests, checks before
+  objective admission, between GP lengthscale trials and EHVI candidates, drains
+  admitted parallel evaluations, and reports stopped runs without success.
+  Existing entry points keep their no-stop behavior. Active numerical kernels and
+  objective calls finish cooperatively; there is no hard preemption guarantee.
+- Seven focused regression cases cover pre-stop, serial/parallel initial batches,
+  surrogate work, acquisition interruption, latched requests, final-evaluation
+  stopping, and seeded no-stop equivalence. Full library gate: **258 passed,
+  one ignored**; strict library/test Clippy passed. Retained logs and before/after
+  hashes: `/Volumes/home_tmp/tmp/math-a07-bo-stop-evidence/full-tests-v2.*` and
+  `clippy-v2.*`. A subsequent edit only clarified the report success doc comment.
+  This commit is local and is not yet wired into AutoEQ or published.
+- The final benchmark executable SHA is
+  `27a313015658f6d5ebbbea38852443ba763f5412ef98524b3b03de7bb4f7606b`.
+  Its 841-cell inventory is unchanged. Root ran the actual supervisor on four
+  cells: COBRA ordinary completed, COBRA observer stopped, COBYLA refused an
+  unsupported observer, and the existing BO EHVI process exceeded 30 seconds.
+  The supervisor killed/reaped BO with exit -9, retained its failure, and marked
+  the matrix incomplete with precisely that unresolved result and no missing
+  attempts. This is evidence of the watchdog contract, not a passing BO run.
+- Evidence: `/Volumes/home_tmp/tmp/autoeq-a07-shared-pipeline-evidence/root-runner-smoke-v3`.
+  All three returned results passed the independent budget/accounting verifier;
+  all eleven referenced child artifact hashes matched. Independent receipt:
+  `/Users/pierre/a07-runner-smoke-v3-independent-review.json`.
+- Remaining: wire the stop predicate through AutoEQ's controlled BO path, reproduce
+  the deadline behavior on the real workload, then run the full matrix. UI remains
+  deferred and the overall audit remains active.

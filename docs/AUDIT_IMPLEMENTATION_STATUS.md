@@ -2803,3 +2803,30 @@ receipt is `root-verification.json` in that directory. No path dependency or
 lockfile change is committed. Main integration still requires the published math
 NSGA dependency; these results do not establish recovery of an entire multi-stage
 RoomEQ job.
+
+
+### A16 separate realization-rate canary integrated (2026-10-03)
+
+Commit **7ae4faf** integrates the reviewed 112-cell canary at 44.1 and 96 kHz.
+It covers all 13 registered backends across the three fixed cases, plus bounded
+adaptive, refinement, Pareto, and callback checks. Rates describe digital filter
+realization; no measurement acquisition-rate or hardware claim is made. The
+existing 48 kHz 841-cell inventory retains its exact recorded hash.
+
+The separate Gitea workflow has a 240-minute job limit, records locked dependency
+metadata, and refuses to build/run if metadata resolution fails. No corresponding
+GitHub artifact workflow was added. The workflow has not been published or run.
+
+Root reviewed rate propagation through analytic plant synthesis and all objective
+loaders, then integrated the change without conflicts. The five-module Python CI
+contract command passes **61 tests**, including the previously added real SIGINT
+regression. Log: `/Users/pierre/a16-integrated-python-contracts.log`.
+The first invocation used Apple's Python 3.9 and could not import `tomllib`;
+rerunning with `/opt/homebrew/bin/python3` passed. Agent gates also report focused
+Rust tests and scoped strict Clippy passing; package-wide test Clippy retains an
+unrelated existing dead-code failure in `tests/fir_tests/compute.rs`.
+
+A local 112-cell run is authorized on the frozen feature commit **c04b736**, using
+committed public dependencies without path overrides. Execution and independent
+response verification are pending; inventory tests alone do not establish
+optimizer correctness or acoustic acceptance at these rates.

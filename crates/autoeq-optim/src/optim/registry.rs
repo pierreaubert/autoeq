@@ -28,6 +28,9 @@ pub fn all_algorithms() -> Vec<Box<dyn FilterOptimizer>> {
     use super::cobyla::AutoeqCobylaBackend;
     algos.push(Box::new(AutoeqCobylaBackend::new("autoeq:cobyla")));
 
+    use super::cobra::AutoeqCobraBackend;
+    algos.push(Box::new(AutoeqCobraBackend::new("autoeq:cobra")));
+
     use super::isres::AutoeqIsresBackend;
     algos.push(Box::new(AutoeqIsresBackend::new("autoeq:isres")));
 
@@ -155,10 +158,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn resolves_cobra_with_native_inequalities_without_saved_candidate_support() {
+        for name in ["autoeq:cobra", "cobra", "COBRA"] {
+            let backend = resolve(name).expect("COBRA resolves");
+            assert_eq!(backend.name(), "autoeq:cobra");
+            assert!(backend.capabilities().nonlinear_ineq);
+            assert!(backend.capabilities().iteration_callback);
+            assert!(!backend.supports_initial_candidate());
+        }
+    }
+
+    #[test]
     fn resolves_bayesian_optimizer_aliases() {
         for name in ["autoeq:bo", "bo", "bayes", "bayesian", "autoeq:bayes"] {
             let backend = resolve(name).expect("BO backend should resolve");
             assert_eq!(backend.name(), "autoeq:bo");
+        }
+    }
+
+    #[test]
+    fn warm_start_capability_is_explicit_for_registered_backends() {
+        for name in [
+            "autoeq:cobyla",
+            "autoeq:isres",
+            "autoeq:cmaes",
+            "autoeq:bo",
+            "autoeq:nsga2",
+            "autoeq:nsga3",
+            "autoeq:de",
+        ] {
+            assert!(
+                resolve(name)
+                    .expect("supported backend should resolve")
+                    .supports_initial_candidate(),
+                "{name} should accept a saved candidate"
+            );
+        }
+        for name in ["mh:de", "mh:pso", "mh:rga", "mh:tlbo", "mh:firefly"] {
+            assert!(
+                !resolve(name)
+                    .expect("MH backend should resolve")
+                    .supports_initial_candidate(),
+                "{name} does not seed from x0"
+            );
         }
     }
 }

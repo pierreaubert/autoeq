@@ -6,10 +6,17 @@ use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optim
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_normalization;
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
 use super::prepared_single_channel_eq::run_optimization_pass;
+use super::prepared_single_channel_eq::run_optimization_pass_with_context;
+use super::prepared_single_channel_eq::{OptimizationPassContext, OptimizationPassNormalization};
 use super::resources::{self, EqResources};
+use super::run_control::{
+    ControlledEqError, ControlledEqOptimizationResult, EqBudgetRefusal, EqRunControl,
+    no_search_remaining, run_optimizer, validation_objective,
+};
 use crate::Curve;
 use crate::PeqModel;
 use autoeq_optim::loss::LossType;
+use autoeq_optim::optim::run_control::OptimizerRunControl;
 use autoeq_optim::optim::setup::setup_objective_data;
 use autoeq_optim::optim::{MultiObjectiveData, OptimizerBackend, RealOptimizerBackend};
 use math_audio_iir_fir::Biquad;
@@ -18,7 +25,42 @@ use roomeq_analysis::spatial_robustness::{self, SpatialRobustnessConfig};
 use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerConfig};
 use std::collections::HashMap;
 use std::error::Error;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+#[derive(Debug)]
+pub(super) struct OptimizerStopped;
+
+impl std::fmt::Display for OptimizerStopped {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("optimization stopped by progress observer")
+    }
+}
+
+impl Error for OptimizerStopped {}
+
+pub(super) type LatchedOptimizerCallback = (
+    Option<autoeq_optim::optim::OptimProgressCallback>,
+    Arc<AtomicBool>,
+);
+
+pub(super) fn latch_observer_stop(
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+) -> LatchedOptimizerCallback {
+    let stopped = Arc::new(AtomicBool::new(false));
+    let callback = callback.map(|mut observer| {
+        let stopped = Arc::clone(&stopped);
+        Box::new(move |iteration, loss, epa| {
+            let action = observer(iteration, loss, epa);
+            if !matches!(&action, autoeq_optim::de::CallbackAction::Continue) {
+                stopped.store(true, std::sync::atomic::Ordering::Release);
+            }
+            action
+        }) as autoeq_optim::optim::OptimProgressCallback
+    });
+    (callback, stopped)
+}
 
 /// Derive audibility-veto modal evidence for one measurement using the same
 /// decomposition thresholds as the single-channel path.  Multi-measurement
@@ -360,6 +402,7 @@ pub(crate) fn prepare_multi_measurement_objective_recorded(
                 LossType::SpeakerFlat
             }
         }
+        "headphone_flat" => LossType::HeadphoneFlat,
         "score" => LossType::SpeakerScore,
         "epa" => LossType::Epa,
         _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
@@ -1021,6 +1064,10 @@ pub(crate) fn group_upper_reference_scores(
 }
 
 /// Forward iterative optimization: try 1..=max_filters, stop when improvement stalls.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves preparation and optimizer inputs"
+)]
 fn optimize_channel_eq_adaptive(
     curve: &Curve,
     config: &OptimizerConfig,
@@ -1030,8 +1077,9 @@ fn optimize_channel_eq_adaptive(
     spin_data: Option<&HashMap<String, Curve>>,
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
-    let prep = if let Some(spin_data) = spin_data {
+    let mut prep = if let Some(spin_data) = spin_data {
         prepare_single_channel_eq_with_spin(
             curve,
             config,
@@ -1049,6 +1097,54 @@ fn optimize_channel_eq_adaptive(
             normalization_mean_spl,
         )?
     };
+    prep.objective_data = validation_objective(&prep.objective_data, control);
+    let context = OptimizationPassContext {
+        objective_data: &prep.objective_data,
+        args_template: &prep.args_template,
+        peq_model: prep.peq_model,
+        sample_rate: prep.sample_rate,
+        normalization: OptimizationPassNormalization::Single(&prep.input_normalization),
+    };
+    let selection = adaptive_filter_search(&context, config, callback, backend, control)?;
+
+    // Per-filter audibility veto (Stage 1 adjudication). Report-only by
+    // default, so merely enabling the config records verdicts without
+    // changing output.
+    let (filters, loss, audibility_veto, veto_adjudication) = apply_veto_postpass(
+        selection.filters,
+        selection.loss,
+        &prep,
+        config,
+        std::slice::from_ref(curve),
+    );
+    log::info!(
+        "  Adaptive EQ optimization: {} filters, final loss={:.6}",
+        filters.len(),
+        loss
+    );
+    Ok(EqOptimizationResult {
+        filters,
+        loss,
+        optimizer_evidence: selection.optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
+    })
+}
+
+struct AdaptiveSelection {
+    filters: Vec<Biquad>,
+    loss: f64,
+    optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+}
+
+/// Shared pass selection for single- and multi-measurement adaptive EQ.
+fn adaptive_filter_search(
+    context: &OptimizationPassContext<'_>,
+    config: &OptimizerConfig,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+) -> Result<AdaptiveSelection, Box<dyn Error>> {
     let max_filters = config.num_filters;
     let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
 
@@ -1069,6 +1165,12 @@ fn optimize_channel_eq_adaptive(
     );
 
     for k in 1..=max_filters {
+        if let Some(control) = control {
+            control.check_terminal()?;
+        }
+        if k > 1 && no_search_remaining(control) {
+            break;
+        }
         let budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, k);
         let pass_callback = callback.as_ref().map(|callback| {
             let callback = std::sync::Arc::clone(callback);
@@ -1087,8 +1189,28 @@ fn optimize_channel_eq_adaptive(
                 action
             }) as autoeq_optim::optim::OptimProgressCallback
         });
-        let (filters, loss, _x, mut pass_evidence) =
-            run_optimization_pass(&prep, k, budget_per_step, config, pass_callback, backend)?;
+        let pass = run_optimization_pass_with_context(
+            context,
+            k,
+            budget_per_step,
+            config,
+            pass_callback,
+            backend,
+            control,
+        );
+        let (filters, loss, _x, mut pass_evidence) = match pass {
+            Ok(pass) => pass,
+            Err(error) if k > 1 && error.is::<EqBudgetRefusal>() => {
+                let mut evidence = error
+                    .downcast::<EqBudgetRefusal>()
+                    .expect("checked refusal type")
+                    .0;
+                evidence.selected_for_output = false;
+                optimizer_evidence.push(evidence);
+                break;
+            }
+            Err(error) => return Err(error),
+        };
         if stopped.load(std::sync::atomic::Ordering::Relaxed) {
             return Err("Adaptive EQ optimization stopped by progress callback".into());
         }
@@ -1134,39 +1256,17 @@ fn optimize_channel_eq_adaptive(
     if !uses_veto && config.elimination_threshold > 0.0 && best_filters.len() > 1 {
         let (pruned, pruned_loss) = backward_eliminate(
             best_filters,
-            &prep.objective_data,
-            prep.peq_model,
+            context.objective_data,
+            context.peq_model,
             config.elimination_threshold,
         );
         best_filters = pruned;
         best_loss = pruned_loss;
     }
-
-    // Per-filter audibility veto (Stage 1 adjudication). Report-only by
-    // default, so merely enabling the config records verdicts without
-    // changing output.
-    let (kept, veto_loss, audibility_veto, veto_adjudication) = apply_veto_postpass(
-        best_filters,
-        best_loss,
-        &prep,
-        config,
-        std::slice::from_ref(curve),
-    );
-    best_filters = kept;
-    best_loss = veto_loss;
-
-    log::info!(
-        "  Adaptive EQ optimization: {} filters, final loss={:.6}",
-        best_filters.len(),
-        best_loss
-    );
-
-    Ok(EqOptimizationResult {
+    Ok(AdaptiveSelection {
         filters: best_filters,
         loss: best_loss,
         optimizer_evidence,
-        audibility_veto,
-        veto_adjudication,
     })
 }
 
@@ -1364,6 +1464,71 @@ fn optimize_channel_eq_inner(
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_inner_with_control(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        normalization_mean_spl,
+        spin_data,
+        callback,
+        backend,
+        None,
+    )
+}
+
+/// Optimize one channel with shared search and per-stage evaluation caps.
+///
+/// The supplied control spans adaptive passes and local refinement. Validation
+/// and pruning scores are reported separately outside the search cap. Call
+/// `request_cancel` or `request_deadline` on a control clone to close the gate;
+/// this synchronous call must return before the worker can be considered joined.
+/// Existing APIs retain their historical iteration budgets.
+///
+/// # Errors
+/// Returns preparation, unsupported-backend, stop, preflight, or validation
+/// failures with cumulative counters and completed stage records.
+pub fn optimize_channel_eq_controlled_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    run_control: &OptimizerRunControl,
+    stage_budget: NonZeroUsize,
+) -> Result<ControlledEqOptimizationResult, ControlledEqError> {
+    let control = EqRunControl::new(run_control, stage_budget);
+    let result = control.check_terminal().and_then(|()| {
+        optimize_channel_eq_inner_with_control(
+            curve,
+            config,
+            resources,
+            sample_rate,
+            None,
+            None,
+            callback,
+            &RealOptimizerBackend::new(),
+            Some(&control),
+        )
+    });
+    control.finish(result)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves legacy inputs and adds optional control"
+)]
+fn optimize_channel_eq_inner_with_control(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    normalization_mean_spl: Option<f64>,
+    spin_data: Option<&HashMap<String, Curve>>,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let measurement_quality = autoeq_optim::measurements::assess_measurement_quality(curve);
     let uncertainty_scaled_config =
         uncertainty_scaled_optimizer_config(config, &measurement_quality);
@@ -1380,11 +1545,12 @@ fn optimize_channel_eq_inner(
             spin_data,
             callback,
             backend,
+            control,
         );
     }
 
     // Single-pass optimization when adaptive selection is disabled.
-    let prep = if let Some(spin_data) = spin_data {
+    let mut prep = if let Some(spin_data) = spin_data {
         prepare_single_channel_eq_with_spin(
             curve,
             config,
@@ -1402,6 +1568,7 @@ fn optimize_channel_eq_inner(
             normalization_mean_spl,
         )?
     };
+    prep.objective_data = validation_objective(&prep.objective_data, control);
     let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
         &prep,
         config.num_filters,
@@ -1409,6 +1576,7 @@ fn optimize_channel_eq_inner(
         config,
         callback,
         backend,
+        control,
     )?;
 
     // Same Stage 1 veto as the adaptive path: the legacy single-pass path
@@ -1593,6 +1761,70 @@ fn optimize_channel_eq_multi_inner(
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    optimize_channel_eq_multi_inner_with_control(
+        curves,
+        config,
+        multi_config,
+        resources,
+        sample_rate,
+        callback,
+        backend,
+        None,
+    )
+}
+
+/// Optimize shared EQ across measurements under one search evaluation cap.
+///
+/// Each global or refinement invocation receives a fresh stage quota, while
+/// total search, component counts, cancellation, and deadline state are shared.
+/// Validation is counted separately. The supplied observer covers global search.
+///
+/// # Errors
+/// Returns preparation, stop, preflight, or validation failures with run evidence.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "adds explicit run controls to existing multi-EQ inputs"
+)]
+pub fn optimize_channel_eq_multi_controlled_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    run_control: &OptimizerRunControl,
+    stage_budget: NonZeroUsize,
+) -> Result<ControlledEqOptimizationResult, ControlledEqError> {
+    let control = EqRunControl::new(run_control, stage_budget);
+    let result = control.check_terminal().and_then(|()| {
+        optimize_channel_eq_multi_inner_with_control(
+            curves,
+            config,
+            multi_config,
+            resources,
+            sample_rate,
+            callback,
+            &RealOptimizerBackend::new(),
+            Some(&control),
+        )
+    });
+    control.finish(result)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves legacy inputs and adds optional control"
+)]
+fn optimize_channel_eq_multi_inner_with_control(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
     let (primary, optim_params, effective_config, input_normalization) =
         prepare_multi_measurement_objective_recorded(
             curves,
@@ -1602,7 +1834,22 @@ fn optimize_channel_eq_multi_inner(
             sample_rate,
         )?;
     let config = &effective_config;
+    let primary = validation_objective(&primary, control);
     let final_objective = primary.clone();
+
+    if config.min_filter_improvement > 0.0 && config.num_filters > 1 {
+        return optimize_channel_eq_multi_adaptive_prepared(
+            curves,
+            config,
+            primary,
+            optim_params,
+            input_normalization,
+            sample_rate,
+            callback,
+            backend,
+            control,
+        );
+    }
 
     // Setup bounds and initial guess
     let (lower_bounds, upper_bounds) = autoeq_optim::optim::setup::setup_bounds(&optim_params);
@@ -1617,28 +1864,29 @@ fn optimize_channel_eq_multi_inner(
     };
 
     // Run global optimization
-    let opt_result = if let Some(cb) = callback {
-        backend.optimize_filters_with_callback(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            primary,
-            &optim_params,
-            cb,
-        )
-    } else {
-        backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
-    };
-
-    let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-        &optim_params.algo,
-        opt_result,
-        &x,
+    let (callback, observer_stopped) = latch_observer_stop(callback);
+    let stage_index = control.map(EqRunControl::stage_count);
+    let global_result = run_optimizer(
+        backend,
+        &mut x,
         &lower_bounds,
         &upper_bounds,
-        optim_params.maxeval,
-        optim_params.seed,
+        primary,
+        &optim_params,
+        None,
+        callback,
+        control,
     );
+    if let (Some(control), Some(index)) = (control, stage_index)
+        && control.stage_count() > index
+    {
+        control.attach_stage_normalization(index, None, Some(input_normalization.clone()));
+    }
+    let mut global_evidence = global_result?;
+    if observer_stopped.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Box::new(OptimizerStopped));
+    }
+
     if !global_evidence.converged {
         if global_evidence.best_effort {
             log::warn!(
@@ -1680,74 +1928,88 @@ fn optimize_channel_eq_multi_inner(
     // small_stereo_2_2_group QA case after the C-FFI nlopt → pure-Rust
     // cobyla swap). Snapshot the global result and roll back if the
     // refine regresses.
-    let _optimizer_loss = if let Some(refine_data) = primary_for_refine {
-        log::info!(
-            "  Running local refinement ({}) from global loss={:.6}",
-            config.local_algo,
-            global_loss
-        );
-        let x_before_refine = x.to_vec();
-        let refine_snapshot = refine_data.clone();
-        let local_result = backend.optimize_filters_with_algo_override(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            refine_data,
-            &optim_params,
-            Some(&optim_params.local_algo),
-        );
-        let mut local_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-            &optim_params.local_algo,
-            local_result,
-            &x,
-            &lower_bounds,
-            &upper_bounds,
-            optim_params.maxeval,
-            optim_params.seed,
-        );
-        if !local_evidence.converged {
-            log::warn!(
-                "  Multi-measurement local refinement did not fully converge: {}",
-                local_evidence.status
-            );
-        }
-        crate::evidence_gate::verify_emission_candidate(
-            "multi-measurement-refine",
-            &x,
-            &refine_snapshot,
-            &optim_params,
-            &mut local_evidence,
-        )
-        .map_err(|reason| {
-            format!("multi-measurement refine candidate refused at emission: {reason}")
-        })?;
-        let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
-        let use_local = local_evidence.confidence
-            != autoeq_optim::optim::OptimizerConfidence::Unusable
-            && local_loss < global_loss;
-        local_evidence.selected_for_output = use_local;
-        optimizer_evidence[0].selected_for_output = !use_local;
-        optimizer_evidence.push(local_evidence);
-        if use_local {
+    let _optimizer_loss =
+        if let Some(refine_data) = primary_for_refine.filter(|_| !no_search_remaining(control)) {
             log::info!(
-                "  Local refinement: {:.6} -> {:.6} (improved {:.6})",
-                global_loss,
-                local_loss,
-                global_loss - local_loss
+                "  Running local refinement ({}) from global loss={:.6}",
+                config.local_algo,
+                global_loss
             );
-            local_loss
-        } else {
-            log::info!(
-                "  Local refinement did not improve ({:.6} -> {:.6}), keeping global result",
-                global_loss,
+            let x_before_refine = x.to_vec();
+            let refine_snapshot = refine_data.clone();
+            let stage_index = control.map(EqRunControl::stage_count);
+            let local_result = run_optimizer(
+                backend,
+                &mut x,
+                &lower_bounds,
+                &upper_bounds,
+                refine_data,
+                &optim_params,
+                Some(&optim_params.local_algo),
+                None,
+                control,
+            );
+            if let (Some(control), Some(index)) = (control, stage_index)
+                && control.stage_count() > index
+            {
+                control.attach_stage_normalization(index, None, Some(input_normalization.clone()));
+            }
+            let (mut local_evidence, local_refused) = match local_result {
+                Ok(evidence) => (evidence, false),
+                Err(error) if error.is::<EqBudgetRefusal>() => (
+                    error
+                        .downcast::<EqBudgetRefusal>()
+                        .expect("checked refusal type")
+                        .0,
+                    true,
+                ),
+                Err(error) => return Err(error),
+            };
+            if !local_evidence.converged {
+                log::warn!(
+                    "  Multi-measurement local refinement did not fully converge: {}",
+                    local_evidence.status
+                );
+            }
+            if !local_refused {
+                crate::evidence_gate::verify_emission_candidate(
+                    "multi-measurement-refine",
+                    &x,
+                    &refine_snapshot,
+                    &optim_params,
+                    &mut local_evidence,
+                )
+                .map_err(|reason| {
+                    format!("multi-measurement refine candidate refused at emission: {reason}")
+                })?;
+            }
+            let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
+            let use_local = local_evidence.confidence
+                != autoeq_optim::optim::OptimizerConfidence::Unusable
+                && local_loss < global_loss;
+            local_evidence.selected_for_output = use_local;
+            optimizer_evidence[0].selected_for_output = !use_local;
+            optimizer_evidence.push(local_evidence);
+            if use_local {
+                log::info!(
+                    "  Local refinement: {:.6} -> {:.6} (improved {:.6})",
+                    global_loss,
+                    local_loss,
+                    global_loss - local_loss
+                );
                 local_loss
-            );
-            x.copy_from_slice(&x_before_refine);
+            } else {
+                log::info!(
+                    "  Local refinement did not improve ({:.6} -> {:.6}), keeping global result",
+                    global_loss,
+                    local_loss
+                );
+                x.copy_from_slice(&x_before_refine);
+                global_loss
+            }
+        } else {
             global_loss
-        }
-    } else {
-        global_loss
-    };
+        };
 
     let x_after_boost = if let Some(envelope) = &config.max_boost_envelope {
         autoeq_optim::optim::clamp_gains_to_envelope(&x, envelope, optim_params.peq_model)
@@ -1789,6 +2051,54 @@ fn optimize_channel_eq_multi_inner(
     Ok(EqOptimizationResult {
         filters,
         loss: final_loss,
+        optimizer_evidence,
+        audibility_veto,
+        veto_adjudication,
+    })
+}
+
+/// Multi-measurement adaptive path sharing the same prepared joint objective
+/// across every filter-count pass.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "preserves the multi-measurement preparation and controlled-run inputs"
+)]
+fn optimize_channel_eq_multi_adaptive_prepared(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    objective_data: autoeq_optim::optim::ObjectiveData,
+    args_template: autoeq_optim::OptimParams,
+    normalization: roomeq_model::MultiInputNormalizationEvidence,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let context = OptimizationPassContext {
+        objective_data: &objective_data,
+        args_template: &args_template,
+        peq_model: args_template.peq_model,
+        sample_rate,
+        normalization: OptimizationPassNormalization::Multi(&normalization),
+    };
+    let selection = adaptive_filter_search(&context, config, callback, backend, control)?;
+    let (filters, loss, audibility_veto, veto_adjudication) = apply_veto_postpass_for_objective(
+        selection.filters,
+        selection.loss,
+        &objective_data,
+        config,
+        curves,
+    );
+    let mut optimizer_evidence = selection.optimizer_evidence;
+    for evidence in &mut optimizer_evidence {
+        evidence.multi_input_normalization = Some(normalization.clone());
+        if evidence.selected_for_output {
+            evidence.objective = Some(loss);
+        }
+    }
+    Ok(EqOptimizationResult {
+        filters,
+        loss,
         optimizer_evidence,
         audibility_veto,
         veto_adjudication,
@@ -2049,6 +2359,7 @@ mod pruning_workflow_tests {
 mod processing_mode_tests {
     use super::*;
     use ndarray::Array1;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::mixed_phase::MixedPhaseConfig;
     use roomeq_model::{FirConfig, ProcessingMode};
@@ -2093,6 +2404,79 @@ mod processing_mode_tests {
             spl: Array1::from_vec(spl),
             phase: Some(Array1::from_vec(phase)),
             ..Default::default()
+        }
+    }
+
+    #[derive(Default)]
+    struct RefinementAdmissionBackend {
+        refinement_calls: AtomicUsize,
+    }
+
+    impl OptimizerBackend for RefinementAdmissionBackend {
+        fn optimize_filters(
+            &self,
+            x: &mut [f64],
+            _lower_bounds: &[f64],
+            _upper_bounds: &[f64],
+            objective: autoeq_optim::optim::ObjectiveData,
+            _params: &autoeq_optim::OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            Ok((
+                String::from("test optimizer completed"),
+                autoeq_optim::optim::compute_fitness_penalties_ref(x, &objective),
+            ))
+        }
+
+        fn optimize_filters_with_callback(
+            &self,
+            x: &mut [f64],
+            lower_bounds: &[f64],
+            upper_bounds: &[f64],
+            objective: autoeq_optim::optim::ObjectiveData,
+            params: &autoeq_optim::OptimParams,
+            mut callback: autoeq_optim::optim::OptimProgressCallback,
+        ) -> Result<(String, f64), (String, f64)> {
+            let result = self.optimize_filters(x, lower_bounds, upper_bounds, objective, params);
+            if let Ok((_, loss)) = &result
+                && matches!(
+                    callback(1, *loss, None),
+                    autoeq_optim::de::CallbackAction::Stop
+                )
+                && let Some(first_parameter) = x.first_mut()
+            {
+                // If emission validation runs before the stop check, this
+                // invalid result will mask the requested cancellation.
+                *first_parameter = f64::NAN;
+            }
+            result
+        }
+
+        fn optimize_filters_with_algo_override(
+            &self,
+            x: &mut [f64],
+            lower_bounds: &[f64],
+            upper_bounds: &[f64],
+            objective: autoeq_optim::optim::ObjectiveData,
+            params: &autoeq_optim::OptimParams,
+            _algorithm: Option<&str>,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.refinement_calls.fetch_add(1, Ordering::Relaxed);
+            self.optimize_filters(x, lower_bounds, upper_bounds, objective, params)
+        }
+    }
+
+    fn observer_test_config(num_filters: usize, min_filter_improvement: f64) -> OptimizerConfig {
+        OptimizerConfig {
+            algorithm: String::from("autoeq:de"),
+            strategy: String::from("lshade"),
+            num_filters,
+            max_iter: 64,
+            population: 8,
+            seed: Some(7),
+            refine: true,
+            min_filter_improvement,
+            psychoacoustic: false,
+            ..OptimizerConfig::default()
         }
     }
 
@@ -2409,6 +2793,85 @@ mod processing_mode_tests {
         );
     }
 
+    #[test]
+    fn observer_stop_prevents_single_pass_and_adaptive_refinement_admission() {
+        let curve = make_simple_room_curve();
+        for (num_filters, min_filter_improvement) in [(1, 0.0), (2, 1e-6)] {
+            let config = observer_test_config(num_filters, min_filter_improvement);
+            let backend = RefinementAdmissionBackend::default();
+            let callback: autoeq_optim::optim::OptimProgressCallback =
+                Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop);
+
+            let error = optimize_channel_eq_inner(
+                &curve,
+                &config,
+                None,
+                48_000.0,
+                None,
+                None,
+                Some(callback),
+                &backend,
+            )
+            .expect_err("a stopped optimizer must not return a publishable result");
+
+            assert!(
+                error.downcast_ref::<super::OptimizerStopped>().is_some(),
+                "expected typed observer stop before candidate validation, got {error}"
+            );
+            assert_eq!(backend.refinement_calls.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn observer_stop_prevents_multi_measurement_refinement_admission() {
+        let curve = make_simple_room_curve();
+        let config = observer_test_config(2, 0.0);
+        let backend = RefinementAdmissionBackend::default();
+        let callback: autoeq_optim::optim::OptimProgressCallback =
+            Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop);
+
+        let error = optimize_channel_eq_multi_inner(
+            &[curve],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+            Some(callback),
+            &backend,
+        )
+        .expect_err("a stopped multi-measurement run must not return a result");
+
+        assert!(
+            error.downcast_ref::<OptimizerStopped>().is_some(),
+            "expected typed observer stop before candidate validation, got {error}"
+        );
+        assert_eq!(backend.refinement_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn observer_continue_preserves_refinement_path() {
+        let curve = make_simple_room_curve();
+        let config = observer_test_config(1, 0.0);
+        let backend = RefinementAdmissionBackend::default();
+        let callback: autoeq_optim::optim::OptimProgressCallback =
+            Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Continue);
+
+        let result = optimize_channel_eq_inner(
+            &curve,
+            &config,
+            None,
+            48_000.0,
+            None,
+            None,
+            Some(callback),
+            &backend,
+        )
+        .expect("continue should retain the existing global/refinement flow");
+
+        assert!(result.loss.is_finite());
+        assert_eq!(backend.refinement_calls.load(Ordering::Relaxed), 1);
+    }
+
     /// Test PhaseLinear mode configuration
     #[test]
     fn test_processing_mode_phaselinear_config() {
@@ -2697,13 +3160,15 @@ mod multi_eq_tests {
             phase: None,
             ..Default::default()
         };
-        let mut config = OptimizerConfig::default();
-        config.min_freq = 20.0;
-        config.max_freq = 2_000.0;
-        config.decomposed_correction = Some(roomeq_model::DecomposedCorrectionSerdeConfig {
-            enabled: true,
+        let config = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 2_000.0,
+            decomposed_correction: Some(roomeq_model::DecomposedCorrectionSerdeConfig {
+                enabled: true,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
 
         let (objective, _, _) = prepare_multi_measurement_objective(
             &[curve],
@@ -2754,6 +3219,43 @@ mod multi_eq_tests {
         assert_eq!(objectives[0].freqs.as_ref(), objectives[1].freqs.as_ref());
         assert!(objectives[0].freqs[0] >= 30.0);
         assert!(objectives[0].freqs[objectives[0].freqs.len() - 1] <= 18_000.0);
+    }
+
+    #[test]
+    fn multi_measurement_preparation_preserves_headphone_flat_loss() {
+        let config = OptimizerConfig {
+            loss_type: "headphone_flat".to_string(),
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            ..OptimizerConfig::default()
+        };
+        let (objective, params, _) = prepare_multi_measurement_objective(
+            &[make_simple_room_curve()],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+        )
+        .expect("headphone flat objective should prepare");
+
+        assert_eq!(params.loss, LossType::HeadphoneFlat);
+        let multi = objective.multi_objective.as_ref().expect("multi objective");
+        assert_eq!(multi.objectives.len(), 1);
+        assert!(
+            multi
+                .objectives
+                .iter()
+                .all(|measurement| measurement.loss_type == LossType::HeadphoneFlat)
+        );
+        let responses: Vec<_> = multi
+            .objectives
+            .iter()
+            .map(|measurement| Array1::zeros(measurement.freqs.len()))
+            .collect();
+        assert!(matches!(
+            autoeq_optim::optim::compute_response_fitness(&responses, &objective),
+            Some(fitness) if fitness.is_finite()
+        ));
     }
 
     #[test]
@@ -3894,5 +4396,548 @@ mod multi_eq_tests {
         let (filters, loss) = result.unwrap();
         assert!(!filters.is_empty());
         assert!(loss.is_finite());
+    }
+}
+
+#[cfg(test)]
+mod controlled_pipeline_tests {
+    use super::*;
+    use autoeq_optim::optim::OptimizerDispatchOutcome;
+
+    fn curve() -> Curve {
+        let frequencies: Vec<f64> = (0..96)
+            .map(|i| 30.0 * (100.0_f64).powf(i as f64 / 95.0))
+            .collect();
+        let levels = frequencies
+            .iter()
+            .map(|frequency| {
+                let distance = (frequency / 250.0).log2();
+                6.0 * (-0.5 * (distance / 0.4).powi(2)).exp()
+            })
+            .collect::<Vec<_>>();
+        Curve {
+            freq: frequencies.into(),
+            spl: levels.into(),
+            ..Default::default()
+        }
+    }
+
+    fn config() -> OptimizerConfig {
+        OptimizerConfig {
+            algorithm: "autoeq:cobra".into(),
+            local_algo: "autoeq:cobyla".into(),
+            min_freq: 40.0,
+            max_freq: 2500.0,
+            num_filters: 1,
+            max_iter: 100_000,
+            seed: Some(42),
+            refine: false,
+            ..Default::default()
+        }
+    }
+
+    fn positive(value: usize) -> NonZeroUsize {
+        NonZeroUsize::new(value).unwrap()
+    }
+
+    fn assert_drained(snapshot: &autoeq_optim::optim::run_control::OptimizerRunSnapshot) {
+        assert_eq!(snapshot.evaluations_in_flight, 0);
+        assert_eq!(snapshot.validation_evaluations_in_flight, 0);
+        assert_eq!(snapshot.evaluations_started, snapshot.evaluations_completed);
+        assert!(snapshot.evaluations_started <= snapshot.evaluation_budget);
+    }
+
+    #[test]
+    fn controlled_pipeline_nsga_front_validation_survives_exact_search_cap() {
+        for algorithm in ["autoeq:nsga2", "autoeq:nsga3"] {
+            for multi in [false, true] {
+                let mut config = config();
+                config.algorithm = algorithm.into();
+                config.population = 16;
+                let control = OptimizerRunControl::new(positive(16));
+                let output = if multi {
+                    optimize_channel_eq_multi_controlled_detailed(
+                        &[curve(), curve()],
+                        &config,
+                        &MultiMeasurementConfig::default(),
+                        None,
+                        48000.0,
+                        None,
+                        &control,
+                        positive(16),
+                    )
+                } else {
+                    optimize_channel_eq_controlled_detailed(
+                        &curve(),
+                        &config,
+                        None,
+                        48000.0,
+                        None,
+                        &control,
+                        positive(16),
+                    )
+                }
+                .unwrap_or_else(|error| panic!("{algorithm} multi={multi}: {error}"));
+                assert_eq!(output.stages.len(), 1);
+                assert_eq!(output.snapshot.evaluations_started, 16);
+                assert_eq!(output.snapshot.evaluations_refused, 0);
+                assert_eq!(output.snapshot.validation_evaluations_refused, 0);
+                assert!(output.snapshot.validation_evaluations_completed > 0);
+                assert_eq!(
+                    output.snapshot.validation_component_evaluations_completed,
+                    output.snapshot.validation_evaluations_completed * if multi { 2 } else { 1 },
+                );
+                if multi {
+                    assert!(output.stages.iter().all(|stage| {
+                        stage
+                            .evidence
+                            .multi_input_normalization
+                            .as_ref()
+                            .is_some_and(|normalization| normalization.objectives.len() == 2)
+                    }));
+                }
+                assert!(output.result.loss.is_finite());
+                assert_drained(&output.snapshot);
+            }
+        }
+    }
+
+    #[test]
+    fn controlled_pipeline_refinement_uses_remaining_shared_budget() {
+        let mut config = config();
+        config.refine = true;
+        let control = OptimizerRunControl::new(positive(64));
+        let output = optimize_channel_eq_controlled_detailed(
+            &curve(),
+            &config,
+            None,
+            48000.0,
+            None,
+            &control,
+            positive(32),
+        )
+        .unwrap();
+        assert_eq!(output.stages.len(), 2);
+        assert_eq!(output.stages[0].evidence.algorithm, "autoeq:cobra");
+        assert_eq!(output.stages[1].evidence.algorithm, "autoeq:cobyla");
+        let stage_counts: usize = output
+            .stages
+            .iter()
+            .map(|stage| stage.stage_snapshot.unwrap().evaluations_started)
+            .sum();
+        assert_eq!(stage_counts, output.snapshot.evaluations_started);
+        assert!(
+            output
+                .stages
+                .iter()
+                .all(|stage| stage.stage_snapshot.unwrap().evaluations_started <= 32)
+        );
+        assert!(
+            output
+                .stages
+                .iter()
+                .all(|stage| stage.evidence.input_normalization.is_some())
+        );
+        assert!(output.snapshot.validation_evaluations_completed > 0);
+        assert!(output.result.loss.is_finite());
+        assert_drained(&output.snapshot);
+    }
+
+    #[test]
+    fn controlled_multi_adaptive_passes_keep_every_seat_under_fresh_stage_caps() {
+        let first = curve();
+        let mut second = curve();
+        second.spl = second.freq.mapv(|frequency| {
+            let distance = (frequency / 630.0).log2();
+            -5.0 * (-0.5 * (distance / 0.32).powi(2)).exp()
+        });
+        let curves = [first, second];
+        let mut config = config();
+        config.num_filters = 3;
+        config.min_filter_improvement = 0.001;
+        config.min_db = -8.0;
+        config.max_db = 3.0;
+        config.max_boost_envelope = Some(vec![(40.0, 8.0), (2500.0, 8.0)]);
+        config.min_cut_envelope = Some(vec![(40.0, -8.0), (2500.0, -8.0)]);
+        let control = OptimizerRunControl::new(positive(192));
+        let output = optimize_channel_eq_multi_controlled_detailed(
+            &curves,
+            &config,
+            &MultiMeasurementConfig {
+                strategy: MultiMeasurementStrategy::WeightedSum,
+                ..MultiMeasurementConfig::default()
+            },
+            None,
+            48_000.0,
+            None,
+            &control,
+            positive(64),
+        )
+        .expect("adaptive optimization should retain its prepared joint objective");
+
+        assert!(
+            output.stages.len() >= 2,
+            "adaptive path did not run multiple passes"
+        );
+        assert!(output.snapshot.evaluations_started <= 192);
+        assert_eq!(
+            output.snapshot.component_evaluations_started,
+            output.snapshot.evaluations_started * curves.len(),
+            "every search candidate must score both training measurements"
+        );
+        assert_eq!(
+            output.snapshot.component_evaluations_completed,
+            output.snapshot.component_evaluations_started
+        );
+        for stage in &output.stages {
+            let stage_counts = stage.stage_snapshot.expect("adaptive stage quota recorded");
+            assert_eq!(stage_counts.evaluation_budget, 64);
+            assert!(stage_counts.evaluations_started <= 64);
+            let profile = &stage.search_profile;
+            assert_eq!(profile.dispatch_algorithm, stage.evidence.algorithm);
+            assert_eq!(profile.resolved_backend.as_deref(), Some("autoeq:cobra"));
+            assert_eq!(profile.effective_evaluation_limit, 64);
+            assert_eq!(profile.stage_evaluation_budget, Some(64));
+            assert_eq!(profile.parameter_dimension, profile.lower_bounds.len());
+            assert_eq!(profile.parameter_dimension, profile.upper_bounds.len());
+            let budget = profile
+                .budget_profile
+                .expect("registered adaptive backend supplies its search profile");
+            assert_eq!(
+                budget.requested_evaluations,
+                profile.effective_evaluation_limit
+            );
+            assert_eq!(budget.solver_evaluation_limit, Some(64));
+            assert_eq!(
+                budget.initial_batch_size,
+                profile
+                    .parameter_dimension
+                    .saturating_mul(3)
+                    .saturating_add(1)
+                    .min(profile.effective_evaluation_limit),
+                "per-pass batch profile must use that pass's actual vector dimension"
+            );
+            assert_eq!(
+                stage_counts.component_evaluations_started,
+                stage_counts.evaluations_started * curves.len()
+            );
+            let normalization = stage
+                .evidence
+                .multi_input_normalization
+                .as_ref()
+                .expect("all seats retained in stage evidence");
+            assert_eq!(normalization.objectives.len(), curves.len());
+            assert_ne!(
+                normalization.objectives[0].input_curve_identity,
+                normalization.objectives[1].input_curve_identity,
+                "distinct measurements must not collapse to the first seat"
+            );
+        }
+        assert!(
+            output
+                .stages
+                .windows(2)
+                .all(|passes| passes[0].search_profile.parameter_dimension
+                    < passes[1].search_profile.parameter_dimension),
+            "adaptive passes with more filters must report their larger dispatched vectors"
+        );
+        assert_eq!(output.result.optimizer_evidence.len(), output.stages.len());
+        assert!(
+            output
+                .result
+                .filters
+                .iter()
+                .all(|filter| { (-8.0 - 1e-6..=8.0 + 1e-6).contains(&filter.db_gain) })
+        );
+        let realized = autoeq_core::response::compute_peq_complex_response(
+            &output.result.filters,
+            &curves[0].freq,
+            48_000.0,
+        );
+        let peak_cascade_db = realized
+            .iter()
+            .map(|value| 20.0 * value.norm().log10())
+            .fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            peak_cascade_db <= config.max_db + 0.05,
+            "adaptive multi-measurement output exceeded the summed-cascade ceiling: {peak_cascade_db:.4} dB"
+        );
+        assert!(output.result.loss.is_finite());
+        assert_drained(&output.snapshot);
+    }
+
+    #[test]
+    fn controlled_multi_adaptive_preflight_refusal_keeps_prepared_seat_identities() {
+        let curves = [curve(), curve()];
+        let mut config = config();
+        config.algorithm = "autoeq:de".into();
+        config.num_filters = 2;
+        config.min_filter_improvement = 0.001;
+        let control = OptimizerRunControl::new(positive(8));
+        let error = optimize_channel_eq_multi_controlled_detailed(
+            &curves,
+            &config,
+            &MultiMeasurementConfig {
+                strategy: MultiMeasurementStrategy::WeightedSum,
+                ..MultiMeasurementConfig::default()
+            },
+            None,
+            48_000.0,
+            None,
+            &control,
+            positive(1),
+        )
+        .expect_err("DE cannot start its complete initialization batch under one score");
+
+        assert_eq!(error.snapshot().evaluations_started, 0);
+        assert_eq!(error.stages().len(), 1);
+        let stage = &error.stages()[0];
+        assert!(matches!(
+            &stage.dispatch,
+            OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)
+        ));
+        assert_eq!(stage.stage_snapshot.unwrap().evaluations_started, 0);
+        assert_eq!(
+            stage
+                .evidence
+                .multi_input_normalization
+                .as_ref()
+                .expect("prepared identities survive preflight refusal")
+                .objectives
+                .len(),
+            curves.len()
+        );
+    }
+
+    #[test]
+    fn controlled_multi_adaptive_refuses_candidate_outside_strict_cut_envelope() {
+        let first = curve();
+        let mut second = curve();
+        second.spl = second.freq.mapv(|frequency| {
+            let distance = (frequency / 630.0).log2();
+            -5.0 * (-0.5 * (distance / 0.32).powi(2)).exp()
+        });
+        let curves = [first, second];
+        let mut config = config();
+        config.num_filters = 3;
+        config.min_filter_improvement = 0.001;
+        config.min_db = -2.5;
+        config.max_db = 3.0;
+        config.max_boost_envelope = Some(vec![(40.0, 1.5), (2500.0, 1.5)]);
+        config.min_cut_envelope = Some(vec![(40.0, -2.5), (2500.0, -2.5)]);
+        let control = OptimizerRunControl::new(positive(192));
+
+        let error = optimize_channel_eq_multi_controlled_detailed(
+            &curves,
+            &config,
+            &MultiMeasurementConfig {
+                strategy: MultiMeasurementStrategy::WeightedSum,
+                ..MultiMeasurementConfig::default()
+            },
+            None,
+            48_000.0,
+            None,
+            &control,
+            positive(64),
+        )
+        .expect_err("a candidate beyond the configured cut envelope must be refused");
+
+        assert!(
+            error
+                .to_string()
+                .contains("composite gain envelope breached"),
+            "the refusal should identify the violated correction envelope: {error}"
+        );
+        assert_eq!(error.snapshot().evaluations_started, 192);
+        assert_eq!(error.stages().len(), 3);
+        assert!(error.stages().iter().all(|stage| {
+            stage
+                .evidence
+                .multi_input_normalization
+                .as_ref()
+                .is_some_and(|normalization| normalization.objectives.len() == curves.len())
+        }));
+    }
+
+    #[test]
+    fn controlled_pipeline_exhausted_global_skips_refinement_single_and_multi() {
+        let mut config = config();
+        config.refine = true;
+        for multi in [false, true] {
+            let control = OptimizerRunControl::new(positive(32));
+            let output = if multi {
+                optimize_channel_eq_multi_controlled_detailed(
+                    &[curve(), curve()],
+                    &config,
+                    &MultiMeasurementConfig::default(),
+                    None,
+                    48000.0,
+                    None,
+                    &control,
+                    positive(32),
+                )
+            } else {
+                optimize_channel_eq_controlled_detailed(
+                    &curve(),
+                    &config,
+                    None,
+                    48000.0,
+                    None,
+                    &control,
+                    positive(32),
+                )
+            }
+            .unwrap();
+            assert_eq!(output.stages.len(), 1);
+            assert_eq!(output.snapshot.evaluations_started, 32);
+            assert_eq!(
+                output.snapshot.component_evaluations_started,
+                32 * if multi { 2 } else { 1 }
+            );
+            assert!(output.result.loss.is_finite());
+            assert_drained(&output.snapshot);
+        }
+    }
+
+    #[test]
+    fn controlled_pipeline_adaptive_refusal_preserves_last_finalized_winner() {
+        let mut config = config();
+        config.algorithm = "autoeq:de".into();
+        config.population = 4;
+        config.num_filters = 4;
+        config.min_filter_improvement = 1e-12;
+        let control = OptimizerRunControl::new(positive(33));
+        let output = optimize_channel_eq_controlled_detailed(
+            &curve(),
+            &config,
+            None,
+            48000.0,
+            None,
+            &control,
+            positive(32),
+        )
+        .unwrap();
+        assert_eq!(output.stages.len(), 2);
+        assert!(matches!(
+            output.stages[1].dispatch,
+            OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)
+        ));
+        assert!(
+            output.snapshot.evaluations_started > 0 && output.snapshot.evaluations_started <= 32
+        );
+        assert_eq!(
+            output.snapshot.evaluations_started,
+            output.stages[0].stage_snapshot.unwrap().evaluations_started
+        );
+        assert!(
+            !output
+                .result
+                .optimizer_evidence
+                .last()
+                .unwrap()
+                .selected_for_output
+        );
+        assert!(
+            output
+                .result
+                .optimizer_evidence
+                .iter()
+                .any(|evidence| evidence.selected_for_output)
+        );
+        assert!(output.result.loss.is_finite());
+        assert_drained(&output.snapshot);
+    }
+
+    #[test]
+    fn controlled_pipeline_initial_preflight_refuses_without_scoring() {
+        let mut config = config();
+        config.algorithm = "autoeq:de".into();
+        let control = OptimizerRunControl::new(positive(1));
+        let error = optimize_channel_eq_controlled_detailed(
+            &curve(),
+            &config,
+            None,
+            48000.0,
+            None,
+            &control,
+            positive(1),
+        )
+        .unwrap_err();
+        assert_eq!(error.stages().len(), 1);
+        assert!(matches!(
+            error.stages()[0].dispatch,
+            OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)
+        ));
+        assert_eq!(error.snapshot().evaluations_started, 0);
+        assert_eq!(error.snapshot().validation_evaluations_started, 0);
+        assert_drained(&error.snapshot());
+    }
+
+    #[test]
+    fn controlled_pipeline_observer_stop_blocks_validation_and_refinement() {
+        let mut config = config();
+        config.refine = true;
+        let control = OptimizerRunControl::new(positive(64));
+        let error = optimize_channel_eq_controlled_detailed(
+            &curve(),
+            &config,
+            None,
+            48000.0,
+            Some(Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop)),
+            &control,
+            positive(32),
+        )
+        .unwrap_err();
+        assert!(error.snapshot().cancellation_requested);
+        assert_eq!(error.stages().len(), 1);
+        assert_eq!(error.snapshot().validation_evaluations_started, 0);
+        assert_drained(&error.snapshot());
+    }
+
+    #[test]
+    fn controlled_pipeline_preexisting_stop_and_deadline_do_no_work() {
+        for deadline in [false, true] {
+            let control = OptimizerRunControl::new(positive(64));
+            if deadline {
+                control.request_deadline();
+            } else {
+                control.request_cancel();
+            }
+            let error = optimize_channel_eq_controlled_detailed(
+                &curve(),
+                &config(),
+                None,
+                48000.0,
+                None,
+                &control,
+                positive(32),
+            )
+            .unwrap_err();
+            assert!(error.stages().is_empty());
+            assert_eq!(error.snapshot().evaluations_started, 0);
+            assert_eq!(error.snapshot().validation_evaluations_started, 0);
+        }
+    }
+
+    #[test]
+    fn controlled_pipeline_custom_backend_has_no_unbounded_fallback() {
+        let control = OptimizerRunControl::new(positive(64));
+        let context = EqRunControl::new(&control, positive(32));
+        let backend = autoeq_optim::optim::MockOptimizerBackend::default();
+        let result = optimize_channel_eq_inner_with_control(
+            &curve(),
+            &config(),
+            None,
+            48000.0,
+            None,
+            None,
+            None,
+            &backend,
+            Some(&context),
+        );
+        let error = context.finish(result).unwrap_err();
+        assert!(error.reason.contains("does not support controlled runs"));
+        assert_eq!(error.snapshot().evaluations_started, 0);
+        assert_eq!(error.snapshot().validation_evaluations_started, 0);
     }
 }

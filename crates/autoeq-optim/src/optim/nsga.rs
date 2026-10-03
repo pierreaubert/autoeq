@@ -5,14 +5,19 @@
 //! summary of the rank-0 front, then writes back a normalised compromise point
 //! from that front.
 
-use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
-use super::compute::compute_ceiling_violation_into;
-use super::constraint_envelope::{ConstraintSpec, OwnedConstraintSpec, judge_pareto_members};
+use super::backend::{
+    AlgorithmType, ConstraintCapabilities, FilterOptimizer, FilterOptimizerOutput,
+};
+use super::compute::{compute_ceiling_violation_into, compute_penalty_total};
+use super::constraint_envelope::{
+    ConstraintSpec, OwnedConstraintSpec, ParetoValidationError, judge_pareto_members_with_stop,
+};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{
-    ObjectiveData, OptimProgressCallback, PenaltyMode, compute_base_fitness,
-    compute_fitness_penalties_ref, compute_pareto_objectives,
+    ObjectiveData, OptimProgressCallback, PenaltyMode, ValidationScoreRefusal,
+    compute_fitness_penalties_ref, compute_pareto_objectives, try_compute_fitness_penalties_ref,
 };
 use crate::constraints::{viol_min_gain_from_xs, viol_spacing_from_xs};
 use math_audio_optimisation::{NsgaConfig, NsgaVariant, ParetoSolution, nsga};
@@ -47,6 +52,32 @@ impl FilterOptimizer for AutoeqNsgaBackend {
         self.name
     }
 
+    fn supports_initial_candidate(&self) -> bool {
+        true
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let population_size = params.population.max(16);
+        let solver_limit = params.maxeval.max(population_size);
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            Some(solver_limit),
+            population_size,
+            population_size,
+            Some(population_size),
+            Some(population_size),
+            Some(solver_limit / population_size),
+        ))
+    }
+
     fn library(&self) -> &'static str {
         "AutoEQ"
     }
@@ -72,17 +103,27 @@ impl FilterOptimizer for AutoeqNsgaBackend {
         upper: &[f64],
         objective: ObjectiveData,
         params: &OptimParams,
-        _callback: Option<OptimProgressCallback>,
+        callback: Option<OptimProgressCallback>,
     ) -> Result<(String, f64), (String, f64)> {
+        self.optimize_with_report(x, lower, upper, objective, params, callback)
+            .into_legacy_result()
+    }
+
+    fn optimize_with_report(
+        &self,
+        x: &mut [f64],
+        lower: &[f64],
+        upper: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+        _callback: Option<OptimProgressCallback>,
+    ) -> FilterOptimizerOutput {
         if lower.len() != x.len() || upper.len() != x.len() {
-            return Err((
-                format!(
-                    "bounds dimension mismatch: x={}, lower={}, upper={}",
-                    x.len(),
-                    lower.len(),
-                    upper.len(),
-                ),
-                f64::INFINITY,
+            return failed_output(format!(
+                "bounds dimension mismatch: x={}, lower={}, upper={}",
+                x.len(),
+                lower.len(),
+                upper.len(),
             ));
         }
 
@@ -124,51 +165,82 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                     &report.pareto_front
                 };
                 if front.is_empty() {
-                    return Err((
-                        format!("{} produced an empty population", self.name),
-                        f64::INFINITY,
-                    ));
+                    return failed_output(format!("{} produced an empty population", self.name));
                 }
+                let validation_objective = objective.post_search_validation_view();
                 // Judge every eligible member through the shared envelopes
                 // before selection so an infeasible member can never win the
                 // compromise pick on a score its repaired form cannot keep.
                 let owned = match OwnedConstraintSpec::from_params(params) {
                     Ok(owned) => owned,
                     Err(reason) => {
-                        return Err((
-                            format!(
-                                "{} cannot honor the constraint contract: {}",
-                                self.name, reason
-                            ),
-                            f64::INFINITY,
+                        return failed_output(format!(
+                            "{} cannot honor the constraint contract: {}",
+                            self.name, reason
                         ));
                     }
                 };
                 let judged = match judge_front_members(
                     self.name,
                     front,
-                    objective.as_ref(),
+                    &validation_objective,
                     &owned.as_spec(),
                 ) {
                     Ok(judged) => judged,
-                    Err(reason) => return Err((reason, f64::INFINITY)),
+                    Err(ParetoValidationError::Stopped(reason)) => {
+                        return stopped_output(reason);
+                    }
+                    Err(ParetoValidationError::Invalid(reason)) => {
+                        return failed_output(reason);
+                    }
                 };
-                let Some(best) = choose_compromise(&judged, objective.as_ref()) else {
-                    return Err((
-                        format!("{} produced an empty judged front", self.name),
-                        f64::INFINITY,
+                if !objective_vectors_are_finite(&judged.members) {
+                    return failed_output(format!(
+                        "{} produced non-finite or inconsistent Pareto objectives",
+                        self.name
                     ));
+                }
+                let Some(best) = choose_compromise(&judged.members, &validation_objective) else {
+                    return failed_output(format!("{} produced an empty judged front", self.name));
                 };
 
                 if best.x.len() == x.len() {
                     x.copy_from_slice(best.x.as_slice().unwrap());
                 }
-                log_pareto_front(self.name, &judged, best);
-                if let Some(front_report) = build_nsga_front_report(
+                log_pareto_front(self.name, &judged.members, best);
+                let mut scalar_scores = Vec::with_capacity(judged.members.len());
+                for member in &judged.members {
+                    match try_compute_fitness_penalties_ref(
+                        member.x.as_slice().unwrap_or(&[]),
+                        &validation_objective,
+                    ) {
+                        Ok(score) if score.is_finite() => scalar_scores.push(score),
+                        Ok(_) => {
+                            return failed_output(format!(
+                                "{} produced a non-finite validated scalar score",
+                                self.name
+                            ));
+                        }
+                        Err(ValidationScoreRefusal::TerminalStop) => {
+                            return stopped_output(format!(
+                                "{} validation score gate stopped while scoring the front",
+                                self.name
+                            ));
+                        }
+                        Err(ValidationScoreRefusal::NonTerminal) => {
+                            return failed_output(format!(
+                                "{} validation score was refused by a non-terminal gate",
+                                self.name
+                            ));
+                        }
+                    }
+                }
+                if let Some(front_report) = build_nsga_front_report_with_scores(
                     self.name,
                     &cfg,
-                    &judged,
-                    objective.as_ref(),
+                    &judged.members,
+                    &validation_objective,
+                    &scalar_scores,
                     report.nfev,
                     report.nit,
                 ) {
@@ -177,42 +249,93 @@ impl FilterOptimizer for AutoeqNsgaBackend {
                         self.name,
                         nsga_front_report_json(&front_report)
                     );
-                    let loss = compute_fitness_penalties_ref(x, objective.as_ref());
-                    return Ok((
-                        format!(
-                            "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6} \
-                             (compromise #{} of {}, scalar-best #{} by {})",
-                            variant_label(self.variant),
-                            judged.len(),
+                    let Some(selected_index) = judged
+                        .members
+                        .iter()
+                        .position(|member| std::ptr::eq(member, best))
+                    else {
+                        return failed_output(format!(
+                            "{} lost the selected Pareto member identity",
+                            self.name
+                        ));
+                    };
+                    let loss = scalar_scores[selected_index];
+                    let dispatch_report = match nsga_dispatch_report(
+                        self.name,
+                        front,
+                        &judged,
+                        &scalar_scores,
+                        &front_report,
+                        x,
+                        report.nfev,
+                        report.nit,
+                    ) {
+                        Ok(report) => report,
+                        Err(reason) => {
+                            return failed_output(format!(
+                                "{} could not build Pareto dispatch evidence: {reason}",
+                                self.name
+                            ));
+                        }
+                    };
+                    if let Err(reason) = dispatch_report.validate() {
+                        return failed_output(format!(
+                            "{} built invalid Pareto dispatch evidence: {reason}",
+                            self.name
+                        ));
+                    }
+                    return FilterOptimizerOutput::Completed {
+                        result: Ok((
+                            format!(
+                                "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6} \
+                                 (compromise #{} of {}, scalar-best #{} by {})",
+                                variant_label(self.variant),
+                                judged.members.len(),
+                                loss,
+                                front_report.selection.selected_index + 1,
+                                front_report.points.len(),
+                                front_report.selection.scalar_best_index + 1,
+                                front_report.selection.scalar_baseline_rule,
+                            ),
                             loss,
-                            front_report.selection.selected_index + 1,
-                            front_report.points.len(),
-                            front_report.selection.scalar_best_index + 1,
-                            front_report.selection.scalar_baseline_rule,
-                        ),
-                        loss,
-                    ));
+                        )),
+                        pareto_report: Some(dispatch_report),
+                    };
                 }
-                let loss = compute_fitness_penalties_ref(x, objective.as_ref());
-                Ok((
-                    format!(
-                        "AutoEQ {}: {} feasible Pareto points, selected compromise scalar loss {:.6}",
-                        variant_label(self.variant),
-                        judged.len(),
-                        loss
-                    ),
-                    loss,
+                failed_output(format!(
+                    "{} could not build its validated Pareto report",
+                    self.name
                 ))
             }
-            Err(e) => Err((
-                format!("{} setup failed: {:?}", self.name, e),
-                f64::INFINITY,
-            )),
+            Err(e) => failed_output(format!("{} setup failed: {e:?}", self.name)),
         }
     }
 }
 
-/// Normalised frame for compromise selection: per-axis weights plus the
+fn objective_vectors_are_finite(front: &[ParetoSolution]) -> bool {
+    let Some(first) = front.first() else {
+        return false;
+    };
+    let objective_count = first.objectives.len();
+    objective_count > 0
+        && front.iter().all(|solution| {
+            solution.objectives.len() == objective_count
+                && solution.objectives.iter().all(|value| value.is_finite())
+        })
+}
+
+fn failed_output(message: String) -> FilterOptimizerOutput {
+    FilterOptimizerOutput::Completed {
+        result: Err((message, f64::INFINITY)),
+        pareto_report: None,
+    }
+}
+
+fn stopped_output(reason: String) -> FilterOptimizerOutput {
+    FilterOptimizerOutput::StoppedDuringValidation { reason }
+}
+
+/// Normalized frame for compromise selection: per-axis weights plus the
 /// ideal/nadir points spanning the front.
 struct CompromiseFrame {
     weights: Vec<f64>,
@@ -266,22 +389,32 @@ fn compromise_distances(front: &[ParetoSolution], frame: &CompromiseFrame) -> Ve
 ///
 /// Returns a description when the spec or a member vector is invalid, or
 /// when no member survives the envelopes.
+#[derive(Debug)]
+struct JudgedNsgaFront {
+    members: Vec<ParetoSolution>,
+    source_indices: Vec<usize>,
+    refused_source_indices: Vec<usize>,
+    submitted: usize,
+}
+
 fn judge_front_members(
     backend_name: &str,
     front: &[ParetoSolution],
     objective: &ObjectiveData,
     spec: &ConstraintSpec<'_>,
-) -> Result<Vec<ParetoSolution>, String> {
+) -> Result<JudgedNsgaFront, ParetoValidationError> {
     let xs: Vec<Vec<f64>> = front
         .iter()
         .enumerate()
         .map(|(index, member)| {
             member.x.as_slice().map(<[f64]>::to_vec).ok_or_else(|| {
-                format!("{backend_name} front member {index} has no parameter vector")
+                ParetoValidationError::Invalid(format!(
+                    "{backend_name} front member {index} has no parameter vector"
+                ))
             })
         })
         .collect::<Result<_, _>>()?;
-    let judged = judge_pareto_members(backend_name, &xs, objective, spec)?;
+    let judged = judge_pareto_members_with_stop(backend_name, &xs, objective, spec)?;
     if judged.refused > 0 {
         log::info!(
             "{} judged {} front member(s): {} feasible, {} refused",
@@ -291,7 +424,8 @@ fn judge_front_members(
             judged.refused
         );
     }
-    Ok(judged
+    let source_indices = judged.members.iter().map(|member| member.index).collect();
+    let members = judged
         .members
         .into_iter()
         .map(|member| {
@@ -303,7 +437,13 @@ fn judge_front_members(
                 crowding_distance: source.crowding_distance,
             }
         })
-        .collect())
+        .collect();
+    Ok(JudgedNsgaFront {
+        members,
+        source_indices,
+        refused_source_indices: judged.refused_source_indices,
+        submitted: judged.submitted,
+    })
 }
 
 /// Normalised-compromise selection: the front point closest to the ideal
@@ -321,13 +461,10 @@ fn choose_compromise<'a>(
     front: &'a [ParetoSolution],
     objective: &ObjectiveData,
 ) -> Option<&'a ParetoSolution> {
-    if front.is_empty() {
+    if !objective_vectors_are_finite(front) {
         return None;
     }
     let m = front[0].objectives.len();
-    if m == 0 {
-        return front.first();
-    }
     let frame = compromise_frame(front, objective, m);
     let distances = compromise_distances(front, &frame);
     front
@@ -493,9 +630,13 @@ fn scalar_baseline_rule(objective: &ObjectiveData) -> String {
     }
 }
 
-fn constraint_evidence(x: &[f64], objective: &ObjectiveData) -> NsgaConstraintEvidence {
-    let base_scalar = compute_base_fitness(x, objective);
-    let scalar_loss = compute_fitness_penalties_ref(x, objective);
+fn constraint_evidence(
+    x: &[f64],
+    objective: &ObjectiveData,
+    scalar_loss: f64,
+) -> NsgaConstraintEvidence {
+    let total_penalty = compute_penalty_total(x, objective);
+    let base_scalar = scalar_loss - total_penalty;
     let ceiling_violation = compute_ceiling_violation_into(
         &objective.freqs,
         x,
@@ -508,7 +649,7 @@ fn constraint_evidence(x: &[f64], objective: &ObjectiveData) -> NsgaConstraintEv
     NsgaConstraintEvidence {
         scalar_loss,
         base_scalar,
-        total_penalty: scalar_loss - base_scalar,
+        total_penalty,
         ceiling_violation,
         spacing_violation,
         min_gain_violation,
@@ -529,7 +670,39 @@ pub fn build_nsga_front_report(
     nfev: usize,
     generations: usize,
 ) -> Option<NsgaFrontReport> {
-    if front.is_empty() {
+    if !objective_vectors_are_finite(front) {
+        return None;
+    }
+    let scalar_scores: Vec<f64> = front
+        .iter()
+        .map(|solution| {
+            compute_fitness_penalties_ref(solution.x.as_slice().unwrap_or(&[]), objective)
+        })
+        .collect();
+    build_nsga_front_report_with_scores(
+        backend_name,
+        cfg,
+        front,
+        objective,
+        &scalar_scores,
+        nfev,
+        generations,
+    )
+}
+
+fn build_nsga_front_report_with_scores(
+    backend_name: &str,
+    cfg: &NsgaConfig,
+    front: &[ParetoSolution],
+    objective: &ObjectiveData,
+    scalar_scores: &[f64],
+    nfev: usize,
+    generations: usize,
+) -> Option<NsgaFrontReport> {
+    if !objective_vectors_are_finite(front)
+        || scalar_scores.len() != front.len()
+        || scalar_scores.iter().any(|score| !score.is_finite())
+    {
         return None;
     }
     let m = front[0].objectives.len();
@@ -544,7 +717,7 @@ pub fn build_nsga_front_report(
             compromise_distance: distances[i],
             rank: sol.rank,
             crowding_distance: sol.crowding_distance,
-            constraint: constraint_evidence(x, objective),
+            constraint: constraint_evidence(x, objective, scalar_scores[i]),
         });
     }
     let selected_index = points
@@ -588,6 +761,91 @@ pub fn build_nsga_front_report(
         },
         nfev,
         generations,
+    })
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "binds search, validated-front, and returned-winner evidence from one NSGA invocation"
+)]
+fn nsga_dispatch_report(
+    backend_name: &str,
+    search_front: &[ParetoSolution],
+    judged: &JudgedNsgaFront,
+    scalar_scores: &[f64],
+    selection: &NsgaFrontReport,
+    returned_parameters: &[f64],
+    nfev: usize,
+    generations: usize,
+) -> Result<roomeq_model::ParetoDispatchReport, String> {
+    if judged.members.len() != judged.source_indices.len()
+        || judged.members.len() != scalar_scores.len()
+        || selection.points.len() != judged.members.len()
+    {
+        return Err("NSGA report inputs have inconsistent candidate counts".to_string());
+    }
+    let mut candidates = Vec::with_capacity(judged.members.len());
+    for (candidate_index, member) in judged.members.iter().enumerate() {
+        let source_index = judged.source_indices[candidate_index];
+        let original = search_front
+            .get(source_index)
+            .ok_or_else(|| "NSGA report source index is out of range".to_string())?;
+        let crowding_distance = if original.crowding_distance.is_finite() {
+            if original.crowding_distance < 0.0 {
+                return Err("NSGA reported a negative crowding distance".to_string());
+            }
+            Some(roomeq_model::ParetoCrowdingDistance::Finite(
+                original.crowding_distance,
+            ))
+        } else if original.crowding_distance == f64::INFINITY {
+            Some(roomeq_model::ParetoCrowdingDistance::Unbounded)
+        } else {
+            return Err("NSGA reported an invalid crowding distance".to_string());
+        };
+        candidates.push(roomeq_model::ParetoCandidateEvidence {
+            source_index,
+            search_parameters: original.x.as_slice().unwrap_or(&[]).to_vec(),
+            search_objectives: original.objectives.clone(),
+            validated_parameters: member.x.as_slice().unwrap_or(&[]).to_vec(),
+            validated_objectives: member.objectives.clone(),
+            rank: Some(original.rank),
+            crowding_distance,
+            scalar_loss: Some(scalar_scores[candidate_index]),
+        });
+    }
+    let selected_candidate_index = selection.selection.selected_index;
+    let scalar_best_index = selection.selection.scalar_best_index;
+    let selected_source_index = *judged
+        .source_indices
+        .get(selected_candidate_index)
+        .ok_or_else(|| "NSGA selected candidate index is out of range".to_string())?;
+    let scalar_best_source_index = *judged
+        .source_indices
+        .get(scalar_best_index)
+        .ok_or_else(|| "NSGA scalar-best candidate index is out of range".to_string())?;
+    let scalar_best_loss = *scalar_scores
+        .get(scalar_best_index)
+        .ok_or_else(|| "NSGA scalar-best score index is out of range".to_string())?;
+    Ok(roomeq_model::ParetoDispatchReport {
+        schema: "roomeq.pareto_dispatch/v1".to_string(),
+        backend: backend_name.to_string(),
+        submitted_count: judged.submitted,
+        refused_source_indices: judged.refused_source_indices.clone(),
+        candidates,
+        selection: roomeq_model::ParetoSelectionEvidence {
+            rule: selection.selection.rule.clone(),
+            weights: selection.selection.weights.clone(),
+            ideal: selection.selection.ideal.clone(),
+            nadir: selection.selection.nadir.clone(),
+            selected_candidate_index,
+            selected_source_index,
+            scalar_baseline_rule: Some(selection.selection.scalar_baseline_rule.clone()),
+            scalar_best_source_index: Some(scalar_best_source_index),
+            scalar_best_loss: Some(scalar_best_loss),
+        },
+        returned_parameters: returned_parameters.to_vec(),
+        search_evaluations: Some(nfev),
+        generations: Some(generations),
     })
 }
 
@@ -648,14 +906,44 @@ fn variant_label(variant: NsgaVariant) -> &'static str {
 
 #[cfg(test)]
 mod nsga_front_report_tests {
+    use super::super::backend::{FilterOptimizer, FilterOptimizerOutput};
+    use super::super::compute::compute_pareto_objectives;
+    use super::super::constraint_envelope::{ConstraintSpec, ParetoValidationError};
+    use super::super::loss::{Objective, ObjectiveContext};
+    use super::super::params::OptimParams;
+    use super::super::run_control::OptimizerRunControl;
     use super::{
-        NsgaConfig, NsgaVariant, ObjectiveData, ParetoSolution, build_nsga_front_report,
-        choose_compromise, nsga_front_report_json,
+        AutoeqNsgaBackend, NsgaConfig, NsgaVariant, ObjectiveData, ParetoSolution,
+        build_nsga_front_report, choose_compromise, judge_front_members, nsga_front_report_json,
     };
     use crate::loss::LossType;
     use crate::roomeq::MultiMeasurementStrategy;
     use crate::{MultiObjectiveData, ObjectiveDataBuilder, PeqModel};
+    use clap::Parser;
     use ndarray::Array1;
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+
+    struct GainDistance {
+        center_db: f64,
+    }
+
+    impl Objective for GainDistance {
+        fn compute(&self, parameters: &[f64], _context: &ObjectiveContext<'_>) -> f64 {
+            parameters
+                .get(2)
+                .map_or(f64::INFINITY, |gain| (gain - self.center_db).powi(2))
+        }
+    }
+
+    struct ScoreCallCounter(std::sync::atomic::AtomicUsize);
+
+    impl Objective for ScoreCallCounter {
+        fn compute(&self, _parameters: &[f64], _context: &ObjectiveContext<'_>) -> f64 {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            1.0
+        }
+    }
 
     fn base_objective() -> ObjectiveData {
         let freqs = Array1::from_vec(vec![100.0, 200.0, 400.0, 800.0, 1600.0]);
@@ -688,6 +976,32 @@ mod nsga_front_report_tests {
             uncertainty_cvar_alpha: None,
         });
         obj
+    }
+
+    fn tradeoff_objective() -> ObjectiveData {
+        let objective_for = |center_db| {
+            let mut objective = base_objective();
+            objective.loss_type = LossType::SpeakerScore;
+            objective.min_db = -6.0;
+            objective.max_db = 6.0;
+            objective.objective = Some(Arc::new(GainDistance { center_db }));
+            objective
+        };
+        let left = objective_for(-1.0);
+        let right = objective_for(1.0);
+        let mut objective = left.clone();
+        objective.multi_objective = Some(MultiObjectiveData {
+            objectives: vec![left, right],
+            strategy: MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.5, 0.5],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        objective
+    }
+
+    fn candidate_at_gain(gain_db: f64) -> Vec<f64> {
+        vec![500.0_f64.log10(), 1.0, gain_db]
     }
 
     fn sol(o1: f64, o2: f64) -> ParetoSolution {
@@ -810,6 +1124,181 @@ mod nsga_front_report_tests {
         let objective = two_seat_objective(vec![0.5, 0.5]);
         assert!(choose_compromise(&[], &objective).is_none());
         assert!(build_nsga_front_report("autoeq:nsga2", &cfg(), &[], &objective, 0, 0).is_none());
+    }
+
+    #[test]
+    fn exhausted_search_cap_uses_validation_front_for_compromise_ordering() {
+        let objective = tradeoff_objective();
+        let control = OptimizerRunControl::new(NonZeroUsize::new(1).expect("positive cap"));
+        let search = objective.with_run_control(control.clone());
+
+        // Consume the single search slot. Later Pareto calls through this view
+        // are deliberately refused as +infinity by the exhausted search gate.
+        assert!(
+            compute_pareto_objectives(&candidate_at_gain(0.0), &search)
+                .iter()
+                .all(|value| value.is_finite())
+        );
+        assert!(control.snapshot().budget_exhausted);
+
+        let raw_front = [-1.0, 0.0, 1.0]
+            .into_iter()
+            .enumerate()
+            .map(|(rank, gain)| ParetoSolution {
+                x: Array1::from(candidate_at_gain(gain)),
+                objectives: vec![0.0, 0.0],
+                rank,
+                crowding_distance: 1.0,
+            })
+            .collect::<Vec<_>>();
+        let invalid_search_front = judge_front_members(
+            "test-nsga",
+            &raw_front,
+            &search,
+            &ConstraintSpec::unconstrained(),
+        )
+        .expect_err("an exhausted search view cannot be used for validation scoring");
+        assert!(matches!(
+            invalid_search_front,
+            ParetoValidationError::Invalid(_)
+        ));
+
+        let validation = search.post_search_validation_view();
+        let finite_front = judge_front_members(
+            "test-nsga",
+            &raw_front,
+            &validation,
+            &ConstraintSpec::unconstrained(),
+        )
+        .expect("validation scores are outside the exhausted search cap");
+        assert_eq!(
+            finite_front
+                .members
+                .iter()
+                .map(|point| point.objectives.clone())
+                .collect::<Vec<_>>(),
+            vec![vec![0.0, 4.0], vec![1.0, 1.0], vec![4.0, 0.0]]
+        );
+        let best =
+            choose_compromise(&finite_front.members, &validation).expect("finite tradeoff point");
+        assert!((best.x[2] - 0.0).abs() < 1e-12);
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluations_started, 1);
+        assert_eq!(snapshot.validation_evaluations_started, 3);
+        assert_eq!(snapshot.validation_evaluations_completed, 3);
+    }
+
+    #[test]
+    fn fixed_seed_nsga16_cap_allows_finite_post_search_front_scoring() {
+        let objective = tradeoff_objective();
+        let control = OptimizerRunControl::new(NonZeroUsize::new(16).expect("positive cap"));
+        let search = objective.with_run_control(control.clone());
+        let mut args = crate::cli::Args::parse_from(["autoeq"]);
+        args.num_filters = 1;
+        args.population = 16;
+        args.maxeval = 16;
+        args.seed = Some(20261003);
+        args.no_parallel = true;
+        let params = OptimParams::from(&args);
+        let backend = AutoeqNsgaBackend::new_nsga2("autoeq:nsga2");
+        let lower = vec![2.0, 0.3, -6.0];
+        let upper = vec![3.0, 8.0, 6.0];
+        let mut x = vec![500.0_f64.log10(), 1.0, 0.0];
+        let profile = backend
+            .evaluation_budget_profile(&lower, &upper, &params)
+            .expect("NSGA reports its search budget profile");
+        assert_eq!(profile.requested_evaluations, 16);
+        assert_eq!(profile.solver_evaluation_limit, Some(16));
+        assert_eq!(profile.minimum_complete_batch, 16);
+
+        let output = backend.optimize_with_report(&mut x, &lower, &upper, search, &params, None);
+        let (status, loss) = match output {
+            FilterOptimizerOutput::Completed {
+                result: Ok(result),
+                pareto_report: Some(report),
+            } => {
+                report
+                    .validate()
+                    .expect("dispatch report is internally consistent");
+                assert_eq!(report.returned_parameters, x);
+                let selected = &report.candidates[report.selection.selected_candidate_index];
+                assert_eq!(selected.validated_parameters, x);
+                assert_eq!(
+                    selected.source_index,
+                    report.selection.selected_source_index
+                );
+                result
+            }
+            other => panic!("fixed-seed NSGA should return a validated report, got {other:?}"),
+        };
+        assert!(loss.is_finite(), "status={status}");
+        assert!(status.contains("selected compromise scalar loss"));
+        assert!(x.iter().all(|value| value.is_finite()));
+
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluation_budget, 16);
+        assert_eq!(snapshot.evaluations_started, 16);
+        assert!(snapshot.budget_exhausted);
+        assert!(snapshot.validation_evaluations_started > 0);
+        assert_eq!(
+            snapshot.validation_evaluations_started,
+            snapshot.validation_evaluations_completed
+        );
+    }
+
+    #[test]
+    fn compromise_and_report_refuse_nonfinite_or_mismatched_objectives() {
+        let objective = two_seat_objective(vec![0.5, 0.5]);
+        let infinite_front = vec![
+            sol(f64::INFINITY, f64::INFINITY),
+            sol(f64::INFINITY, f64::INFINITY),
+        ];
+        // The old normalization treated inf-inf as a non-finite span and set
+        // every axis distance to zero, so this front selected its first row.
+        assert_eq!(
+            super::super::misc::compromise_distance(
+                &[f64::INFINITY, f64::INFINITY],
+                &[f64::INFINITY, f64::INFINITY],
+                &[f64::INFINITY, f64::INFINITY],
+                &[0.5, 0.5],
+            ),
+            0.0
+        );
+        assert!(choose_compromise(&infinite_front, &objective).is_none());
+        assert!(
+            build_nsga_front_report("autoeq:nsga2", &cfg(), &infinite_front, &objective, 16, 1)
+                .is_none()
+        );
+
+        let nan_front = vec![sol(f64::NAN, 1.0), sol(1.0, 1.0)];
+        assert!(choose_compromise(&nan_front, &objective).is_none());
+        let mismatched_front = vec![sol(0.0, 1.0), {
+            let mut point = sol(1.0, 0.0);
+            point.objectives.pop();
+            point
+        }];
+        assert!(choose_compromise(&mismatched_front, &objective).is_none());
+    }
+
+    #[test]
+    fn invalid_report_front_is_rejected_before_scalar_scoring() {
+        let counter = Arc::new(ScoreCallCounter(std::sync::atomic::AtomicUsize::new(0)));
+        let mut objective = two_seat_objective(vec![0.5, 0.5]);
+        let multi = objective
+            .multi_objective
+            .as_mut()
+            .expect("two-seat objective");
+        for seat in &mut multi.objectives {
+            seat.loss_type = LossType::SpeakerScore;
+            seat.objective = Some(counter.clone());
+        }
+        let invalid_front = vec![sol(f64::NAN, 1.0)];
+
+        assert!(
+            build_nsga_front_report("autoeq:nsga2", &cfg(), &invalid_front, &objective, 16, 1)
+                .is_none()
+        );
+        assert_eq!(counter.0.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 
     #[test]

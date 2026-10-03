@@ -116,6 +116,7 @@ pub struct OptimizerConfig {
     pub phase_correction: Option<MixedPhaseSerdeConfig>,
     /// Loss function type. Supported values:
     /// - `"flat"` — minimize deviation from target (default)
+    /// - `"headphone_flat"` — minimize headphone response deviation from target
     /// - `"score"` — maximize Harman/Olive preference score
     /// - `"epa"` — EPA (Evaluation/Potency/Activity) psychoacoustic
     ///   loss combining spectral flatness with sharpness, roughness,

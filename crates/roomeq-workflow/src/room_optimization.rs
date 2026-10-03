@@ -48,6 +48,29 @@ mod tests;
 mod types;
 mod validation_scorecard;
 
+#[cfg(test)]
+pub(crate) fn rebuild_routed_pruning_test_candidate(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    held_out: &HashMap<String, Vec<Curve>>,
+    sample_rate: f64,
+    directory: &Path,
+) -> Result<()> {
+    finalization::rebuild(result, config, held_out, sample_rate, directory)
+}
+
+#[cfg(test)]
+pub(crate) fn apply_routed_pruning_for_test(
+    result: &mut RoomOptimizationResult,
+    captures: &[seat_replay::Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    sample_rate: f64,
+    directory: &Path,
+) {
+    routed_pruning::apply(result, captures, held_out, config, sample_rate, directory);
+}
+
 pub use room_optimization_progress::*;
 pub use room_optimization_result::*;
 pub use types::*;
@@ -138,6 +161,10 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
     context: &crate::WorkflowContext<'_>,
     observer: Option<Box<dyn PipelineObserver>>,
     frequency_samples: usize,
+    finalization_diagnostic: Option<(
+        crate::pipeline::FinalizationDiagnosticTrial,
+        &dyn crate::pipeline::FinalizationDiagnosticSink,
+    )>,
 ) -> Result<RoomOptimizationResult> {
     let snapshot = input_snapshot::freeze(request.config)?;
     let request = roomeq_engine::EngineRequest {
@@ -240,15 +267,28 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         roomeq_model::auto_tune::resolved_schroeder_hz(&request.config.optimizer),
         request.config.optimizer.processing_mode.clone(),
     )?;
-    finalization::select(
-        &mut result,
-        &seat_captures,
-        context.validation_measurements,
-        request.config,
-        request.sample_rate,
-        context.output_dir.unwrap_or_else(|| Path::new(".")),
-        context.artifact_store,
-    )?;
+    if let Some(diagnostic) = finalization_diagnostic {
+        finalization::select_with_diagnostic_sink(
+            &mut result,
+            &seat_captures,
+            context.validation_measurements,
+            request.config,
+            request.sample_rate,
+            context.output_dir.unwrap_or_else(|| Path::new(".")),
+            context.artifact_store,
+            Some(diagnostic),
+        )?;
+    } else {
+        finalization::select(
+            &mut result,
+            &seat_captures,
+            context.validation_measurements,
+            request.config,
+            request.sample_rate,
+            context.output_dir.unwrap_or_else(|| Path::new(".")),
+            context.artifact_store,
+        )?;
+    }
     if routed_pruning_requested {
         routed_pruning::apply(
             &mut result,

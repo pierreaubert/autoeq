@@ -441,6 +441,7 @@ fn export_required_limiter_unsupported_target_rejected() {
 fn limiter_graph() -> roomeq_model::DspGraph {
     roomeq_model::DspGraph {
         version: "1.3.0".into(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         metadata: None,
         correction_decisions: None,
@@ -493,6 +494,7 @@ fn export_delay_seconds_preserved_across_sample_rates() {
 fn serial_delay_graph(delay_ms: f64) -> roomeq_model::DspGraph {
     roomeq_model::DspGraph {
         version: "1.3.0".into(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         metadata: None,
         correction_decisions: None,

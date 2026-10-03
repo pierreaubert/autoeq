@@ -104,36 +104,60 @@ pub(super) fn max_curve_difference_db(curves: &[&Curve], fmin: f64, fmax: f64) -
 ///
 /// The mean offset is removed before the RMS is calculated so this measures
 /// tonal shape rather than harmless mode-dependent broadband latency/level
-/// normalization.
+/// normalization. Both curves must have valid grids covering the entire band.
 pub(super) fn level_matched_rms_curve_difference_db(
     first: &Curve,
     second: &Curve,
     fmin: f64,
     fmax: f64,
 ) -> Option<f64> {
+    let covers_band = |curve: &Curve| {
+        curve.freq.len() == curve.spl.len()
+            && curve.freq.len() >= 3
+            && curve
+                .freq
+                .iter()
+                .all(|frequency| frequency.is_finite() && *frequency >= 0.0)
+            && curve
+                .freq
+                .iter()
+                .zip(curve.freq.iter().skip(1))
+                .all(|(left, right)| left < right)
+            && curve.spl.iter().all(|spl| spl.is_finite())
+            && curve.freq[0] <= fmin
+            && curve.freq[curve.freq.len() - 1] >= fmax
+    };
+    if !fmin.is_finite()
+        || !fmax.is_finite()
+        || fmin < 0.0
+        || fmin >= fmax
+        || !covers_band(first)
+        || !covers_band(second)
+    {
+        return None;
+    }
+    // Complete support is required: clamped extrapolation or dropped invalid
+    // bins would turn unavailable evidence into apparently matching curves.
     let differences: Vec<f64> = first
         .freq
         .iter()
         .copied()
         .filter(|frequency| *frequency >= fmin && *frequency <= fmax)
-        .filter_map(|frequency| {
-            let first_spl = interpolate_spl_at(first, frequency)?;
-            let second_spl = interpolate_spl_at(second, frequency)?;
-            (first_spl.is_finite() && second_spl.is_finite()).then_some(first_spl - second_spl)
+        .map(|frequency| {
+            Some(interpolate_spl_at(first, frequency)? - interpolate_spl_at(second, frequency)?)
         })
-        .collect();
-    if differences.len() < 3 {
+        .collect::<Option<_>>()?;
+    if differences.len() < 3 || differences.iter().any(|difference| !difference.is_finite()) {
         return None;
     }
     let mean = differences.iter().sum::<f64>() / differences.len() as f64;
-    Some(
-        (differences
-            .iter()
-            .map(|difference| (difference - mean).powi(2))
-            .sum::<f64>()
-            / differences.len() as f64)
-            .sqrt(),
-    )
+    let rms = (differences
+        .iter()
+        .map(|difference| (difference - mean).powi(2))
+        .sum::<f64>()
+        / differences.len() as f64)
+        .sqrt();
+    rms.is_finite().then_some(rms)
 }
 
 /// Linear interpolation of SPL at a given frequency

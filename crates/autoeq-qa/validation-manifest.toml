@@ -18,6 +18,7 @@ golden = "peq_response.json"
 test = "wolfram_peq_response"
 tolerance = "complex relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -29,6 +30,7 @@ golden = "fir_response.json"
 test = "wolfram_fir_response"
 tolerance = "complex relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -40,6 +42,7 @@ golden = "log_interp.json"
 test = "wolfram_log_interp"
 tolerance = "absolute SPL error <= 1e-9 dB"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -51,6 +54,7 @@ golden = "erb_quadrature.json"
 test = "wolfram_erb_quadrature"
 tolerance = "absolute error <= 1e-9 (rates/widths/RMS/degrees)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -62,6 +66,7 @@ golden = "aw01_workflow_correction.json"
 test = "wolfram_aw01_workflow_correction"
 tolerance = "A: absolute error <= 1e-6 dB (target/eq/corrected/RMS traces)"
 tolerance_kind = "abs"
+tolerance_value = 1e-06
 tier = "smoke"
 
 [[case]]
@@ -73,6 +78,7 @@ golden = "pl01_tonal_regression.json"
 test = "wolfram_pl01_tonal_regression"
 tolerance = "A: absolute error <= 1e-9 (slope dB/oct, intercept dB, line dB)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -84,6 +90,7 @@ golden = "pl02_plot_response_trace.json"
 test = "wolfram_pl02_plot_response_trace"
 tolerance = "A/I: absolute SPL error <= 1e-6 dB (eq/corrected/error traces)"
 tolerance_kind = "abs"
+tolerance_value = 1e-06
 tier = "smoke"
 
 [[case]]
@@ -95,6 +102,7 @@ golden = "ac01_cli_spacing_score.json"
 test = "wolfram_ac01_cli_spacing_score"
 tolerance = "A/X: spacings exact <= 1e-12 oct; eq <= 1e-6 dB; score <= 1e-9 points"
 tolerance_kind = "abs"
+tolerance_value = 1e-06
 tier = "smoke"
 
 [[case]]
@@ -106,6 +114,7 @@ golden = "ac02_apo_roundtrip_gap.json"
 test = "wolfram_ac02_apo_roundtrip_gap"
 tolerance = "A/Q/X: APO line exact; traces <= 1e-6 dB; gap <= 1e-9 dB"
 tolerance_kind = "abs"
+tolerance_value = 1e-06
 tier = "smoke"
 
 [[case]]
@@ -117,6 +126,7 @@ golden = "ac03_benchmark_stats.json"
 test = "wolfram_ac03_benchmark_stats"
 tolerance = "A/B/X: absolute error <= 1e-12; tie mask exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -128,6 +138,7 @@ golden = "c02_peq_layouts.json"
 test = "wolfram_c02_peq_layouts"
 tolerance = "complex relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -139,6 +150,7 @@ golden = "c02_free_types.json"
 test = "wolfram_c02_free_types"
 tolerance = "complex relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -150,6 +162,7 @@ golden = "c04_octave_smooth.json"
 test = "wolfram_c04_octave_smooth"
 tolerance = "absolute SPL error <= 1e-9 dB"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -161,6 +174,7 @@ golden = "c04_gaussian_smooth.json"
 test = "wolfram_c04_gaussian_smooth"
 tolerance = "absolute error <= 1e-12"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -172,6 +186,7 @@ golden = "c05_unwrap_delay.json"
 test = "wolfram_c05_unwrap_delay"
 tolerance = "absolute error <= 1e-9 (degrees/ms)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -183,6 +198,7 @@ golden = "c05_minphase_flat.json"
 test = "wolfram_c05_minphase_flat"
 tolerance = "absolute phase error <= 0.5 deg"
 tolerance_kind = "abs"
+tolerance_value = 0.5
 tier = "smoke"
 
 [[case]]
@@ -194,6 +210,7 @@ golden = "c07_quality_geometry.json"
 test = "wolfram_c07_quality_geometry"
 tolerance = "absolute error <= 1e-9 (dB/coherence/variance/Hz/s/deg) [A/X]"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -205,6 +222,7 @@ golden = "c08_local_q.json"
 test = "wolfram_c08_local_q"
 tolerance = "absolute Q error <= 1e-12 [A/X]"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -216,6 +234,7 @@ golden = "c03_logmean_slope.json"
 test = "wolfram_c03_logmean_slope"
 tolerance = "absolute error <= 1e-9 dB (mean) / dB-per-octave (slope) [A/X]"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -227,6 +246,7 @@ golden = "f01_fir_flat_designs.json"
 test = "wolfram_f01_fir_flat_designs"
 tolerance = "taps absolute <= 1e-9, realized complex-relative <= 1e-9 [N]"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -238,6 +258,7 @@ golden = "f02_target_grid_wav.json"
 test = "wolfram_f02_target_grid_wav"
 tolerance = "target absolute <= 1e-9 dB; WAV DTFT within Sum Abs[delta_h] [A/Q/X]"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -249,6 +270,7 @@ golden = "ar01_impulse_store.json"
 test = "wolfram_ar01_impulse_store"
 tolerance = "byte-exact reload; decoded f32 within 1e-7 absolute [Q/X]"
 tolerance_kind = "abs"
+tolerance_value = 1e-07
 tier = "smoke"
 
 [[case]]
@@ -260,6 +282,7 @@ golden = "re01_dsp_gain_delay.json"
 test = "wolfram_re01_dsp_gain_delay"
 tolerance = "complex relative error <= 1e-9 (serial gain, delay, peak SOS)"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -271,6 +294,7 @@ golden = "re02_preference_shelves.json"
 test = "wolfram_re02_preference_shelves"
 tolerance = "absolute error <= 1e-9 dB (preference shelf correction)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -282,6 +306,7 @@ golden = "re06_fir_integer_delay.json"
 test = "wolfram_re06_fir_integer_delay"
 tolerance = "exact stored taps; complex relative error <= 1e-9 (delayed DTFT)"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -293,6 +318,7 @@ golden = "re21_eq_response_correction.json"
 test = "wolfram_re21_eq_response_correction"
 tolerance = "absolute error <= 1e-12 dB (final-minus-initial on shared grid)"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -304,6 +330,7 @@ golden = "re22_limiter_gain_envelope.json"
 test = "wolfram_re22_limiter_gain_envelope"
 tolerance = "exact latency samples and envelope flag; absolute error <= 1e-12 dB"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -315,6 +342,7 @@ golden = "re03_candidate_loss.json"
 test = "wolfram_re03_candidate_loss"
 tolerance = "relative error <= 1e-9 on recomputed candidate loss (ERB-rate + log-band weighted RMS)"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -326,6 +354,7 @@ golden = "re04_pruning_cumulative.json"
 test = "wolfram_re04_pruning_cumulative"
 tolerance = "complex relative error <= 1e-9; dB differences absolute error <= 1e-8 dB; ERB impact relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -337,6 +366,7 @@ golden = "re05_fir_residual.json"
 test = "wolfram_re05_fir_residual"
 tolerance = "complex relative error <= 1e-9; residual/corrected absolute error <= 1e-8 dB; linear-phase deviation <= 1e-9 rad"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -348,6 +378,7 @@ golden = "re09_kautz_bank.json"
 test = "wolfram_re09_kautz_bank"
 tolerance = "complex relative error <= 1e-9 on prescribed and fitted dry-plus-bank composites"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -359,6 +390,7 @@ golden = "re07_null_mask.json"
 test = "wolfram_re07_null_mask"
 tolerance = "exact boolean agreement on the null mask (6 dB envelope, 0.8 coherence, 10 dB SNR gates)"
 tolerance_kind = "abs"
+tolerance_value = 0.0
 tier = "smoke"
 
 [[case]]
@@ -370,6 +402,7 @@ golden = "re08_split_band_sum.json"
 test = "wolfram_re08_split_band_sum"
 tolerance = "complex relative error <= 1e-9; combined dB absolute error <= 1e-8 dB; split bands elementwise 1e-12 with exact lengths"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -381,6 +414,7 @@ golden = "re10_branch_sum_levels.json"
 test = "wolfram_re10_branch_sum_levels"
 tolerance = "complex relative error <= 1e-9; combined dB absolute error <= 1e-8 dB; level delta exact from band means"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -392,6 +426,7 @@ golden = "re11_summation_lattice.json"
 test = "wolfram_re11_summation_lattice"
 tolerance = "band summation error absolute error <= 1e-9; lattice identity and ledger outcomes exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -403,6 +438,7 @@ golden = "re12_gd_coherence.json"
 test = "wolfram_re12_gd_coherence"
 tolerance = "group delay absolute error <= 1e-9 ms; mean coherence absolute error <= 1e-12; gate reasons exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -414,6 +450,7 @@ golden = "re13_mso_seat_response.json"
 test = "wolfram_re13_mso_seat_response"
 tolerance = "SPL absolute error <= 1e-9 dB; complex phasor relative error <= 1e-12 (phase compared unwrap-invariant)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -425,6 +462,7 @@ golden = "re14_combined_curves.json"
 test = "wolfram_re14_combined_curves"
 tolerance = "SPL/phase absolute error <= 1e-8 (dB/degrees); weighted mean and seat variance <= 1e-9 dB"
 tolerance_kind = "abs"
+tolerance_value = 1e-08
 tier = "smoke"
 
 [[case]]
@@ -436,6 +474,7 @@ golden = "re15_modal_svd.json"
 test = "wolfram_re15_modal_svd"
 tolerance = "singular values, retained energy, sign-invariant projector and residual: relative error <= 1e-12"
 tolerance_kind = "rel"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -447,6 +486,7 @@ golden = "re16_spatial_quadrature.json"
 test = "wolfram_re16_spatial_quadrature"
 tolerance = "quadrature transcription <= 1e-9; normal CDF <= 2e-7, inverse normal <= 2e-9 (approximation bounds); expected/CVaR <= 1e-12; quadrature-vs-analytic budget 0.1"
 tolerance_kind = "abs"
+tolerance_value = 2e-07
 tier = "smoke"
 
 [[case]]
@@ -458,6 +498,7 @@ golden = "re17_interchannel_deviation.json"
 test = "wolfram_re17_interchannel_deviation"
 tolerance = "spread and RMS/peak statistics absolute error <= 1e-9 dB; upper-band reference exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -469,6 +510,7 @@ golden = "re18_dba_sum.json"
 test = "wolfram_re18_dba_sum"
 tolerance = "combined SPL/phase absolute error <= 1e-8 (dB/degrees); missing phase and empty arrays refuse"
 tolerance_kind = "abs"
+tolerance_value = 1e-08
 tier = "smoke"
 
 [[case]]
@@ -480,6 +522,7 @@ golden = "re19_bass_power.json"
 test = "wolfram_re19_bass_power"
 tolerance = "SPL/phase absolute error <= 1e-9 (dB/degrees); H R H^H programme powers relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -491,6 +534,7 @@ golden = "re20_drr_velvet.json"
 test = "wolfram_re20_drr_velvet"
 tolerance = "DRR absolute error <= 1e-9 dB including exact +-40 dB fallbacks; velvet sequence exact tap-by-tap"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -502,6 +546,7 @@ golden = "re23_ctc_regularized.json"
 test = "wolfram_re23_ctc_regularized"
 tolerance = "FIR taps, betas, gains, reconstruction and delivered residual/balance metrics absolute error <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -513,6 +558,7 @@ golden = "re24_cardioid.json"
 test = "wolfram_re24_cardioid"
 tolerance = "processed rear phase and combined SPL/phase absolute error <= 1e-8 (degrees/dB); rear SPL untouched"
 tolerance_kind = "abs"
+tolerance_value = 1e-08
 tier = "smoke"
 
 [[case]]
@@ -524,6 +570,7 @@ golden = "ex01_apo_biquad_gain_delay.json"
 test = "wolfram_ex01_apo_biquad_gain_delay"
 tolerance = "A/Q/I: complex-relative error <= 1e-9 (transfer); coefficients <= 1e-12 rel; text params <= 1e-9 abs"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -535,6 +582,7 @@ golden = "ex02_delay_padding_matrix.json"
 test = "wolfram_ex02_delay_padding_matrix"
 tolerance = "A/I: exact padding/indices; realized taps and effective delay <= 1e-12 rel"
 tolerance_kind = "rel"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -546,6 +594,7 @@ golden = "ex03_rendered_convolution_taps.json"
 test = "wolfram_ex03_rendered_convolution_taps"
 tolerance = "N/Q/I: taps/samples <= 1e-12 abs; DTFT <= 1e-9 rel; f32 L1 within declared bound"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -557,6 +606,7 @@ golden = "rc01_wav_decode_dtft_calibration.json"
 test = "wolfram_rc01_wav_decode_dtft_calibration"
 tolerance = "A/N/Q/I: exact decode; DTFT <= 1e-9 rel; levels <= 1e-9 dB abs; stereo/rate refused"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -568,6 +618,7 @@ golden = "rc02_route_matrix_prediction.json"
 test = "wolfram_rc02_route_matrix_prediction"
 tolerance = "A/I: complex sums <= 1e-9 rel; magnitudes <= 1e-9 dB; phases <= 1e-6 deg circular"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -579,6 +630,7 @@ golden = "rq01_seat_bin_cvar.json"
 test = "wolfram_rq01_seat_bin_cvar"
 tolerance = "A/B/X: aggregates/CVaR <= 1e-12 abs; group delay <= 1e-9 ms; degenerate support is None"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -590,6 +642,7 @@ golden = "rq02_step_schroeder_t60.json"
 test = "wolfram_rq02_step_schroeder_t60"
 tolerance = "N: step/decay/envelope <= 1e-9 abs; T60 <= 1e-9 s; R-squared <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -601,6 +654,7 @@ golden = "rq03_welch_noise_spl.json"
 test = "wolfram_rq03_welch_noise_spl"
 tolerance = "N/Q: PSD <= 1e-9 rel (1e-18 abs floor at analytic zeros); octave SPL <= 1e-6 dB"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -612,6 +666,7 @@ golden = "rq04_headroom_drive_verdicts.json"
 test = "wolfram_rq04_headroom_drive_verdicts"
 tolerance = "A/L/X: amplitudes <= 1e-12 abs; headroom <= 1e-9 dB; exact verdict booleans"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -623,6 +678,7 @@ golden = "m01_pir_prefscore.json"
 test = "wolfram_m01_pir_prefscore"
 tolerance = "absolute SPL/metric error <= 1e-9 dB"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -634,6 +690,7 @@ golden = "m02_avg_coherent.json"
 test = "wolfram_m02_avg_coherent"
 tolerance = "absolute SPL/phase error <= 1e-9 dB/deg"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -645,6 +702,7 @@ golden = "m03_mic_clock.json"
 test = "wolfram_m03_mic_clock"
 tolerance = "absolute dB/deg/s/ppm error <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -656,6 +714,7 @@ golden = "m04_ingest_adapters.json"
 test = "wolfram_m04_ingest_adapters"
 tolerance = "absolute SPL/phase error <= 1e-9 dB/deg"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -667,6 +726,7 @@ golden = "rm01_spl_level.json"
 test = "wolfram_rm01_spl_level"
 tolerance = "absolute error <= 1e-4 dB/linear on the f32 calibration path"
 tolerance_kind = "abs"
+tolerance_value = 0.0001
 tier = "smoke"
 
 [[case]]
@@ -678,6 +738,7 @@ golden = "rm02_target_shape.json"
 test = "wolfram_rm02_target_shape"
 tolerance = "absolute SPL error <= 1e-9 dB; guard verdicts exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -689,6 +750,7 @@ golden = "rm03_auto_tune.json"
 test = "wolfram_rm03_auto_tune"
 tolerance = "absolute error <= 1e-9 (dB/Q/counts exact)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -700,6 +762,7 @@ golden = "rm03_band_gauss.json"
 test = "wolfram_rm03_band_gauss"
 tolerance = "absolute band error <= 1e-9 Hz; Gaussian boundary exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -711,6 +774,7 @@ golden = "rm04_phase_thresholds.json"
 test = "wolfram_rm04_phase_thresholds"
 tolerance = "absolute error <= 1e-9 deg; acceptance decisions exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -722,6 +786,7 @@ golden = "o01_scalar_weights.json"
 test = "wolfram_o01_scalar_weights"
 tolerance = "absolute error <= 1e-9 dB (ERB/band/combined/masked loss)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -733,6 +798,7 @@ golden = "o01_asymmetric_weights.json"
 test = "wolfram_o01_asymmetric_weights"
 tolerance = "absolute error <= 1e-9 dB (asymmetric combined loss)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -744,6 +810,7 @@ golden = "o02_scalarization.json"
 test = "wolfram_o02_scalarization"
 tolerance = "absolute error <= 1e-9 dB (per-curve losses and all scalarizations)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -755,6 +822,7 @@ golden = "o03_tv2_stencil.json"
 test = "wolfram_o03_tv2_stencil"
 tolerance = "absolute error <= 1e-9 dB/decade^2 (TV2 penalties; exact zero for constant/affine)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -766,6 +834,7 @@ golden = "o04_deadband.json"
 test = "wolfram_o04_deadband"
 tolerance = "absolute error <= 1e-9 dB (deadband outputs incl. exact-boundary zeros)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -777,6 +846,7 @@ golden = "o04_bass_boost.json"
 test = "wolfram_o04_bass_boost"
 tolerance = "absolute error <= 1e-9 dB (linear/Harman/disabled target curves)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -788,6 +858,7 @@ golden = "o05_constraint_penalties.json"
 test = "wolfram_o05_constraint_penalties"
 tolerance = "absolute error <= 1e-9 in native units (dB, octaves, linear Q); penalties relative <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -799,6 +870,7 @@ golden = "o06_initial_guess_bounds.json"
 test = "wolfram_o06_initial_guess_bounds"
 tolerance = "absolute error <= 1e-9 (centers/bounds 1e-12); widths/gains inside exact diversification bands; flags exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -810,6 +882,7 @@ golden = "o13_backend_objectives.json"
 test = "wolfram_o13_backend_objectives"
 tolerance = "fixed-candidate absolute error <= 1e-9; seeded backend objective gap <= 1e-2 with exact feasibility"
 tolerance_kind = "abs"
+tolerance_value = 0.01
 tier = "smoke"
 
 [[case]]
@@ -821,6 +894,7 @@ golden = "o14_rerank_ordering.json"
 test = "wolfram_o14_rerank_ordering"
 tolerance = "exact rank order, ranks, scores and abort contracts (no numeric tolerance)"
 tolerance_kind = "abs"
+tolerance_value = 0.0
 tier = "smoke"
 
 [[case]]
@@ -832,6 +906,7 @@ golden = "o07_crossover_sum.json"
 test = "wolfram_o07_crossover_sum"
 tolerance = "[A] complex relative error <= 1e-9; combined dB absolute error <= 1e-8 dB"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -843,6 +918,7 @@ golden = "o08_joint_multisub.json"
 test = "wolfram_o08_joint_multisub"
 tolerance = "[A] absolute error <= 1e-9 dB^2 on variation/output_drive/target_error/total"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -854,6 +930,7 @@ golden = "o09_group_delay.json"
 test = "wolfram_o09_group_delay"
 tolerance = "[A] absolute error <= 1e-9 ms (group delay, duration) and <= 1e-9 deg/dimensionless (deviation, loss)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -865,6 +942,7 @@ golden = "o10_bark_sharpness.json"
 test = "wolfram_o10_bark_sharpness"
 tolerance = "[A] Bark/CBW relative error <= 1e-12, weights/loudness/sharpness absolute error <= 1e-9; Bark inverse round-trip <= 0.02 (pinned Newton budget)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -876,6 +954,7 @@ golden = "o11_temporal_ir.json"
 test = "wolfram_o11_temporal_ir"
 tolerance = "[A] absolute error <= 1e-9 dB/ms; main peak index exact [X]; normalized vs absolute EPA paths bit-identical [X]"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -887,6 +966,7 @@ golden = "o12_pareto_mixed.json"
 test = "wolfram_o12_pareto_mixed"
 tolerance = "[X] Pareto front identity exact; [A] slopes/mixed-loss absolute error <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -898,6 +978,7 @@ golden = "rq05_capture_alignment.json"
 test = "wolfram_rq05_capture_alignment"
 tolerance = "A: absolute error <= 1e-9 dB (residual peak, mean change, output loss); exact support/binding decisions"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -909,6 +990,7 @@ golden = "rq06_tone_render.json"
 test = "wolfram_rq06_tone_render"
 tolerance = "N/Q: absolute error <= 1e-6 (f32 samples, peak, RMS); invalid inputs refuse"
 tolerance_kind = "abs"
+tolerance_value = 1e-06
 tier = "smoke"
 
 [[case]]
@@ -920,6 +1002,7 @@ golden = "rq08_delay_oracle.json"
 test = "wolfram_rq08_delay_oracle"
 tolerance = "A: complex relative error <= 1e-9 (transfer); grid relative error <= 1e-12"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -931,6 +1014,7 @@ golden = "qa01_clock_phase.json"
 test = "wolfram_qa01_clock_phase"
 tolerance = "A: absolute error <= 1e-9 (s, degrees, dB); exact cancellation/invariance decisions"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -942,6 +1026,7 @@ golden = "qa02_heldout_perturb.json"
 test = "wolfram_qa02_heldout_perturb"
 tolerance = "A/B: absolute error <= 1e-9 (perturbed transfer, tail mean); exact partition decisions"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -953,6 +1038,7 @@ golden = "qa03_seed_matrix.json"
 test = "wolfram_qa03_seed_matrix"
 tolerance = "A/B/X: absolute error <= 1e-9 (fractions, tail risk, median); exact counts and stage replay"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -964,6 +1050,7 @@ golden = "rs01_flat_tilt.json"
 test = "wolfram_rs01_flat_tilt"
 tolerance = "A: absolute error <= 1e-9 dB (plants); grid relative error <= 1e-12; degenerate grids empty"
 tolerance_kind = "rel"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -975,6 +1062,7 @@ golden = "rs02_coherent_sum.json"
 test = "wolfram_rs02_coherent_sum"
 tolerance = "A: absolute error <= 1e-9 (dB and linear pressure); exact cancellation/refusal decisions"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -986,6 +1074,7 @@ golden = "rs03_tone_bank.json"
 test = "wolfram_rs03_tone_bank"
 tolerance = "N: absolute error <= 1e-9 (samples); DTFT relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -997,6 +1086,7 @@ golden = "ra01_hybrid_grid.json"
 test = "wolfram_ra01_hybrid_grid"
 tolerance = "grid relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1008,6 +1098,7 @@ golden = "ra01_log_slope.json"
 test = "wolfram_ra01_log_slope"
 tolerance = "absolute slope error <= 1e-9 dB/oct"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1019,6 +1110,7 @@ golden = "ra01_lr24_crossover.json"
 test = "wolfram_ra01_lr24_crossover"
 tolerance = "complex relative error <= 1e-9; crossover-sum absolute error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1030,6 +1122,7 @@ golden = "ra02_probe_delay.json"
 test = "wolfram_ra02_probe_delay"
 tolerance = "absolute timing error <= 0.02 ms; gain error <= 0.05 dB"
 tolerance_kind = "abs"
+tolerance_value = 0.02
 tier = "smoke"
 
 [[case]]
@@ -1041,6 +1134,7 @@ golden = "ra02_phase_slope_delay.json"
 test = "wolfram_ra02_phase_slope_delay"
 tolerance = "absolute delay error <= 1e-9 ms"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1052,6 +1146,7 @@ golden = "ra02_arrival_alignment.json"
 test = "wolfram_ra02_arrival_alignment"
 tolerance = "exact arrival samples; absolute error <= 1e-9 ms"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1063,6 +1158,7 @@ golden = "ra03_mode_null_masks.json"
 test = "wolfram_ra03_mode_null_masks"
 tolerance = "[A] relative error <= 1e-9 (mode/null Q, prominence, depth); [A] absolute mask error <= 1e-12"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1074,6 +1170,7 @@ golden = "ra04_decay_severity.json"
 test = "wolfram_ra04_decay_severity"
 tolerance = "[A] absolute threshold error <= 1e-12 s; relative Q error <= 1e-12; absolute severity error <= 1e-9 dB; [A/N] planted-RT60 regression relative error <= 0.15 with confidence >= 0.5; domain/decision gates exact [X]"
 tolerance_kind = "rel"
+tolerance_value = 0.15
 tier = "smoke"
 
 [[case]]
@@ -1085,6 +1182,7 @@ golden = "ra05_delay_excess_phase.json"
 test = "wolfram_ra05_delay_excess_phase"
 tolerance = "[A] absolute bulk-delay error <= 1e-6 s; residual/correction phase <= 1e-9; [N] all-pass excess-GD absolute error <= 0.35 ms; correction latency/tap bounds exact [X]"
 tolerance_kind = "abs"
+tolerance_value = 0.35
 tier = "smoke"
 
 [[case]]
@@ -1096,6 +1194,7 @@ golden = "ra06_reflection_cancel.json"
 test = "wolfram_ra06_reflection_cancel"
 tolerance = "[A] absolute Butterworth-Q error <= 1e-12; complex-relative H error <= 1e-9; [N] absolute impulse-response error <= 1e-9; recurrence/convolution agree to 1e-12"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1107,6 +1206,7 @@ golden = "ra07_spatial_stats.json"
 test = "wolfram_ra07_spatial_stats"
 tolerance = "[A] absolute error <= 1e-9 dB (power average, spread); [A] absolute mask error <= 1e-12; [B] absolute band/CVaR error <= 1e-9 dB; single-curve band width exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1118,6 +1218,7 @@ golden = "ra08_area_interp.json"
 test = "wolfram_ra08_area_interp"
 tolerance = "[A] absolute error <= 1e-9 (dB SPL, degrees, unit weights, confidence); support/out-of-support decisions exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1129,6 +1230,7 @@ golden = "ra09_rir_weights.json"
 test = "wolfram_ra09_rir_weights"
 tolerance = "[A] absolute error <= 1e-9 dB (prototype SPL); [A/N] absolute weight-matrix error <= 1e-9; measured-direction counts and magnitude-only contract exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1140,6 +1242,7 @@ golden = "ra10_evidence_stats.json"
 test = "wolfram_ra10_evidence_stats"
 tolerance = "[A] absolute error <= 1e-9 (dB spread, seconds, Hz, degrees); support/verdict/label/reason decisions exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1151,6 +1254,7 @@ golden = "rw01_intake_overlap.json"
 test = "wolfram_rw01_intake_overlap"
 tolerance = "absolute overlap error <= 1e-12 Hz; disjoint refusal exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -1162,6 +1266,7 @@ golden = "rw02_windowed_matrix_dft.json"
 test = "wolfram_rw02_windowed_matrix_dft"
 tolerance = "complex relative error <= 1e-9 per bin; Hann weights absolute <= 1e-12"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1173,6 +1278,7 @@ golden = "rw03_dsp_fir_convolution.json"
 test = "wolfram_rw03_dsp_fir_convolution"
 tolerance = "complex relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1184,6 +1290,7 @@ golden = "rw04_crossover_bounded_sum.json"
 test = "wolfram_rw04_crossover_bounded_sum"
 tolerance = "winner triple exact; band error absolute <= 1e-12; per-bin magnitude relative <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -1195,6 +1302,7 @@ golden = "rw05_electrical_headroom.json"
 test = "wolfram_rw05_electrical_headroom"
 tolerance = "peak amplitude and dBFS absolute <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1206,6 +1314,7 @@ golden = "rw06_velvet_support.json"
 test = "wolfram_rw06_velvet_support"
 tolerance = "velvet taps exact; support name exact; summary mean/std absolute <= 1e-12"
 tolerance_kind = "abs"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -1217,6 +1326,7 @@ golden = "rw07_scorecard_pruning.json"
 test = "wolfram_rw07_scorecard_pruning"
 tolerance = "I/X: exact ran/stale/skipped identity, tolerance 0"
 tolerance_kind = "abs"
+tolerance_value = 0.0
 tier = "smoke"
 
 [[case]]
@@ -1228,6 +1338,7 @@ golden = "rw08_stimulus_binding.json"
 test = "wolfram_rw08_stimulus_binding"
 tolerance = "I/Q: exact hash/label/count identity, tolerance 0"
 tolerance_kind = "abs"
+tolerance_value = 0.0
 tier = "smoke"
 
 [[case]]
@@ -1239,6 +1350,7 @@ golden = "rw09_scaled_replay.json"
 test = "wolfram_rw09_scaled_replay"
 tolerance = "A: complex relative error <= 1e-9"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1250,6 +1362,7 @@ golden = "rw10_from_measurement_slope.json"
 test = "wolfram_rw10_from_measurement_slope"
 tolerance = "A: absolute error <= 1e-9 dB/oct (slope) and dB (window mean)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1261,6 +1374,7 @@ golden = "rw11_hybrid_grid_delay.json"
 test = "wolfram_rw11_hybrid_grid_delay"
 tolerance = "N/A: grid relative error <= 1e-12; delay/ms and phase/deg absolute error <= 1e-9"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1272,6 +1386,7 @@ golden = "root01_facade_passthrough.json"
 test = "wolfram_root01_facade_passthrough"
 tolerance = "A/I: complex relative error <= 1e-12; facade bit-identical to direct kernel"
 tolerance_kind = "rel"
+tolerance_value = 1e-12
 tier = "smoke"
 
 [[case]]
@@ -1283,6 +1398,7 @@ golden = "rq07_abx_binomial.json"
 test = "wolfram_rq07_abx_binomial"
 tolerance = "absolute error <= 1e-9 (probabilities, interval ends); exact thresholds; invalid inputs refuse"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 
 [[case]]
@@ -1294,6 +1410,7 @@ golden = "rm01_schroeder_spl.json"
 test = "wolfram_rm01_schroeder_spl"
 tolerance = "1e-9 absolute Hz (f64); 1e-4 dB/linear on the f32 calibration path; degenerate inputs pin to 0.0"
 tolerance_kind = "abs"
+tolerance_value = 0.0001
 tier = "smoke"
 
 [[case]]
@@ -1305,6 +1422,7 @@ golden = "py01_dsp_smoothing.json"
 test = "py01_dsp_smoothing"
 tolerance = "A: absolute error <= 1e-9 dB (triangular-log viewer smoothing)"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 runner = "python"
 
@@ -1317,6 +1435,7 @@ golden = "py02_band_statistics.json"
 test = "py02_band_statistics"
 tolerance = "A: absolute error <= 1e-9 dB (band mean); empty band is None"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 runner = "python"
 
@@ -1329,6 +1448,7 @@ golden = "py03_roon_correlation.json"
 test = "py03_roon_correlation"
 tolerance = "N: exact integer samples (inter-channel correlation delay)"
 tolerance_kind = "abs"
+tolerance_value = 0.0
 tier = "smoke"
 runner = "python"
 
@@ -1341,6 +1461,7 @@ golden = "py04_converter_decode.json"
 test = "py04_converter_decode"
 tolerance = "A: absolute error <= 1e-9 (SPL dB, phase deg); 6-decimal rounding exact"
 tolerance_kind = "abs"
+tolerance_value = 1e-09
 tier = "smoke"
 runner = "python"
 
@@ -1353,6 +1474,7 @@ golden = "py05_heldout_contract.json"
 test = "py05_heldout_contract"
 tolerance = "A: absolute error <= 6e-5 dB/deg (4-decimal CSV rounding)"
 tolerance_kind = "abs"
+tolerance_value = 6e-05
 tier = "smoke"
 runner = "python"
 
@@ -1365,6 +1487,7 @@ golden = "h01_fir_bin_rounding.json"
 test = "wolfram_h01_fir_bin_rounding"
 tolerance = "N: absolute error <= 1e-6 dB on rounded-bin value; exact-DTFT gap budgeted separately"
 tolerance_kind = "abs"
+tolerance_value = 1e-06
 tier = "smoke"
 
 [[case]]
@@ -1376,5 +1499,6 @@ golden = "h02_scorer_sign.json"
 test = "h02_scorer_sign"
 tolerance = "N: complex relative error <= 1e-9 (RBJ peak transfer); coefficients <= 1e-12 rel"
 tolerance_kind = "rel"
+tolerance_value = 1e-09
 tier = "smoke"
 runner = "python"

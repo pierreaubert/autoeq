@@ -28,6 +28,10 @@ pub struct DspGraph {
     /// Output version
     #[serde(default = "crate::config::default_config_version")]
     pub version: String,
+    /// Required artifact-bundle manifest schema for newly published bundles.
+    /// Absent on legacy graphs, which may still use embedded measurements.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_bundle_schema_version: Option<u32>,
     /// Global graph-level plugins, e.g. matrix routing that combines several
     /// programme inputs before per-output correction chains.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -52,6 +56,7 @@ impl DspGraph {
     pub fn new(version: impl Into<String>) -> Self {
         Self {
             version: version.into(),
+            artifact_bundle_schema_version: None,
             global_plugins: Vec::new(),
             channels: HashMap::new(),
             deployed_source_curves: HashMap::new(),

@@ -8989,6 +8989,17 @@
           ],
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
+        "tilt_stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TiltStageConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Trailing LS plus HS tilt pair appended after the main filters."
+        },
         "tolerance": {
           "default": 1e-05,
           "description": "Optimization convergence tolerance (relative)",
@@ -9156,6 +9167,7 @@
         "evaluation_limit",
         "non_converged",
         "user_stopped",
+        "timed_out",
         "backend_failure",
         "invalid_result"
       ],
@@ -10507,6 +10519,13 @@
           "format": "float",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "capture_handoff_file": {
+          "description": "Required acquisition inventory for newly exported capture configurations.\nThe canonical filename is `capture-handoff.json`; missing or changed\ninventories are refused before correction. Absent on legacy imports.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -12691,6 +12710,43 @@
       },
       "type": "object"
     },
+    "TiltStageConfig": {
+      "description": "Appends an optimizer-driven LS plus HS tilt pair at the DSP chain end.\n\nThe pair extends `num_filters` by two instead of replacing peak slots, so\nenabling tilt never moves the main filters' bounds. Both shelves use the\nexisting shelf limits (+/-`max_db` gain, pinned Q) and flow through the\nsame HF guard, audibility veto, and headroom stages as every other filter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable the trailing tilt pair.",
+          "type": "boolean"
+        },
+        "hs_band_hz": {
+          "description": "HS hinge band `[lo, hi]` in Hz (`None` selects the upper geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "ls_band_hz": {
+          "description": "LS hinge band `[lo, hi]` in Hz (`None` selects the lower geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "TimingDiagnosticsReport": {
       "properties": {
         "advisories": {
@@ -13107,6 +13163,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "DSP chain output (AudioEngine PluginConfig format)",
   "properties": {
+    "artifact_bundle_schema_version": {
+      "description": "Required artifact-bundle manifest schema for newly published bundles.\nAbsent on legacy graphs, which may still use embedded measurements.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "channels": {
       "additionalProperties": {
         "$ref": "#/$defs/ChannelDspChain"

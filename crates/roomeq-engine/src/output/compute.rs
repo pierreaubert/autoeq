@@ -183,6 +183,25 @@ fn align_epa_curves(curves: &[&CurveData]) -> Option<(Vec<f64>, Vec<Vec<f64>>)> 
     Some((grid, levels))
 }
 
+/// Compute the EQ filter response curve from initial and final curves.
+///
+/// Returns a `CurveData` whose SPL values are `final - initial` (the correction in dB).
+pub fn compute_eq_response(initial: &CurveData, final_curve: &CurveData) -> CurveData {
+    let spl: Vec<f64> = final_curve
+        .spl
+        .iter()
+        .zip(initial.spl.iter())
+        .map(|(&f, &i)| f - i)
+        .collect();
+    CurveData {
+        freq: initial.freq.clone(),
+        spl,
+        phase: None,
+        norm_range: None,
+        ..Default::default()
+    }
+}
+
 #[cfg(test)]
 mod alignment_tests {
     use super::*;
@@ -231,24 +250,5 @@ mod alignment_tests {
         bad = a.clone();
         bad.spl[0] = f64::NAN;
         assert!(align_epa_curves(&[&a, &bad]).is_none());
-    }
-}
-
-/// Compute the EQ filter response curve from initial and final curves.
-///
-/// Returns a `CurveData` whose SPL values are `final - initial` (the correction in dB).
-pub fn compute_eq_response(initial: &CurveData, final_curve: &CurveData) -> CurveData {
-    let spl: Vec<f64> = final_curve
-        .spl
-        .iter()
-        .zip(initial.spl.iter())
-        .map(|(&f, &i)| f - i)
-        .collect();
-    CurveData {
-        freq: initial.freq.clone(),
-        spl,
-        phase: None,
-        norm_range: None,
-        ..Default::default()
     }
 }

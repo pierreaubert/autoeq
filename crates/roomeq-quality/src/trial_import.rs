@@ -494,11 +494,7 @@ pub fn summarize_claims(
         }
         let (p_value, reference_p_value, decision, equivalence_bound_p_correct) =
             match &protocol.decision {
-                DecisionRule::Abx {
-                    min_correct,
-                    alpha: _,
-                    ..
-                } => {
+                DecisionRule::Abx { min_correct, .. } => {
                     let p_value = abx_p_value(cell.correct, cell.trials)?;
                     let ci95 = wilson_ci95(cell.correct, cell.trials)?;
                     let decision = if cell.correct >= *min_correct {

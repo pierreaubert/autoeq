@@ -45,15 +45,24 @@ jobs:
           python3 -m unittest scripts/test_check_crate_partition.py
           python3 scripts/check_crate_partition.py --baseline-ref "${{ github.event.pull_request.base.sha }}"
 
+      - name: Check CI workflow mirror
+        run: |
+          python3 -m unittest scripts.test_check_ci_workflow_parity
+          python3 scripts/check_ci_workflow_parity.py
+
+      - name: Check numerical QA runner contracts
+        run: python3 -m unittest scripts.test_run_crate_test_matrix scripts.test_run_optimizer_benchmark_matrix scripts.test_check_parameter_matrix scripts.test_analyze_optimizer_benchmark_matrix scripts.test_optimizer_rate_canary
+
       - name: cargo check
         run: cargo check --workspace --all-targets --all-features
 
       - name: Check RoomEQ schema baselines
         run: python3 scripts/check_roomeq_schema_baselines.py
-      - name: Test RoomEQ GPUI client
+      - name: Test RoomEQ and recording GPUI clients
         run: |
-          python3 -m pip install 'jsonschema>=4.25,<5'
-          PYTHONPATH=python/roomeq-gui python3 -m unittest discover python/roomeq-gui/tests
+          python3 -m pip install --editable ui/roomeq-gui --editable ui/recording-gui
+          PYTHONPATH=ui/roomeq-gui python3 -m unittest discover ui/roomeq-gui/tests
+          PYTHONPATH=ui/recording-gui python3 -m unittest discover ui/recording-gui/tests
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
@@ -94,10 +103,63 @@ jobs:
       - name: Run focused crate tests
         run: python3 scripts/run_crate_test_matrix.py --package "${{ matrix.package }}" --release
 
+  qa-autoeq-numerical:
+    name: AutoEQ numerical validation (124 manifest cases)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    needs: crate-unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.14"
+
+      - name: Install pinned AutoEQ QA Python dependencies
+        run: python3 -m pip install --requirement scripts/autoeq-qa-requirements.txt
+
+      - name: Install pinned Just
+        run: |
+          cargo install --locked --version 1.58.0 just
+          just --version
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-autoeq-numerical-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Validate the complete manifest and target membership
+        run: python3 scripts/run_crate_test_matrix.py --check-qa-manifest
+
+      - name: Run all Rust and Python manifest cases
+        run: just qa-wolfram-validation
+
+      - name: Upload AutoEQ QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoeq-numerical-qa
+          path: |
+            target/qa/autoeq-qa-manifest.json
+            target/qa/autoeq-qa-rust-results.json
+            target/qa/autoeq-qa-rust-run.log
+            target/qa/autoeq-qa-python-results.json
+          if-no-files-found: warn
+
   qa-roomeq-ci:
     name: RoomEQ CI QA Gate
     runs-on: ubuntu-latest
     needs: crate-unit-tests
+    env:
+      ROOMEQ_QA_DIR: target/qa
     steps:
       - uses: actions/checkout@v4
 
@@ -113,8 +175,15 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Install Just
-        uses: extractions/setup-just@v4
+      - name: Clear stale public workflow evidence
+        run: |
+          mkdir -p "$ROOMEQ_QA_DIR"
+          rm -f "$ROOMEQ_QA_DIR/public-workflow-contracts.json" "$ROOMEQ_QA_DIR/public-workflow-contracts.log"
+
+      - name: Install pinned Just
+        run: |
+          cargo install --locked --version 1.58.0 just
+          just --version
 
       - name: Strict RoomEQ config and registry lint
         run: cargo test -p roomeq-qa strictly_deserialize --lib
@@ -141,6 +210,15 @@ jobs:
 
       - name: Run deterministic RoomEQ correctness contracts
         run: just qa-roomeq-contract-pr
+      - name: Upload public workflow contract evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-public-workflow-contracts
+          path: |
+            target/qa/public-workflow-contracts.json
+            target/qa/public-workflow-contracts.log
+          if-no-files-found: warn
 
       - name: Run RoomEQ CI QA
         run: just qa-roomeq-ci
@@ -152,7 +230,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: extractions/setup-just@v4
+      - name: Install pinned Just
+        run: |
+          cargo install --locked --version 1.58.0 just
+          just --version
       - uses: taiki-e/install-action@cargo-nextest
       - uses: taiki-e/install-action@cargo-mutants
       - name: Verify ownership and mutation-runner failure contracts
@@ -173,7 +254,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - uses: extractions/setup-just@v4
+      - name: Install pinned Just
+        run: |
+          cargo install --locked --version 1.58.0 just
+          just --version
       - name: Verify required-backend launcher failure contracts
         run: python3 scripts/test_camilladsp_backend_contracts.py
       - name: Install Linux audio build dependencies
@@ -194,6 +278,37 @@ jobs:
             target/qa/roomeq-matrix-backend.*
             target/qa/roomeq-parameter-matrix.json
             target/qa/roomeq-parameter-bundles/
+
+  qa-roomeq-linux-acoustic:
+    name: RoomEQ Linux Acoustic Baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs: crate-unit-tests
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-roomeq-linux-acoustic-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Validate Linux acoustic PR baseline
+        run: cargo run --locked --release --features qa --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json --output target/qa/roomeq-acoustic-linux-pr.json
+
+      - name: Upload Linux acoustic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: roomeq-acoustic-linux-pr
+          path: target/qa/roomeq-acoustic-linux-pr.json
+          if-no-files-found: warn
 
   qa-roomeq-macos:
     name: RoomEQ macOS Acoustic Baseline
@@ -232,8 +347,10 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Install Just
-        uses: extractions/setup-just@v4
+      - name: Install pinned Just
+        run: |
+          cargo install --locked --version 1.58.0 just
+          just --version
 
       - name: Cache cargo registry
         uses: actions/cache@v4

@@ -62,6 +62,9 @@ fn to_optimizer_termination(
         autoeq_optim::optim::OptimizerTermination::UserStopped => {
             roomeq_model::OptimizerTermination::UserStopped
         }
+        autoeq_optim::optim::OptimizerTermination::TimedOut => {
+            roomeq_model::OptimizerTermination::TimedOut
+        }
         autoeq_optim::optim::OptimizerTermination::BackendFailure => {
             roomeq_model::OptimizerTermination::BackendFailure
         }
@@ -99,5 +102,19 @@ pub fn to_optimizer_run_evidence(
                 objective: restart.objective,
             })
             .collect(),
+        pareto_report: value.pareto_report.clone(),
+    }
+}
+
+#[cfg(test)]
+mod termination_tests {
+    use super::to_optimizer_termination;
+
+    #[test]
+    fn timeout_reason_survives_the_room_report_adapter() {
+        assert_eq!(
+            to_optimizer_termination(autoeq_optim::optim::OptimizerTermination::TimedOut),
+            roomeq_model::OptimizerTermination::TimedOut
+        );
     }
 }

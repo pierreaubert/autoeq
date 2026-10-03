@@ -4,6 +4,8 @@ use crate::optim::{ObjectiveData, SmoothnessPenaltyConfig};
 /// Candidate-independent data derived from an [`ObjectiveData`] frequency grid.
 #[derive(Debug, Clone)]
 pub struct PreparedObjective {
+    pub(crate) run_control: Option<super::run_control::OptimizerRunControl>,
+    pub(crate) evaluation_stage: super::run_control::EvaluationStage,
     pub(crate) flat: Option<PreparedFlatLoss>,
     pub(crate) asymmetric: Option<PreparedAsymmetricLoss>,
     pub(crate) deadband_thresholds: Option<Vec<f64>>,
@@ -73,12 +75,22 @@ impl PreparedObjective {
                 )
             });
         Self {
+            run_control: None,
+            evaluation_stage: super::run_control::EvaluationStage::Search,
             flat,
             asymmetric,
             deadband_thresholds,
             smoothing_rows,
             smoothness,
         }
+    }
+
+    pub(crate) fn with_run_control(
+        mut self,
+        run_control: super::run_control::OptimizerRunControl,
+    ) -> Self {
+        self.run_control = Some(run_control);
+        self
     }
 
     pub(crate) fn apply_deadband(&self, error: &mut [f64]) {

@@ -1,7 +1,11 @@
 use super::super::consts::decide_schroeder_override;
 use super::super::misc::build_optim_params;
+use super::super::optimize::{OptimizerStopped, latch_observer_stop};
 use super::super::representative::measure_bass_rt60;
 use super::super::resources::{self, EqResources};
+use super::super::run_control::{
+    EqBudgetRefusal, EqRunControl, no_search_remaining, run_optimizer,
+};
 use super::super::types::PreparedSingleChannelEq;
 use crate::Curve;
 use crate::PeqModel;
@@ -584,6 +588,7 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
                 LossType::SpeakerFlat
             }
         }
+        "headphone_flat" => LossType::HeadphoneFlat,
         "score" => LossType::SpeakerScore,
         "epa" => LossType::Epa,
         _ => return Err(format!("Unknown loss type: {}", config.loss_type).into()),
@@ -716,6 +721,49 @@ pub(in super::super) fn prepare_single_channel_eq_with_spin(
     })
 }
 
+/// Conditioning metadata retained on each optimizer stage.
+#[derive(Clone, Copy)]
+pub(in super::super) enum OptimizationPassNormalization<'a> {
+    Single(&'a roomeq_model::InputNormalizationEvidence),
+    Multi(&'a roomeq_model::MultiInputNormalizationEvidence),
+}
+
+/// Objective and filter settings shared by a single optimization pass.
+pub(in super::super) struct OptimizationPassContext<'a> {
+    pub(in super::super) objective_data: &'a autoeq_optim::optim::ObjectiveData,
+    pub(in super::super) args_template: &'a autoeq_optim::OptimParams,
+    pub(in super::super) peq_model: PeqModel,
+    pub(in super::super) sample_rate: f64,
+    pub(in super::super) normalization: OptimizationPassNormalization<'a>,
+}
+
+impl OptimizationPassContext<'_> {
+    fn candidate_id(&self, is_refinement: bool) -> &'static str {
+        match (self.normalization, is_refinement) {
+            (OptimizationPassNormalization::Single(_), false) => "prepared-single-global",
+            (OptimizationPassNormalization::Single(_), true) => "prepared-single-refine",
+            (OptimizationPassNormalization::Multi(_), false) => "prepared-multi-global",
+            (OptimizationPassNormalization::Multi(_), true) => "prepared-multi-refine",
+        }
+    }
+
+    fn normalization_records(
+        &self,
+    ) -> (
+        Option<roomeq_model::InputNormalizationEvidence>,
+        Option<roomeq_model::MultiInputNormalizationEvidence>,
+    ) {
+        match self.normalization {
+            OptimizationPassNormalization::Single(normalization) => {
+                (Some(normalization.clone()), None)
+            }
+            OptimizationPassNormalization::Multi(normalization) => {
+                (None, Some(normalization.clone()))
+            }
+        }
+    }
+}
+
 /// Run a single optimization pass with the given number of filters.
 ///
 /// Returns (filters, loss, parameter_vector, optimizer evidence).
@@ -727,6 +775,7 @@ pub(in super::super) fn run_optimization_pass(
     config: &OptimizerConfig,
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
 ) -> Result<
     (
         Vec<Biquad>,
@@ -736,7 +785,44 @@ pub(in super::super) fn run_optimization_pass(
     ),
     Box<dyn Error>,
 > {
-    let mut optim_params = prep.args_template.clone();
+    let context = OptimizationPassContext {
+        objective_data: &prep.objective_data,
+        args_template: &prep.args_template,
+        peq_model: prep.peq_model,
+        sample_rate: prep.sample_rate,
+        normalization: OptimizationPassNormalization::Single(&prep.input_normalization),
+    };
+    run_optimization_pass_with_context(
+        &context,
+        num_filters,
+        max_iter,
+        config,
+        callback,
+        backend,
+        control,
+    )
+}
+
+/// Run a pass using a prepared single- or multi-measurement objective.
+#[allow(clippy::type_complexity)]
+pub(in super::super) fn run_optimization_pass_with_context(
+    context: &OptimizationPassContext<'_>,
+    num_filters: usize,
+    max_iter: usize,
+    config: &OptimizerConfig,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+) -> Result<
+    (
+        Vec<Biquad>,
+        f64,
+        Vec<f64>,
+        Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+    ),
+    Box<dyn Error>,
+> {
+    let mut optim_params = context.args_template.clone();
     // The pass count is the BASE count; a tilt-mapped template (marked by
     // resolved hinge bands) optimizes the pair on top of every pass.
     let tilt_extra = usize::from(optim_params.tilt_bands_hz.is_some()) * 2;
@@ -744,7 +830,7 @@ pub(in super::super) fn run_optimization_pass(
     optim_params.maxeval = max_iter;
 
     if optim_params.num_filters == 0 {
-        let loss = autoeq_optim::optim::compute_fitness_penalties_ref(&[], &prep.objective_data);
+        let loss = autoeq_optim::optim::compute_fitness_penalties_ref(&[], context.objective_data);
         if !loss.is_finite() {
             return Err("identity EQ objective is not finite".into());
         }
@@ -779,34 +865,30 @@ pub(in super::super) fn run_optimization_pass(
         autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 
     // Global optimization
-    let opt_result = if let Some(cb) = callback {
-        backend.optimize_filters_with_callback(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            prep.objective_data.clone(),
-            &optim_params,
-            cb,
-        )
-    } else {
-        backend.optimize_filters(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            prep.objective_data.clone(),
-            &optim_params,
-        )
-    };
-
-    let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-        &optim_params.algo,
-        opt_result,
-        &x,
+    let (callback, observer_stopped) = latch_observer_stop(callback);
+    let stage_index = control.map(EqRunControl::stage_count);
+    let global_result = run_optimizer(
+        backend,
+        &mut x,
         &lower_bounds,
         &upper_bounds,
-        optim_params.maxeval,
-        optim_params.seed,
+        context.objective_data.clone(),
+        &optim_params,
+        None,
+        callback,
+        control,
     );
+    if let (Some(control), Some(index)) = (control, stage_index)
+        && control.stage_count() > index
+    {
+        let (input, multi_input) = context.normalization_records();
+        control.attach_stage_normalization(index, input, multi_input);
+    }
+    let mut global_evidence = global_result?;
+    if observer_stopped.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Box::new(OptimizerStopped));
+    }
+
     if !global_evidence.converged {
         if global_evidence.best_effort {
             log::warn!(
@@ -825,9 +907,9 @@ pub(in super::super) fn run_optimization_pass(
     // the same objective data and refuse infeasible winners instead of
     // emitting them.
     crate::evidence_gate::verify_emission_candidate(
-        "prepared-single-global",
+        context.candidate_id(false),
         &x,
-        &prep.objective_data,
+        context.objective_data,
         &optim_params,
         &mut global_evidence,
     )
@@ -843,44 +925,58 @@ pub(in super::super) fn run_optimization_pass(
     let mut optimizer_evidence = vec![global_evidence];
 
     // Local refinement (COBYLA)
-    let _optimizer_loss = if config.refine {
+    let _optimizer_loss = if config.refine && !no_search_remaining(control) {
         log::info!(
             "  Running local refinement ({}) from global loss={:.6}",
             config.local_algo,
             global_loss
         );
         let x_before_refine = x.to_vec();
-        let local_result = backend.optimize_filters_with_algo_override(
+        let stage_index = control.map(EqRunControl::stage_count);
+        let local_result = run_optimizer(
+            backend,
             &mut x,
             &lower_bounds,
             &upper_bounds,
-            prep.objective_data.clone(),
+            context.objective_data.clone(),
             &optim_params,
             Some(&optim_params.local_algo),
+            None,
+            control,
         );
-        let mut local_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
-            &optim_params.local_algo,
-            local_result,
-            &x,
-            &lower_bounds,
-            &upper_bounds,
-            optim_params.maxeval,
-            optim_params.seed,
-        );
+        if let (Some(control), Some(index)) = (control, stage_index)
+            && control.stage_count() > index
+        {
+            let (input, multi_input) = context.normalization_records();
+            control.attach_stage_normalization(index, input, multi_input);
+        }
+        let (mut local_evidence, local_refused) = match local_result {
+            Ok(evidence) => (evidence, false),
+            Err(error) if error.is::<EqBudgetRefusal>() => (
+                error
+                    .downcast::<EqBudgetRefusal>()
+                    .expect("checked refusal type")
+                    .0,
+                true,
+            ),
+            Err(error) => return Err(error),
+        };
         if !local_evidence.converged {
             log::warn!(
                 "  Local refinement did not fully converge: {}",
                 local_evidence.status
             );
         }
-        crate::evidence_gate::verify_emission_candidate(
-            "prepared-single-refine",
-            &x,
-            &prep.objective_data,
-            &optim_params,
-            &mut local_evidence,
-        )
-        .map_err(|reason| format!("prepared refine candidate refused at emission: {reason}"))?;
+        if !local_refused {
+            crate::evidence_gate::verify_emission_candidate(
+                context.candidate_id(true),
+                &x,
+                context.objective_data,
+                &optim_params,
+                &mut local_evidence,
+            )
+            .map_err(|reason| format!("prepared refine candidate refused at emission: {reason}"))?;
+        }
         let local_loss = local_evidence.objective.unwrap_or(f64::INFINITY);
         let use_local = local_evidence.confidence
             != autoeq_optim::optim::OptimizerConfidence::Unusable
@@ -907,40 +1003,47 @@ pub(in super::super) fn run_optimization_pass(
 
     // Apply boost and cut envelope clamps to the final result so deployed filters
     // respect the same gain limits used during fitness evaluation.
-    let x_after_boost = if let Some(ref env) = prep.objective_data.max_boost_envelope {
-        autoeq_optim::optim::clamp_gains_to_envelope(&x, env, prep.peq_model)
+    let x_after_boost = if let Some(ref env) = context.objective_data.max_boost_envelope {
+        autoeq_optim::optim::clamp_gains_to_envelope(&x, env, context.peq_model)
     } else {
         x.to_vec()
     };
-    let mut x_final = if let Some(ref env) = prep.objective_data.min_cut_envelope {
-        autoeq_optim::optim::clamp_cuts_to_envelope(&x_after_boost, env, prep.peq_model)
+    let mut x_final = if let Some(ref env) = context.objective_data.min_cut_envelope {
+        autoeq_optim::optim::clamp_cuts_to_envelope(&x_after_boost, env, context.peq_model)
     } else {
         x_after_boost
     };
     clamp_combined_boost(
         &mut x_final,
-        &prep.objective_data.freqs,
-        prep.sample_rate,
-        prep.peq_model,
-        prep.objective_data.max_db,
+        &context.objective_data.freqs,
+        context.sample_rate,
+        context.peq_model,
+        context.objective_data.max_db,
     );
     zero_null_filling_boosts(
         &mut x_final,
-        &prep.objective_data.freqs,
-        prep.objective_data.null_suppression.as_deref(),
-        prep.peq_model,
+        &context.objective_data.freqs,
+        context.objective_data.null_suppression.as_deref(),
+        context.peq_model,
     );
     let final_loss =
-        autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, &prep.objective_data);
+        autoeq_optim::optim::compute_fitness_penalties_ref(&x_final, context.objective_data);
     for evidence in &mut optimizer_evidence {
-        evidence.input_normalization = Some(prep.input_normalization.clone());
+        match context.normalization {
+            OptimizationPassNormalization::Single(normalization) => {
+                evidence.input_normalization = Some(normalization.clone());
+            }
+            OptimizationPassNormalization::Multi(normalization) => {
+                evidence.multi_input_normalization = Some(normalization.clone());
+            }
+        }
         if evidence.selected_for_output {
             evidence.objective = Some(final_loss);
         }
     }
 
     // Convert to Biquad filters, pruning near-zero gain
-    let peq = autoeq_core::x2peq::x2peq(&x_final, prep.sample_rate, prep.peq_model);
+    let peq = autoeq_core::x2peq::x2peq(&x_final, context.sample_rate, context.peq_model);
     let filters: Vec<Biquad> = peq
         .into_iter()
         .map(|(_weight, biquad)| biquad)

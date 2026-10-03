@@ -2,10 +2,11 @@
 
 /// Capture-clock and measurement acquisition contracts.
 #[doc(inline)]
-pub use autoeq_core::{MeasurementProvenance, ProvenanceCaptureKind, capture_provenance};
+pub use autoeq_core::{
+    MeasurementProvenance, ProvenanceCaptureKind, capture_handoff, capture_provenance,
+};
 pub use autoeq_workflow::qa_println;
 
-// Re-export external crate functionality
 pub use math_audio_iir_fir as iir;
 pub use math_audio_optimisation as de;
 
@@ -63,7 +64,6 @@ pub use optim::de as optim_de;
 pub use optim::mh as optim_mh;
 pub use optim::params as optim_params;
 
-// Re-export commonly used items
 pub use cli::*;
 pub use loss::{CrossoverType, HeadphoneLossData, LossType, SpeakerLossData};
 pub use optim::params::{OptimParams, PeqModel, TiltBandsHz};

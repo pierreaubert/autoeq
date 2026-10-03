@@ -81,6 +81,42 @@ cargo run --features cli --bin autoeq --release -- \
 | `--recombination` | 0.9 | Crossover probability |
 | `--seed` | random | Random seed for reproducibility |
 
+## Warm-start checkpoints
+
+Save a recoverable candidate while optimizing with AutoEQ DE:
+
+```bash
+autoeq --curve measurements.csv --target target.csv --algo autoeq:de \
+  --seed 7 --checkpoint-state optimizer-state.json
+```
+
+Restart from that saved candidate using the same inputs and search settings:
+
+```bash
+autoeq --curve measurements.csv --target target.csv --algo autoeq:de \
+  --seed 7 --resume-state optimizer-state.json \
+  --checkpoint-state optimizer-state.json
+```
+
+Reuse checks the measurement, target/configuration, explicit normalization
+state, sample rate, parameter bounds, resolved optimizer/version, and budget.
+The candidate is checked against current constraints before search. Missing
+legacy identities and changed inputs produce a rejection with a reason.
+
+AutoEQ DE saves improved feasible candidates during search. Other backends
+save the initial and final feasible candidates and report that periodic
+snapshots are unavailable. Saved-candidate reuse is refused for `mh:*`
+backends because they do not initialize their population from that candidate.
+Multi-driver checkpoints are currently refused.
+File replacement is atomic; Unix builds also flush the parent directory.
+Directory-entry durability on other platforms remains dependent on the OS.
+
+A warm start creates a fresh population and random stream. It does not restore
+the optimizer population, adaptation/archive state, or random generator for
+exact continuation. Keep an unchanged copy of the settings used to create the
+checkpoint; increasing the budget requires a fresh run under this strict
+identity contract.
+
 ## Headphone Example
 
 ```bash

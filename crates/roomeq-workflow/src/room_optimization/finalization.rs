@@ -16,10 +16,387 @@ struct PreparedCandidate {
     physical: std::collections::BTreeMap<String, physical_drive::Requirement>,
 }
 
+struct FinalizationDiagnosticCapture<'a> {
+    sink: &'a dyn crate::pipeline::FinalizationDiagnosticSink,
+    failure: Option<String>,
+    optimized_result: bool,
+    prepared_candidate: bool,
+    required_attenuation: bool,
+    post_safety_candidate: bool,
+    post_alignment_candidate: bool,
+    useful_output_replay: bool,
+    target_trial_descriptor: Option<serde_json::Value>,
+    target_trial_post_alignment_hashes: Option<DiagnosticGraphHashes>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DiagnosticGraphHashes {
+    serialized_projection_sha256: String,
+    playback_projection_sha256: String,
+}
+
+fn diagnostic_result_value(result: &RoomOptimizationResult) -> Result<serde_json::Value> {
+    let channel_results: std::collections::BTreeMap<_, _> = result
+        .channel_results
+        .iter()
+        .map(|(name, channel)| {
+            (
+                name.clone(),
+                serde_json::json!({
+                    "pre_score": channel.pre_score,
+                    "post_score": channel.post_score,
+                    "initial_curve": &channel.initial_curve,
+                    "final_curve": &channel.final_curve,
+                    "fir_coeff_count": channel.fir_coeffs.as_ref().map(Vec::len),
+                }),
+            )
+        })
+        .collect();
+    let mut dsp_output = result.to_dsp_chain_output();
+    let effective_config = dsp_output
+        .metadata
+        .as_mut()
+        .and_then(|metadata| metadata.effective_config.take())
+        .map(|config| diagnostic_config_value(&config));
+    serde_json::to_value(dsp_output)
+        .map(|dsp_graph| {
+            serde_json::json!({
+                "dsp_graph": dsp_graph,
+                "effective_config": effective_config,
+                "channel_results": channel_results,
+                "combined_pre_score": result.combined_pre_score,
+                "combined_post_score": result.combined_post_score,
+                "has_finalized_decisions": result.finalized_decisions.is_some(),
+            })
+        })
+        .map_err(|error| failed(format!("serialize diagnostic graph: {error}")))
+}
+
+fn diagnostic_graph_hashes(result: &RoomOptimizationResult) -> Result<DiagnosticGraphHashes> {
+    let projection = diagnostic_result_value(result)?;
+    let serialized_graph = projection
+        .get("dsp_graph")
+        .ok_or_else(|| failed("diagnostic result omitted the DSP graph projection"))?;
+    let serialized_bytes = serde_json::to_vec(serialized_graph)
+        .map_err(|error| failed(format!("serialize diagnostic DSP graph: {error}")))?;
+
+    let graph = result.to_dsp_chain_output();
+    let channels: std::collections::BTreeMap<_, _> = graph
+        .channels
+        .iter()
+        .map(|(name, chain)| {
+            let drivers = chain.drivers.as_ref().map(|drivers| {
+                drivers
+                    .iter()
+                    .map(|driver| {
+                        serde_json::json!({
+                            "name": driver.name,
+                            "index": driver.index,
+                            "plugins": &driver.plugins,
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            (
+                name.clone(),
+                serde_json::json!({
+                    "channel": &chain.channel,
+                    "plugins": &chain.plugins,
+                    "drivers": drivers,
+                }),
+            )
+        })
+        .collect();
+    // This executable-graph projection includes version, bundle schema marker,
+    // global ordered plugins, and channel/driver plugin payloads. Curves,
+    // acceptance metadata, and decision ledgers are evidence, not executable
+    // DSP identity.
+    let playback_projection = serde_json::json!({
+        "version": &graph.version,
+        "artifact_bundle_schema_version": graph.artifact_bundle_schema_version,
+        "global_plugins": &graph.global_plugins,
+        "channels": channels,
+    });
+    let playback_bytes = serde_json::to_vec(&playback_projection)
+        .map_err(|error| failed(format!("serialize playback graph projection: {error}")))?;
+    Ok(DiagnosticGraphHashes {
+        serialized_projection_sha256: autoeq_artifacts::sha256_hex(&serialized_bytes),
+        playback_projection_sha256: autoeq_artifacts::sha256_hex(&playback_bytes),
+    })
+}
+
+fn diagnostic_config_value(config: &RoomConfig) -> serde_json::Value {
+    match serde_json::to_value(config) {
+        Ok(value) => serde_json::json!({"serialized": true, "value": value}),
+        Err(error) => serde_json::json!({
+            "serialized": false,
+            "reason": format!("configuration contains non-serializable inputs: {error}"),
+        }),
+    }
+}
+
+fn physical_requirements_value(
+    requirements: &std::collections::BTreeMap<String, physical_drive::Requirement>,
+) -> serde_json::Value {
+    let requirements: std::collections::BTreeMap<_, _> = requirements
+        .iter()
+        .map(|(output, requirement)| {
+            (
+                output.clone(),
+                serde_json::json!({
+                    "attenuation_db": requirement.attenuation_db,
+                    "frequency_hz": requirement.frequency_hz,
+                }),
+            )
+        })
+        .collect();
+    serde_json::json!(requirements)
+}
+
+impl<'a> FinalizationDiagnosticCapture<'a> {
+    fn new(sink: &'a dyn crate::pipeline::FinalizationDiagnosticSink) -> Self {
+        Self {
+            sink,
+            failure: None,
+            optimized_result: false,
+            prepared_candidate: false,
+            required_attenuation: false,
+            post_safety_candidate: false,
+            post_alignment_candidate: false,
+            useful_output_replay: false,
+            target_trial_descriptor: None,
+            target_trial_post_alignment_hashes: None,
+        }
+    }
+
+    fn write(&mut self, name: &str, value: serde_json::Value) {
+        if self.failure.is_some() {
+            return;
+        }
+        let bytes = match serde_json::to_vec(&value) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.failure = Some(format!("serialize diagnostic event '{name}': {error}"));
+                return;
+            }
+        };
+        if let Err(error) = self.sink.write_event(name, &bytes) {
+            self.failure = Some(format!("write diagnostic event '{name}': {error}"));
+        }
+    }
+
+    fn complete(&mut self, result: &RoomOptimizationResult) -> Result<()> {
+        if let Some(error) = &self.failure {
+            return Err(failed(format!(
+                "finalization diagnostic capture failed: {error}"
+            )));
+        }
+        let missing: Vec<_> = [
+            (self.optimized_result, "optimized result"),
+            (self.prepared_candidate, "prepared candidate"),
+            (self.required_attenuation, "required attenuation"),
+            (self.post_safety_candidate, "post-safety candidate"),
+            (self.post_alignment_candidate, "post-alignment candidate"),
+            (self.useful_output_replay, "useful-output replay"),
+            (
+                self.target_trial_descriptor.is_some(),
+                "target trial descriptor",
+            ),
+            (
+                self.target_trial_post_alignment_hashes.is_some(),
+                "target trial graph hashes",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(captured, name)| (!captured).then_some(name))
+        .collect();
+        if !missing.is_empty() {
+            return Err(failed(format!(
+                "finalization diagnostic target was not fully captured: {}",
+                missing.join(", ")
+            )));
+        }
+        match diagnostic_result_value(result) {
+            Ok(result_projection) => match diagnostic_graph_hashes(result) {
+                Ok(graph_hashes) => self.write(
+                    "finalization-result",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "event": "finalization-result",
+                        "serialized_dsp_graph_projection_sha256":
+                            &graph_hashes.serialized_projection_sha256,
+                        "playback_graph_sha256": &graph_hashes.playback_projection_sha256,
+                        "attempted_target_trial_descriptor": &self.target_trial_descriptor,
+                        "attempted_target_post_alignment_serialized_dsp_graph_projection_sha256":
+                            self.target_trial_post_alignment_hashes
+                                .as_ref()
+                                .map(|hashes| &hashes.serialized_projection_sha256),
+                        "attempted_target_post_alignment_playback_graph_sha256": self
+                            .target_trial_post_alignment_hashes.as_ref().map(|hashes| {
+                                &hashes.playback_projection_sha256
+                            }),
+                        "attempted_target_graph_equals_final_playback_graph": self
+                            .target_trial_post_alignment_hashes
+                            .as_ref()
+                            .is_some_and(|hashes| {
+                                hashes.playback_projection_sha256
+                                    == graph_hashes.playback_projection_sha256
+                            }),
+                        "result": result_projection,
+                    }),
+                ),
+                Err(error) => {
+                    self.failure = Some(error.to_string());
+                }
+            },
+            Err(error) => {
+                self.failure = Some(error.to_string());
+            }
+        }
+        if let Some(error) = &self.failure {
+            return Err(failed(format!(
+                "finalization diagnostic capture failed: {error}"
+            )));
+        }
+        Ok(())
+    }
+}
+
 fn failed(message: impl Into<String>) -> AutoeqError {
     AutoeqError::OptimizationFailed {
         message: message.into(),
     }
+}
+
+fn output_safety_attenuation_budget_checks(
+    result: &RoomOptimizationResult,
+    config: &RoomConfig,
+) -> Result<Vec<StageCheck>> {
+    let limits = &config
+        .optimizer
+        .finalization
+        .max_output_safety_attenuation_db;
+    if limits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let attenuation = crate::electrical_headroom::room_eq_safety_attenuation_by_output(
+        &result.to_dsp_chain_output(),
+    )?;
+    let unknown: Vec<_> = limits
+        .keys()
+        .filter(|output| !attenuation.contains_key(*output))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "finalization.max_output_safety_attenuation_db names unknown physical output(s): {}",
+                unknown.join(", ")
+            ),
+        });
+    }
+    Ok(limits
+        .iter()
+        .map(|(output, limit_db)| {
+            let observed_db = attenuation[output];
+            StageCheck {
+                id: format!("max_output_safety_attenuation_db:{output}"),
+                kind: StageCheckKind::Safety,
+                passed: observed_db <= *limit_db,
+                observed: Some(observed_db),
+                limit: Some(*limit_db),
+                diagnostic: Some(format!(
+                    "cumulative tagged static safety attenuation; output={output}; baseline calibration and untagged trims excluded; dynamic limiter not credited"
+                )),
+            }
+        })
+        .collect())
+}
+
+fn output_safety_attenuation_failure(checks: &[StageCheck]) -> Option<String> {
+    let exceeded: Vec<_> = checks
+        .iter()
+        .filter(|check| !check.passed)
+        .map(|check| {
+            format!(
+                "{} observed {:.6} dB exceeds {:.6} dB",
+                check.id,
+                check.observed.unwrap_or(f64::NAN),
+                check.limit.unwrap_or(f64::NAN)
+            )
+        })
+        .collect();
+    (!exceeded.is_empty()).then(|| exceeded.join("; "))
+}
+
+fn record_output_safety_attenuation_budget(
+    result: &mut RoomOptimizationResult,
+    checks: Vec<StageCheck>,
+) -> bool {
+    if checks.is_empty() {
+        return false;
+    }
+    let exceeded = checks.iter().any(|check| !check.passed);
+    result
+        .metadata
+        .stage_outcomes
+        .retain(|stage| stage.stage != "final_output_safety_attenuation_budget");
+    result.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_output_safety_attenuation_budget".into(),
+        status: if exceeded {
+            StageStatus::Degraded
+        } else {
+            StageStatus::Applied
+        },
+        advisories: vec![
+            "counts_cumulative_tagged_static_safety_gains_per_physical_output_path".into(),
+            "baseline_calibration_and_untagged_level_trims_are_not_included".into(),
+            "runtime_limiter_is_not_credited_toward_physical_drive_limits".into(),
+        ],
+        checks,
+    });
+    exceeded
+}
+
+fn finish_ctc_without_room_seat_evidence(
+    result: &mut RoomOptimizationResult,
+    safety_budget_checks: Vec<StageCheck>,
+    safety_budget_failure: Option<&str>,
+) -> Result<()> {
+    let safety_budget_exceeded =
+        record_output_safety_attenuation_budget(result, safety_budget_checks);
+    if safety_budget_exceeded && result.metadata.correction_acceptance.is_none() {
+        return Err(failed(format!(
+            "max_output_safety_attenuation_exceeded: {}; CTC has no correction report to retain the refusal",
+            safety_budget_failure.unwrap_or("budget exceeded")
+        )));
+    }
+    if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+        report.accepted = false;
+        report.decision = roomeq_model::CorrectionDecision::Rejected;
+        report
+            .violations
+            .push("ctc_final_seat_evidence_insufficient".to_string());
+        if safety_budget_exceeded {
+            report.violations.push(format!(
+                "max_output_safety_attenuation_exceeded: {}",
+                safety_budget_failure.unwrap_or("budget exceeded")
+            ));
+        }
+        report.violations.sort();
+        report.violations.dedup();
+        report.refresh_outcome();
+    }
+    result.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_correction_selection".into(),
+        status: StageStatus::Degraded,
+        advisories: vec![
+            "ctc_artifact_retained_without_room_seat_acceptance".into(),
+            "final_seat_evidence=insufficient_evidence".into(),
+        ],
+        checks: Vec::new(),
+    });
+    Ok(())
 }
 
 /// Select against the final graph, after all late processing and artifact binding.
@@ -33,9 +410,40 @@ pub(super) fn select(
     dir: &Path,
     store: &dyn autoeq_artifacts::ArtifactStore,
 ) -> Result<()> {
+    select_with_diagnostic_sink(result, captures, held_out, config, fs, dir, store, None)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The diagnostic sink is an opt-in extension of the established selection inputs"
+)]
+pub(super) fn select_with_diagnostic_sink(
+    result: &mut RoomOptimizationResult,
+    captures: &[seat_replay::Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+    store: &dyn autoeq_artifacts::ArtifactStore,
+    diagnostic: Option<(
+        crate::pipeline::FinalizationDiagnosticTrial,
+        &dyn crate::pipeline::FinalizationDiagnosticSink,
+    )>,
+) -> Result<()> {
     let snapshot = result.clone();
-    let selection = select_inner(result, captures, held_out, config, fs, dir, store)
-        .and_then(|()| verify_delivered_channel_alignment(result, config, fs, dir));
+    let mut diagnostics = diagnostic.map(|(_, sink)| FinalizationDiagnosticCapture::new(sink));
+    let selection = select_inner(
+        result,
+        captures,
+        held_out,
+        config,
+        fs,
+        dir,
+        store,
+        diagnostic.map(|(trial, _)| trial),
+        diagnostics.as_mut().map(|capture| &mut *capture),
+    )
+    .and_then(|()| verify_delivered_channel_alignment(result, config, fs, dir));
     match selection {
         Ok(()) => {
             // WP4a advisory: correlated (identical-drive) bass through the
@@ -47,7 +455,14 @@ pub(super) fn select(
                 super::validation_scorecard::align_report_metrics_to_scorecard(report);
                 report.refresh_outcome();
             }
-            Ok(())
+            if let Some(capture) = diagnostics.as_mut()
+                && let Err(error) = capture.complete(result)
+            {
+                *result = snapshot;
+                Err(error)
+            } else {
+                Ok(())
+            }
         }
         Err(error) => {
             *result = snapshot;
@@ -247,8 +662,15 @@ fn select_inner(
     fs: f64,
     dir: &Path,
     store: &dyn autoeq_artifacts::ArtifactStore,
+    diagnostic_trial: Option<crate::pipeline::FinalizationDiagnosticTrial>,
+    mut diagnostics: Option<&mut FinalizationDiagnosticCapture<'_>>,
 ) -> Result<()> {
     config.optimizer.finalization.validate().map_err(failed)?;
+    // Resolve configured output IDs against the actual routed graph before
+    // candidate search. A stale or misspelled key must never be ignored.
+    let initial_safety_budget_checks = output_safety_attenuation_budget_checks(result, config)?;
+    let initial_safety_budget_failure =
+        output_safety_attenuation_failure(&initial_safety_budget_checks);
 
     // CTC measurements describe ear transfer functions, not room-seat
     // captures.  They cannot be replayed by the physical-seat validator that
@@ -256,25 +678,11 @@ fn select_inner(
     // the CTC artifact, but do not turn the missing room-seat evidence into an
     // accepted acoustic claim (or fail the entire CTC artifact-producing run).
     if result.metadata.ctc.is_some() {
-        if let Some(report) = result.metadata.correction_acceptance.as_mut() {
-            report.accepted = false;
-            report.decision = roomeq_model::CorrectionDecision::Rejected;
-            report
-                .violations
-                .push("ctc_final_seat_evidence_insufficient".to_string());
-            report.violations.sort();
-            report.violations.dedup();
-            report.refresh_outcome();
-        }
-        result.metadata.stage_outcomes.push(StageOutcome {
-            stage: "final_correction_selection".into(),
-            status: StageStatus::Degraded,
-            advisories: vec![
-                "ctc_artifact_retained_without_room_seat_acceptance".into(),
-                "final_seat_evidence=insufficient_evidence".into(),
-            ],
-            checks: Vec::new(),
-        });
+        finish_ctc_without_room_seat_evidence(
+            result,
+            initial_safety_budget_checks,
+            initial_safety_budget_failure.as_deref(),
+        )?;
         return Ok(());
     }
 
@@ -284,6 +692,12 @@ fn select_inner(
     // given the same evaluator here so the finalizer cannot bypass evidence.
     if result.metadata.correction_acceptance.is_none() && captures.is_empty() && held_out.is_empty()
     {
+        if let Some(failure) = initial_safety_budget_failure {
+            return Err(failed(format!(
+                "max_output_safety_attenuation_exceeded: {failure}; selection has no acceptance evidence"
+            )));
+        }
+        record_output_safety_attenuation_budget(result, initial_safety_budget_checks);
         result.metadata.stage_outcomes.push(StageOutcome {
             stage: "final_correction_selection".into(),
             status: StageStatus::Skipped,
@@ -331,6 +745,19 @@ fn select_inner(
         );
     }
     let original = result.clone();
+    if let Some(capture) = diagnostics.as_deref_mut() {
+        capture.write(
+            "optimized-pre-finalization",
+            serde_json::json!({
+                "schema_version": 1,
+                "event": "optimized-pre-finalization",
+                "sample_rate_hz": fs,
+                "config": diagnostic_config_value(config),
+                "result": diagnostic_result_value(&original)?,
+            }),
+        );
+        capture.optimized_result = capture.failure.is_none();
+    }
     // Strength changes cannot supply missing physical measurements, coherent
     // phase, or artifact identities. Fail those evidence errors before doing
     // expensive FIR trials; an ordinary acoustic rejection still gets refined.
@@ -566,6 +993,53 @@ fn select_inner(
             .as_ref()
             .map(|value| value.result.clone())
             .unwrap_or_else(|_| original.clone());
+        let capture_target = diagnostics.is_some()
+            && diagnostic_trial
+                == Some(crate::pipeline::FinalizationDiagnosticTrial::ZeroStrengthOutput)
+            && strength == 0.0
+            && sub_strength == 0.0
+            && attenuation_mode == "output"
+            && drive_cut_db == 0.0
+            && joint_trial.is_none()
+            && !omit_post_eq;
+        let trial_descriptor = capture_target.then(|| {
+            serde_json::json!({
+                "schema_version": 1,
+                "trial": "zero_strength_output",
+                "correction_strength": strength,
+                "sub_correction_strength": sub_strength,
+                "attenuation_mode": attenuation_mode,
+                "drive_cut_db": drive_cut_db,
+                "joint_trial_index": joint_trial,
+                "omit_post_eq": omit_post_eq,
+            })
+        });
+        if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
+            capture.target_trial_descriptor = trial_descriptor.clone();
+        }
+        if capture_target
+            && let Some(capture) = diagnostics.as_deref_mut()
+            && let Ok(prepared) = &prepared
+        {
+            let graph_hashes = diagnostic_graph_hashes(&prepared.result)?;
+            capture.write(
+                "zero-strength-output-prepared",
+                serde_json::json!({
+                    "schema_version": 1,
+                    "event": "zero-strength-output-prepared",
+                    "trial_descriptor": trial_descriptor.as_ref(),
+                    "serialized_dsp_graph_projection_sha256":
+                        graph_hashes.serialized_projection_sha256,
+                    "playback_graph_sha256": graph_hashes.playback_projection_sha256,
+                    "strength": strength,
+                    "sub_strength": sub_strength,
+                    "result": diagnostic_result_value(&prepared.result)?,
+                    "electrical": &prepared.electrical,
+                        "physical_requirements": physical_requirements_value(&prepared.physical),
+                }),
+            );
+            capture.prepared_candidate = capture.failure.is_none();
+        }
         let mut stop_after_trial = false;
         let attempt = (|| -> Result<f64> {
             let policy = &config.optimizer.finalization;
@@ -588,6 +1062,26 @@ fn select_inner(
                 physical,
                 policy.output_ceiling_dbfs,
             );
+            if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
+                let graph_hashes = diagnostic_graph_hashes(&candidate)?;
+                capture.write(
+                    "zero-strength-output-required-attenuation",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "event": "zero-strength-output-required-attenuation",
+                        "trial_descriptor": trial_descriptor.as_ref(),
+                        "serialized_dsp_graph_projection_sha256":
+                            graph_hashes.serialized_projection_sha256,
+                        "playback_graph_sha256": graph_hashes.playback_projection_sha256,
+                        "electrical_before_protection": &before,
+                        "physical_requirements": physical_requirements_value(physical),
+                        "protected_outputs": &protected,
+                        "required_attenuation_db_by_output": &required,
+                        "output_ceiling_dbfs": policy.output_ceiling_dbfs,
+                    }),
+                );
+                capture.required_attenuation = capture.failure.is_none();
+            }
             let attenuation = required.values().copied().fold(0.0_f64, f64::max) + drive_cut_db;
             attenuation_budget::check(
                 &candidate,
@@ -624,6 +1118,23 @@ fn select_inner(
                 );
                 refresh_responses(&mut candidate, fs, dir)?;
             }
+            if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
+                let graph_hashes = diagnostic_graph_hashes(&candidate)?;
+                capture.write(
+                    "zero-strength-output-post-safety-pre-alignment",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "event": "zero-strength-output-post-safety-pre-alignment",
+                        "trial_descriptor": trial_descriptor.as_ref(),
+                        "serialized_dsp_graph_projection_sha256":
+                            graph_hashes.serialized_projection_sha256,
+                        "playback_graph_sha256": graph_hashes.playback_projection_sha256,
+                        "result": diagnostic_result_value(&candidate)?,
+                        "required_attenuation_db_by_output": &required,
+                    }),
+                );
+                capture.post_safety_candidate = capture.failure.is_none();
+            }
             // Strength and output attenuation can change role-pair levels.
             // Reapply the configured alignment to this complete candidate,
             // then verify electrical limits again with those gains included.
@@ -631,11 +1142,19 @@ fn select_inner(
             if alignment.checks.iter().any(|check| !check.passed) {
                 return Err(failed("final candidate channel-level alignment failed"));
             }
+            let alignment_diagnostic = capture_target.then(|| alignment.clone());
             candidate.metadata.stage_outcomes.retain(|stage| {
                 stage.stage != "final_channel_level_alignment"
                     && stage.stage != "channel_level_candidate_requires_final_refinement"
             });
             candidate.metadata.stage_outcomes.push(alignment);
+            let safety_budget_checks = output_safety_attenuation_budget_checks(&candidate, config)?;
+            if let Some(failure) = output_safety_attenuation_failure(&safety_budget_checks) {
+                return Err(failed(format!(
+                    "max_output_safety_attenuation_exceeded: {failure}"
+                )));
+            }
+            record_output_safety_attenuation_budget(&mut candidate, safety_budget_checks);
             if let Some(bass) = &candidate.metadata.bass_management
                 && let Some(graph) = &bass.routing_graph
             {
@@ -697,16 +1216,105 @@ fn select_inner(
             }
             let drive_utilization =
                 verify_declared_physical_drive(&mut candidate, config, fs, dir)?;
+            let post_alignment_hashes = capture_target
+                .then(|| diagnostic_graph_hashes(&candidate))
+                .transpose()?;
+            if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
+                capture.target_trial_post_alignment_hashes = post_alignment_hashes.clone();
+                let alignment_gains = candidate
+                    .channels
+                    .iter()
+                    .filter_map(|(name, chain)| {
+                        let gains: Vec<_> = chain
+                            .plugins
+                            .iter()
+                            .filter(|plugin| {
+                                plugin
+                                    .parameters
+                                    .get("label")
+                                    .and_then(serde_json::Value::as_str)
+                                    == Some("final_channel_level_alignment")
+                            })
+                            .cloned()
+                            .collect();
+                        (!gains.is_empty()).then_some((name.clone(), gains))
+                    })
+                    .collect::<std::collections::BTreeMap<_, _>>();
+                capture.write(
+                    "zero-strength-output-post-alignment",
+                    serde_json::json!({
+                        "schema_version": 1,
+                        "event": "zero-strength-output-post-alignment",
+                        "trial_descriptor": trial_descriptor.as_ref(),
+                        "serialized_dsp_graph_projection_sha256": post_alignment_hashes
+                            .as_ref()
+                            .map(|hashes| &hashes.serialized_projection_sha256),
+                        "playback_graph_sha256": post_alignment_hashes
+                            .as_ref()
+                            .map(|hashes| &hashes.playback_projection_sha256),
+                        "result": diagnostic_result_value(&candidate)?,
+                        "alignment_outcome": alignment_diagnostic,
+                        "tagged_alignment_plugins_by_channel": alignment_gains,
+                        "electrical_outputs": &outputs,
+                        "physical_drive_utilization": &drive_utilization,
+                    }),
+                );
+                capture.post_alignment_candidate = capture.failure.is_none();
+            }
             // Do not reuse a pre-attenuation or representative-seat verdict.
-            seat_replay::validate_candidate_final_seats(
-                &mut candidate,
-                &original,
-                captures,
-                held_out,
-                config,
-                fs,
-                dir,
-            )?;
+            let seat_validation = if capture_target {
+                let mut replay_trace = Vec::new();
+                let validation = seat_replay::validate_candidate_final_seats_with_diagnostic_trace(
+                    &mut candidate,
+                    &original,
+                    captures,
+                    held_out,
+                    config,
+                    fs,
+                    dir,
+                    &mut replay_trace,
+                );
+                if let Some(graph_hashes) = &post_alignment_hashes {
+                    for record in &mut replay_trace {
+                        record.replayed_serialized_dsp_graph_projection_sha256 =
+                            Some(graph_hashes.serialized_projection_sha256.clone());
+                        record.replayed_playback_graph_sha256 =
+                            Some(graph_hashes.playback_projection_sha256.clone());
+                    }
+                }
+                if let Some(capture) = diagnostics.as_deref_mut() {
+                    capture.write(
+                        "zero-strength-output-useful-output-replay",
+                        serde_json::json!({
+                            "schema_version": 1,
+                            "event": "zero-strength-output-useful-output-replay",
+                            "trial_descriptor": trial_descriptor.as_ref(),
+                            "replayed_serialized_dsp_graph_projection_sha256": post_alignment_hashes
+                                .as_ref()
+                                .map(|hashes| &hashes.serialized_projection_sha256),
+                            "replayed_playback_graph_sha256": post_alignment_hashes
+                                .as_ref()
+                                .map(|hashes| &hashes.playback_projection_sha256),
+                            "replay_records": replay_trace,
+                            "validation_error": validation.as_ref().err().map(ToString::to_string),
+                        }),
+                    );
+                    capture.useful_output_replay =
+                        capture.failure.is_none() && !replay_trace.is_empty();
+                }
+                validation
+            } else {
+                seat_replay::validate_candidate_final_seats(
+                    &mut candidate,
+                    &original,
+                    captures,
+                    held_out,
+                    config,
+                    fs,
+                    dir,
+                )
+            };
+            seat_validation?;
             let report = candidate
                 .metadata
                 .correction_acceptance
@@ -896,26 +1504,25 @@ fn select_inner(
             limit: None,
             diagnostic: attempt.as_ref().err().map(ToString::to_string),
         });
-        if let Ok(score) = attempt {
-            if best
+        if let Ok(score) = attempt
+            && best
                 .as_ref()
                 .is_none_or(|(previous, _)| score < *previous - 1e-9)
-            {
-                candidate.metadata.stage_outcomes.push(StageOutcome {
-                    stage: "final_correction_strength".into(),
-                    status: StageStatus::Applied,
-                    advisories: vec![
-                        format!("selected_strength={strength}"),
-                        format!("selected_sub_strength={sub_strength}"),
-                        format!("selected_without_post_eq={omit_post_eq}"),
-                        "attenuation_included_in_final_acoustic_acceptance".into(),
-                    ],
-                    checks: Vec::new(),
-                });
-                best = Some((score, candidate));
-                if stop_after_trial {
-                    break;
-                }
+        {
+            candidate.metadata.stage_outcomes.push(StageOutcome {
+                stage: "final_correction_strength".into(),
+                status: StageStatus::Applied,
+                advisories: vec![
+                    format!("selected_strength={strength}"),
+                    format!("selected_sub_strength={sub_strength}"),
+                    format!("selected_without_post_eq={omit_post_eq}"),
+                    "attenuation_included_in_final_acoustic_acceptance".into(),
+                ],
+                checks: Vec::new(),
+            });
+            best = Some((score, candidate));
+            if stop_after_trial {
+                break;
             }
         }
     }
@@ -1170,6 +1777,10 @@ fn publish_baseline(
     verify_declared_physical_drive(&mut baseline, config, fs, dir)?;
     refresh_responses(&mut baseline, fs, dir)?;
     refresh_final_reports(&mut baseline, config, fs, dir);
+    let safety_budget_checks = output_safety_attenuation_budget_checks(&baseline, config)?;
+    let safety_budget_failure = output_safety_attenuation_failure(&safety_budget_checks);
+    let safety_budget_exceeded =
+        record_output_safety_attenuation_budget(&mut baseline, safety_budget_checks);
     if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
         // Candidate evidence must never be attached to the delivered fallback.
         report.acoustic_quality = None;
@@ -1194,6 +1805,9 @@ fn publish_baseline(
     if attenuation > 1e-6 {
         advisories.push(format!("baseline_safety_attenuation_db={attenuation:.6}"));
     }
+    if safety_budget_exceeded {
+        advisories.push("baseline_exceeds_output_safety_attenuation_budget".into());
+    }
     if let Err(error) = replay {
         match error {
             AutoeqError::InvalidMeasurement { .. }
@@ -1217,10 +1831,22 @@ fn publish_baseline(
     advisories.extend(baseline_crossover_residuals(&baseline, fs, dir));
     if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
         report.accepted = false;
-        report.decision = if attenuation > 1e-6 {
+        if let Some(failure) = safety_budget_failure {
             report
                 .violations
-                .push("baseline_requires_safety_attenuation".into());
+                .push(format!("max_output_safety_attenuation_exceeded: {failure}"));
+        }
+        report.decision = if attenuation > 1e-6 || safety_budget_exceeded {
+            if attenuation > 1e-6 {
+                report
+                    .violations
+                    .push("baseline_requires_safety_attenuation".into());
+            }
+            if safety_budget_exceeded {
+                report
+                    .violations
+                    .push("baseline_exceeds_output_safety_attenuation_budget".into());
+            }
             roomeq_model::CorrectionDecision::Rejected
         } else {
             roomeq_model::CorrectionDecision::IdentityFallback
@@ -1334,6 +1960,10 @@ fn record_final_electrical_stage(
     Ok(())
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Candidate rebuild keeps policy, validation curves and artifact IO explicit"
+)]
 fn prepare_candidate(
     original: &RoomOptimizationResult,
     strengths: (f64, f64),
@@ -1441,13 +2071,12 @@ fn has_repeated_eq_sections(result: &RoomOptimizationResult) -> bool {
         if inspect(&chain.plugins, &mut seen) {
             return true;
         }
-        if let Some(drivers) = &chain.drivers {
-            if drivers
+        if let Some(drivers) = &chain.drivers
+            && drivers
                 .iter()
                 .any(|driver| inspect(&driver.plugins, &mut seen.clone()))
-            {
-                return true;
-            }
+        {
+            return true;
         }
     }
     false
@@ -2228,6 +2857,150 @@ mod tests {
     }
 
     #[test]
+    fn unknown_output_safety_budget_id_fails_before_selection_search() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut config = roomeq_model::RoomConfig::default();
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert("stale-output".into(), 3.0);
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        let dir = tempfile::tempdir().unwrap();
+        let error = select(
+            &mut result,
+            &[],
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .expect_err("stale configured output must not be ignored");
+        assert!(error.to_string().contains("unknown physical output"));
+        assert!(result.metadata.stage_outcomes.is_empty());
+    }
+
+    #[test]
+    fn output_safety_budget_records_over_limit_stage_diagnostic() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut gain = roomeq_engine::output::create_gain_plugin(-7.0);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![gain];
+        let output_id = serde_json::json!(["channel", "L"]).to_string();
+        let mut config = roomeq_model::RoomConfig::default();
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert(output_id.clone(), 6.0);
+        let checks = output_safety_attenuation_budget_checks(&result, &config).unwrap();
+        assert_eq!(checks.len(), 1);
+        assert!(!checks[0].passed);
+        assert_eq!(
+            checks[0].id,
+            format!("max_output_safety_attenuation_db:{output_id}")
+        );
+        assert_eq!(checks[0].observed, Some(7.0));
+        assert_eq!(checks[0].limit, Some(6.0));
+        assert!(output_safety_attenuation_failure(&checks).is_some());
+        assert!(record_output_safety_attenuation_budget(&mut result, checks));
+        let stage = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "final_output_safety_attenuation_budget")
+            .unwrap();
+        assert_eq!(stage.status, StageStatus::Degraded);
+        assert!(!stage.checks[0].passed);
+    }
+
+    #[test]
+    fn explicit_over_budget_without_acceptance_evidence_fails_closed() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut gain = roomeq_engine::output::create_gain_plugin(-7.0);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![gain];
+        let mut config = roomeq_model::RoomConfig::default();
+        let output_id = serde_json::json!(["channel", "L"]).to_string();
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert(output_id, 6.0);
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        let dir = tempfile::tempdir().unwrap();
+        let error = select(
+            &mut result,
+            &[],
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .expect_err("an explicit over-budget graph cannot use the no-evidence skip");
+        assert!(
+            format!("{error:#}").contains("max_output_safety_attenuation_exceeded"),
+            "unexpected CTC refusal: {error:#}"
+        );
+    }
+
+    #[test]
+    fn ctc_over_budget_without_acceptance_evidence_fails_closed() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        result.metadata.ctc = Some(roomeq_model::CtcReport {
+            enabled: true,
+            source: "synthetic-test".into(),
+            artifact: "ctc-test.json".into(),
+            speakers: vec!["L".into()],
+            ears: vec!["left".into(), "right".into()],
+            head_positions: 1,
+            fir_taps: 64,
+            latency_samples: 32,
+            latency_ms: 32.0 / 48.0,
+            max_filter_gain_db: 0.0,
+            max_condition_number: 1.0,
+            mean_reconstruction_error: 0.0,
+            worst_position_error: 0.0,
+            mean_crosstalk_residual_db: 0.0,
+            max_electrical_sum_gain_db: 0.0,
+            driver_headroom_limited: false,
+            room_eq_correction_applied: false,
+            room_eq_correction_channels: Vec::new(),
+            delivered_response: None,
+            binaural_diagnostics: None,
+        });
+        assert!(result.metadata.correction_acceptance.is_none());
+
+        let error = finish_ctc_without_room_seat_evidence(
+            &mut result,
+            vec![StageCheck {
+                id: format!(
+                    "max_output_safety_attenuation_db:{}",
+                    serde_json::json!(["channel", "L"])
+                ),
+                kind: roomeq_model::StageCheckKind::Safety,
+                passed: false,
+                observed: Some(7.0),
+                limit: Some(6.0),
+                diagnostic: None,
+            }],
+            Some("configured output budget exceeded"),
+        )
+        .expect_err("CTC cannot silently bypass an explicit output safety budget");
+        assert!(
+            format!("{error:#}").contains("max_output_safety_attenuation_exceeded"),
+            "unexpected CTC refusal: {error:#}"
+        );
+        assert!(result.metadata.stage_outcomes.iter().any(|stage| {
+            stage.stage == "final_output_safety_attenuation_budget"
+                && stage.status == StageStatus::Degraded
+                && !stage.checks[0].passed
+        }));
+    }
+
+    #[test]
     fn refined_fir_registers_exact_replayed_bytes_in_memory_store() {
         let dir = tempfile::tempdir().unwrap();
         let original = dir.path().join("original.wav");
@@ -2379,6 +3152,340 @@ mod tests {
     }
 
     #[test]
+    fn opt_in_zero_strength_capture_replays_exact_useful_output_inputs_without_changing_result() {
+        use std::collections::BTreeMap;
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct MemorySink(Mutex<BTreeMap<String, Vec<u8>>>);
+
+        impl crate::FinalizationDiagnosticSink for MemorySink {
+            fn write_event(&self, name: &str, json: &[u8]) -> std::io::Result<()> {
+                let mut events = self.0.lock().expect("diagnostic event mutex");
+                if events.contains_key(name) {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::AlreadyExists,
+                        format!("duplicate event {name}"),
+                    ));
+                }
+                events.insert(name.to_string(), json.to_vec());
+                Ok(())
+            }
+        }
+
+        // A useful-output trial is only reached when the intact candidate
+        // fails the benefit check and selection continues through its
+        // strength ladder. This deliberately harmful +6 dB peak makes the
+        // zero-strength identity endpoint the first candidate that can pass.
+        let (mut uninstrumented, config) = fixture();
+        let correction = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            100.0,
+            48_000.0,
+            1.0,
+            6.0,
+        );
+        uninstrumented.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_eq_plugin(
+                std::slice::from_ref(&correction),
+            )];
+        uninstrumented.channel_results.get_mut("L").unwrap().biquads = vec![correction];
+        let mut instrumented = uninstrumented.clone();
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let held_out = HashMap::new();
+        let plain_store = autoeq_artifacts::MemoryArtifactStore::new();
+        let traced_store = autoeq_artifacts::MemoryArtifactStore::new();
+        let plain_dir = tempfile::tempdir().unwrap();
+        let traced_dir = tempfile::tempdir().unwrap();
+
+        select(
+            &mut uninstrumented,
+            &captures,
+            &held_out,
+            &config,
+            48_000.0,
+            plain_dir.path(),
+            &plain_store,
+        )
+        .unwrap();
+
+        let sink = MemorySink::default();
+        select_with_diagnostic_sink(
+            &mut instrumented,
+            &captures,
+            &held_out,
+            &config,
+            48_000.0,
+            traced_dir.path(),
+            &traced_store,
+            Some((
+                crate::FinalizationDiagnosticTrial::ZeroStrengthOutput,
+                &sink,
+            )),
+        )
+        .unwrap();
+
+        assert_eq!(
+            diagnostic_result_value(&instrumented).unwrap(),
+            diagnostic_result_value(&uninstrumented).unwrap(),
+            "enabling capture must not alter the serialized graph/result projection"
+        );
+
+        let events = sink.0.lock().unwrap();
+        for name in [
+            "optimized-pre-finalization",
+            "zero-strength-output-prepared",
+            "zero-strength-output-required-attenuation",
+            "zero-strength-output-post-safety-pre-alignment",
+            "zero-strength-output-post-alignment",
+            "zero-strength-output-useful-output-replay",
+            "finalization-result",
+        ] {
+            assert!(events.contains_key(name), "missing diagnostic event {name}");
+        }
+        let replay: serde_json::Value = serde_json::from_slice(
+            events
+                .get("zero-strength-output-useful-output-replay")
+                .unwrap(),
+        )
+        .unwrap();
+        let post_alignment: serde_json::Value =
+            serde_json::from_slice(events.get("zero-strength-output-post-alignment").unwrap())
+                .unwrap();
+        assert_eq!(
+            replay["trial_descriptor"],
+            post_alignment["trial_descriptor"]
+        );
+        assert_eq!(
+            replay["replayed_serialized_dsp_graph_projection_sha256"],
+            post_alignment["serialized_dsp_graph_projection_sha256"]
+        );
+        assert_eq!(
+            replay["replayed_playback_graph_sha256"],
+            post_alignment["playback_graph_sha256"]
+        );
+        let final_result: serde_json::Value =
+            serde_json::from_slice(events.get("finalization-result").unwrap()).unwrap();
+        assert_eq!(
+            final_result["attempted_target_trial_descriptor"],
+            post_alignment["trial_descriptor"]
+        );
+        assert_eq!(
+            final_result["attempted_target_post_alignment_serialized_dsp_graph_projection_sha256"],
+            post_alignment["serialized_dsp_graph_projection_sha256"]
+        );
+        assert_eq!(
+            final_result["attempted_target_post_alignment_playback_graph_sha256"],
+            post_alignment["playback_graph_sha256"]
+        );
+        assert_eq!(
+            final_result["attempted_target_graph_equals_final_playback_graph"],
+            final_result["playback_graph_sha256"] == post_alignment["playback_graph_sha256"]
+        );
+        #[derive(serde::Deserialize)]
+        struct MeasurementContributor {
+            physical_output: String,
+            measured_curve: Curve,
+        }
+        #[derive(serde::Deserialize)]
+        struct ReplayInputs {
+            baseline_kind: String,
+            replayed_serialized_dsp_graph_projection_sha256: Option<String>,
+            replayed_playback_graph_sha256: Option<String>,
+            baseline_measurement_contributors: Vec<MeasurementContributor>,
+            delivered_measurement_contributors: Vec<MeasurementContributor>,
+            baseline_curve: Curve,
+            delivered_curve: Curve,
+            target_curve: Option<Curve>,
+            min_freq_hz: f64,
+            max_freq_hz: f64,
+            schroeder_hz: Option<f64>,
+            normalize_level: bool,
+            permitted_gain_db: f64,
+            scorecard: serde_json::Value,
+        }
+        let records: Vec<ReplayInputs> =
+            serde_json::from_value(replay["replay_records"].clone()).unwrap();
+        let record = records
+            .first()
+            .expect("captured useful-output replay must identify its scored curves");
+        assert!(!record.baseline_measurement_contributors.is_empty());
+        assert!(!record.delivered_measurement_contributors.is_empty());
+        for contributor in record
+            .baseline_measurement_contributors
+            .iter()
+            .chain(&record.delivered_measurement_contributors)
+        {
+            assert!(!contributor.physical_output.is_empty());
+            contributor
+                .measured_curve
+                .validate("captured physical measurement contributor")
+                .unwrap();
+        }
+        assert_eq!(
+            record.baseline_kind,
+            "pre_finalization_optimized_graph_without_tagged_correction"
+        );
+        assert_eq!(
+            record
+                .replayed_serialized_dsp_graph_projection_sha256
+                .as_deref(),
+            replay["replayed_serialized_dsp_graph_projection_sha256"].as_str()
+        );
+        assert_eq!(
+            record.replayed_playback_graph_sha256.as_deref(),
+            replay["replayed_playback_graph_sha256"].as_str()
+        );
+        assert!(record.normalize_level);
+
+        let recomputed = roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
+            std::slice::from_ref(&record.baseline_curve),
+            std::slice::from_ref(&record.delivered_curve),
+            &[],
+            &[],
+            record.target_curve.as_ref(),
+            roomeq_engine::quality::QualityEvaluationConfig {
+                min_freq_hz: record.min_freq_hz,
+                max_freq_hz: record.max_freq_hz,
+                schroeder_hz: record.schroeder_hz,
+                normalize_level: record.normalize_level,
+            },
+            Default::default(),
+            record.permitted_gain_db,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(recomputed).unwrap(),
+            record.scorecard.clone(),
+            "the captured baseline/delivered curves and settings must reproduce the score"
+        );
+    }
+
+    #[test]
+    fn diagnostic_capture_refuses_when_selection_stops_before_target_trial() {
+        use std::sync::Mutex;
+
+        #[derive(Default)]
+        struct Names(Mutex<Vec<String>>);
+
+        impl crate::FinalizationDiagnosticSink for Names {
+            fn write_event(&self, name: &str, _json: &[u8]) -> std::io::Result<()> {
+                self.0.lock().unwrap().push(name.to_string());
+                Ok(())
+            }
+        }
+
+        // The plain identity fixture accepts its intact first candidate and
+        // exits before zero strength. Keep this as a fail-closed guard rather
+        // than making diagnostic mode extend production selection.
+        let (mut result, config) = fixture();
+        let before = diagnostic_result_value(&result).unwrap();
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let sink = Names::default();
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        let dir = tempfile::tempdir().unwrap();
+        let error = select_with_diagnostic_sink(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+            Some((
+                crate::FinalizationDiagnosticTrial::ZeroStrengthOutput,
+                &sink,
+            )),
+        )
+        .expect_err("capture must reject an unvisited diagnostic target");
+
+        assert!(
+            error
+                .to_string()
+                .contains("diagnostic target was not fully captured")
+        );
+        assert!(error.to_string().contains("prepared candidate"));
+        assert_eq!(
+            *sink.0.lock().unwrap(),
+            vec!["optimized-pre-finalization"],
+            "the guard should retain only the real event that ran"
+        );
+        assert_eq!(diagnostic_result_value(&result).unwrap(), before);
+    }
+
+    #[test]
+    fn playback_hash_ignores_evidence_metadata_but_tracks_executable_graph() {
+        let (result, _) = fixture();
+        let original = diagnostic_graph_hashes(&result).unwrap();
+
+        let mut evidence_only_change = result.clone();
+        evidence_only_change
+            .metadata
+            .stage_outcomes
+            .push(StageOutcome {
+                stage: "diagnostic_hash_scope_test".into(),
+                status: StageStatus::Applied,
+                checks: Vec::new(),
+                advisories: vec!["evidence-only metadata change".into()],
+            });
+        let evidence_hashes = diagnostic_graph_hashes(&evidence_only_change).unwrap();
+        assert_ne!(
+            original.serialized_projection_sha256,
+            evidence_hashes.serialized_projection_sha256
+        );
+        assert_eq!(
+            original.playback_projection_sha256,
+            evidence_hashes.playback_projection_sha256
+        );
+
+        let mut executable_change = result;
+        let channel = executable_change.channels.get_mut("L").unwrap();
+        channel.plugins.push(PluginConfigWrapper {
+            plugin_type: "gain".into(),
+            parameters: serde_json::json!({"gain_db": 0.0}),
+        });
+        let executable_hashes = diagnostic_graph_hashes(&executable_change).unwrap();
+        assert_ne!(
+            original.playback_projection_sha256,
+            executable_hashes.playback_projection_sha256
+        );
+    }
+
+    #[test]
+    fn diagnostic_sink_failure_rolls_back_finalization_result() {
+        struct FailedSink;
+
+        impl crate::FinalizationDiagnosticSink for FailedSink {
+            fn write_event(&self, _name: &str, _json: &[u8]) -> std::io::Result<()> {
+                Err(std::io::Error::other("injected diagnostic failure"))
+            }
+        }
+
+        let (mut result, config) = fixture();
+        let before = diagnostic_result_value(&result).unwrap();
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        let dir = tempfile::tempdir().unwrap();
+        let error = select_with_diagnostic_sink(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+            Some((
+                crate::FinalizationDiagnosticTrial::ZeroStrengthOutput,
+                &FailedSink,
+            )),
+        )
+        .expect_err("an enabled diagnostic write failure must fail closed");
+
+        assert!(error.to_string().contains("diagnostic capture failed"));
+        assert_eq!(diagnostic_result_value(&result).unwrap(), before);
+    }
+
+    #[test]
     fn correction_strength_keeps_retained_biquads_equal_to_emitted_filters() {
         use math_audio_iir_fir::{Biquad, BiquadFilterType};
         for fs in [44_100.0, 48_000.0, 96_000.0] {
@@ -2387,7 +3494,9 @@ mod tests {
                     let (mut result, _) = fixture();
                     let filter = Biquad::new(BiquadFilterType::Peak, 60.0, fs, 3.0, -0.1);
                     result.channels.get_mut("L").unwrap().plugins =
-                        vec![roomeq_engine::output::create_eq_plugin(&[filter.clone()])];
+                        vec![roomeq_engine::output::create_eq_plugin(
+                            std::slice::from_ref(&filter),
+                        )];
                     result.channel_results.get_mut("L").unwrap().biquads = vec![filter];
                     let subs = if is_sub {
                         [String::from("L")].into()
@@ -3341,6 +4450,61 @@ mod tests {
                 .iter()
                 .flat_map(|stage| &stage.advisories)
                 .any(|note| note.starts_with("baseline_safety_attenuation_db=6.000"))
+        );
+    }
+
+    #[test]
+    fn over_budget_structural_fallback_keeps_diagnostics_but_is_rejected() {
+        let (mut result, mut config) = fixture();
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_gain_plugin(6.0)];
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert(serde_json::json!(["channel", "L"]).to_string(), 3.0);
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::FsArtifactStore::new();
+        rebuild(&mut result, &config, &HashMap::new(), 48_000.0, dir.path()).unwrap();
+
+        publish_baseline(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+            "no_candidate_within_electrical_acoustic_limits",
+            Vec::new(),
+        )
+        .unwrap();
+
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("fallback keeps the correction report for inspection");
+        assert_eq!(report.outcome, roomeq_model::RoomEqOutcome::Rejected);
+        assert!(!report.accepted);
+        assert!(
+            report.violations.iter().any(|violation| {
+                violation.starts_with("max_output_safety_attenuation_exceeded:")
+            })
+        );
+        let budget_stage = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "final_output_safety_attenuation_budget")
+            .expect("budget failure remains in the diagnostic output");
+        assert_eq!(budget_stage.status, StageStatus::Degraded);
+        assert!(budget_stage.checks.iter().any(|check| !check.passed));
+        assert!(
+            result.channels["L"].plugins.iter().any(|plugin| {
+                plugin.parameters["room_eq_safety_gain"] == serde_json::json!(true)
+            })
         );
     }
 

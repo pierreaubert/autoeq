@@ -201,8 +201,7 @@ mod tests {
             48_000.0,
             16,
         )
-        .err()
-        .expect("phase arrays alone cannot authorize all-pass fitting");
+        .expect_err("phase arrays alone cannot authorize all-pass fitting");
         assert!(error.to_string().contains("timing reference"), "{error}");
     }
 

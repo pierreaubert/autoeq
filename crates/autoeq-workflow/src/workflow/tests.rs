@@ -829,23 +829,27 @@ fn optimizer_state_save_load_roundtrip() {
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("optimizer_state.json");
 
-    let state = super::resume::OptimizerState {
-        best_params: vec![1.0, 2.0, 3.0],
-        current_params: vec![1.1, 2.1, 3.1],
-        best_loss: 0.42,
-        iteration: 10,
-        total_iterations: 100,
-        converged: false,
-        seed: Some(7),
-        timestamp: chrono::Utc::now(),
-        state_version: super::resume::WARM_START_STATE_VERSION,
-        measurement_identity: Some("meas-abc".to_string()),
-        normalization_hash: Some("norm-1".to_string()),
-        sample_rate: Some(48_000.0),
-        lower_bounds: Some(vec![0.0, 0.0, 0.0]),
-        upper_bounds: Some(vec![1.0, 1.0, 1.0]),
-        algorithm: Some("autoeq:de".to_string()),
+    let identity = super::resume::WarmStartIdentity {
+        measurement_identity: "meas-abc",
+        config_identity: "config-abc",
+        normalization_hash: Some("norm-1"),
+        sample_rate: 48_000.0,
+        lower_bounds: &[0.0, 0.0, 0.0],
+        upper_bounds: &[1.0, 2.0, 3.0],
+        algorithm: "autoeq:de",
+        algorithm_version: "0.5.6",
+        budget: 100,
     };
+    let state = super::resume::OptimizerState::from_candidate(
+        &[0.5, 1.0, 2.0],
+        0.42,
+        10,
+        100,
+        false,
+        Some(7),
+        true,
+        &identity,
+    );
 
     super::resume::save_optimizer_state(&state, &path).unwrap();
     assert!(path.exists());
@@ -863,19 +867,16 @@ fn optimizer_state_save_load_roundtrip() {
     assert_eq!(loaded.state_version, state.state_version);
     assert_eq!(loaded.measurement_identity, state.measurement_identity);
     assert_eq!(loaded.normalization_hash, state.normalization_hash);
+    assert_eq!(loaded.config_identity, state.config_identity);
+    assert_eq!(loaded.normalization_metadata, state.normalization_metadata);
     assert_eq!(loaded.sample_rate, state.sample_rate);
     assert_eq!(loaded.lower_bounds, state.lower_bounds);
     assert_eq!(loaded.upper_bounds, state.upper_bounds);
     assert_eq!(loaded.algorithm, state.algorithm);
+    assert_eq!(loaded.algorithm_version, state.algorithm_version);
+    assert!(loaded.best_feasible);
 
     // Matching identity is accepted as a warm-start seed.
-    let identity = super::resume::WarmStartIdentity {
-        measurement_identity: "meas-abc",
-        normalization_hash: Some("norm-1"),
-        sample_rate: 48_000.0,
-        lower_bounds: &[0.0, 0.0, 0.0],
-        upper_bounds: &[1.0, 1.0, 1.0],
-    };
     assert!(loaded.check_warm_start_compatible(&identity).is_ok());
 
     // Any identity mismatch rejects the record.
@@ -885,7 +886,15 @@ fn optimizer_state_save_load_roundtrip() {
             ..identity.clone()
         },
         super::resume::WarmStartIdentity {
+            config_identity: "config-other",
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
             normalization_hash: Some("norm-2"),
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
+            normalization_hash: None,
             ..identity.clone()
         },
         super::resume::WarmStartIdentity {
@@ -896,6 +905,18 @@ fn optimizer_state_save_load_roundtrip() {
             upper_bounds: &[2.0, 1.0, 1.0],
             ..identity.clone()
         },
+        super::resume::WarmStartIdentity {
+            algorithm: "autoeq:cobyla",
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
+            algorithm_version: "0.5.7",
+            ..identity.clone()
+        },
+        super::resume::WarmStartIdentity {
+            budget: 101,
+            ..identity.clone()
+        },
     ] {
         assert!(
             loaded.check_warm_start_compatible(&bad).is_err(),
@@ -903,10 +924,101 @@ fn optimizer_state_save_load_roundtrip() {
         );
     }
 
-    // Legacy records without identity are rejected when identity is required.
-    let mut legacy = loaded.clone();
-    legacy.measurement_identity = None;
-    assert!(legacy.check_warm_start_compatible(&identity).is_err());
+    // Explicit no-normalization metadata is reusable and differs from missing metadata.
+    let no_normalization_identity = super::resume::WarmStartIdentity {
+        normalization_hash: None,
+        ..identity.clone()
+    };
+    let no_normalization = super::resume::OptimizerState::from_candidate(
+        &[0.5, 1.0, 2.0],
+        0.42,
+        10,
+        100,
+        false,
+        Some(7),
+        true,
+        &no_normalization_identity,
+    );
+    assert_eq!(
+        no_normalization.normalization_metadata,
+        Some(super::resume::NormalizationMetadata::NotApplied)
+    );
+    assert!(
+        no_normalization
+            .check_warm_start_compatible(&no_normalization_identity)
+            .is_ok()
+    );
+
+    let mut empty_normalization_hash = state.clone();
+    empty_normalization_hash.normalization_metadata =
+        Some(super::resume::NormalizationMetadata::Applied {
+            hash: String::new(),
+        });
+    let normalization_error = empty_normalization_hash
+        .check_warm_start_compatible(&identity)
+        .expect_err("empty applied-normalization hash must be rejected");
+    assert!(normalization_error.contains("normalization hash"));
+    assert!(super::resume::save_optimizer_state(&empty_normalization_hash, &path).is_err());
+
+    // Missing metadata is different from an explicit no-normalization decision.
+    let mut missing_normalization = no_normalization.clone();
+    missing_normalization.normalization_metadata = None;
+    let missing_error = missing_normalization
+        .check_warm_start_compatible(&no_normalization_identity)
+        .expect_err("missing normalization metadata must be rejected");
+    assert!(missing_error.contains("missing normalization decision metadata"));
+
+    // Legacy JSON remains loadable, but incomplete identity cannot seed a run.
+    let legacy_path = dir.join("legacy_state.json");
+    std::fs::write(
+        &legacy_path,
+        r#"{
+            "best_params":[0.5,1.0,2.0],"current_params":[0.5,1.0,2.0],
+            "best_loss":0.42,"iteration":10,"total_iterations":100,
+            "converged":false,"seed":7,"timestamp":"2026-10-02T00:00:00Z",
+            "state_version":1,"measurement_identity":"meas-abc",
+            "normalization_hash":null,"sample_rate":48000.0,
+            "lower_bounds":[0.0,0.0,0.0],"upper_bounds":[1.0,2.0,3.0],
+            "algorithm":"autoeq:de"
+        }"#,
+    )
+    .unwrap();
+    let legacy = super::resume::load_optimizer_state(&legacy_path)
+        .unwrap()
+        .expect("legacy state should remain readable");
+    let legacy_error = legacy
+        .check_warm_start_compatible(&no_normalization_identity)
+        .expect_err("ambiguous legacy normalization must not be reused");
+    assert!(
+        legacy_error.contains("configuration identity") || legacy_error.contains("normalization"),
+        "legacy error should explain which identity is unsafe: {legacy_error}"
+    );
+
+    let mut invalid_dimensions = state.clone();
+    invalid_dimensions.current_params.pop();
+    let dimensions_error = super::resume::save_optimizer_state(&invalid_dimensions, &path)
+        .expect_err("saved vector dimensions must match");
+    assert!(
+        dimensions_error
+            .to_string()
+            .contains("dimensions are invalid")
+    );
+
+    let mut missing_algorithm_version = state.clone();
+    missing_algorithm_version.algorithm_version = None;
+    let algorithm_error = missing_algorithm_version
+        .check_warm_start_compatible(&identity)
+        .expect_err("missing optimizer version must reject warm reuse");
+    assert!(algorithm_error.contains("optimizer version"));
+
+    // Invalid state saves leave the last valid checkpoint untouched.
+    let saved_bytes = std::fs::read(&path).unwrap();
+    let mut invalid_state = state.clone();
+    invalid_state.best_params[0] = f64::NAN;
+    let save_error = super::resume::save_optimizer_state(&invalid_state, &path)
+        .expect_err("non-finite parameters must not be saved");
+    assert!(save_error.to_string().contains("not finite"));
+    assert_eq!(std::fs::read(&path).unwrap(), saved_bytes);
 
     let missing = super::resume::load_optimizer_state(&dir.join("missing.json")).unwrap();
     assert!(missing.is_none());

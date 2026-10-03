@@ -18,6 +18,164 @@ pub struct VetoAdjudicationReport {
     pub enforced: bool,
 }
 
+#[cfg(test)]
+mod pareto_dispatch_report_tests {
+    use super::{
+        ParetoCandidateEvidence, ParetoCrowdingDistance, ParetoDispatchReport,
+        ParetoSelectionEvidence,
+    };
+
+    fn report() -> ParetoDispatchReport {
+        ParetoDispatchReport {
+            schema: "roomeq.pareto_dispatch/v1".to_string(),
+            backend: "autoeq:nsga2".to_string(),
+            submitted_count: 3,
+            refused_source_indices: vec![1],
+            candidates: vec![
+                ParetoCandidateEvidence {
+                    source_index: 0,
+                    search_parameters: vec![0.2, 0.4],
+                    search_objectives: vec![3.0, 1.5],
+                    validated_parameters: vec![0.2, 0.4],
+                    validated_objectives: vec![3.0, 1.5],
+                    rank: Some(0),
+                    crowding_distance: Some(ParetoCrowdingDistance::Finite(0.5)),
+                    scalar_loss: Some(3.0),
+                },
+                ParetoCandidateEvidence {
+                    source_index: 2,
+                    search_parameters: vec![0.7, 0.1],
+                    search_objectives: vec![1.0, 2.0],
+                    validated_parameters: vec![0.7, 0.1],
+                    validated_objectives: vec![1.0, 2.0],
+                    rank: Some(0),
+                    crowding_distance: Some(ParetoCrowdingDistance::Unbounded),
+                    scalar_loss: Some(2.0),
+                },
+            ],
+            selection: ParetoSelectionEvidence {
+                rule: "normalized_compromise".to_string(),
+                weights: vec![0.5, 0.5],
+                ideal: vec![1.0, 1.5],
+                nadir: vec![3.0, 2.0],
+                selected_candidate_index: 1,
+                selected_source_index: 2,
+                scalar_baseline_rule: Some("configured_scalar:minimax".to_string()),
+                scalar_best_source_index: Some(2),
+                scalar_best_loss: Some(2.0),
+            },
+            returned_parameters: vec![0.7, 0.1],
+            search_evaluations: Some(64),
+            generations: Some(4),
+        }
+    }
+
+    #[test]
+    fn pareto_report_validates_and_roundtrips_tagged_unbounded_distance() {
+        let report = report();
+        report.validate().unwrap();
+        let json = serde_json::to_string(&report).unwrap();
+        assert!(json.contains(r#""kind":"unbounded""#));
+        assert!(!json.contains("Infinity"));
+        let decoded: ParetoDispatchReport = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, report);
+        decoded.validate().unwrap();
+    }
+
+    #[test]
+    fn pareto_report_rejects_return_mismatch_and_non_finite_values() {
+        let mut mismatched = report();
+        mismatched.returned_parameters[0] = 0.8;
+        assert!(
+            mismatched
+                .validate()
+                .unwrap_err()
+                .contains("does not match returned parameters")
+        );
+
+        let mut non_finite = report();
+        non_finite.candidates[0].validated_objectives[0] = f64::NAN;
+        assert!(
+            non_finite
+                .validate()
+                .unwrap_err()
+                .contains("malformed or non-finite")
+        );
+    }
+
+    #[test]
+    fn pareto_report_rejects_impossible_selection_policy_values() {
+        let mut negative_crowding = report();
+        negative_crowding.candidates[0].crowding_distance =
+            Some(ParetoCrowdingDistance::Finite(-0.1));
+        assert!(
+            negative_crowding
+                .validate()
+                .unwrap_err()
+                .contains("malformed or non-finite")
+        );
+
+        let mut negative_weight = report();
+        negative_weight.selection.weights = vec![-0.5, 1.5];
+        assert!(
+            negative_weight
+                .validate()
+                .unwrap_err()
+                .contains("selection frame")
+        );
+
+        let mut zero_weights = report();
+        zero_weights.selection.weights = vec![0.0, 0.0];
+        assert!(
+            zero_weights
+                .validate()
+                .unwrap_err()
+                .contains("selection frame")
+        );
+
+        let mut blank_rule = report();
+        blank_rule.selection.rule = "  ".to_string();
+        assert!(
+            blank_rule
+                .validate()
+                .unwrap_err()
+                .contains("selection frame")
+        );
+
+        let mut non_minimum_scalar = report();
+        non_minimum_scalar.selection.scalar_best_source_index = Some(0);
+        non_minimum_scalar.selection.scalar_best_loss = Some(3.0);
+        assert!(
+            non_minimum_scalar
+                .validate()
+                .unwrap_err()
+                .contains("does not select the minimum")
+        );
+    }
+
+    #[test]
+    fn legacy_optimizer_evidence_defaults_to_no_pareto_report() {
+        let value = serde_json::json!({
+            "algorithm": "autoeq:cobyla",
+            "termination": "converged",
+            "converged": true,
+            "best_effort": false,
+            "status": "done",
+            "evaluation_limit": 10,
+            "max_constraint_violation": 0.0,
+            "confidence": "high"
+        });
+        let evidence: super::OptimizerRunEvidence = serde_json::from_value(value).unwrap();
+        assert!(evidence.pareto_report.is_none());
+        assert!(
+            serde_json::to_value(evidence)
+                .unwrap()
+                .get("pareto_report")
+                .is_none()
+        );
+    }
+}
+
 /// True impulse-response temporal masking metrics for FIR / phase correction.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct TemporalIrMaskingMetrics {
@@ -235,6 +393,7 @@ pub enum OptimizerTermination {
     EvaluationLimit,
     NonConverged,
     UserStopped,
+    TimedOut,
     BackendFailure,
     InvalidResult,
 }
@@ -342,6 +501,254 @@ pub struct OptimizerRunEvidence {
     pub selected_for_output: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub restart_history: Vec<OptimizerRestartEvidence>,
+    /// Pareto selection evidence from this invocation, when the backend emitted it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pareto_report: Option<ParetoDispatchReport>,
+}
+
+/// A JSON-safe crowding distance from a Pareto backend.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", content = "value", rename_all = "snake_case")]
+pub enum ParetoCrowdingDistance {
+    /// A finite crowding distance.
+    Finite(f64),
+    /// An unbounded boundary-point distance, represented without non-finite JSON numbers.
+    Unbounded,
+}
+
+/// One source front member and its post-envelope validation result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ParetoCandidateEvidence {
+    /// Position in the optimizer's submitted front.
+    pub source_index: usize,
+    /// Parameters nominated by the search backend.
+    pub search_parameters: Vec<f64>,
+    /// Search-stage objectives attached to the nominated member.
+    pub search_objectives: Vec<f64>,
+    /// Parameters retained after shared envelope validation and repair.
+    pub validated_parameters: Vec<f64>,
+    /// Validation-stage objectives evaluated at `validated_parameters`.
+    pub validated_objectives: Vec<f64>,
+    /// Backend non-dominated rank, when it reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rank: Option<usize>,
+    /// Backend crowding distance, when it reports one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crowding_distance: Option<ParetoCrowdingDistance>,
+    /// Configured scalar loss already computed during this invocation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scalar_loss: Option<f64>,
+}
+
+/// Policy and winner identity for one validated Pareto front.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ParetoSelectionEvidence {
+    /// Selection rule, such as `normalized_compromise`.
+    pub rule: String,
+    /// Objective weights used by the selection rule.
+    pub weights: Vec<f64>,
+    /// Per-objective ideal point.
+    pub ideal: Vec<f64>,
+    /// Per-objective nadir point.
+    pub nadir: Vec<f64>,
+    /// Index into [`ParetoDispatchReport::candidates`] of the selected member.
+    pub selected_candidate_index: usize,
+    /// Original submitted-front index of the selected member.
+    pub selected_source_index: usize,
+    /// Scalar baseline policy, when the backend computed one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scalar_baseline_rule: Option<String>,
+    /// Original submitted-front index of the scalar-best member, when computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scalar_best_source_index: Option<usize>,
+    /// Scalar-best loss, when computed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scalar_best_loss: Option<f64>,
+}
+
+/// Invocation-local, post-validation evidence for a Pareto optimizer result.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct ParetoDispatchReport {
+    /// Schema marker: `roomeq.pareto_dispatch/v1`.
+    pub schema: String,
+    /// Backend that nominated the source front.
+    pub backend: String,
+    /// Number of members submitted for shared validation.
+    pub submitted_count: usize,
+    /// Submitted-front indices refused by shared validation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refused_source_indices: Vec<usize>,
+    /// Feasible members, in submitted-front order.
+    pub candidates: Vec<ParetoCandidateEvidence>,
+    /// Selection policy and winner identity.
+    pub selection: ParetoSelectionEvidence,
+    /// Exact parameters returned by the optimizer invocation.
+    pub returned_parameters: Vec<f64>,
+    /// Search objective evaluations, when reported by the backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_evaluations: Option<usize>,
+    /// Search generations completed, when reported by the backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generations: Option<usize>,
+}
+
+impl ParetoDispatchReport {
+    /// Check that the report is internally consistent and contains finite values.
+    ///
+    /// This method validates deserialized reports as well as reports created by
+    /// an optimizer. It does not authenticate the optimizer or prove physical quality.
+    ///
+    /// # Errors
+    ///
+    /// Returns an explanation when identities, dimensions, selection, or numbers conflict.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.schema != "roomeq.pareto_dispatch/v1" || self.backend.trim().is_empty() {
+            return Err("Pareto report schema or backend identity is invalid".to_string());
+        }
+        let inventory_count = self
+            .candidates
+            .len()
+            .checked_add(self.refused_source_indices.len())
+            .ok_or_else(|| "Pareto report member inventory overflows usize".to_string())?;
+        if self.submitted_count != inventory_count {
+            return Err(
+                "Pareto report submitted count does not match its member inventory".to_string(),
+            );
+        }
+        let objective_count = self
+            .candidates
+            .first()
+            .map(|candidate| candidate.validated_objectives.len())
+            .filter(|count| *count > 0)
+            .ok_or_else(|| "Pareto report has no validated candidates".to_string())?;
+        let parameter_count = self.returned_parameters.len();
+        if parameter_count == 0
+            || !self
+                .returned_parameters
+                .iter()
+                .all(|value| value.is_finite())
+            || self.selection.weights.len() != objective_count
+            || self.selection.ideal.len() != objective_count
+            || self.selection.nadir.len() != objective_count
+        {
+            return Err("Pareto report has invalid selection dimensions or values".to_string());
+        }
+        let finite = |values: &[f64]| values.iter().all(|value| value.is_finite());
+        if self.selection.rule.trim().is_empty()
+            || !finite(&self.selection.weights)
+            || self.selection.weights.iter().any(|weight| *weight < 0.0)
+            || !self.selection.weights.iter().any(|weight| *weight > 0.0)
+            || !finite(&self.selection.ideal)
+            || !finite(&self.selection.nadir)
+            || self
+                .selection
+                .ideal
+                .iter()
+                .zip(&self.selection.nadir)
+                .any(|(ideal, nadir)| ideal > nadir)
+        {
+            return Err("Pareto report selection frame is invalid".to_string());
+        }
+        let mut source_indices = vec![false; self.submitted_count];
+        for candidate in &self.candidates {
+            if candidate.source_index >= self.submitted_count
+                || source_indices[candidate.source_index]
+                || candidate.search_parameters.len() != parameter_count
+                || candidate.validated_parameters.len() != parameter_count
+                || candidate.search_objectives.len() != objective_count
+                || candidate.validated_objectives.len() != objective_count
+                || !finite(&candidate.search_parameters)
+                || !finite(&candidate.validated_parameters)
+                || !finite(&candidate.search_objectives)
+                || !finite(&candidate.validated_objectives)
+                || candidate.scalar_loss.is_some_and(|loss| !loss.is_finite())
+                || matches!(candidate.crowding_distance, Some(ParetoCrowdingDistance::Finite(value)) if !value.is_finite() || value < 0.0)
+            {
+                return Err("Pareto report candidate is malformed or non-finite".to_string());
+            }
+            source_indices[candidate.source_index] = true;
+        }
+        for &index in &self.refused_source_indices {
+            if index >= self.submitted_count || source_indices[index] {
+                return Err("Pareto report has a duplicate or invalid refused index".to_string());
+            }
+            source_indices[index] = true;
+        }
+        if source_indices.iter().any(|seen| !seen) {
+            return Err("Pareto report omits a submitted-front index".to_string());
+        }
+        let selected = self
+            .candidates
+            .get(self.selection.selected_candidate_index)
+            .ok_or_else(|| "Pareto report selected candidate index is out of range".to_string())?;
+        if selected.source_index != self.selection.selected_source_index
+            || selected.validated_parameters != self.returned_parameters
+        {
+            return Err("Pareto report selection does not match returned parameters".to_string());
+        }
+        match (
+            self.selection.scalar_baseline_rule.as_ref(),
+            self.selection.scalar_best_source_index,
+            self.selection.scalar_best_loss,
+        ) {
+            (None, None, None) => {}
+            (Some(rule), Some(source_index), Some(loss))
+                if !rule.trim().is_empty() && loss.is_finite() =>
+            {
+                let Some(best_candidate) = self
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.source_index == source_index)
+                else {
+                    return Err(
+                        "Pareto report scalar baseline source is not a candidate".to_string()
+                    );
+                };
+                if best_candidate.scalar_loss != Some(loss) {
+                    return Err(
+                        "Pareto report scalar baseline source and loss disagree".to_string()
+                    );
+                }
+                if rule.starts_with("configured_scalar:") {
+                    let scalar_losses = self
+                        .candidates
+                        .iter()
+                        .map(|candidate| candidate.scalar_loss)
+                        .collect::<Option<Vec<_>>>()
+                        .ok_or_else(|| {
+                            "configured scalar baseline omits candidate scalar losses".to_string()
+                        })?;
+                    let minimum = scalar_losses
+                        .iter()
+                        .copied()
+                        .min_by(f64::total_cmp)
+                        .ok_or_else(|| {
+                            "configured scalar baseline has no candidate scores".to_string()
+                        })?;
+                    if loss != minimum {
+                        return Err(
+                            "configured scalar baseline does not select the minimum loss"
+                                .to_string(),
+                        );
+                    }
+                }
+            }
+            _ => return Err("Pareto report scalar baseline evidence is inconsistent".to_string()),
+        }
+        Ok(())
+    }
+}
+
+impl OptimizerRunEvidence {
+    /// Whether the reported objective and recorded bound checks retain a valid candidate.
+    ///
+    /// This does not imply convergence, deployment acceptance, or that a stop
+    /// request did not occur.
+    pub fn has_valid_candidate(&self) -> bool {
+        self.objective.is_some_and(f64::is_finite)
+            && self.max_constraint_violation.is_finite()
+            && self.max_constraint_violation <= 1e-9
+    }
 }
 
 /// Serialisable summary of GD-Opt results for report plumbing (GD-4).

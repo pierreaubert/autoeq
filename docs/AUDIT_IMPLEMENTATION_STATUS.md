@@ -2422,3 +2422,29 @@ open, and the full matrix is still pending watchdog review.
   Native review additionally requires marked published graphs to provide acceptance
   even through compatibility builders/direct rack apply; that follow-up and its
   final gates are still in progress. The A09 slices are not yet integrated.
+
+
+### A07 benchmark profile correction (2026-10-03)
+
+The v1 matrix was started with a development binary. Source review of
+`Cargo.toml` confirms `profile.dev` leaves workspace code at opt-level 0 and
+`profile.release` is the repository's benchmark profile (opt-level 3, thin LTO).
+The 10-second deadline therefore makes development timings unsuitable for
+production algorithm comparisons. Root corrected this setup before using any
+results to recommend presets.
+
+The owned v1 supervisor received SIGINT and exited 130 after killing/reaping its
+active cell. Tool session 28303 is terminal, not still running. The retained
+matrix is explicitly interrupted: 18 attempted cells, 17 typed results (six
+completed and eleven timed out), and one interrupted cell. Nothing was erased
+or relabeled as a completed matrix. The original executable hash is unchanged.
+This partial development run remains control-path evidence only.
+
+An optimized release binary is building from the same frozen integration source
+with the command-only math override. Evidence is being written under
+`/Volumes/home_tmp/tmp/autoeq-a07-release-evidence`; active build tool session
+93712. The replacement run will use a separate directory
+`/Volumes/home_tmp/tmp/autoeq-a07-full-matrix-release-v2`, retain explicit build
+profile/provenance, and execute the same 841-cell inventory. It has not started
+at the time of this note. This is a deliberate profile correction, not a restart
+because a process observation timed out.

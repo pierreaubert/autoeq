@@ -15,6 +15,11 @@ use std::{
     path::Path,
 };
 
+// Preserve the physical-drive cap across all electrical replay callers.
+// Retained Complex64 response samples alone consume up to 256 MiB here;
+// transient working buffers and convolution taps are additional storage.
+const MAX_ELECTRICAL_PATH_SAMPLES: usize = 16_777_216;
+
 pub struct SerializedElectricalPath<'a> {
     pub input: &'a str,
     pub output: &'a str,
@@ -101,7 +106,7 @@ pub fn assess_final_graph_physical_drive(
     if expanded
         .len()
         .checked_mul(frequencies.len())
-        .is_none_or(|work| work > 16_777_216)
+        .is_none_or(|work| work > MAX_ELECTRICAL_PATH_SAMPLES)
     {
         return Err(AutoeqError::InvalidConfiguration {
             message: "physical_drive replay exceeds the path/sample budget".into(),
@@ -493,10 +498,14 @@ pub fn replay_sampled_electrical_headroom(
     .map(|assessment| assessment.outputs)
 }
 
-/// Replay serialized paths and retain the canonical frequency-dependent electrical envelopes.
+/// Replay serialized paths and retain their frequency-dependent electrical envelopes.
+///
+/// At most 16,777,216 path/frequency pairs may be retained. Oversized requests
+/// refuse before response allocation or sidecar access; the grid is not reduced.
 ///
 /// # Errors
-/// Rejects unsupported DSP, incomplete physical paths, invalid grids, and unavailable resources.
+/// Rejects requests beyond the path/sample budget, unsupported DSP, incomplete
+/// physical paths, invalid grids, and unavailable resources.
 pub fn replay_sampled_electrical_assessment(
     paths: &[SerializedElectricalPath<'_>],
     frequencies_hz: &[f64],
@@ -508,6 +517,13 @@ pub fn replay_sampled_electrical_assessment(
     let invalid = |message: &str| AutoeqError::InvalidMeasurement {
         message: message.into(),
     };
+    if paths
+        .len()
+        .checked_mul(frequencies_hz.len())
+        .is_none_or(|samples| samples > MAX_ELECTRICAL_PATH_SAMPLES)
+    {
+        return Err(invalid("electrical replay exceeds the path/sample budget"));
+    }
     if !sample_rate_hz.is_finite()
         || sample_rate_hz <= 0.0
         || frequencies_hz.len() < 2
@@ -597,6 +613,64 @@ pub fn replay_sampled_electrical_assessment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn electrical_replay_refuses_excess_response_storage_before_sidecar_access() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut chain = result.channels.remove("L").unwrap();
+        chain.plugins = vec![roomeq_model::PluginConfigWrapper {
+            plugin_type: "convolution".into(),
+            parameters: serde_json::json!({"ir_file": "must-not-open.wav"}),
+        }];
+        let stages = [&chain];
+        let mut paths: Vec<_> = (0..129)
+            .map(|_| SerializedElectricalPath {
+                input: "L",
+                output: "L",
+                stages: &stages,
+            })
+            .collect();
+        // 128 paths fit the existing 16,777,216 path/sample limit exactly.
+        // One more would retain over 256 MiB of complex response samples.
+        let frequencies: Vec<_> = (0..131_072)
+            .map(|index| index as f64 * 24_000.0 / 131_071.0)
+            .collect();
+        let limits = BTreeMap::from([("L".into(), 1.0)]);
+        let directory = tempfile::tempdir().unwrap();
+        let error = replay_sampled_electrical_assessment(
+            &paths,
+            &frequencies,
+            48_000.0,
+            &limits,
+            directory.path(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("electrical replay exceeds the path/sample budget"),
+            "oversized replay must refuse before opening any sidecar: {error}"
+        );
+
+        // At the exact limit, ordinary resource validation proceeds. The
+        // intentionally absent sidecar keeps this boundary probe inexpensive.
+        paths.pop();
+        let error = replay_sampled_electrical_assessment(
+            &paths,
+            &frequencies,
+            48_000.0,
+            &limits,
+            directory.path(),
+            &HashMap::new(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("cannot read required convolution sidecar")
+        );
+    }
 
     #[test]
     fn final_graph_policy_uses_declared_input_peaks_and_rejects_unknown_inputs() {

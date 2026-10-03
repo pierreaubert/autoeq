@@ -3,6 +3,9 @@
 //! This runner reports measured outcomes. It does not map algorithms to user
 //! presets or infer quality tiers from one run.
 
+use crate::optimizer_benchmark_sources::{
+    SourceSnapshot, resolve_room_input_paths, snapshot_declared_sources,
+};
 use autoeq_optim::optim::run_control::{
     OptimizerBudgetProfile, OptimizerRunControl, OptimizerRunSnapshot,
 };
@@ -16,9 +19,10 @@ use autoeq_optim::roomeq::MultiMeasurementStrategy;
 use autoeq_optim::{LossType, OptimParams, PeqModel};
 use clap::Parser;
 use ndarray::Array1;
+use roomeq_engine::Curve;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -27,6 +31,13 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
+
+mod controlled_cell;
+pub use controlled_cell::{
+    BenchmarkCellSpec, CellPurpose, CellSpecInventory, ControlledCellOutcome, ControlledCellResult,
+    benchmark_cell_spec_inventory, benchmark_cell_specs, run_benchmark_cell_spec,
+    run_benchmark_cell_spec_file, write_cell_specs, write_controlled_cell_result,
+};
 
 const FIXED_MANIFEST: &str = include_str!("../optimizer-benchmark/manifest.json");
 const NORMALIZATION_REFERENCE_HZ: f64 = 425.0;
@@ -462,6 +473,10 @@ pub struct BenchmarkDistribution {
 struct MeasurementObjective {
     id: String,
     data: ObjectiveData,
+    /// Input curve after the fixture's declared 425 Hz source normalization.
+    /// The RoomEQ engine applies and records its correction-band normalization
+    /// separately for each dispatch.
+    source_curve: Curve,
 }
 
 #[derive(Debug, Clone)]
@@ -486,7 +501,30 @@ pub fn benchmark_manifest() -> Result<BenchmarkManifest, String> {
     {
         return Err("optimizer benchmark manifest has an invalid schema or empty matrix".into());
     }
+    ensure_unique_case_ids(&manifest.cases)?;
+    ensure_unique_seeds(&manifest.seed_set)?;
     Ok(manifest)
+}
+
+fn ensure_unique_case_ids(cases: &[FixtureDeclaration]) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    for case in cases {
+        if case.id.trim().is_empty() || !ids.insert(case.id.as_str()) {
+            return Err(format!(
+                "optimizer benchmark manifest has an empty or duplicate case ID '{}'",
+                case.id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn ensure_unique_seeds(seeds: &[u64]) -> Result<(), String> {
+    let unique = seeds.iter().copied().collect::<BTreeSet<_>>();
+    if unique.len() != seeds.len() {
+        return Err("optimizer benchmark manifest has duplicate seeds".into());
+    }
+    Ok(())
 }
 
 /// Run all registered backends across every fixed case and seed.
@@ -511,17 +549,25 @@ pub fn run_optimizer_benchmark(
     if seeds.is_empty() {
         return Err("at least one seed is required".into());
     }
+    ensure_unique_seeds(&seeds)?;
 
     let root = repository_root();
-    let fixtures = manifest
+    let source_snapshots = manifest
         .cases
         .iter()
-        .map(|case| fixture_provenance(case, &root))
+        .map(|case| snapshot_declared_sources(&root, &case.source_paths))
         .collect::<Result<Vec<_>, _>>()?;
     let loaded = manifest
         .cases
         .iter()
-        .map(|declaration| load_case(declaration, &root, &manifest))
+        .zip(&source_snapshots)
+        .map(|(declaration, sources)| load_case(declaration, &manifest, sources))
+        .collect::<Result<Vec<_>, _>>()?;
+    let fixtures = manifest
+        .cases
+        .iter()
+        .zip(&source_snapshots)
+        .map(|(case, sources)| fixture_provenance(case, sources))
         .collect::<Result<Vec<_>, _>>()?;
     let backend_names = autoeq_optim::optim::registry::all_algorithms()
         .into_iter()
@@ -625,7 +671,9 @@ pub fn run_optimizer_benchmark_cell_with_time_budget(
         .iter()
         .find(|case| case.id == case_id)
         .ok_or_else(|| format!("unknown benchmark case '{case_id}'"))?;
-    let case = load_case(declaration, &repository_root(), &manifest)?;
+    let root = repository_root();
+    let source_snapshot = snapshot_declared_sources(&root, &declaration.source_paths)?;
+    let case = load_case(declaration, &manifest, &source_snapshot)?;
     let control = OptimizerRunControl::new(
         std::num::NonZeroUsize::new(budget)
             .ok_or_else(|| "evaluation budget must be positive".to_string())?,
@@ -1139,13 +1187,13 @@ fn quantile(sorted_values: &[f64], probability: f64) -> Option<f64> {
 
 fn load_case(
     declaration: &FixtureDeclaration,
-    root: &Path,
     manifest: &BenchmarkManifest,
+    sources: &SourceSnapshot,
 ) -> Result<LoadedCase, String> {
     match declaration.kind.as_str() {
         "analytic_peq" => load_analytic_case(declaration, manifest),
-        "measured_headphone_csv" => load_measured_headphone_case(declaration, root, manifest),
-        "measured_room_csv" => load_measured_room_case(declaration, root, manifest),
+        "measured_headphone_csv" => load_measured_headphone_case(declaration, manifest, sources),
+        "measured_room_csv" => load_measured_room_case(declaration, manifest, sources),
         unknown => Err(format!(
             "unknown fixture kind '{unknown}' for {}",
             declaration.id
@@ -1215,15 +1263,14 @@ fn load_analytic_case(
 
 fn load_measured_headphone_case(
     declaration: &FixtureDeclaration,
-    root: &Path,
     manifest: &BenchmarkManifest,
+    sources: &SourceSnapshot,
 ) -> Result<LoadedCase, String> {
     let csv_path = declaration
         .source_paths
         .first()
         .ok_or_else(|| format!("{} is missing its measurement CSV", declaration.id))?;
-    let path = root.join(csv_path);
-    let (left, right) = read_headphone_csv(&path)?;
+    let (left, right) = read_headphone_csv(sources.bytes_for(csv_path)?, csv_path)?;
     let freqs = log_grid(
         declaration.frequency_min_hz,
         declaration.frequency_max_hz,
@@ -1245,12 +1292,13 @@ fn load_measured_headphone_case(
 
 fn load_measured_room_case(
     declaration: &FixtureDeclaration,
-    root: &Path,
     manifest: &BenchmarkManifest,
+    sources: &SourceSnapshot,
 ) -> Result<LoadedCase, String> {
+    let room_inputs = resolve_room_input_paths(&declaration.source_paths)?;
     let training_paths = [
-        "data_tests/roomeq/measured/2.0_8361a/L.csv",
-        "data_tests/roomeq/measured/2.0_8361a/R.csv",
+        ("left", room_inputs.training_left),
+        ("right", room_inputs.training_right),
     ];
     let freqs = log_grid(
         declaration.frequency_min_hz,
@@ -1258,8 +1306,8 @@ fn load_measured_room_case(
         192,
     );
     let mut training = Vec::new();
-    for (id, relative) in [("left", training_paths[0]), ("right", training_paths[1])] {
-        let points = read_room_csv(&root.join(relative))?;
+    for (id, relative) in training_paths {
+        let points = read_room_csv(sources.bytes_for(relative)?, relative)?;
         let spl = normalized_resample(&points, &freqs, NORMALIZATION_REFERENCE_HZ)?;
         training.push(objective_for_curve(
             id,
@@ -1270,26 +1318,14 @@ fn load_measured_room_case(
         )?);
     }
     let held_out_paths = [
-        (
-            "heldout_left_1",
-            "data_tests/roomeq/measured/2.0_8361a/L_heldout_1.csv",
-        ),
-        (
-            "heldout_left_2",
-            "data_tests/roomeq/measured/2.0_8361a/L_heldout_2.csv",
-        ),
-        (
-            "heldout_right_1",
-            "data_tests/roomeq/measured/2.0_8361a/R_heldout_1.csv",
-        ),
-        (
-            "heldout_right_2",
-            "data_tests/roomeq/measured/2.0_8361a/R_heldout_2.csv",
-        ),
+        ("heldout_left_1", room_inputs.held_out_left_1),
+        ("heldout_left_2", room_inputs.held_out_left_2),
+        ("heldout_right_1", room_inputs.held_out_right_1),
+        ("heldout_right_2", room_inputs.held_out_right_2),
     ];
     let mut held_out = Vec::new();
     for (id, relative) in held_out_paths {
-        let points = read_room_csv(&root.join(relative))?;
+        let points = read_room_csv(sources.bytes_for(relative)?, relative)?;
         let spl = normalized_resample(&points, &freqs, NORMALIZATION_REFERENCE_HZ)?;
         held_out.push(objective_for_curve(
             id,
@@ -1320,6 +1356,12 @@ fn objective_for_curve(
             declaration.id
         ));
     }
+    let source_curve = Curve {
+        freq: freqs.clone(),
+        spl: Array1::from_vec(response_db.clone()),
+        phase: None,
+        ..Default::default()
+    };
     let deviation = response_db.iter().map(|value| -value).collect::<Vec<_>>();
     let data = ObjectiveDataBuilder::new(
         freqs.clone(),
@@ -1341,19 +1383,19 @@ fn objective_for_curve(
     Ok(MeasurementObjective {
         id: id.to_string(),
         data,
+        source_curve,
     })
 }
 
-fn read_headphone_csv(path: &Path) -> Result<HeadphoneEarCurves, String> {
+fn read_headphone_csv(bytes: &[u8], source_label: &str) -> Result<HeadphoneEarCurves, String> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(false)
         .flexible(true)
-        .from_path(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+        .from_reader(bytes);
     let mut left = Vec::new();
     let mut right = Vec::new();
     for record in reader.records() {
-        let record = record.map_err(|error| format!("{}: {error}", path.display()))?;
+        let record = record.map_err(|error| format!("{source_label}: {error}"))?;
         let Some(frequency) = record.get(0).and_then(parse_finite) else {
             continue;
         };
@@ -1369,20 +1411,19 @@ fn read_headphone_csv(path: &Path) -> Result<HeadphoneEarCurves, String> {
         left.push((frequency, left_db));
         right.push((right_frequency, right_db));
     }
-    validate_curve_points(&left, path)?;
-    validate_curve_points(&right, path)?;
+    validate_curve_points(&left, source_label)?;
+    validate_curve_points(&right, source_label)?;
     Ok((left, right))
 }
 
-fn read_room_csv(path: &Path) -> Result<CurvePoints, String> {
+fn read_room_csv(bytes: &[u8], source_label: &str) -> Result<CurvePoints, String> {
     let mut reader = csv::ReaderBuilder::new()
         .has_headers(true)
         .flexible(true)
-        .from_path(path)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
+        .from_reader(bytes);
     let mut points = Vec::new();
     for record in reader.records() {
-        let record = record.map_err(|error| format!("{}: {error}", path.display()))?;
+        let record = record.map_err(|error| format!("{source_label}: {error}"))?;
         let Some(frequency) = record.get(0).and_then(parse_finite) else {
             continue;
         };
@@ -1393,7 +1434,7 @@ fn read_room_csv(path: &Path) -> Result<CurvePoints, String> {
             points.push((frequency, spl));
         }
     }
-    validate_curve_points(&points, path)?;
+    validate_curve_points(&points, source_label)?;
     Ok(points)
 }
 
@@ -1404,7 +1445,7 @@ fn parse_finite(text: &str) -> Option<f64> {
         .filter(|value| value.is_finite())
 }
 
-fn validate_curve_points(points: &[(f64, f64)], path: &Path) -> Result<(), String> {
+fn validate_curve_points(points: &[(f64, f64)], source_label: &str) -> Result<(), String> {
     if points.len() < 4
         || points
             .windows(2)
@@ -1412,7 +1453,7 @@ fn validate_curve_points(points: &[(f64, f64)], path: &Path) -> Result<(), Strin
     {
         return Err(format!(
             "{} has too few, unsorted, or non-finite samples",
-            path.display()
+            source_label
         ));
     }
     Ok(())
@@ -1470,13 +1511,9 @@ fn log_grid(minimum: f64, maximum: f64, count: usize) -> Array1<f64> {
 
 fn fixture_provenance(
     declaration: &FixtureDeclaration,
-    root: &Path,
+    sources: &SourceSnapshot,
 ) -> Result<FixtureProvenance, String> {
-    let mut hashes = BTreeMap::new();
-    for relative in &declaration.source_paths {
-        let bytes = read_all(&root.join(relative))?;
-        hashes.insert(relative.clone(), sha256_hex(&bytes));
-    }
+    let hashes = sources.hashes().clone();
     let declaration_sha256 = if declaration.source_paths.is_empty() {
         Some(sha256_hex(
             &serde_json::to_vec(declaration).map_err(|error| error.to_string())?,
@@ -1489,14 +1526,6 @@ fn fixture_provenance(
         source_sha256: hashes,
         declaration_sha256,
     })
-}
-
-fn read_all(path: &Path) -> Result<Vec<u8>, String> {
-    let mut file = File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|error| format!("{}: {error}", path.display()))?;
-    Ok(bytes)
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1550,4 +1579,10 @@ pub struct BenchmarkCliArgs {
     /// Run only the first N cells, for smoke checks.
     #[arg(long)]
     pub limit_cells: Option<usize>,
+    /// Run exactly one cell from a JSON `BenchmarkCellSpec` file.
+    #[arg(long, conflicts_with = "list_cell_specs")]
+    pub cell_spec: Option<PathBuf>,
+    /// Print the immutable per-cell specification matrix as JSON.
+    #[arg(long, conflicts_with = "cell_spec")]
+    pub list_cell_specs: bool,
 }

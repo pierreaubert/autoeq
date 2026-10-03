@@ -1,6 +1,6 @@
 use autoeq_qa::optimizer_benchmark::{
-    BenchmarkCancellation, BenchmarkCliArgs, BenchmarkRunOptions, run_optimizer_benchmark,
-    write_report,
+    BenchmarkCancellation, BenchmarkCliArgs, BenchmarkRunOptions, run_benchmark_cell_spec_file,
+    run_optimizer_benchmark, write_cell_specs, write_controlled_cell_result, write_report,
 };
 use clap::Parser;
 
@@ -14,6 +14,40 @@ async fn main() {
 
 async fn run() -> Result<(), String> {
     let args = BenchmarkCliArgs::parse();
+    if args.list_cell_specs {
+        if args.output.is_some()
+            || args.evaluation_budget.is_some()
+            || args.time_budget_seconds.is_some()
+            || !args.seeds.is_empty()
+            || args.limit_cells.is_some()
+        {
+            return Err(
+                "--list-cell-specs cannot be combined with matrix overrides or --output".into(),
+            );
+        }
+        return write_cell_specs();
+    }
+    if let Some(path) = args.cell_spec.as_deref() {
+        if args.evaluation_budget.is_some()
+            || args.time_budget_seconds.is_some()
+            || !args.seeds.is_empty()
+            || args.limit_cells.is_some()
+        {
+            return Err("--cell-spec cannot be combined with matrix overrides".into());
+        }
+        let result = run_benchmark_cell_spec_file(path)?;
+        write_controlled_cell_result(args.output.as_deref(), &result)?;
+        eprintln!(
+            "cell={} outcome={:?} root_search={}/{} validation={} elapsed_ms={}",
+            result.cell_id,
+            result.outcome,
+            result.root_counters.evaluations_started,
+            result.root_counters.evaluation_budget,
+            result.root_counters.validation_evaluations_started,
+            result.elapsed_millis
+        );
+        return Ok(());
+    }
     let cancellation = BenchmarkCancellation::default();
     let worker_cancellation = cancellation.clone();
     let time_budget_millis = args

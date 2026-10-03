@@ -574,6 +574,32 @@ pub(super) fn compare_cross_mode_band(
     }
 }
 
+/// Require accepted correction in the requested family for convergence evidence.
+pub(super) fn strict_cross_mode_correction(
+    result: &RoomOptimizationResult,
+    requested: &ProcessingMode,
+) -> std::result::Result<(), String> {
+    let report = result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .ok_or_else(|| "missing correction acceptance report".to_string())?;
+    let outcome = report.derived_outcome();
+    if outcome != roomeq_model::RoomEqOutcome::Accepted || !report.violations.is_empty() {
+        return Err(format!(
+            "correction is {outcome:?} (decision={:?}, violations={:?})",
+            report.decision, report.violations
+        ));
+    }
+    // Metadata can precede graph conversion or contain a stale family label.
+    // Inspect the emitted channel and driver plugins instead.
+    let realized = roomeq_model::assess_realized_processing(&result.channels);
+    if let Some(reason) = roomeq_model::processing_fallback_reason(Some(requested), &realized) {
+        return Err(reason);
+    }
+    Ok(())
+}
+
 pub(super) fn run_cross_mode_convergence_tests(
     name: &str,
     base_config_path: &Path,
@@ -602,6 +628,7 @@ pub(super) fn run_cross_mode_convergence_tests(
     // Run every production processing mode and collect comparable artifacts.
     let mut mode_results: Vec<(&str, RoomOptimizationResult)> = Vec::new();
     let mut expected_main_channels = std::collections::BTreeSet::new();
+    let mut unavailable_corrections = Vec::new();
 
     for (mode_name, processing_mode, override_file) in modes {
         let override_path = override_config_dir.join(override_file);
@@ -639,13 +666,24 @@ pub(super) fn run_cross_mode_convergence_tests(
         let pre = result.combined_pre_score;
         let scorecard = compute_scorecard(&result);
         let (pass, reason) = if strict {
-            let pass = pre.is_finite()
+            let acceptance = strict_cross_mode_correction(&result, processing_mode);
+            let finite = pre.is_finite()
                 && scorecard.flat_loss.is_finite()
                 && scorecard.max_boost_db.is_finite();
-            (
-                pass,
-                "measured-mode artifact produced with finite metrics".to_string(),
-            )
+            let reason = match acceptance {
+                Err(reason) => Some(reason),
+                Ok(()) if !finite => Some("non-finite measured-mode metrics".to_string()),
+                Ok(()) => None,
+            };
+            if let Some(reason) = reason {
+                unavailable_corrections.push(format!("{mode_name}: {reason}"));
+                (false, reason)
+            } else {
+                (
+                    true,
+                    "accepted requested-mode correction with finite metrics".to_string(),
+                )
+            }
         } else {
             let mut baseline_scorecard = None;
             evaluate_scorecard(Mutation::Baseline, pre, &scorecard, &mut baseline_scorecard)
@@ -676,6 +714,18 @@ pub(super) fn run_cross_mode_convergence_tests(
 
         mode_results.push((mode_name, result.result));
     }
+
+    // Keep rejected/baseline curves for diagnostics, but never promote their
+    // agreement to successful correction convergence.
+    let corrections_available = unavailable_corrections.is_empty();
+    let acceptance_detail = if corrections_available {
+        String::new()
+    } else {
+        format!(
+            "; unavailable corrections: {}",
+            unavailable_corrections.join("; ")
+        )
+    };
 
     // CM-1: Frequency-response convergence from the final deployed channel
     // curves. Strict cases use level-matched RMS bands; legacy generic cases
@@ -715,7 +765,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             let comparison = compare_cross_mode_band(&channel_curves, &mode_names, fmin, fmax);
             let median_rms = comparison.median_rms;
             let max_rms = comparison.max_rms;
-            let pass = comparison.passes(median_limit, max_limit);
+            let pass = corrections_available && comparison.passes(median_limit, max_limit);
             let coverage = format!(
                 "comparisons={}/{}",
                 comparison.available_comparisons, comparison.expected_comparisons
@@ -737,7 +787,7 @@ pub(super) fn run_cross_mode_convergence_tests(
                 scorecard: placeholder_scorecard(max_rms),
                 pass,
                 reason: format!(
-                    "median_rms={median_rms:.2}dB (limit={median_limit:.2}dB), max_rms={max_rms:.2}dB{}, {coverage}{unavailable}",
+                    "median_rms={median_rms:.2}dB (limit={median_limit:.2}dB), max_rms={max_rms:.2}dB{}, {coverage}{unavailable}{acceptance_detail}",
                     max_limit.map_or_else(String::new, |limit| format!(" (limit={limit:.2}dB)"))
                 ),
             });
@@ -793,9 +843,10 @@ pub(super) fn run_cross_mode_convergence_tests(
             .into_iter()
             .map(|values| median(values).unwrap_or(f64::INFINITY))
             .collect();
-        let pass = medians
-            .iter()
-            .all(|value| value.is_finite() && *value <= CROSS_MODE_TIMING_MAX_STD_MS);
+        let pass = corrections_available
+            && medians
+                .iter()
+                .all(|value| value.is_finite() && *value <= CROSS_MODE_TIMING_MAX_STD_MS);
         let detail = mode_results
             .iter()
             .zip(&medians)
@@ -816,7 +867,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             ),
             pass,
             reason: format!(
-                "{detail}; every mode must remain <= {CROSS_MODE_TIMING_MAX_STD_MS:.2}ms"
+                "{detail}; every mode must remain <= {CROSS_MODE_TIMING_MAX_STD_MS:.2}ms{acceptance_detail}"
             ),
         });
     } else {
@@ -877,7 +928,7 @@ pub(super) fn run_cross_mode_convergence_tests(
         } else {
             f64::INFINITY
         };
-        let cm3_pass = ratio <= CROSS_MODE_SCORE_RATIO_LIMIT;
+        let cm3_pass = corrections_available && ratio <= CROSS_MODE_SCORE_RATIO_LIMIT;
         let status = if cm3_pass { "PASS" } else { "FAIL" };
 
         let mode_scores: String = mode_results
@@ -899,7 +950,7 @@ pub(super) fn run_cross_mode_convergence_tests(
             scorecard: placeholder_scorecard(ratio),
             pass: cm3_pass,
             reason: format!(
-                "{} ratio={:.2}x (limit={:.1}x)",
+                "{} ratio={:.2}x (limit={:.1}x){acceptance_detail}",
                 mode_scores, ratio, CROSS_MODE_SCORE_RATIO_LIMIT
             ),
         });

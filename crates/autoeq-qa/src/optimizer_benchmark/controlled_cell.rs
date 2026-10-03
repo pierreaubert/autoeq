@@ -806,7 +806,7 @@ fn execute_cell(
         }
     };
     if spec.purpose == CellPurpose::ObserverStop
-        && outcome != ControlledCellOutcome::ObserverStopped
+        && !observer_outcome_matches_purpose(spec.purpose, outcome)
     {
         return Err(format!(
             "observer cell {} did not stop at the first progress callback",
@@ -814,7 +814,7 @@ fn execute_cell(
         ));
     }
     if spec.purpose == CellPurpose::ObserverUnsupported
-        && outcome != ControlledCellOutcome::CallbackUnsupported
+        && !observer_outcome_matches_purpose(spec.purpose, outcome)
     {
         return Err(format!(
             "callback-unsupported cell {} did not produce its required refusal",
@@ -1250,6 +1250,22 @@ fn authoritative_failure_outcome(
     }
 }
 
+fn observer_outcome_matches_purpose(purpose: CellPurpose, outcome: ControlledCellOutcome) -> bool {
+    let authoritative_failure = matches!(
+        outcome,
+        ControlledCellOutcome::BackendFailure | ControlledCellOutcome::InvalidCandidate
+    );
+    match purpose {
+        CellPurpose::ObserverStop => {
+            outcome == ControlledCellOutcome::ObserverStopped || authoritative_failure
+        }
+        CellPurpose::ObserverUnsupported => {
+            outcome == ControlledCellOutcome::CallbackUnsupported || authoritative_failure
+        }
+        _ => true,
+    }
+}
+
 fn executable_identity() -> Result<(String, String), String> {
     use sha2::{Digest, Sha256};
     use std::io::Read as _;
@@ -1291,7 +1307,7 @@ mod tests {
     use super::{
         CellPurpose, ControlledCellOutcome, StageDispatchRecord, authoritative_failure_outcome,
         benchmark_cell_spec_inventory, benchmark_cell_specs, classify_failed_pipeline,
-        ensure_unique_spec_ids, run_benchmark_cell_spec,
+        ensure_unique_spec_ids, observer_outcome_matches_purpose, run_benchmark_cell_spec,
     };
     use crate::optimizer_benchmark::{
         benchmark_manifest, ensure_unique_case_ids, ensure_unique_seeds,
@@ -1476,5 +1492,38 @@ mod tests {
             ),
             Some(ControlledCellOutcome::InvalidCandidate)
         );
+    }
+
+    #[test]
+    fn observer_contracts_preserve_authoritative_failure_records() {
+        for failure in [
+            ControlledCellOutcome::BackendFailure,
+            ControlledCellOutcome::InvalidCandidate,
+        ] {
+            assert!(observer_outcome_matches_purpose(
+                CellPurpose::ObserverStop,
+                failure
+            ));
+            assert!(observer_outcome_matches_purpose(
+                CellPurpose::ObserverUnsupported,
+                failure
+            ));
+        }
+        assert!(observer_outcome_matches_purpose(
+            CellPurpose::ObserverStop,
+            ControlledCellOutcome::ObserverStopped
+        ));
+        assert!(observer_outcome_matches_purpose(
+            CellPurpose::ObserverUnsupported,
+            ControlledCellOutcome::CallbackUnsupported
+        ));
+        assert!(!observer_outcome_matches_purpose(
+            CellPurpose::ObserverStop,
+            ControlledCellOutcome::Completed
+        ));
+        assert!(!observer_outcome_matches_purpose(
+            CellPurpose::ObserverUnsupported,
+            ControlledCellOutcome::ObserverStopped
+        ));
     }
 }

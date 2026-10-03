@@ -2737,3 +2737,47 @@ The separate public-mirror proposal **469a61e** was not integrated: automatic
 approval review rejected scheduled public GitHub uploads without explicit
 artifact-publication authorization. The user decision is pending. Main contains
 no corresponding GitHub nightly workflow.
+
+
+### A16 interruption and Gitea artifact runtime checks (2026-10-03)
+
+Commit **93c143d** adds a real SIGINT supervisor regression. All eight runner
+contract tests pass. A separate GNU `timeout --signal=INT --kill-after=5s 2s`
+check used a synthetic hanging cell: timeout returned 124, the benchmark child
+was reaped, and the runner preserved an interrupted receipt with one attempted
+and one missing cell. This checks the nightly timeout mechanism, not optimizer
+correctness. Receipt:
+`/Volumes/home_tmp/tmp/a16-gtimeout-supervisor-unmt3xx3/verification.json`.
+
+The isolated Gitea smoke branch **bd9423a** uploaded one synthetic marker using
+`actions/upload-artifact@v4`, downloaded it with `actions/download-artifact@v4`,
+and verified byte equality. All four steps passed in
+[Gitea run 463](http://192.168.1.32:3001/pierre/autoeq/actions/runs/463).
+Artifact 1628 has a server-recorded expiry exactly 90 days after creation; this
+verifies the configured expiry, not elapsed retention. The server reports 28.0.0.
+Receipt: `/Users/pierre/a16-gitea-artifact-smoke-verification.json`.
+
+The Gitea repository API reports `private: false` at its private-network address.
+Network isolation and repository visibility are distinct. The smoke run uploaded
+no benchmark or audit payload. The full nightly workflow has not been published
+or run, and access controls for its full evidence remain to be verified.
+
+### A08 NSGA exact continuation integration prepared (2026-10-03)
+
+Isolated commit **ad8eba3** adds typed NSGA-II/III exact continuation and an
+explicit generation pause using the existing exact checkpoint flags. A paused
+run saves state, emits a visible pause receipt, and returns before correction
+or report publication. The legacy DE envelope remains compatible.
+
+Fresh-process adapter tests use two objectives and reproduce the uninterrupted
+terminal checkpoint for NSGA-II and NSGA-III after excluding only the envelope
+timestamp: generation 4, 67 evaluations, population 16. A CLI orchestration test
+pauses, resumes with the pause flag removed, and matches uninterrupted terminal
+state at generation 2 and 48 evaluations. Gates passed: CLI library 90/90,
+NSGA filter 14/14, NSGA envelope 2/2, bounded I/O 1/1, DE exact continuation 3/3,
+and strict Clippy for the three changed crates.
+
+These tests used the isolated math checkpoint revision through a command-only
+Cargo override. The source commit contains no lockfile or path dependency change.
+Main integration still requires the published math NSGA dependency; these results
+do not establish recovery of an entire multi-stage RoomEQ job.

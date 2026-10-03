@@ -3,7 +3,7 @@
 use super::optimize::EqOptimizationResult;
 use autoeq_optim::OptimParams;
 use autoeq_optim::optim::run_control::{
-    OptimizerRunControl, OptimizerRunSnapshot, OptimizerStageSnapshot,
+    OptimizerBudgetProfile, OptimizerRunControl, OptimizerRunSnapshot, OptimizerStageSnapshot,
 };
 use autoeq_optim::optim::{
     ObjectiveData, OptimProgressCallback, OptimizerBackend, OptimizerDispatchOutcome,
@@ -24,6 +24,30 @@ pub struct EqOptimizerStageRecord {
     pub snapshot: OptimizerRunSnapshot,
     /// Counters for this stage, including its optimizer finalization.
     pub stage_snapshot: Option<OptimizerStageSnapshot>,
+    /// Backend profile computed from the exact parameters and bounds passed to
+    /// this dispatch. Adaptive passes can have different vector dimensions.
+    pub search_profile: EqOptimizerSearchProfile,
+}
+
+/// Effective solver plan and candidate bounds for one optimizer dispatch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EqOptimizerSearchProfile {
+    /// Algorithm string selected for dispatch, including any local override.
+    pub dispatch_algorithm: String,
+    /// Canonical registered backend name when resolution succeeded.
+    pub resolved_backend: Option<String>,
+    /// Search cap remaining at this dispatch after applying root and stage caps.
+    pub effective_evaluation_limit: usize,
+    /// Fresh quota configured for this stage.
+    pub stage_evaluation_budget: Option<usize>,
+    /// Candidate vector dimension for this exact pass.
+    pub parameter_dimension: usize,
+    /// Lower bounds supplied to this exact pass.
+    pub lower_bounds: Vec<f64>,
+    /// Upper bounds supplied to this exact pass.
+    pub upper_bounds: Vec<f64>,
+    /// Native solver profile computed using this pass's actual dimension/bounds.
+    pub budget_profile: Option<OptimizerBudgetProfile>,
 }
 
 /// RoomEQ output with a shared search cap and stage accounting.
@@ -181,6 +205,29 @@ pub(super) fn run_optimizer(
     if let Some(control) = control {
         control.check_terminal()?;
         let stage_control = control.control.with_stage_budget(control.stage_budget);
+        let dispatch_algorithm = algo_override.unwrap_or(&params.algo);
+        let effective_evaluation_limit = stage_control.effective_evaluation_limit();
+        let dispatch_profile = backend.evaluation_budget_profile(
+            lower,
+            upper,
+            params,
+            algo_override,
+            effective_evaluation_limit,
+        );
+        let search_profile = EqOptimizerSearchProfile {
+            dispatch_algorithm: dispatch_algorithm.to_string(),
+            resolved_backend: dispatch_profile
+                .as_ref()
+                .map(|profile| profile.backend.clone()),
+            effective_evaluation_limit,
+            stage_evaluation_budget: stage_control
+                .stage_snapshot()
+                .map(|snapshot| snapshot.evaluation_budget),
+            parameter_dimension: x.len(),
+            lower_bounds: lower.to_vec(),
+            upper_bounds: upper.to_vec(),
+            budget_profile: dispatch_profile.and_then(|profile| profile.profile),
+        };
         let run = backend.optimize_filters_controlled(
             x,
             lower,
@@ -196,6 +243,7 @@ pub(super) fn run_optimizer(
             dispatch: run.dispatch,
             snapshot: run.snapshot,
             stage_snapshot: run.stage_snapshot,
+            search_profile,
         });
         control.check_terminal()?;
         if matches!(

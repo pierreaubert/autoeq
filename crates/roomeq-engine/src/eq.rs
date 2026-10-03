@@ -20,5 +20,8 @@ pub use multi_eq_auto_optimizer_context::*;
 pub use optimize::*;
 pub use resources::{EqResources, PreparedEqTarget, PreparedImpulseResponse};
 #[doc(inline)]
-pub use run_control::{ControlledEqError, ControlledEqOptimizationResult, EqOptimizerStageRecord};
+pub use run_control::{
+    ControlledEqError, ControlledEqOptimizationResult, EqOptimizerSearchProfile,
+    EqOptimizerStageRecord,
+};
 pub use schroeder::{SchroederOptimizationResult, optimize_with_schroeder_split_detailed};

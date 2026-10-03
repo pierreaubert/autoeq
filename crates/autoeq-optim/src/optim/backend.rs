@@ -90,6 +90,15 @@ pub trait FilterOptimizer: Send + Sync {
     /// What this backend can handle natively.
     fn capabilities(&self) -> ConstraintCapabilities;
 
+    /// Whether this invocation can honor progress callbacks.
+    ///
+    /// The default follows the backend capability. Implementations with modes
+    /// that lack callbacks must override this query before controlled dispatch.
+    fn supports_iteration_callback(&self, params: &OptimParams, objective: &ObjectiveData) -> bool {
+        let _ = (params, objective);
+        self.capabilities().iteration_callback
+    }
+
     /// Whether the high-level optimization path supports using a saved
     /// candidate to seed this backend.
     ///
@@ -123,9 +132,9 @@ pub trait FilterOptimizer: Send + Sync {
     /// hard failure — callers should still consider `x` updated to the
     /// best point seen.
     ///
-    /// `callback` is honored only when [`Self::capabilities`] reports
-    /// `iteration_callback = true`; backends that lack callback support
-    /// silently ignore it (NLopt is the typical case).
+    /// Consult [`Self::supports_iteration_callback`] for the selected mode.
+    /// Controlled dispatch refuses unsupported callback requests. Legacy
+    /// backends without any callback capability may ignore this argument.
     fn optimize(
         &self,
         x: &mut [f64],

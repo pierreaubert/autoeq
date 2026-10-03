@@ -2875,3 +2875,46 @@ The agent's `final-run-receipt.json` in the evidence directory records the logs
 and frozen run/analysis files. Together with the four CI parity tests, all
 **65** integrated Python contracts pass; these unit checks do not override the
 failed execution gate.
+
+
+### A00 public dependency numerical gate completed (2026-10-03)
+
+The frozen detached worktree at **1abc017** passed all **124 numerical
+comparisons**: 118 Rust and 6 Python. All **140 Rust test targets** passed;
+the separate Python negative-control command passed its eight controls.
+The QA manifest check also passed. This run used the committed public dependency
+pins, offline locked resolution, and the pinned QA Python environment. References
+were checked-in goldens; this is not a fresh Wolfram execution or hardware test.
+
+Before/after snapshots differ only in their label: repository source, fixtures,
+lockfile, configuration, and external source identities are unchanged. Fresh
+post-run Cargo metadata confirms identical packages and dependency graph; only
+target/build directory fields differ because that read-only query omitted the
+build's target-directory environment setting.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a00-public-numerical-20261003/`.
+Root receipt: `/Users/pierre/a00-public-numerical-final-verification.json`.
+
+### A09 retained measured IIR diagnostic: two distinct failures (2026-10-03)
+
+The single measured diagnostic run02 completed optimization/finalization and
+retained all seven required events, then its QA assertion failed after **571.95 s**:
+`retained resolved run config differs from the finalizer config`. Exit status was
+101. Source, fixture, lockfile, and binary provenance were retained; no second
+optimization run was launched after this failure.
+
+Root verified all 12 manifest entries by byte length and SHA-256. Trial descriptor
+and both graph hashes agree across post-alignment, replay, and final-result events.
+The attempted zero-strength trial differs from the final playback graph. Its
+replay failed independently on missing physical output `LFE` at seat 0 and captured
+only C and L before that error. Root recomputed those two records: mean changes
+were **-3.506807143315539 dB** and **-3.216466719731555 dB**. Arithmetic agrees;
+this neither clears the missing-output error nor establishes acoustic acceptance.
+The required-attenuation event reports zero additional attenuation for all nine
+mains and identifies Sub1 as protected.
+
+Both the config mismatch and LFE mapping are under investigation. The original
+failed QA summary remains intact. Evidence is under
+`/Volumes/home_tmp/tmp/a09-finalization-diagnostic-gates-20261003-01/measured-iir-run-02/`.
+Root receipts: `/Users/pierre/a09-run02-root-artifact-verification.json` and
+`/Users/pierre/a09-run02-independent-useful-output-verification.json`.

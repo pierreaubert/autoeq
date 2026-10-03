@@ -645,7 +645,9 @@ fn optimize_filters_with_run_control_dispatch(
     // Some backend profiles clamp the configured value to a positive solver
     // minimum. A zero effective cap is still refused below, before scoring.
     controlled_params.maxeval = evaluation_limit.max(1);
-    if callback.is_some() && !backend.capabilities().iteration_callback {
+    let supports_callback =
+        backend.supports_iteration_callback(&controlled_params, &objective_data);
+    if callback.is_some() && !supports_callback {
         return not_started(
             format!(
                 "{} cannot provide requested optimizer progress callbacks",
@@ -708,31 +710,30 @@ fn optimize_filters_with_run_control_dispatch(
     let validation_snapshot = objective_data.with_validation_tracking(run_control.clone());
     let controlled_objective = objective_data.with_run_control(run_control.clone());
     let control_for_callback = run_control.clone();
-    let backend_callback: Option<OptimProgressCallback> =
-        if backend.capabilities().iteration_callback {
-            Some(Box::new(move |iteration, loss, preference| {
-                if control_for_callback.stop_requested() {
-                    return crate::de::CallbackAction::Stop;
-                }
-                if let Some(observer) = callback.as_mut() {
-                    let action = observer(iteration, loss, preference);
-                    match action {
-                        crate::de::CallbackAction::Continue => {}
-                        crate::de::CallbackAction::Stop => {
-                            control_for_callback.request_cancel();
-                            return crate::de::CallbackAction::Stop;
-                        }
+    let backend_callback: Option<OptimProgressCallback> = if supports_callback {
+        Some(Box::new(move |iteration, loss, preference| {
+            if control_for_callback.stop_requested() {
+                return crate::de::CallbackAction::Stop;
+            }
+            if let Some(observer) = callback.as_mut() {
+                let action = observer(iteration, loss, preference);
+                match action {
+                    crate::de::CallbackAction::Continue => {}
+                    crate::de::CallbackAction::Stop => {
+                        control_for_callback.request_cancel();
+                        return crate::de::CallbackAction::Stop;
                     }
                 }
-                if control_for_callback.stop_requested() {
-                    crate::de::CallbackAction::Stop
-                } else {
-                    crate::de::CallbackAction::Continue
-                }
-            }))
-        } else {
-            None
-        };
+            }
+            if control_for_callback.stop_requested() {
+                crate::de::CallbackAction::Stop
+            } else {
+                crate::de::CallbackAction::Continue
+            }
+        }))
+    } else {
+        None
+    };
     let backend_output = backend.optimize_with_report(
         x,
         lower_bounds,
@@ -976,6 +977,18 @@ pub fn optimize_filters_with_callback(
             callback,
         );
         return finalize_dispatch_winner(backend.name(), x, &snapshot, params, result);
+    }
+
+    if backend.capabilities().iteration_callback
+        && !backend.supports_iteration_callback(params, &objective_data)
+    {
+        return Err((
+            format!(
+                "{} cannot provide requested optimizer progress callbacks in this mode",
+                backend.name()
+            ),
+            f64::INFINITY,
+        ));
     }
 
     // Generic path: delegate to the trait. Backends without callback
@@ -1518,6 +1531,92 @@ mod staged_run_control_tests {
         );
         assert_eq!(run.snapshot.evaluations_started, 0);
         assert_eq!(run.snapshot.validation_evaluations_started, 0);
+    }
+
+    #[test]
+    fn bo_callback_capability_tracks_actual_objective_mode() {
+        let (objective, mut params, _, _, _) = scalar_fixture();
+        let backend = super::super::registry::resolve("autoeq:bo").unwrap();
+        params.bo_ehvi = true;
+        assert!(backend.supports_iteration_callback(&params, &objective));
+        let mut multi = objective.clone();
+        multi.multi_objective = Some(super::super::types::MultiObjectiveData {
+            objectives: vec![objective.clone(), objective],
+            strategy: crate::roomeq::MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.5, 0.5],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        assert!(!backend.supports_iteration_callback(&params, &multi));
+        params.bo_ehvi = false;
+        assert!(backend.supports_iteration_callback(&params, &multi));
+    }
+
+    #[test]
+    fn bo_ehvi_observer_refuses_all_entry_points_before_scoring() {
+        let (mut objective, mut params, lower, upper, mut initial) = scalar_fixture();
+        params.algo = "autoeq:bo".into();
+        params.bo_ehvi = true;
+        objective.multi_objective = Some(super::super::types::MultiObjectiveData {
+            objectives: vec![objective.clone(), objective.clone()],
+            strategy: crate::roomeq::MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.5, 0.5],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        let control = OptimizerRunControl::new(NonZeroUsize::new(60).unwrap());
+        let before = initial.clone();
+        let observer = || -> OptimProgressCallback {
+            Box::new(|_, _, _| panic!("unsupported EHVI observer must not run"))
+        };
+        let run = optimize_filters_with_run_control_and_algo_override_detailed(
+            &mut initial,
+            &lower,
+            &upper,
+            objective.clone(),
+            &params,
+            None,
+            Some(observer()),
+            &control,
+        );
+        assert_eq!(
+            run.dispatch,
+            OptimizerDispatchOutcome::NotStartedCallbackUnsupported
+        );
+        let error = optimize_filters_with_callback(
+            &mut initial,
+            &lower,
+            &upper,
+            objective.clone().with_run_control(control.clone()),
+            &params,
+            observer(),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .0
+                .contains("cannot provide requested optimizer progress callbacks")
+        );
+        let backend = super::super::registry::resolve("autoeq:bo").unwrap();
+        let error = backend
+            .optimize(
+                &mut initial,
+                &lower,
+                &upper,
+                objective.with_run_control(control.clone()),
+                &params,
+                Some(observer()),
+            )
+            .unwrap_err();
+        assert!(
+            error
+                .0
+                .contains("cannot provide requested optimizer progress callbacks")
+        );
+        assert_eq!(initial, before);
+        let snapshot = control.snapshot();
+        assert_eq!(snapshot.evaluations_started, 0);
+        assert_eq!(snapshot.validation_evaluations_started, 0);
     }
 
     #[test]

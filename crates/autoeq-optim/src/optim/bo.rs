@@ -95,6 +95,11 @@ impl FilterOptimizer for AutoeqBoBackend {
         }
     }
 
+    fn supports_iteration_callback(&self, params: &OptimParams, objective: &ObjectiveData) -> bool {
+        // The upstream EHVI loop does not invoke BayesOptConfig::callback.
+        !(params.bo_ehvi && objective.multi_objective.is_some())
+    }
+
     fn optimize(
         &self,
         x: &mut [f64],
@@ -117,6 +122,11 @@ impl FilterOptimizer for AutoeqBoBackend {
         params: &OptimParams,
         callback: Option<OptimProgressCallback>,
     ) -> FilterOptimizerOutput {
+        if callback.is_some() && !self.supports_iteration_callback(params, &objective) {
+            return bo_failed(
+                "AutoEQ BO EHVI cannot provide requested optimizer progress callbacks".into(),
+            );
+        }
         if lower.len() != x.len() || upper.len() != x.len() {
             return bo_failed(format!(
                 "bounds dimension mismatch: x={}, lower={}, upper={}",

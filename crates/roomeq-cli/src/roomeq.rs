@@ -55,6 +55,29 @@ fn require_playback_outcome(outcome: Option<roomeq_model::RoomEqOutcome>) -> Res
     }
 }
 
+fn require_output_playback_approval(output: &DspChainOutput) -> Result<()> {
+    if let Some(metadata) = &output.metadata {
+        let exceeded_safety_budget = metadata
+            .stage_outcomes
+            .iter()
+            .filter(|stage| stage.stage == "final_output_safety_attenuation_budget")
+            .flat_map(|stage| &stage.checks)
+            .any(|check| {
+                check.id.starts_with("max_output_safety_attenuation_db:") && !check.passed
+            });
+        if exceeded_safety_budget {
+            anyhow::bail!("RoomEQ output exceeds its configured output safety-attenuation budget");
+        }
+        return require_playback_outcome(
+            metadata
+                .correction_acceptance
+                .as_ref()
+                .map(|report| report.derived_outcome()),
+        );
+    }
+    require_playback_outcome(None)
+}
+
 /// Whether an outcome approves playback. Only `Accepted` and `Unchanged`
 /// approve; anything else (including a missing outcome) keeps the failure
 /// exit. A written output JSON file never changes this: file existence is
@@ -761,6 +784,8 @@ pub fn run_command_with_shutdown(shutdown: Arc<AtomicBool>) -> Result<()> {
             .with_context(|| format!("Failed to read DSP chain from {:?}", convert_path))?;
         let dsp_output: DspChainOutput = serde_json::from_str(&json_str)
             .with_context(|| format!("Failed to parse DSP chain from {:?}", convert_path))?;
+
+        require_output_playback_approval(&dsp_output)?;
 
         let export_path = args
             .export_path
@@ -1778,13 +1803,7 @@ fn execute_optimization_candidate(
             .collect::<Vec<_>>(),
     );
 
-    if let Err(error) = require_playback_outcome(
-        result
-            .metadata
-            .correction_acceptance
-            .as_ref()
-            .map(|report| report.outcome),
-    ) {
+    if let Err(error) = require_output_playback_approval(&dsp_output) {
         append_run_log(&output_path, &[format!("status: rejected: {error:#}")]);
         persist_run_manifest_best_effort(
             &output_path,
@@ -3660,6 +3679,10 @@ mod tests {
         assert!(
             text.contains("num_resamples"),
             "bootstrap resamples in schema"
+        );
+        assert!(
+            text.contains("max_output_safety_attenuation_db"),
+            "optional per-output attenuation budget in schema"
         );
         let defaults = roomeq_model::RoomConfig::default();
         assert_eq!(defaults.optimizer.strategy, "lshade");

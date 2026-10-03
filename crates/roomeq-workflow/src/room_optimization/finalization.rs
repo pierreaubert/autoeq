@@ -22,6 +22,137 @@ fn failed(message: impl Into<String>) -> AutoeqError {
     }
 }
 
+fn output_safety_attenuation_budget_checks(
+    result: &RoomOptimizationResult,
+    config: &RoomConfig,
+) -> Result<Vec<StageCheck>> {
+    let limits = &config
+        .optimizer
+        .finalization
+        .max_output_safety_attenuation_db;
+    if limits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let attenuation = crate::electrical_headroom::room_eq_safety_attenuation_by_output(
+        &result.to_dsp_chain_output(),
+    )?;
+    let unknown: Vec<_> = limits
+        .keys()
+        .filter(|output| !attenuation.contains_key(*output))
+        .cloned()
+        .collect();
+    if !unknown.is_empty() {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: format!(
+                "finalization.max_output_safety_attenuation_db names unknown physical output(s): {}",
+                unknown.join(", ")
+            ),
+        });
+    }
+    Ok(limits
+        .iter()
+        .map(|(output, limit_db)| {
+            let observed_db = attenuation[output];
+            StageCheck {
+                id: format!("max_output_safety_attenuation_db:{output}"),
+                kind: StageCheckKind::Safety,
+                passed: observed_db <= *limit_db,
+                observed: Some(observed_db),
+                limit: Some(*limit_db),
+                diagnostic: Some(format!(
+                    "cumulative tagged static safety attenuation; output={output}; baseline calibration and untagged trims excluded; dynamic limiter not credited"
+                )),
+            }
+        })
+        .collect())
+}
+
+fn output_safety_attenuation_failure(checks: &[StageCheck]) -> Option<String> {
+    let exceeded: Vec<_> = checks
+        .iter()
+        .filter(|check| !check.passed)
+        .map(|check| {
+            format!(
+                "{} observed {:.6} dB exceeds {:.6} dB",
+                check.id,
+                check.observed.unwrap_or(f64::NAN),
+                check.limit.unwrap_or(f64::NAN)
+            )
+        })
+        .collect();
+    (!exceeded.is_empty()).then(|| exceeded.join("; "))
+}
+
+fn record_output_safety_attenuation_budget(
+    result: &mut RoomOptimizationResult,
+    checks: Vec<StageCheck>,
+) -> bool {
+    if checks.is_empty() {
+        return false;
+    }
+    let exceeded = checks.iter().any(|check| !check.passed);
+    result
+        .metadata
+        .stage_outcomes
+        .retain(|stage| stage.stage != "final_output_safety_attenuation_budget");
+    result.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_output_safety_attenuation_budget".into(),
+        status: if exceeded {
+            StageStatus::Degraded
+        } else {
+            StageStatus::Applied
+        },
+        advisories: vec![
+            "counts_cumulative_tagged_static_safety_gains_per_physical_output_path".into(),
+            "baseline_calibration_and_untagged_level_trims_are_not_included".into(),
+            "runtime_limiter_is_not_credited_toward_physical_drive_limits".into(),
+        ],
+        checks,
+    });
+    exceeded
+}
+
+fn finish_ctc_without_room_seat_evidence(
+    result: &mut RoomOptimizationResult,
+    safety_budget_checks: Vec<StageCheck>,
+    safety_budget_failure: Option<&str>,
+) -> Result<()> {
+    let safety_budget_exceeded =
+        record_output_safety_attenuation_budget(result, safety_budget_checks);
+    if safety_budget_exceeded && result.metadata.correction_acceptance.is_none() {
+        return Err(failed(format!(
+            "max_output_safety_attenuation_exceeded: {}; CTC has no correction report to retain the refusal",
+            safety_budget_failure.unwrap_or("budget exceeded")
+        )));
+    }
+    if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+        report.accepted = false;
+        report.decision = roomeq_model::CorrectionDecision::Rejected;
+        report
+            .violations
+            .push("ctc_final_seat_evidence_insufficient".to_string());
+        if safety_budget_exceeded {
+            report.violations.push(format!(
+                "max_output_safety_attenuation_exceeded: {}",
+                safety_budget_failure.unwrap_or("budget exceeded")
+            ));
+        }
+        report.violations.sort();
+        report.violations.dedup();
+        report.refresh_outcome();
+    }
+    result.metadata.stage_outcomes.push(StageOutcome {
+        stage: "final_correction_selection".into(),
+        status: StageStatus::Degraded,
+        advisories: vec![
+            "ctc_artifact_retained_without_room_seat_acceptance".into(),
+            "final_seat_evidence=insufficient_evidence".into(),
+        ],
+        checks: Vec::new(),
+    });
+    Ok(())
+}
+
 /// Select against the final graph, after all late processing and artifact binding.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn select(
@@ -254,6 +385,11 @@ fn select_inner(
     store: &dyn autoeq_artifacts::ArtifactStore,
 ) -> Result<()> {
     config.optimizer.finalization.validate().map_err(failed)?;
+    // Resolve configured output IDs against the actual routed graph before
+    // candidate search. A stale or misspelled key must never be ignored.
+    let initial_safety_budget_checks = output_safety_attenuation_budget_checks(result, config)?;
+    let initial_safety_budget_failure =
+        output_safety_attenuation_failure(&initial_safety_budget_checks);
 
     // CTC measurements describe ear transfer functions, not room-seat
     // captures.  They cannot be replayed by the physical-seat validator that
@@ -261,25 +397,11 @@ fn select_inner(
     // the CTC artifact, but do not turn the missing room-seat evidence into an
     // accepted acoustic claim (or fail the entire CTC artifact-producing run).
     if result.metadata.ctc.is_some() {
-        if let Some(report) = result.metadata.correction_acceptance.as_mut() {
-            report.accepted = false;
-            report.decision = roomeq_model::CorrectionDecision::Rejected;
-            report
-                .violations
-                .push("ctc_final_seat_evidence_insufficient".to_string());
-            report.violations.sort();
-            report.violations.dedup();
-            report.refresh_outcome();
-        }
-        result.metadata.stage_outcomes.push(StageOutcome {
-            stage: "final_correction_selection".into(),
-            status: StageStatus::Degraded,
-            advisories: vec![
-                "ctc_artifact_retained_without_room_seat_acceptance".into(),
-                "final_seat_evidence=insufficient_evidence".into(),
-            ],
-            checks: Vec::new(),
-        });
+        finish_ctc_without_room_seat_evidence(
+            result,
+            initial_safety_budget_checks,
+            initial_safety_budget_failure.as_deref(),
+        )?;
         return Ok(());
     }
 
@@ -289,6 +411,12 @@ fn select_inner(
     // given the same evaluator here so the finalizer cannot bypass evidence.
     if result.metadata.correction_acceptance.is_none() && captures.is_empty() && held_out.is_empty()
     {
+        if let Some(failure) = initial_safety_budget_failure {
+            return Err(failed(format!(
+                "max_output_safety_attenuation_exceeded: {failure}; selection has no acceptance evidence"
+            )));
+        }
+        record_output_safety_attenuation_budget(result, initial_safety_budget_checks);
         result.metadata.stage_outcomes.push(StageOutcome {
             stage: "final_correction_selection".into(),
             status: StageStatus::Skipped,
@@ -641,6 +769,13 @@ fn select_inner(
                     && stage.stage != "channel_level_candidate_requires_final_refinement"
             });
             candidate.metadata.stage_outcomes.push(alignment);
+            let safety_budget_checks = output_safety_attenuation_budget_checks(&candidate, config)?;
+            if let Some(failure) = output_safety_attenuation_failure(&safety_budget_checks) {
+                return Err(failed(format!(
+                    "max_output_safety_attenuation_exceeded: {failure}"
+                )));
+            }
+            record_output_safety_attenuation_budget(&mut candidate, safety_budget_checks);
             if let Some(bass) = &candidate.metadata.bass_management
                 && let Some(graph) = &bass.routing_graph
             {
@@ -1174,6 +1309,10 @@ fn publish_baseline(
     verify_declared_physical_drive(&mut baseline, config, fs, dir)?;
     refresh_responses(&mut baseline, fs, dir)?;
     refresh_final_reports(&mut baseline, config, fs, dir);
+    let safety_budget_checks = output_safety_attenuation_budget_checks(&baseline, config)?;
+    let safety_budget_failure = output_safety_attenuation_failure(&safety_budget_checks);
+    let safety_budget_exceeded =
+        record_output_safety_attenuation_budget(&mut baseline, safety_budget_checks);
     if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
         // Candidate evidence must never be attached to the delivered fallback.
         report.acoustic_quality = None;
@@ -1198,6 +1337,9 @@ fn publish_baseline(
     if attenuation > 1e-6 {
         advisories.push(format!("baseline_safety_attenuation_db={attenuation:.6}"));
     }
+    if safety_budget_exceeded {
+        advisories.push("baseline_exceeds_output_safety_attenuation_budget".into());
+    }
     if let Err(error) = replay {
         match error {
             AutoeqError::InvalidMeasurement { .. }
@@ -1221,10 +1363,22 @@ fn publish_baseline(
     advisories.extend(baseline_crossover_residuals(&baseline, fs, dir));
     if let Some(report) = baseline.metadata.correction_acceptance.as_mut() {
         report.accepted = false;
-        report.decision = if attenuation > 1e-6 {
+        if let Some(failure) = safety_budget_failure {
             report
                 .violations
-                .push("baseline_requires_safety_attenuation".into());
+                .push(format!("max_output_safety_attenuation_exceeded: {failure}"));
+        }
+        report.decision = if attenuation > 1e-6 || safety_budget_exceeded {
+            if attenuation > 1e-6 {
+                report
+                    .violations
+                    .push("baseline_requires_safety_attenuation".into());
+            }
+            if safety_budget_exceeded {
+                report
+                    .violations
+                    .push("baseline_exceeds_output_safety_attenuation_budget".into());
+            }
             roomeq_model::CorrectionDecision::Rejected
         } else {
             roomeq_model::CorrectionDecision::IdentityFallback
@@ -2215,6 +2369,150 @@ mod tests {
                 .advisories
                 .contains(&"selection_without_acceptance_evidence_deferred".to_string())
         );
+    }
+
+    #[test]
+    fn unknown_output_safety_budget_id_fails_before_selection_search() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut config = roomeq_model::RoomConfig::default();
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert("stale-output".into(), 3.0);
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        let dir = tempfile::tempdir().unwrap();
+        let error = select(
+            &mut result,
+            &[],
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .expect_err("stale configured output must not be ignored");
+        assert!(error.to_string().contains("unknown physical output"));
+        assert!(result.metadata.stage_outcomes.is_empty());
+    }
+
+    #[test]
+    fn output_safety_budget_records_over_limit_stage_diagnostic() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut gain = roomeq_engine::output::create_gain_plugin(-7.0);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![gain];
+        let output_id = serde_json::json!(["channel", "L"]).to_string();
+        let mut config = roomeq_model::RoomConfig::default();
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert(output_id.clone(), 6.0);
+        let checks = output_safety_attenuation_budget_checks(&result, &config).unwrap();
+        assert_eq!(checks.len(), 1);
+        assert!(!checks[0].passed);
+        assert_eq!(
+            checks[0].id,
+            format!("max_output_safety_attenuation_db:{output_id}")
+        );
+        assert_eq!(checks[0].observed, Some(7.0));
+        assert_eq!(checks[0].limit, Some(6.0));
+        assert!(output_safety_attenuation_failure(&checks).is_some());
+        assert!(record_output_safety_attenuation_budget(&mut result, checks));
+        let stage = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "final_output_safety_attenuation_budget")
+            .unwrap();
+        assert_eq!(stage.status, StageStatus::Degraded);
+        assert!(!stage.checks[0].passed);
+    }
+
+    #[test]
+    fn explicit_over_budget_without_acceptance_evidence_fails_closed() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let mut gain = roomeq_engine::output::create_gain_plugin(-7.0);
+        gain.parameters["room_eq_safety_gain"] = serde_json::json!(true);
+        result.channels.get_mut("L").unwrap().plugins = vec![gain];
+        let mut config = roomeq_model::RoomConfig::default();
+        let output_id = serde_json::json!(["channel", "L"]).to_string();
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert(output_id, 6.0);
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        let dir = tempfile::tempdir().unwrap();
+        let error = select(
+            &mut result,
+            &[],
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .expect_err("an explicit over-budget graph cannot use the no-evidence skip");
+        assert!(
+            format!("{error:#}").contains("max_output_safety_attenuation_exceeded"),
+            "unexpected CTC refusal: {error:#}"
+        );
+    }
+
+    #[test]
+    fn ctc_over_budget_without_acceptance_evidence_fails_closed() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        result.metadata.ctc = Some(roomeq_model::CtcReport {
+            enabled: true,
+            source: "synthetic-test".into(),
+            artifact: "ctc-test.json".into(),
+            speakers: vec!["L".into()],
+            ears: vec!["left".into(), "right".into()],
+            head_positions: 1,
+            fir_taps: 64,
+            latency_samples: 32,
+            latency_ms: 32.0 / 48.0,
+            max_filter_gain_db: 0.0,
+            max_condition_number: 1.0,
+            mean_reconstruction_error: 0.0,
+            worst_position_error: 0.0,
+            mean_crosstalk_residual_db: 0.0,
+            max_electrical_sum_gain_db: 0.0,
+            driver_headroom_limited: false,
+            room_eq_correction_applied: false,
+            room_eq_correction_channels: Vec::new(),
+            delivered_response: None,
+            binaural_diagnostics: None,
+        });
+        assert!(result.metadata.correction_acceptance.is_none());
+
+        let error = finish_ctc_without_room_seat_evidence(
+            &mut result,
+            vec![StageCheck {
+                id: format!(
+                    "max_output_safety_attenuation_db:{}",
+                    serde_json::json!(["channel", "L"])
+                ),
+                kind: roomeq_model::StageCheckKind::Safety,
+                passed: false,
+                observed: Some(7.0),
+                limit: Some(6.0),
+                diagnostic: None,
+            }],
+            Some("configured output budget exceeded"),
+        )
+        .expect_err("CTC cannot silently bypass an explicit output safety budget");
+        assert!(
+            format!("{error:#}").contains("max_output_safety_attenuation_exceeded"),
+            "unexpected CTC refusal: {error:#}"
+        );
+        assert!(result.metadata.stage_outcomes.iter().any(|stage| {
+            stage.stage == "final_output_safety_attenuation_budget"
+                && stage.status == StageStatus::Degraded
+                && !stage.checks[0].passed
+        }));
     }
 
     #[test]
@@ -3272,6 +3570,61 @@ mod tests {
                 .iter()
                 .flat_map(|stage| &stage.advisories)
                 .any(|note| note.starts_with("baseline_safety_attenuation_db=6.000"))
+        );
+    }
+
+    #[test]
+    fn over_budget_structural_fallback_keeps_diagnostics_but_is_rejected() {
+        let (mut result, mut config) = fixture();
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_gain_plugin(6.0)];
+        config
+            .optimizer
+            .finalization
+            .max_output_safety_attenuation_db
+            .insert(serde_json::json!(["channel", "L"]).to_string(), 3.0);
+        let captures = seat_replay::capture_training(&config).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::FsArtifactStore::new();
+        rebuild(&mut result, &config, &HashMap::new(), 48_000.0, dir.path()).unwrap();
+
+        publish_baseline(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+            "no_candidate_within_electrical_acoustic_limits",
+            Vec::new(),
+        )
+        .unwrap();
+
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("fallback keeps the correction report for inspection");
+        assert_eq!(report.outcome, roomeq_model::RoomEqOutcome::Rejected);
+        assert!(!report.accepted);
+        assert!(
+            report.violations.iter().any(|violation| {
+                violation.starts_with("max_output_safety_attenuation_exceeded:")
+            })
+        );
+        let budget_stage = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "final_output_safety_attenuation_budget")
+            .expect("budget failure remains in the diagnostic output");
+        assert_eq!(budget_stage.status, StageStatus::Degraded);
+        assert!(budget_stage.checks.iter().any(|check| !check.passed));
+        assert!(
+            result.channels["L"].plugins.iter().any(|plugin| {
+                plugin.parameters["room_eq_safety_gain"] == serde_json::json!(true)
+            })
         );
     }
 

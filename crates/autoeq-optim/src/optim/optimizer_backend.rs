@@ -9,8 +9,21 @@
 //! [`MockOptimizerBackend`] to avoid flaky stochastic optimization while still
 //! exercising curve preparation, target construction, and filter conversion.
 
-use super::{ObjectiveData, OptimProgressCallback};
+use super::run_control::OptimizerRunControl;
+use super::{ControlledOptimizerRun, ObjectiveData, OptimProgressCallback};
 use crate::OptimParams;
+
+/// A backend cannot enforce the requested controlled-run contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ControlledBackendUnsupported;
+
+impl std::fmt::Display for ControlledBackendUnsupported {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("optimizer backend does not support controlled runs")
+    }
+}
+
+impl std::error::Error for ControlledBackendUnsupported {}
 
 /// High-level optimizer backend used by the RoomEQ filter-fitting pipeline.
 pub trait OptimizerBackend: Send + Sync {
@@ -48,6 +61,31 @@ pub trait OptimizerBackend: Send + Sync {
         params: &OptimParams,
         algo_override: Option<&str>,
     ) -> Result<(String, f64), (String, f64)>;
+
+    /// Run with a shared score cap and retain typed dispatch evidence.
+    ///
+    /// Existing custom backends must implement this explicitly. The default
+    /// refuses the request without invoking an uncontrolled optimizer.
+    ///
+    /// # Errors
+    /// Returns `ControlledBackendUnsupported` unless the backend supports run control.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "mirrors the existing optimizer seam"
+    )]
+    fn optimize_filters_controlled(
+        &self,
+        _x: &mut [f64],
+        _lower_bounds: &[f64],
+        _upper_bounds: &[f64],
+        _objective: ObjectiveData,
+        _params: &OptimParams,
+        _algo_override: Option<&str>,
+        _callback: Option<OptimProgressCallback>,
+        _run_control: &OptimizerRunControl,
+    ) -> Result<ControlledOptimizerRun, ControlledBackendUnsupported> {
+        Err(ControlledBackendUnsupported)
+    }
 }
 
 /// Production backend: delegates to the real [`crate::optim`] dispatchers.
@@ -108,6 +146,31 @@ impl OptimizerBackend for RealOptimizerBackend {
             objective,
             params,
             algo_override,
+        )
+    }
+
+    fn optimize_filters_controlled(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+        algo_override: Option<&str>,
+        callback: Option<OptimProgressCallback>,
+        run_control: &OptimizerRunControl,
+    ) -> Result<ControlledOptimizerRun, ControlledBackendUnsupported> {
+        Ok(
+            super::optimize_filters_with_run_control_and_algo_override_detailed(
+                x,
+                lower_bounds,
+                upper_bounds,
+                objective,
+                params,
+                algo_override,
+                callback,
+                run_control,
+            ),
         )
     }
 }

@@ -30,7 +30,7 @@ cannot replace them.
 | A13 rendering/accessibility | Deferred | Begin after backend work |
 | A14 perceptual/listening evidence | Partial | Exact stimulus-hash disjointness and metric validity limits committed; independent references/domain registry and relevant blinded listening evidence remain |
 | A15 spatial/adaptive studies | Partial | Typed held-out evidence and recommendation constraints committed; independent measured studies and adaptive outcomes remain |
-| A16 persistent regression corpus | Partial | Four typed public workflow contracts and CI retention committed; independent measured evidence, historical canary acceptance and release evidence remain |
+| A16 persistent regression corpus | Partial | Separate 44.1/96 kHz canary attempted 112 cells: 102 completed, four callback outcomes, six BO Pareto watchdog failures; Gitea workflows integrated locally; passing nightly, independent measured evidence and release evidence remain |
 
 ## Verified backend changes
 
@@ -2862,3 +2862,16 @@ Root receipt: `/Users/pierre/a16-independent-peq-rate-results-v1.json`, SHA-256
 `f14ce132cc7316b4adf95f3c1c350705544eb227ca58531a2b09b7acd5a00300`.
 Strict repository analysis and final source/metadata comparison are being retained
 separately. The dependency publication and BO cooperative-stop fix remain open.
+
+
+Final A16 rate-run provenance verification confirms that repository and external
+source-package file inventories are unchanged; pre/post Cargo metadata is byte
+identical. Only snapshot label, time, and the newly built binary differ. The
+repository strict analyzer independently validates 106 result artifacts, with
+102 eligible completed optimizations and no artifact-integrity problems. Its
+strict gate fails for incomplete result coverage from the six watchdog failures.
+Root receipt: `/Users/pierre/a16-root-final-provenance-verification.json`.
+The agent's `final-run-receipt.json` in the evidence directory records the logs
+and frozen run/analysis files. Together with the four CI parity tests, all
+**65** integrated Python contracts pass; these unit checks do not override the
+failed execution gate.

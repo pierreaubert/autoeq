@@ -19,6 +19,40 @@ use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy, OptimizerCo
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
+#[derive(Debug)]
+pub(super) struct OptimizerStopped;
+
+impl std::fmt::Display for OptimizerStopped {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("optimization stopped by progress observer")
+    }
+}
+
+impl Error for OptimizerStopped {}
+
+pub(super) type LatchedOptimizerCallback = (
+    Option<autoeq_optim::optim::OptimProgressCallback>,
+    Arc<AtomicBool>,
+);
+
+pub(super) fn latch_observer_stop(
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+) -> LatchedOptimizerCallback {
+    let stopped = Arc::new(AtomicBool::new(false));
+    let callback = callback.map(|mut observer| {
+        let stopped = Arc::clone(&stopped);
+        Box::new(move |iteration, loss, epa| {
+            let action = observer(iteration, loss, epa);
+            if !matches!(&action, autoeq_optim::de::CallbackAction::Continue) {
+                stopped.store(true, std::sync::atomic::Ordering::Release);
+            }
+            action
+        }) as autoeq_optim::optim::OptimProgressCallback
+    });
+    (callback, stopped)
+}
 
 /// Derive audibility-veto modal evidence for one measurement using the same
 /// decomposition thresholds as the single-channel path.  Multi-measurement
@@ -1617,6 +1651,7 @@ fn optimize_channel_eq_multi_inner(
     };
 
     // Run global optimization
+    let (callback, observer_stopped) = latch_observer_stop(callback);
     let opt_result = if let Some(cb) = callback {
         backend.optimize_filters_with_callback(
             &mut x,
@@ -1629,6 +1664,10 @@ fn optimize_channel_eq_multi_inner(
     } else {
         backend.optimize_filters(&mut x, &lower_bounds, &upper_bounds, primary, &optim_params)
     };
+
+    if observer_stopped.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Box::new(OptimizerStopped));
+    }
 
     let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,
@@ -2049,6 +2088,7 @@ mod pruning_workflow_tests {
 mod processing_mode_tests {
     use super::*;
     use ndarray::Array1;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::mixed_phase::MixedPhaseConfig;
     use roomeq_model::{FirConfig, ProcessingMode};
@@ -2093,6 +2133,79 @@ mod processing_mode_tests {
             spl: Array1::from_vec(spl),
             phase: Some(Array1::from_vec(phase)),
             ..Default::default()
+        }
+    }
+
+    #[derive(Default)]
+    struct RefinementAdmissionBackend {
+        refinement_calls: AtomicUsize,
+    }
+
+    impl OptimizerBackend for RefinementAdmissionBackend {
+        fn optimize_filters(
+            &self,
+            x: &mut [f64],
+            _lower_bounds: &[f64],
+            _upper_bounds: &[f64],
+            objective: autoeq_optim::optim::ObjectiveData,
+            _params: &autoeq_optim::OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            Ok((
+                String::from("test optimizer completed"),
+                autoeq_optim::optim::compute_fitness_penalties_ref(x, &objective),
+            ))
+        }
+
+        fn optimize_filters_with_callback(
+            &self,
+            x: &mut [f64],
+            lower_bounds: &[f64],
+            upper_bounds: &[f64],
+            objective: autoeq_optim::optim::ObjectiveData,
+            params: &autoeq_optim::OptimParams,
+            mut callback: autoeq_optim::optim::OptimProgressCallback,
+        ) -> Result<(String, f64), (String, f64)> {
+            let result = self.optimize_filters(x, lower_bounds, upper_bounds, objective, params);
+            if let Ok((_, loss)) = &result
+                && matches!(
+                    callback(1, *loss, None),
+                    autoeq_optim::de::CallbackAction::Stop
+                )
+                && let Some(first_parameter) = x.first_mut()
+            {
+                // If emission validation runs before the stop check, this
+                // invalid result will mask the requested cancellation.
+                *first_parameter = f64::NAN;
+            }
+            result
+        }
+
+        fn optimize_filters_with_algo_override(
+            &self,
+            x: &mut [f64],
+            lower_bounds: &[f64],
+            upper_bounds: &[f64],
+            objective: autoeq_optim::optim::ObjectiveData,
+            params: &autoeq_optim::OptimParams,
+            _algorithm: Option<&str>,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.refinement_calls.fetch_add(1, Ordering::Relaxed);
+            self.optimize_filters(x, lower_bounds, upper_bounds, objective, params)
+        }
+    }
+
+    fn observer_test_config(num_filters: usize, min_filter_improvement: f64) -> OptimizerConfig {
+        OptimizerConfig {
+            algorithm: String::from("autoeq:de"),
+            strategy: String::from("lshade"),
+            num_filters,
+            max_iter: 64,
+            population: 8,
+            seed: Some(7),
+            refine: true,
+            min_filter_improvement,
+            psychoacoustic: false,
+            ..OptimizerConfig::default()
         }
     }
 
@@ -2407,6 +2520,85 @@ mod processing_mode_tests {
             callback_called.load(std::sync::atomic::Ordering::SeqCst),
             "callback should have been invoked"
         );
+    }
+
+    #[test]
+    fn observer_stop_prevents_single_pass_and_adaptive_refinement_admission() {
+        let curve = make_simple_room_curve();
+        for (num_filters, min_filter_improvement) in [(1, 0.0), (2, 1e-6)] {
+            let config = observer_test_config(num_filters, min_filter_improvement);
+            let backend = RefinementAdmissionBackend::default();
+            let callback: autoeq_optim::optim::OptimProgressCallback =
+                Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop);
+
+            let error = optimize_channel_eq_inner(
+                &curve,
+                &config,
+                None,
+                48_000.0,
+                None,
+                None,
+                Some(callback),
+                &backend,
+            )
+            .expect_err("a stopped optimizer must not return a publishable result");
+
+            assert!(
+                error.downcast_ref::<super::OptimizerStopped>().is_some(),
+                "expected typed observer stop before candidate validation, got {error}"
+            );
+            assert_eq!(backend.refinement_calls.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn observer_stop_prevents_multi_measurement_refinement_admission() {
+        let curve = make_simple_room_curve();
+        let config = observer_test_config(2, 0.0);
+        let backend = RefinementAdmissionBackend::default();
+        let callback: autoeq_optim::optim::OptimProgressCallback =
+            Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop);
+
+        let error = optimize_channel_eq_multi_inner(
+            &[curve],
+            &config,
+            &MultiMeasurementConfig::default(),
+            None,
+            48_000.0,
+            Some(callback),
+            &backend,
+        )
+        .expect_err("a stopped multi-measurement run must not return a result");
+
+        assert!(
+            error.downcast_ref::<OptimizerStopped>().is_some(),
+            "expected typed observer stop before candidate validation, got {error}"
+        );
+        assert_eq!(backend.refinement_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn observer_continue_preserves_refinement_path() {
+        let curve = make_simple_room_curve();
+        let config = observer_test_config(1, 0.0);
+        let backend = RefinementAdmissionBackend::default();
+        let callback: autoeq_optim::optim::OptimProgressCallback =
+            Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Continue);
+
+        let result = optimize_channel_eq_inner(
+            &curve,
+            &config,
+            None,
+            48_000.0,
+            None,
+            None,
+            Some(callback),
+            &backend,
+        )
+        .expect("continue should retain the existing global/refinement flow");
+
+        assert!(result.loss.is_finite());
+        assert_eq!(backend.refinement_calls.load(Ordering::Relaxed), 1);
     }
 
     /// Test PhaseLinear mode configuration

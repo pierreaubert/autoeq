@@ -285,7 +285,6 @@ name = "autoeq-cli"
 version = "0.5.2"
 dependencies = [
  "anyhow",
- "autoeq-artifacts",
  "autoeq-plot",
  "autoeq-workflow",
  "chrono",
@@ -4673,7 +4672,6 @@ dependencies = [
  "autoeq-artifacts",
  "autoeq-core",
  "autoeq-measurements",
- "autoeq-optim",
  "chrono",
  "criterion",
  "hound",

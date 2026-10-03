@@ -2025,3 +2025,71 @@ Root review: `/Users/pierre/ess-run05-independent-review.json`, SHA-256
 Acceptance remains limited to the declared synthetic 4 kHz, 320-tap diagnostic.
 Production-scale estimator integration, broader excitation/model validity and
 physical measurement evidence remain open; A04 is still partial.
+
+### A07 controlled multi-measurement adaptive stages
+
+Integrated commit `aa0d26e` preserves the prepared multi-measurement objective
+through every adaptive pass. Root and per-stage Search limits remain shared,
+and stage evidence retains normalization and measurement identities even when
+a stage is refused. The regression covers two opposing measured curves, a
+192-evaluation root limit with 64-evaluation stages, accepted gain envelopes,
+and deterministic refusal of an infeasible composite envelope.
+
+Worker verification: 884 engine tests passed, one ignored; strict engine Clippy
+passed after the previously reviewed lint cleanup. Root independently verified
+the three adaptive regressions and strict Clippy on the integrated tree and
+compared its source tree to the tested worker tree (only this status file differs).
+Root review: `/Users/pierre/a07-multi-adaptive-independent-review.json`, SHA-256
+`773940a6d3925d392c9351c02f7ba9cf4212b23a8842d1f6ae8bb3fc4c21a1ac`.
+The full controlled benchmark matrix and derived preset tiers remain pending.
+
+### A08 exact NSGA continuation: verified local prototype
+
+Local math commit `6a15f7a` adds checkpointed NSGA-II/III at initialization and
+completed-generation barriers. Checkpoints retain ordered population and
+objective bits, ranks/crowding, RNG state, counters, configuration, executable
+and caller identities. Save errors abort; malformed or incompatible state is
+refused before objective evaluation. Terminal resume performs no new evaluations.
+The legacy API retains its seeded behavior through a shared generation step.
+
+Full math library verification passed: 257 tests, one ignored, including two
+fresh-process continuation child runs. Tests compare complete candidate traces
+and final population bits across variants, seeds, barriers and partial final
+generations, and reject corrupt states with recomputed checksums. Strict Clippy,
+formatting and diff checks passed. The isolated worktree is clean.
+Evidence: `/Volumes/home_tmp/tmp/math-audio-a08-nsga-evidence-20261003`.
+Full-test receipt SHA-256:
+`bde3b11eea1dbe431a619da378e310c99760ed8992854921ced8ecab72f2aa10`.
+Strict-Clippy receipt SHA-256:
+`9c4335672e80994b2ed25b46583ce8446270764050480c4e890003432272486b`.
+This prototype is local and requires the same executable and deterministic
+objective. Public publication and RoomEQ integration remain open; A08 is partial.
+
+### A11 REW run06: all numerical cases pass; cleanup gate fails
+
+The reviewed centered shelf mapping uses typed `LS Q`/`HS Q` with
+Q=1/sqrt(2) for source S=1 center-frequency shelves. Offline positive/negative
+controls cover both shelf directions, three rates, three frequency fractions,
+both gain signs and three Q values. The original run05 mismatch remains recorded.
+
+Run06 passed all 15 typed filter-engine cases (PK, HPQ, LPQ, LS, HS at
+44.1/48/96 kHz) with unchanged tolerances. Maximum impulse error was
+5.821e-11, PCM convolution error 2.213e-8, response error 6.524e-7 dB,
+and phase error 5.897e-6 degrees. Root verified 125 saved response hashes,
+per-case gates, unchanged unused filter slots and stable runtime/source hashes.
+
+The overall command exited 1: the API port remained unavailable throughout
+the fixed five-second cleanup observation, despite no listener or owned process
+remaining. Owned shutdown returned HTTP 202 and process exit zero; user paths
+were unchanged and the run did not time out. A later read-only observation found
+the port available. This does not alter the original failed cleanup verdict;
+the socket-state cause is undiagnosed. No app retry was performed.
+
+Run report SHA-256:
+`1f6000f92dec6d50c844a4debcc04712815a6e4359a9658faa9c5a2dcef37ee2`.
+Root review `/Users/pierre/rew-filter-run06-independent-review.json`, SHA-256:
+`1c892cbe2dfee1fc25a11cbdfb26aaba620c4191726e5aae6f4a0052e41fde53`.
+Later observation SHA-256:
+`46b18c469c9631eda696914a9d3cb2bed29d560decd3cad59a61f68bb2480f19`.
+This proves the declared synthetic typed API DSP cases only. Actual APO text
+import, complete routing/protection behavior and hardware evidence remain open.

@@ -2918,3 +2918,27 @@ failed QA summary remains intact. Evidence is under
 `/Volumes/home_tmp/tmp/a09-finalization-diagnostic-gates-20261003-01/measured-iir-run-02/`.
 Root receipts: `/Users/pierre/a09-run02-root-artifact-verification.json` and
 `/Users/pierre/a09-run02-independent-useful-output-verification.json`.
+
+
+### A00 isolated CLI installation and converter argument fix (2026-10-03)
+
+A locked offline source installation from frozen **1abc017** successfully installed
+all four README binaries into an isolated prefix. The startup check then found
+`convert-recording --help` treated the flag as a filename and exited 1. The original
+failed receipt and installed binaries remain in the evidence directory.
+
+The converter now uses the existing Clap parser, handles help/version before file
+access, accepts OS-native paths, and rejects unknown options or excess positional
+arguments. Its existing input/output defaults and backup behavior are preserved.
+All **10 converter tests** and scoped strict CLI library Clippy pass. A second
+isolated source installation passes `--help` for all four binaries. Six installed
+converter invocations verify help does not touch a file named `--help`, missing/
+unknown/excess arguments do not write files, separate output preserves source
+bytes, and in-place conversion creates an exact `.bak` copy.
+
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a00-public-source-install-20261003/`.
+`installed-cli-verification.json` retains the original failure;
+`corrected-installed-cli-verification.json` and `corrected-converter-io.json`
+record the corrected binary hashes and results. This proves source installation
+and CLI behavior on this host; registry package installation and cross-platform
+execution remain open. No audio device or network downloader was run.

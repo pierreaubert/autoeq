@@ -2997,3 +2997,21 @@ dependencies. The earlier standalone source-install evidence belongs to its
 frozen audit revision; it does not prove standalone installation of this newly
 combined workspace. Recovery and derived-trim fixes remain isolated until their
 acceptance tests pass. This merge does not complete the audit or publish it.
+
+### A00 standalone backend workspace isolation (2026-10-03)
+
+The local GPUI demos now use an independent workspace and lockfile; existing
+`just` demo recipes select its manifest explicitly. Root backend metadata from
+a frozen checkout with no sibling repositories passes locked offline resolution:
+22 workspace members and zero external path dependencies. Both demo targets
+remain present in their own metadata and both build recipes pass dry-run checks.
+The frozen checkout also passes locked offline release installation of all four
+CLIs (`autoeq`, `roomeq`, `autoeq-download-speakers`, `convert-recording`); each
+installed binary exits successfully for `--help`. The install took 4m10s and
+binary/log hashes are recorded in the standalone verification receipt.
+
+The partition gate still fails five ownership/size checks: the CLI-to-artifacts
+normal edge, the workflow-to-optimizer dev edge, and root source/binary/test
+budgets. No policy limit was raised. Registry and cross-platform acceptance
+remain open. Evidence: `autoeq-a00-standalone-proof-20261003` and
+`autoeq-main-merge-20261003/standalone-partition.log` under the task evidence root.

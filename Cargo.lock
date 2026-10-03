@@ -3199,7 +3199,7 @@ dependencies = [
 
 [[package]]
 name = "math-dsp"
-version = "0.5.31"
+version = "0.5.32"
 dependencies = [
  "clap",
  "hound",

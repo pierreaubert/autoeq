@@ -28,6 +28,9 @@ pub fn all_algorithms() -> Vec<Box<dyn FilterOptimizer>> {
     use super::cobyla::AutoeqCobylaBackend;
     algos.push(Box::new(AutoeqCobylaBackend::new("autoeq:cobyla")));
 
+    use super::cobra::AutoeqCobraBackend;
+    algos.push(Box::new(AutoeqCobraBackend::new("autoeq:cobra")));
+
     use super::isres::AutoeqIsresBackend;
     algos.push(Box::new(AutoeqIsresBackend::new("autoeq:isres")));
 
@@ -153,6 +156,17 @@ fn warn_deprecated_once(removed: &str, replacement: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolves_cobra_with_native_inequalities_without_saved_candidate_support() {
+        for name in ["autoeq:cobra", "cobra", "COBRA"] {
+            let backend = resolve(name).expect("COBRA resolves");
+            assert_eq!(backend.name(), "autoeq:cobra");
+            assert!(backend.capabilities().nonlinear_ineq);
+            assert!(backend.capabilities().iteration_callback);
+            assert!(!backend.supports_initial_candidate());
+        }
+    }
 
     #[test]
     fn resolves_bayesian_optimizer_aliases() {

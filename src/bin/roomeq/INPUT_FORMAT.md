@@ -1400,3 +1400,13 @@ of the configured directivity model, replacing geometric angles in supported
 bins only. This remains a magnitude-only spatial-weight approximation, not
 coherent reconstruction of the reflected field. Invalid capture evidence or
 ambiguous geometry retains the geometric weighting path.
+
+
+### COBRA optimizer
+
+Select the constrained surrogate solver with `optimizer.algorithm: "autoeq:cobra"`
+(or `"cobra"`). It uses `max_iter` as the objective-evaluation budget and `seed`
+for reproducibility. It supports native inequality constraints, with progress
+and stop callbacks after surrogate infill evaluations. Its initial Halton design
+does not use a saved candidate. Internal true-function polish is disabled; the
+existing `refine`/`local_algo` settings control RoomEQ local refinement.

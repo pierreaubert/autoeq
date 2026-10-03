@@ -28,6 +28,8 @@ pub mod bo;
 pub mod callback;
 /// Pure-Rust CMA-ES backend.
 pub mod cmaes;
+/// COBRA surrogate optimization with native inequalities.
+pub mod cobra;
 /// Pure-Rust COBYLA backend (replaces NLopt's COBYLA when nlopt feature is off).
 pub mod cobyla;
 /// Frequency-dependent constraint envelopes and neutral diagnostics.

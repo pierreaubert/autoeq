@@ -514,6 +514,47 @@ fn room_cli_sigint_drains_stereo_optimization_and_preserves_prior_bundle() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn room_cli_cobra_publishes_a_loadable_stereo_bundle() {
+    let directory = tempfile::TempDir::new().expect("COBRA RoomEQ test directory");
+    let config_path = write_signal_test_config(directory.path(), 24);
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["optimizer"]["algorithm"] = serde_json::json!("autoeq:cobra");
+    config["optimizer"]["num_filters"] = serde_json::json!(1);
+    config["optimizer"]["refine"] = serde_json::json!(false);
+    fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    let output_path = directory.path().join("cobra-room.json");
+    let mut child =
+        SpawnedRoomEq::spawn(&config_path, &output_path, 64).expect("spawn COBRA RoomEQ");
+    let status = child
+        .wait_until_exit(ROOM_CONFIGURATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            panic!(
+                "COBRA RoomEQ did not finish: {error}; {}",
+                child.output_text()
+            )
+        });
+    assert!(
+        status.success(),
+        "COBRA RoomEQ failed: {}",
+        child.output_text()
+    );
+    roomeq_workflow::load_output_bundle(&output_path).expect("COBRA bundle is valid and loadable");
+    let graph: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output_path).unwrap()).unwrap();
+    assert_eq!(graph["metadata"]["algorithm"], "autoeq:cobra");
+    assert!(graph["channels"].get("L").is_some());
+    assert!(graph["channels"].get("R").is_some());
+    let evidence = graph["metadata"]["optimizer_evidence"].to_string();
+    assert!(
+        evidence.contains("AutoEQ COBRA:"),
+        "missing actual COBRA run evidence: {evidence}"
+    );
+    assert!(room_stage_directories(directory.path()).unwrap().is_empty());
+}
+
 fn centered_rms_in_band(curve: &serde_json::Value, min_hz: f64, max_hz: f64) -> f64 {
     let frequencies = curve["freq"].as_array().expect("curve frequency array");
     let spl = curve["spl"].as_array().expect("curve SPL array");

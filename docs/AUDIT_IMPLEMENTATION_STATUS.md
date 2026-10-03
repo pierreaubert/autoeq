@@ -2244,3 +2244,37 @@ yet verified production cell receipts; the harness is still being compiled.
 Actual input buffers are now shared by the draft CSV parsers and source hashes.
 The full matrix, executable identity, watchdog outcomes, and final artifact
 completeness remain separate acceptance checks.
+
+### A07: CLI inventory and controlled COBRA smoke verified (2026-10-03)
+
+The worker's frozen-source focused test run passed 5/5, and the separate source
+snapshot helper suite passed 5/5. The CLI build succeeded. Root verified the
+actual emitted inventory: 841 unique cells, full ordinary Cartesian coverage,
+expected purpose counts, stage quotas, and content hash
+`427643cb51f91cc6c74645b18f6a4cb199d9f383ccd597f91a9c4ad82598ebd5`.
+
+Root executed three fresh-process analytic smoke cells with a 30-second owned
+process watchdog, retaining each spec, result, log, exit status and hash in
+`/Volumes/home_tmp/tmp/autoeq-a07-shared-pipeline-evidence/root-smoke-v1`.
+Binary SHA-256 remained
+`8fec9b840a522a8e72209a6538814101de8a49ddb5c6bef8f243d628506d7a8f`.
+All three exited zero without watchdog timeout:
+
+- Ordinary COBRA, cap 128: 128 Search and 2 Validation evaluations; 928 ms engine time.
+- Adaptive COBRA, root cap 512: four stages with dimensions 3/6/9/12, each
+  using 128 Search evaluations; 8 Validation evaluations; 1975 ms engine time.
+- Callback-unsupported COBYLA: explicit refusal, zero Search, zero Validation,
+  and zero source-metric scores.
+
+The independent result checker passed admission conservation, per-stage caps,
+spec/inventory identity, emitted feasibility and finite comparison availability.
+Both COBRA cases emitted the same final four-filter candidate, with worst-ear
+source comparison loss 1.4531589293884717; the extra adaptive passes did not
+improve this smoke result. No broad backend ranking or preset recommendation
+is inferred.
+
+Root review receipt: `/Users/pierre/a07-controlled-smoke-independent-review.json`,
+SHA-256 `ae2923f341c880f53bead5533220cfddf7b3df1ba1a3ea183ac2b6152e3115fd`.
+The full matrix remains pending watchdog review and broader smoke coverage for
+measured inputs, Pareto, refinement and observer cancellation. These changes
+remain in the worker worktree pending final review and integration.

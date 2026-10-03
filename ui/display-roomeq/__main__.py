@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Display roomeq optimization results using Plotly.
+Display roomeq optimization results as an HTML report.
 
 Reads a roomeq-generated JSON file and creates an HTML file with interactive
 plots comparing initial (without EQ) and final (with EQ) frequency response

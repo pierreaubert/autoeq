@@ -1,0 +1,28 @@
+[package]
+name = "autoeq-gpui-examples"
+version = "0.5.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Spinorama visualization demos for AutoEQ and GPUI"
+
+[dependencies]
+autoeq = { path = "../.." }
+d3rs = { package = "gpui-d3rs", path = "../../../gpui-toolkit/crates/gpui-d3rs", features = ["gpui", "gpu-2d", "gpu-3d"] }
+gpui = { package = "gpui-toolkit-gpui", path = "../../../gpui-toolkit/crates/3rdparties/gpui" }
+gpui-builder = { path = "../../../gpui-toolkit/crates/gpui-builder" }
+gpui-design = { path = "../../../gpui-toolkit/crates/gpui-design" }
+gpui-miniapp = { path = "../../../gpui-toolkit/crates/gpui-miniapp" }
+gpui-px = { path = "../../../gpui-toolkit/crates/gpui-px", features = ["gpui", "gpu-3d"] }
+gpui-ui-kit = { path = "../../../gpui-toolkit/crates/gpui-ui-kit", default-features = false }
+reqwest = { workspace = true }
+tokio = { workspace = true }
+urlencoding = { workspace = true }
+
+[[bin]]
+name = "d3rs-spinorama"
+path = "bin/d3rs-spinorama/main.rs"
+
+[[bin]]
+name = "px-spinorama"
+path = "bin/px-spinorama.rs"

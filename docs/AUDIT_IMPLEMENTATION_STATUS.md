@@ -2121,3 +2121,24 @@ also pass. This closes the previously recorded model-test lint obstruction;
 production behavior is unchanged.
 Evidence: `/Volumes/home_tmp/tmp/a00-model-lint-evidence-20261003/gates.json`,
 SHA-256 `3ff18c7a74ae7626b93ae6ef053249eb0b2f25854300b2f34acdb17ea17e0777`.
+
+### A07 validated Pareto report evidence integrated
+
+Commit `0955086` retains invocation-local Pareto candidates, original front
+indices, repaired parameters and validation objectives, selection weights and
+ideal/nadir, scalar evidence when available, and returned-winner identity.
+Unbounded crowding uses an explicit JSON tag. Backend identity, selected scalar
+and returned vector are checked before attaching the report; errors and typed
+validation stops cannot carry a partial report. Search exhaustion still allows
+post-search Validation, while cancellation/deadline refuses new validation.
+Malformed vectors and empty/infeasible fronts preserve their error semantics.
+Report construction reuses existing scalar scores.
+
+Root compared all nine integrated source files with worker commit `538763e`.
+Full integrated optimizer tests passed 393/393 and model tests 338/338; strict
+library/test Clippy passed for both packages. Formatting and diff checks passed.
+Root review: `/Users/pierre/a07-pareto-independent-review.json`, SHA-256
+`35e5f0b191a5b819944516c3c90f4083ede71eca2e7ed0cc54df1a2becbe73c6`.
+Evidence: `/Volumes/home_tmp/tmp/a07-pareto-integrated-evidence-20261003`.
+Full engine integration will be checked with the adaptive budget-profile slice.
+The full benchmark matrix and evidence-derived presets remain open.

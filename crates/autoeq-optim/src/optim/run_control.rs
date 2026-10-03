@@ -84,6 +84,7 @@ struct RunStageState {
     validation_evaluations_started: usize,
     validation_evaluations_completed: usize,
     validation_evaluations_failed: usize,
+    validation_evaluations_refused: usize,
     validation_component_evaluations_started: usize,
     validation_component_evaluations_completed: usize,
     validation_evaluations_in_flight: usize,
@@ -101,6 +102,7 @@ struct RunState {
     validation_evaluations_started: usize,
     validation_evaluations_completed: usize,
     validation_evaluations_failed: usize,
+    validation_evaluations_refused: usize,
     validation_component_evaluations_started: usize,
     validation_component_evaluations_completed: usize,
     validation_evaluations_in_flight: usize,
@@ -133,6 +135,8 @@ pub struct OptimizerRunSnapshot {
     pub validation_evaluations_completed: usize,
     /// Validation scores whose objective function unwound with a panic.
     pub validation_evaluations_failed: usize,
+    /// Validation scores refused because cancellation or the deadline was latched.
+    pub validation_evaluations_refused: usize,
     /// Measurement components scored during finalization and post-run checks.
     pub validation_component_evaluations_started: usize,
     /// Validation measurement components that returned.
@@ -176,6 +180,8 @@ pub struct OptimizerStageSnapshot {
     pub validation_evaluations_completed: usize,
     /// Validation scores whose objective function unwound with a panic.
     pub validation_evaluations_failed: usize,
+    /// Validation scores refused because cancellation or the deadline was latched.
+    pub validation_evaluations_refused: usize,
     /// Measurement components scored during this stage's validation work.
     pub validation_component_evaluations_started: usize,
     /// Validation measurement components that returned.
@@ -373,6 +379,15 @@ impl OptimizerRunControl {
                 }
             }
             EvaluationStage::Validation => {
+                if state.cancellation_requested || state.deadline_reached {
+                    state.validation_evaluations_refused =
+                        state.validation_evaluations_refused.saturating_add(1);
+                    if let Some(stage_state) = stage_state.as_mut() {
+                        stage_state.validation_evaluations_refused =
+                            stage_state.validation_evaluations_refused.saturating_add(1);
+                    }
+                    return None;
+                }
                 state.validation_evaluations_started += 1;
                 state.validation_component_evaluations_started = state
                     .validation_component_evaluations_started
@@ -502,6 +517,7 @@ fn stage_snapshot(
         validation_evaluations_started: state.validation_evaluations_started,
         validation_evaluations_completed: state.validation_evaluations_completed,
         validation_evaluations_failed: state.validation_evaluations_failed,
+        validation_evaluations_refused: state.validation_evaluations_refused,
         validation_component_evaluations_started: state.validation_component_evaluations_started,
         validation_component_evaluations_completed: state
             .validation_component_evaluations_completed,
@@ -525,6 +541,7 @@ fn snapshot(budget: usize, state: &RunState) -> OptimizerRunSnapshot {
         validation_evaluations_started: state.validation_evaluations_started,
         validation_evaluations_completed: state.validation_evaluations_completed,
         validation_evaluations_failed: state.validation_evaluations_failed,
+        validation_evaluations_refused: state.validation_evaluations_refused,
         validation_component_evaluations_started: state.validation_component_evaluations_started,
         validation_component_evaluations_completed: state
             .validation_component_evaluations_completed,
@@ -538,7 +555,7 @@ fn snapshot(budget: usize, state: &RunState) -> OptimizerRunSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::mpsc;
+    use std::sync::{Barrier, mpsc};
     use std::thread;
     use std::time::Duration;
 
@@ -653,25 +670,143 @@ mod tests {
     }
 
     #[test]
-    fn validation_scores_are_counted_separately_and_remain_available_after_cancel() {
-        let control = OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
-        let search = control
-            .begin_evaluation(EvaluationStage::Search, 2)
-            .unwrap();
-        drop(search);
-        control.request_cancel();
+    fn search_budget_exhaustion_allows_validation_but_cancel_refuses_it() {
+        let root = OptimizerRunControl::new(NonZeroUsize::new(1).unwrap());
+        let control = root.with_stage_budget(NonZeroUsize::new(1).unwrap());
+        drop(
+            control
+                .begin_evaluation(EvaluationStage::Search, 2)
+                .unwrap(),
+        );
+        assert!(
+            control
+                .begin_evaluation(EvaluationStage::Search, 2)
+                .is_none()
+        );
+        drop(
+            control
+                .begin_evaluation(EvaluationStage::Validation, 2)
+                .expect("search budget exhaustion does not block validation"),
+        );
 
-        let validation = control
-            .begin_evaluation(EvaluationStage::Validation, 2)
-            .expect("validation is not limited by search cancellation");
-        drop(validation);
+        let cancelled_root = OptimizerRunControl::new(NonZeroUsize::new(2).unwrap());
+        let cancelled = cancelled_root.with_stage_budget(NonZeroUsize::new(2).unwrap());
+        cancelled.request_cancel();
+        assert!(
+            cancelled
+                .begin_evaluation(EvaluationStage::Validation, 3)
+                .is_none()
+        );
 
-        let snapshot = control.snapshot();
-        assert_eq!(snapshot.evaluations_started, 1);
-        assert_eq!(snapshot.component_evaluations_started, 2);
-        assert_eq!(snapshot.validation_evaluations_started, 1);
-        assert_eq!(snapshot.validation_component_evaluations_started, 2);
-        assert!(snapshot.cancellation_requested);
+        let root_snapshot = cancelled_root.snapshot();
+        let stage_snapshot = cancelled.stage_snapshot().unwrap();
+        assert_eq!(root_snapshot.validation_evaluations_started, 0);
+        assert_eq!(root_snapshot.validation_evaluations_refused, 1);
+        assert_eq!(stage_snapshot.validation_evaluations_started, 0);
+        assert_eq!(stage_snapshot.validation_evaluations_refused, 1);
+        assert!(root_snapshot.cancellation_requested);
+    }
+
+    #[test]
+    fn cancel_or_deadline_before_validation_admission_is_never_raced_through() {
+        for stop_kind in ["cancel", "deadline"] {
+            let root = OptimizerRunControl::new(NonZeroUsize::new(3).unwrap());
+            let control = root.with_stage_budget(NonZeroUsize::new(2).unwrap());
+            let barrier = Arc::new(Barrier::new(2));
+            let worker_control = control.clone();
+            let worker_barrier = Arc::clone(&barrier);
+            let (ready_sender, ready_receiver) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                ready_sender.send(()).unwrap();
+                worker_barrier.wait();
+                worker_control
+                    .begin_evaluation(EvaluationStage::Validation, 1)
+                    .is_none()
+            });
+
+            ready_receiver
+                .recv_timeout(Duration::from_secs(1))
+                .expect("validation worker reached admission barrier");
+            if stop_kind == "cancel" {
+                control.request_cancel();
+            } else {
+                control.request_deadline();
+            }
+            barrier.wait();
+            assert!(worker.join().unwrap(), "{stop_kind} must refuse validation");
+
+            let root_snapshot = root.snapshot();
+            let stage_snapshot = control.stage_snapshot().unwrap();
+            assert_eq!(root_snapshot.validation_evaluations_started, 0);
+            assert_eq!(root_snapshot.validation_evaluations_refused, 1);
+            assert_eq!(stage_snapshot.validation_evaluations_started, 0);
+            assert_eq!(stage_snapshot.validation_evaluations_refused, 1);
+            assert_eq!(root_snapshot.cancellation_requested, stop_kind == "cancel");
+            assert_eq!(root_snapshot.deadline_reached, stop_kind == "deadline");
+        }
+    }
+
+    #[test]
+    fn already_admitted_validation_completes_before_cancel_waiter_returns() {
+        let root = OptimizerRunControl::new(NonZeroUsize::new(3).unwrap());
+        let control = root.with_stage_budget(NonZeroUsize::new(2).unwrap());
+        let barrier = Arc::new(Barrier::new(2));
+        let worker_control = control.clone();
+        let worker_barrier = Arc::clone(&barrier);
+        let (admitted_sender, admitted_receiver) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let guard = worker_control
+                .begin_evaluation(EvaluationStage::Validation, 2)
+                .expect("score is admitted before cancellation");
+            admitted_sender.send(()).unwrap();
+            worker_barrier.wait();
+            drop(guard);
+        });
+        admitted_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("validation score reached barrier while admitted");
+
+        let waiter_control = control.clone();
+        let (done_sender, done_receiver) = mpsc::channel();
+        let (waiter_started_sender, waiter_started_receiver) = mpsc::channel();
+        let waiter = thread::spawn(move || {
+            waiter_started_sender.send(()).unwrap();
+            done_sender
+                .send(waiter_control.cancel_and_wait_for_evaluations())
+                .unwrap();
+        });
+        waiter_started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("cancel waiter started");
+        for _ in 0..100 {
+            if control.snapshot().cancellation_requested {
+                break;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        let waiting = control.snapshot();
+        assert!(
+            waiting.cancellation_requested,
+            "cancel waiter must latch stop"
+        );
+        assert_eq!(waiting.validation_evaluations_in_flight, 1);
+        assert!(done_receiver.try_recv().is_err());
+        barrier.wait();
+        worker.join().unwrap();
+        let completed = done_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("cancel waiter returns after admitted validation score drains");
+        waiter.join().unwrap();
+        assert_eq!(completed.validation_evaluations_completed, 1);
+        assert_eq!(completed.validation_evaluations_in_flight, 0);
+        assert_eq!(completed.validation_component_evaluations_completed, 2);
+        assert_eq!(
+            control
+                .stage_snapshot()
+                .unwrap()
+                .validation_evaluations_completed,
+            1
+        );
     }
 
     #[test]

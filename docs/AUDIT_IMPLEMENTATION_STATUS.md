@@ -1919,3 +1919,76 @@ configuration was changed.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a00-runner-inventory-20261003`.
 Owner review: `/Users/pierre/a00-runner-independent-review.json`, SHA-256
 `f25627ccd558cc0d837676f9940fa7b7580a1a7ed0796791cba91aaba3e3b5e2`.
+
+## Backend continuation — 2026-10-03
+
+### A07 shared search budgets integrated
+
+The controlled RoomEQ pipeline (`9cfb7a2`) and strict engine lint cleanup
+(`f41a26f`) are now merged into the audit branch. Controlled single-channel
+adaptive passes and refinement share one root Search cap, with fresh stage
+quotas. Controlled multi-measurement optimization and its optional refinement
+also share the root cap. Validation is counted separately and refuses new work
+after cancellation or deadline; work already admitted drains. Search exhaustion
+alone permits final validation. NSGA front repair and final selection use
+Validation accounting rather than consuming an exhausted Search budget.
+
+Legacy entrypoints and CLI iteration semantics remain unchanged. Controlled
+multi-measurement adaptive passes and structured Pareto-front evidence are still
+being extended in isolated worktrees. The proposed 841-cell full-pipeline matrix
+has not run, and no preset recommendation is justified by these gates.
+
+Verified source: optimizer tests 388/388; engine tests 881 passed, one ignored;
+optimizer benchmark integration 8/8. Strict optimizer and engine library/test
+Clippy pass. The lint-only follow-up reran all 881 engine tests successfully,
+preserving numeric constants and thresholds. The merged source tree matches the
+verified lint branch except for this status document.
+
+Evidence:
+- `/Users/pierre/a07-controlled-pipeline-independent-review.json`, SHA-256
+  `ad43cfe0561081c27e1adb4383d80115c6e7ba9ec3f5a71d685273c6a6d82e30`.
+- `/Volumes/home_tmp/tmp/a00-engine-lint-evidence-20261003/verification.json`,
+  SHA-256 `a628def4094159d7783285afe54108974d8353116358c92c8f8e37f39fb3d0e6`.
+
+### A04 ESS run04 and retained-artifact diagnostic
+
+Run04 separated the fit and frozen V7 reference into sequential processes.
+Both exited successfully within the original RSS cap: peaks were 1,157,251,072
+and 855,457,792 bytes. All four synthetic fits and reference cases completed.
+The independent evaluator then failed because it looked up
+`DENSE_PREDICTION_REL_TOL` in the oracle module instead of the probe module.
+The original run04 remains failed and immutable.
+
+The repaired evaluator passed 13 static checks and a bounded diagnostic replay
+of the retained arrays: 20 training, four held-out, 20 matrix-free/reference,
+and 24 formula/PCM comparisons. Original sources/reports and input inventories
+remained unchanged. This is diagnostic evidence; a fresh full execution using
+the repaired evaluator remains pending.
+
+Diagnostic receipt:
+`/Users/pierre/ess-matrixfree-qr-run04-evaluator-repair-20261003/diagnostic-run-receipt.json`,
+SHA-256 `f9c2056f407f30b8423f3babe774f08126a89f1f4f8d6abfcaca2d723ddfd9c3`.
+
+### A11 REW run05: three completed cases, high-shelf mismatch
+
+REW beta132 ran in a private no-audio process. Its typed FilterSetting API
+preserved all 20 unused native None slots in each completed two-filter HPQ
+case. HPQ at 44.1, 48 and 96 kHz passed the fixed impulse, transfer/group-delay
+and synthetic PCM gates. The next case, high shelf at 44.1 kHz, failed the
+unchanged impulse oracle (maximum absolute error 0.126594126; RMS 0.000840307816).
+The run stopped at that mismatch; the overall witness has not passed.
+
+Owned shutdown returned HTTP 202 and process exit zero. No owned process group
+or REW listener remained; user paths were unchanged. The API port stayed
+unbindable through the five-second recovery observation despite no observed
+listener, so the original cleanup verdict remains false. No socket-state cause
+is inferred. The run did not time out. Saved high-shelf responses are being
+examined without another application run or tolerance adjustment.
+
+This is a typed REW filter-engine witness, with no APO text-import, installed
+consumer, hardware or complete routing/protection claim.
+Owner consistency review verifies 28 saved response hashes:
+`/Users/pierre/rew-filter-run05-independent-review.json`, SHA-256
+`3490a67defedf8f3a46e4558801e866379cb278557693f580f57451541f2cac4`.
+The run report SHA-256 is
+`d9432b79bfb412d33bdad2e0b5dd1e8c11e4ada74fd90309baadcabda92d4235`.

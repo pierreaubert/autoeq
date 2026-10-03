@@ -60,6 +60,28 @@ pub(crate) fn rebuild_routed_pruning_test_candidate(
 }
 
 #[cfg(test)]
+pub(crate) fn publish_structural_baseline_for_test(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    sample_rate: f64,
+    directory: &Path,
+) -> Result<()> {
+    let captures = seat_replay::capture_training(config)?;
+    let store = autoeq_artifacts::MemoryArtifactStore::new();
+    finalization::publish_baseline(
+        result,
+        &captures,
+        &HashMap::new(),
+        config,
+        sample_rate,
+        directory,
+        &store,
+        "test_structural_baseline",
+        Vec::new(),
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn apply_routed_pruning_for_test(
     result: &mut RoomOptimizationResult,
     captures: &[seat_replay::Capture],

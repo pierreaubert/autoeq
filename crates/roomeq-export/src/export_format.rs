@@ -156,7 +156,7 @@ pub enum ExportFormat {
     #[value(name = "roon")]
     #[serde(rename = "roon")]
     RoonDsp,
-    /// Room EQ Wizard Generic EQ filter settings text
+    /// REW Generic EQ reference text for manual entry; REW cannot reload this text.
     #[value(name = "rew")]
     #[serde(rename = "rew")]
     Rew,
@@ -200,7 +200,10 @@ pub struct ExportCapability {
     pub format: ExportFormat,
     /// Whether the backend renderer accepted the graph at the checked rate.
     pub supported: bool,
-    /// Whether this query has enough information to proceed without resource resolution.
+    /// Whether rendering can proceed without resource resolution.
+    ///
+    /// This does not verify import or playback in an external application.
+    /// In particular, REW Generic EQ text is a reference for manual entry.
     pub ready_to_export: bool,
     /// Sample rate used for the renderer dry run.
     pub sample_rate_hz: f64,
@@ -239,6 +242,7 @@ fn capability_default_sample_rate(graph: &DspGraph) -> f64 {
 /// the graph has no sample-rate evidence. It runs the actual
 /// path-free renderer for each backend. Convolution resources are listed as
 /// unverified because this query has no resource directory or byte inputs.
+/// Renderer acceptance does not establish external application import or playback.
 pub fn query_export_capabilities(graph: &DspGraph) -> Vec<ExportCapability> {
     query_export_capabilities_at_sample_rate(graph, capability_default_sample_rate(graph))
 }

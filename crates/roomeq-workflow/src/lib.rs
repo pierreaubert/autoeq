@@ -75,7 +75,10 @@ pub use output_bundle::{
     run_log_path_for, save_output_bundle, save_output_bundle_with_resources,
     save_output_bundle_with_resources_and_prepare,
 };
-pub use pipeline::{RoomPipeline, RoomPipelineRequest, WorkflowContext};
+pub use pipeline::{
+    FinalizationDiagnosticSink, FinalizationDiagnosticTrial, RoomPipeline, RoomPipelineRequest,
+    WorkflowContext,
+};
 pub use room_optimization::{
     CallbackAction, ChannelOptimizationResult, RoomOptimizationCallback, RoomOptimizationProgress,
     RoomOptimizationResult, SpeakerOptimizationCallback, SpeakerOptimizationResult, optimize_room,

@@ -4670,6 +4670,7 @@ dependencies = [
  "autoeq-artifacts",
  "autoeq-core",
  "autoeq-measurements",
+ "autoeq-optim",
  "chrono",
  "criterion",
  "hound",

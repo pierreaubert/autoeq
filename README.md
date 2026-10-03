@@ -114,7 +114,7 @@ roomeq-engine`; no workspace crate depends on the root facade.
 |---------|------------|-------------------|
 | **Metaheuristics** | DE, PSO, RGA, TLBO, Firefly | Penalty-based |
 | **AutoEQ Custom** | Adaptive Differential Evolution | Nonlinear constraints |
-| **Pure-Rust** | COBYLA, ISRES, CMA-ES | Nonlinear/bound constraints |
+| **Pure-Rust** | COBRA, COBYLA, ISRES, CMA-ES | Nonlinear/bound constraints |
 
 ### Loss Functions
 

@@ -870,7 +870,7 @@ fn test_extend_curve_to_full_range_ignores_noisy_last_bin() {
     };
     let extended = extend_curve_to_full_range(&curve);
     let last = *extended.freq.last().unwrap();
-    assert!(last >= 19900.0 && last <= 20000.0);
+    assert!((19900.0..=20000.0).contains(&last));
     let max = extended
         .spl
         .iter()

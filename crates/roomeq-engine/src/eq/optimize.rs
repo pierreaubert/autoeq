@@ -3056,13 +3056,15 @@ mod multi_eq_tests {
             phase: None,
             ..Default::default()
         };
-        let mut config = OptimizerConfig::default();
-        config.min_freq = 20.0;
-        config.max_freq = 2_000.0;
-        config.decomposed_correction = Some(roomeq_model::DecomposedCorrectionSerdeConfig {
-            enabled: true,
+        let config = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 2_000.0,
+            decomposed_correction: Some(roomeq_model::DecomposedCorrectionSerdeConfig {
+                enabled: true,
+                ..Default::default()
+            }),
             ..Default::default()
-        });
+        };
 
         let (objective, _, _) = prepare_multi_measurement_objective(
             &[curve],

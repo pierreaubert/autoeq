@@ -12,6 +12,10 @@ use tokio::task::JoinHandle;
 /// # Errors
 ///
 /// Returns signal-registration, command, or task errors.
+///
+/// # Panics
+///
+/// Panics if called from an existing Tokio runtime.
 #[tokio::main]
 pub async fn run() -> anyhow::Result<()> {
     let shutdown = Arc::new(AtomicBool::new(false));

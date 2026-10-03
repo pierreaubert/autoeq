@@ -1,0 +1,142 @@
+# Private Gitea-only controlled optimizer benchmark workflow.
+# Benchmark reports and per-cell evidence stay in the private Gitea artifact store.
+# This workflow intentionally has no GitHub Actions counterpart or public upload.
+# Requires an `ubuntu-latest` Gitea Actions runner, `actions/*` fetched from
+# github.com, and a private artifact backend compatible with upload-artifact@v4.
+# The host's version alone has not been treated as proof of artifact compatibility.
+# Runtime prerequisite: Cargo must resolve dependencies through the committed
+# workspace configuration and lockfile; this workflow supplies no Cargo overrides.
+name: AutoEQ optimizer benchmark
+
+on:
+  schedule:
+    - cron: "13 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autoeq-optimizer-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  optimizer-benchmark:
+    name: Controlled optimizer matrix (48 kHz)
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      EVIDENCE_ROOT: autoeq-optimizer-evidence/${{ github.run_id }}-${{ github.run_attempt }}
+      MATRIX_RUN: autoeq-optimizer-evidence/${{ github.run_id }}-${{ github.run_attempt }}/run
+      ANALYSIS_OUTPUT: autoeq-optimizer-evidence/${{ github.run_id }}-${{ github.run_attempt }}/analysis
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 10
+
+      - name: Create evidence root and record checkout inputs
+        timeout-minutes: 5
+        run: |
+          mkdir -p "$EVIDENCE_ROOT"
+          {
+            echo "schema=autoeq.optimizer_benchmark_ci_provenance/v1"
+            echo "commit=$(git rev-parse HEAD)"
+            echo "run_id=${{ github.run_id }}"
+            echo "run_attempt=${{ github.run_attempt }}"
+            echo "worktree_status_begin"
+            git status --short --untracked-files=no
+            echo "worktree_status_end"
+            echo "job_timeout_minutes=330"
+            echo "checkout_timeout_minutes=10"
+            echo "setup_rust_timeout_minutes=20"
+            echo "native_tools_timeout_minutes=15"
+            echo "cargo_cache_timeout_minutes=10"
+            echo "metadata_timeout_minutes=10"
+            echo "build_step_timeout_minutes=60"
+            echo "matrix_runner_timeout_minutes=150"
+            echo "matrix_runner_drain_step_limit_minutes=160"
+            echo "analysis_step_timeout_minutes=15"
+            echo "upload_step_timeout_minutes=15"
+            echo "matrix_sample_rate_hz=48000"
+            echo "matrix_spec_count=841"
+            echo "matrix_note=Job timeout is an upper bound, not a guarantee every cell will run."
+            echo "workflow_specific_cargo_overrides=none"
+            sha256sum Cargo.toml
+            sha256sum crates/autoeq-qa/Cargo.toml
+            sha256sum Cargo.lock
+            sha256sum .cargo/config.toml
+            sha256sum crates/autoeq-qa/optimizer-benchmark/manifest.json
+            sha256sum crates/autoeq-qa/src/optimizer_benchmark.rs
+            sha256sum crates/autoeq-qa/src/optimizer_benchmark/controlled_cell.rs
+            sha256sum scripts/run_optimizer_benchmark_matrix.py
+            sha256sum scripts/analyze_optimizer_benchmark_matrix.py
+          } | tee "$EVIDENCE_ROOT/checkout-provenance.txt"
+
+      - uses: dtolnay/rust-toolchain@stable
+        timeout-minutes: 20
+
+      - name: Install configured Linux linker tools
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          if [ "$(id -u)" -eq 0 ]; then
+            apt-get update && apt-get install --yes build-essential clang mold
+          else
+            sudo apt-get update && sudo apt-get install --yes build-essential clang mold
+          fi 2>&1 | tee "$EVIDENCE_ROOT/native-tools.log"
+
+      - uses: Swatinem/rust-cache@v2
+        timeout-minutes: 10
+
+      - name: Record build toolchain and resolved workspace metadata
+        timeout-minutes: 10
+        run: |
+          {
+            rustc --version --verbose
+            cargo --version
+            python3 --version
+          } | tee "$EVIDENCE_ROOT/toolchain.txt"
+          if timeout --signal=TERM --kill-after=30s 8m cargo metadata --locked --format-version 1 > "$EVIDENCE_ROOT/cargo-metadata.json" 2> "$EVIDENCE_ROOT/cargo-metadata.stderr"; then
+            echo "cargo_metadata_exit_code=0" >> "$EVIDENCE_ROOT/toolchain.txt"
+          else
+            status=$?
+            echo "cargo_metadata_exit_code=$status" >> "$EVIDENCE_ROOT/toolchain.txt"
+          fi
+
+      - name: Build benchmark executable
+        timeout-minutes: 60
+        run: |
+          set -o pipefail
+          rm -f target/release/optimizer-benchmark
+          timeout --signal=TERM --kill-after=30s 55m cargo build --locked --release -p autoeq-qa --bin optimizer-benchmark 2>&1 | tee "$EVIDENCE_ROOT/build.log"
+          test -x target/release/optimizer-benchmark
+          tar -C target/release -cf "$EVIDENCE_ROOT/optimizer-benchmark.tar" optimizer-benchmark
+          sha256sum target/release/optimizer-benchmark | tee "$EVIDENCE_ROOT/optimizer-benchmark.sha256"
+          sha256sum "$EVIDENCE_ROOT/optimizer-benchmark.tar" | tee "$EVIDENCE_ROOT/optimizer-benchmark.tar.sha256"
+
+      - name: Run all declared matrix cells
+        timeout-minutes: 160
+        run: |
+          set -o pipefail
+          timeout --signal=INT --kill-after=60s 150m python3 scripts/run_optimizer_benchmark_matrix.py --binary target/release/optimizer-benchmark --output "$MATRIX_RUN" 2>&1 | tee "$EVIDENCE_ROOT/runner.log"
+
+      - name: Strictly analyze matrix evidence
+        if: always()
+        timeout-minutes: 15
+        run: |
+          set -o pipefail
+          mkdir -p "$EVIDENCE_ROOT"
+          if [ ! -d "$MATRIX_RUN" ]; then
+            echo "Matrix run directory was not created; inspect build and runner logs." | tee "$EVIDENCE_ROOT/analysis-not-run.log"
+            exit 1
+          fi
+          timeout --signal=TERM --kill-after=30s 10m python3 scripts/analyze_optimizer_benchmark_matrix.py --run "$MATRIX_RUN" --output "$ANALYSIS_OUTPUT" --require-complete 2>&1 | tee "$EVIDENCE_ROOT/analysis.log"
+
+      - name: Upload optimizer benchmark evidence
+        if: always()
+        timeout-minutes: 15
+        uses: actions/upload-artifact@v4
+        with:
+          name: autoeq-optimizer-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.EVIDENCE_ROOT }}
+          retention-days: 90
+          if-no-files-found: warn

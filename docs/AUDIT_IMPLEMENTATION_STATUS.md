@@ -3069,3 +3069,35 @@ Raw logs use the `autoeq-a00-linux-arm-*` prefix under the task evidence
 root. `/Users/pierre/a00-cross-platform-cli-verification.json` binds the
 source/image/toolchain, raw logs and four binary hashes. Registry packaging
 and the remaining platform requirements are still open.
+
+### A00 dependency partition repairs (2026-10-03)
+
+Local main `91946527` integrates verified source `3be7efe`. The CLI now
+publishes profiled APO preset/sidecar pairs through the workflow-owned
+transaction; parsing remains in the CLI. Publication preserves the previous
+lexical same-parent requirement, canonical-parent validation, same-file alias
+refusal, bounded rollback snapshots and protection of concurrently replaced
+files. Exact resume uses the shared private atomic-file helper with its prior
+bounded serialization and Unix durability sequence. The workflow stopped-run
+regression consumes serialized optimizer evidence without depending on the
+optimizer crate.
+
+Both previously rejected dependency edges are removed. The final partition
+check passes: 22 packages, 90 internal edges, zero cycles and zero temporary
+exceptions. Root budgets remain unchanged and pass at 581 source LOC,
+184 binary LOC and two unit tests. The earlier failing partition results above
+are historical evidence rather than the disposition of this integrated tree.
+
+Locked offline tests pass for all 84 CLI and 53 AutoEQ workflow library tests,
+plus the RoomEQ stopped-candidate regression. Strict scoped library Clippy and
+locked offline metadata pass. The edited product file passes rustfmt; the
+whole-workspace formatting diagnostic still reports unrelated differences.
+The main integration adds only the already reviewed Linux evidence document
+to the tested source tree and preserves all three user-modified CLI files
+byte-for-byte.
+
+Raw commands, exits, source/lock hashes and log hashes are retained under
+`autoeq-partition-repair-gates-20261003` in the task evidence root. The local
+integration receipt is `/Users/pierre/a00-partition-repairs-main-integration.json`.
+These repairs do not complete registry, platform-runtime, UI or hardware
+acceptance, and the private audit has not been pushed publicly.

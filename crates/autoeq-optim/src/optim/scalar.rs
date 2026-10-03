@@ -120,14 +120,14 @@ where
     });
 
     let f = |x: &Array1<f64>| objective(x.as_slice().unwrap());
-    let x0 = clamp_initial(initial, bounds);
+    let x0 = || clamp_initial(initial, bounds);
 
     let result = match canonical.as_str() {
-        "autoeq:cmaes" => optimize_cmaes(&canonical, bounds, x0, config, &f, callback),
-        "autoeq:de" => optimize_de(&canonical, bounds, x0, config, &f, callback),
+        "autoeq:cmaes" => optimize_cmaes(&canonical, bounds, x0(), config, &f, callback),
+        "autoeq:de" => optimize_de(&canonical, bounds, x0(), config, &f, callback),
         "autoeq:cobra" => optimize_cobra(&canonical, bounds, config, &f, callback),
-        "autoeq:cobyla" => optimize_cobyla(&canonical, bounds, x0, config, &f),
-        "autoeq:isres" => optimize_isres(&canonical, bounds, x0, config, &f),
+        "autoeq:cobyla" => optimize_cobyla(&canonical, bounds, x0(), config, &f),
+        "autoeq:isres" => optimize_isres(&canonical, bounds, x0(), config, &f),
         other => Err(format!(
             "Algorithm '{}' is registered for PEQ filter optimization but is not supported for bounded scalar RoomEQ objectives",
             other
@@ -499,6 +499,26 @@ mod tests {
                 first.fun, repeated.fun,
                 "seeded L-SHADE loss reproducibility"
             );
+        }
+    }
+
+    #[test]
+    fn cobra_rejects_nonfinite_bounds_before_scoring_or_clamping() {
+        for bounds in [
+            [(f64::NAN, 1.0)],
+            [(-1.0, f64::INFINITY)],
+            [(f64::NEG_INFINITY, 1.0)],
+        ] {
+            let result = optimize_bounded_scalar(
+                &bounds,
+                &[0.0],
+                &ScalarOptimConfig {
+                    algorithm: "cobra".into(),
+                    ..Default::default()
+                },
+                |_| panic!("nonfinite COBRA bounds must be refused before scoring"),
+            );
+            assert!(result.unwrap_err().contains("finite bounds"));
         }
     }
 

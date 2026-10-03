@@ -127,7 +127,7 @@ fn spatial_fir_native_stop_does_not_return_coefficients() {
         EqResources::default(),
     );
     for phase in ["linear", "minimum"] {
-        for algorithm in ["autoeq:de", "autoeq:cmaes"] {
+        for algorithm in ["autoeq:de", "autoeq:cmaes", "cobra"] {
             let mut room_config = config();
             room_config.optimizer.algorithm = algorithm.into();
             room_config.optimizer.strategy = "rand1bin".into();

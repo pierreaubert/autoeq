@@ -1,5 +1,8 @@
 # Unreleased
 
+- Add `autoeq:cobra` / `cobra` for RoomEQ constrained surrogate optimization,
+  with seeded search, native inequalities, evaluation accounting and callbacks.
+
 - Add explicit speaker/headphone source, target, rig compatibility and per-machine
   device profiles, with verified Equalizer APO serialization and preset provenance.
 - Publish native RoomEQ bundles through recoverable staging, validate immutable

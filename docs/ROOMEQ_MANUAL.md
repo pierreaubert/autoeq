@@ -1786,11 +1786,13 @@ its geometric half of the correction band. The stage requires
 
 Hybrid spatial FIR searches retain the caller's progress/stop callback after
 the IIR stage. DE and CMA-ES check it at native generation boundaries as well
-as scored FIR basis boundaries. COBYLA and ISRES currently check only at stage
+as scored FIR basis boundaries. COBRA checks after surrogate infill evaluations.
+COBYLA and ISRES currently check only at stage
 boundaries because the pinned scalar backends lack native stop hooks; their
 search can finish before a pending Stop is observed. A result is discarded
 once Stop is observed. Completed FIR optimizer evidence records
-`callback_cancellation=native_generation_boundaries` or
+`callback_cancellation=native_generation_boundaries`,
+`callback_cancellation=native_infill_boundaries`, or
 `callback_cancellation=stage_boundaries_only` when a callback was supplied.
 These checks do not interrupt FIR template construction, an initial population,
 or an in-flight objective evaluation, and do not promise a maximum stop latency.
@@ -1799,7 +1801,16 @@ or an in-flight objective evaluation, and do not promise a maximum stop latency.
 - `autoeq:de`: Differential Evolution
 - `autoeq:cobyla`: COBYLA (Constrained Optimization BY Linear Approximations)
 - `autoeq:isres`: Improved Stochastic Ranking Evolution Strategy
+- `autoeq:cobra` (or `cobra`): COBRA surrogate optimization with native inequalities
 - Other AutoEQ and metaheuristics algorithms supported by autoeq
+
+Set `optimizer.algorithm` to `"autoeq:cobra"` to use the math-optimisation
+COBRA solver. `optimizer.max_iter` supplies its objective-evaluation budget and
+`optimizer.seed` makes its initial design and exploration reproducible. COBRA
+starts from a Halton design, so saved-candidate warm starts are unsupported.
+Callbacks run after surrogate infill evaluations, following the initial design.
+RoomEQ owns optional local refinement; COBRA's internal true-function polish
+is disabled to preserve evaluation accounting and callback stop behavior.
 
 ### Loss Types
 
@@ -2594,7 +2605,7 @@ optimization, not an unrestricted FIR optimum. The displayed channel target
 remains a representative target, not a replacement for the per-seat objective
 bank. Optimizer evidence identifies this search and its selected candidate.
 The bounded scalar backends currently supported by this stage are DE, CMA-ES,
-COBYLA and ISRES; another requested backend fails explicitly rather than being
+COBYLA, COBRA and ISRES; another requested backend fails explicitly rather than being
 silently substituted. Multi-measurement minimum-phase Hybrid uses an aligned
 per-objective dB-correction basis instead: each trial is realized through the
 minimum-phase generator before its actual finite-tap response is scored.

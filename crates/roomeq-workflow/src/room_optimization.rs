@@ -161,6 +161,10 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
     context: &crate::WorkflowContext<'_>,
     observer: Option<Box<dyn PipelineObserver>>,
     frequency_samples: usize,
+    finalization_diagnostic: Option<(
+        crate::pipeline::FinalizationDiagnosticTrial,
+        &dyn crate::pipeline::FinalizationDiagnosticSink,
+    )>,
 ) -> Result<RoomOptimizationResult> {
     let snapshot = input_snapshot::freeze(request.config)?;
     let request = roomeq_engine::EngineRequest {
@@ -263,15 +267,28 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         roomeq_model::auto_tune::resolved_schroeder_hz(&request.config.optimizer),
         request.config.optimizer.processing_mode.clone(),
     )?;
-    finalization::select(
-        &mut result,
-        &seat_captures,
-        context.validation_measurements,
-        request.config,
-        request.sample_rate,
-        context.output_dir.unwrap_or_else(|| Path::new(".")),
-        context.artifact_store,
-    )?;
+    if let Some(diagnostic) = finalization_diagnostic {
+        finalization::select_with_diagnostic_sink(
+            &mut result,
+            &seat_captures,
+            context.validation_measurements,
+            request.config,
+            request.sample_rate,
+            context.output_dir.unwrap_or_else(|| Path::new(".")),
+            context.artifact_store,
+            Some(diagnostic),
+        )?;
+    } else {
+        finalization::select(
+            &mut result,
+            &seat_captures,
+            context.validation_measurements,
+            request.config,
+            request.sample_rate,
+            context.output_dir.unwrap_or_else(|| Path::new(".")),
+            context.artifact_store,
+        )?;
+    }
     if routed_pruning_requested {
         routed_pruning::apply(
             &mut result,

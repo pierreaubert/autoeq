@@ -2210,3 +2210,37 @@ Review also identified two harness requirements before running the production
 matrix: reject duplicate case/seed/spec identities and retain the planned cell
 inventory; parse and hash the same retained source byte buffers. The worker
 implementation is in progress. No full matrix result is claimed.
+
+### A09: retained output-loss policy counterfactual (2026-10-03)
+
+Root independently inspected the four retained `210592a` Genelec graph byte
+identities listed in the earlier parity receipt. Under a hypothetical 3 dB
+Sub1 tagged static safety attenuation budget, observed losses are respectively
+0, 19.58527860758979, 19.58527860758979, and 19.58527860758979 dB. The three
+static-cut graphs exceed that hypothetical limit by 16.58527860758979 dB.
+The limiter graph passes only this static-loss check; its previously recorded
+electrical and bass-parity failures remain unchanged. Untagged baseline trims
+are excluded, and the virtual LFE input has no serialized pre-chain gain.
+
+Receipt: `/Users/pierre/a09-output-budget-retained-counterfactual.json`, SHA-256
+`73c72b1b53a99ff9a38a7ee78a5f64c6e5c3416dc5c9568a92902298f4396892`.
+This is bounded arithmetic over retained graphs, not production policy execution,
+a new optimization/PCM run, a changed fixture, or playback acceptance. The
+production helper still needs to reproduce these values after its tests compile.
+
+Root's in-progress policy review is retained separately in
+`/Users/pierre/a09-output-budget-draft-review.json`. It identified the need to
+enforce explicit output budgets on early no-evidence/CTC returns and at native
+compatibility playback boundaries, plus independent invalid-key test setup and
+serial/fan-out route coverage. Worker implementation remains unintegrated.
+
+### A07: independent matrix verifier prepared (2026-10-03)
+
+`/Users/pierre/a07_verify_controlled_cells.py` checks the emitted inventory hash,
+841 unique planned cells, Cartesian ordinary cells, per-stage quotas, admission
+conservation, refusal scoring, and complete finite comparison metrics. It has
+been syntax-checked and rejects five deliberate counter corruptions. It has not
+yet verified production cell receipts; the harness is still being compiled.
+Actual input buffers are now shared by the draft CSV parsers and source hashes.
+The full matrix, executable identity, watchdog outcomes, and final artifact
+completeness remain separate acceptance checks.

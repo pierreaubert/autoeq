@@ -374,6 +374,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             route_count: 3,
         }),
         input_trim_db: Default::default(),
+        post_dsp_main_alignment_band_hz: None,
         advisories: vec!["ok".to_string()],
     };
 

@@ -878,6 +878,7 @@ mod coverage_tests {
             }],
             matrix: None,
             input_trim_db: Default::default(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: Vec::new(),
         };
         let peak = estimated_bass_bus_peak_gain_db(Some(&graph), 0.0);

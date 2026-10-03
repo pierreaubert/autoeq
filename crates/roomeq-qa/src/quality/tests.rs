@@ -447,6 +447,7 @@ fn electrical_qa_expands_canonical_global_bass_routes_once() {
             route_count: 2,
         }),
         input_trim_db: HashMap::new(),
+        post_dsp_main_alignment_band_hz: None,
         advisories: Vec::new(),
     };
     result.metadata.bass_management = Some(roomeq_model::BassManagementReport {

@@ -286,6 +286,7 @@ mod tests {
             ],
             matrix: None,
             input_trim_db: Default::default(),
+            post_dsp_main_alignment_band_hz: None,
             advisories: vec![],
         };
 

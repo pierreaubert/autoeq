@@ -39,15 +39,17 @@ fn config_with_algorithm(algo: &str) -> RoomConfig {
 #[test]
 fn test_all_algorithm_prefixes_accepted() {
     // Bug #7: mh:firefly was flagged as unknown. All prefixed algorithms
-    // (mh:*, nlopt:*, autoeq:*) and bare names (cobyla, de) must be valid.
+    // (mh:*, nlopt:*, autoeq:*) and bare names (cobyla, de, cobra) must be valid.
     let valid_algos = [
         "mh:firefly",
         "mh:pso",
         "nlopt:cobyla",
         "nlopt:isres",
         "autoeq:de",
+        "autoeq:cobra",
         "cobyla",
         "de",
+        "cobra",
     ];
     for algo in &valid_algos {
         let config = config_with_algorithm(algo);

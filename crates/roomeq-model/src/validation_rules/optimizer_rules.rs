@@ -602,7 +602,7 @@ pub fn rule_max_iter(ctx: &mut ValidationContext<'_>) {
 
 pub fn rule_algorithm(ctx: &mut ValidationContext<'_>) {
     let valid_prefixes = ["nlopt:", "mh:", "autoeq:"];
-    let valid_bare = ["cobyla", "de"];
+    let valid_bare = ["cobyla", "de", "cobra"];
     let algo = ctx.opt.algorithm.as_str();
     let is_known = valid_prefixes.iter().any(|p| algo.starts_with(p)) || valid_bare.contains(&algo);
     if !is_known {

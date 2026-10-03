@@ -6,6 +6,9 @@ license = "GPL-3.0-or-later"
 publish = false
 description = "Spinorama visualization demos for AutoEQ and GPUI"
 
+[workspace]
+resolver = "3"
+
 [dependencies]
 autoeq = { path = "../.." }
 d3rs = { package = "gpui-d3rs", path = "../../../gpui-toolkit/crates/gpui-d3rs", features = ["gpui", "gpu-2d", "gpu-3d"] }
@@ -15,9 +18,9 @@ gpui-design = { path = "../../../gpui-toolkit/crates/gpui-design" }
 gpui-miniapp = { path = "../../../gpui-toolkit/crates/gpui-miniapp" }
 gpui-px = { path = "../../../gpui-toolkit/crates/gpui-px", features = ["gpui", "gpu-3d"] }
 gpui-ui-kit = { path = "../../../gpui-toolkit/crates/gpui-ui-kit", default-features = false }
-reqwest = { workspace = true }
-tokio = { workspace = true }
-urlencoding = { workspace = true }
+reqwest = { version = "0.13", features = ["json"] }
+tokio = { version = "1", features = ["rt-multi-thread", "fs", "macros", "io-util", "process", "signal"] }
+urlencoding = "2.1"
 
 [[bin]]
 name = "d3rs-spinorama"
@@ -26,3 +29,54 @@ path = "bin/d3rs-spinorama/main.rs"
 [[bin]]
 name = "px-spinorama"
 path = "bin/px-spinorama.rs"
+
+[profile.dev]
+opt-level = 0
+# Line tables only: gives file:line stack traces, but skips 10GB+ of variable/type DWARF info that chokes the linker.
+debug = "line-tables-only"
+
+# Keep debug symbols in separate .dwo files so the linker never touches them
+split-debuginfo = "unpacked"
+
+# Do NOT strip; backtraces will still work
+strip = "none"
+
+# -------------------------------------------------------------------
+# 2. DEPENDENCY OVERRIDES (The Secret Weapon)
+# Heavily optimize external dependencies (tokio, serde, etc.) in dev mode.
+# They take time to compile ONCE, but sccache caches them forever,
+# and your 50 binaries will run 10x faster during QA/tests.
+# -------------------------------------------------------------------
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+# `release` is the everyday optimised profile — used by CI, `just prod-*`,
+# benchmarks, and local release iteration. Thin LTO keeps cross-crate inlining
+# without the serial bottleneck of fat LTO, and 14 codegen units balance
+# parallelism with optimiser visibility.
+opt-level = 3
+lto = "thin"
+codegen-units = 14
+panic = "abort"           # Removes unwind tables, saving ~15% binary size and link work
+debug = false             # Omit debug symbols in release binaries
+strip = "debuginfo"       # Strip debug symbols, keep symbol table
+
+# `dist` is the "cut a release" profile. Inherits everything from `release`
+# and tightens for maximum runtime performance at the cost of much longer
+# compile time. Use via `cargo build --profile dist` — artifacts land in
+# `target/dist/` instead of `target/release/`.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+incremental = false
+
+# Vello's registry dependencies must resolve to the same pinned Zed fork as
+# gpui-toolkit. Patches in a sibling workspace are not inherited here.
+[patch.crates-io]
+wgpu = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+wgpu-core = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+wgpu-hal = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+wgpu-types = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+naga = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }

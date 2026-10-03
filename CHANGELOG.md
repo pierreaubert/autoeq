@@ -1,5 +1,8 @@
 # Unreleased
 
+- Keep local GPUI demos in a separate workspace so backend source installs
+  resolve without sibling GPUI checkouts; preserve the existing demo recipes.
+
 - Fix non-routed channel-level alignment reading a stale pre-headroom cache:
   response refresh now republishes the just-replayed channel curves as the
   deployed source curves, so the final alignment pass sees differential

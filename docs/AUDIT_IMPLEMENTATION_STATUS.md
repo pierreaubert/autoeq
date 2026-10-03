@@ -2587,3 +2587,26 @@ extrema, phase/timing agreement, PCM consumers, other filter families, or physic
 playback. The failed v2 receipt is retained: its 1682 identity errors came solely
 from comparing pretty JSON bytes with hashes defined over compact field-order
 JSON. V3 keeps raw-file hashes separate and validates the defined spec digest.
+
+
+### A09 strict cross-mode acceptance gate (2026-10-03)
+
+Commit **b700f7a** requires an accepted correction, no acceptance violations,
+and the requested processing family derived from the emitted plugin graph.
+Stale serialized outcome or family labels cannot authorize a mode. When any mode
+fails this gate or has non-finite metrics, CM-1 frequency, CM-2 timing and CM-3
+score convergence fail while their diagnostic values remain available.
+
+The retained Genelec results were not four accepted corrections: IIR was an
+identity fallback; FIR, Hybrid and MixedPhase were rejected structural baselines.
+Their finite metrics cannot establish correction convergence. The original
+canary failures remain unresolved; this change strengthens their interpretation.
+The family check establishes plugin-family presence, not per-channel DSP validity.
+
+Validation: five focused strict-cross-mode tests and all **40 quality tests**
+passed; library/test Clippy passed with warnings denied. Source and Cargo.lock
+hashes stayed unchanged across the gates. Evidence and exact commands are in
+`/Volumes/home_tmp/tmp/a09-cross-mode-acceptance-gates/`. Independent review found
+no bypass. Aggregate CM-1/2/3 gating was reviewed directly; the new unit tests cover
+acceptance, actual family, stale metadata and preservation of failure under the
+registry safe-revert policy.

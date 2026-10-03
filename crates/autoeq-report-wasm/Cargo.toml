@@ -16,7 +16,7 @@ workspace = true
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 # grid.rs uses d3rs::surface, which gpui-d3rs gates behind its "gpui"
 # feature. Declare it here instead of relying on feature unification
 # from elsewhere in the graph (nothing else enables it).

@@ -206,6 +206,13 @@ impl AutoeqBoBackend {
                         f64::INFINITY,
                     ));
                 }
+                if objective.terminal_stop_requested() {
+                    return Err((
+                        "AutoEQ BO EHVI stopped before Pareto front validation".into(),
+                        f64::INFINITY,
+                    ));
+                }
+                let validation_objective = objective.post_search_validation_view();
                 // Judge every eligible member through the shared envelopes
                 // before selection so an infeasible member can never win the
                 // compromise pick on a score its repaired form cannot keep.
@@ -227,12 +234,19 @@ impl AutoeqBoBackend {
                 let judged_front = match judge_pareto_members(
                     self.name,
                     &xs,
-                    objective.as_ref(),
+                    &validation_objective,
                     &owned.as_spec(),
                 ) {
                     Ok(judged) => judged,
                     Err(reason) => return Err((reason, f64::INFINITY)),
                 };
+                if !objective_vectors_are_finite(&judged_front.members) {
+                    return Err((
+                        "AutoEQ BO EHVI produced non-finite or inconsistent Pareto objectives"
+                            .into(),
+                        f64::INFINITY,
+                    ));
+                }
                 let judged: Vec<BayesParetoSolution> = judged_front
                     .members
                     .into_iter()
@@ -241,7 +255,7 @@ impl AutoeqBoBackend {
                         objectives: member.objectives,
                     })
                     .collect();
-                let Some(best) = choose_compromise(&judged, objective.as_ref()) else {
+                let Some(best) = choose_compromise(&judged, &validation_objective) else {
                     return Err((
                         "AutoEQ BO EHVI produced an empty judged front".into(),
                         f64::INFINITY,
@@ -250,7 +264,7 @@ impl AutoeqBoBackend {
                 if best.x.len() == x.len() {
                     x.copy_from_slice(best.x.as_slice().unwrap());
                 }
-                let mut fun = compute_fitness_penalties_ref(x, objective.as_ref());
+                let mut fun = compute_fitness_penalties_ref(x, &validation_objective);
                 let mut status = format!(
                     "AutoEQ BO-EHVI: {} feasible Pareto points, selected compromise scalar loss {:.6}",
                     judged.len(),
@@ -277,6 +291,18 @@ impl AutoeqBoBackend {
             Err(e) => Err((format!("BO-EHVI setup failed: {:?}", e), f64::INFINITY)),
         }
     }
+}
+
+fn objective_vectors_are_finite(front: &[super::constraint_envelope::JudgedParetoMember]) -> bool {
+    let Some(first) = front.first() else {
+        return false;
+    };
+    let objective_count = first.objectives.len();
+    objective_count > 0
+        && front.iter().all(|member| {
+            member.objectives.len() == objective_count
+                && member.objectives.iter().all(|value| value.is_finite())
+        })
 }
 
 fn bo_config(
@@ -412,13 +438,17 @@ fn choose_compromise<'a>(
     front: &'a [BayesParetoSolution],
     objective: &ObjectiveData,
 ) -> Option<&'a BayesParetoSolution> {
-    if front.is_empty() {
+    let first = front.first()?;
+    let objective_count = first.objectives.len();
+    if objective_count == 0
+        || front.iter().any(|solution| {
+            solution.objectives.len() != objective_count
+                || solution.objectives.iter().any(|value| !value.is_finite())
+        })
+    {
         return None;
     }
     let m = front[0].objectives.len();
-    if m == 0 {
-        return front.first();
-    }
     let weights = if let Some(ref mo) = objective.multi_objective {
         if mo.weights.len() == m {
             mo.weights.clone()
@@ -595,14 +625,13 @@ mod bo_branch_tests {
     }
 
     #[test]
-    fn choose_compromise_zero_objectives_returns_first() {
+    fn choose_compromise_zero_objectives_returns_none() {
         let obj = scalar_objective().0;
         let front = vec![BayesParetoSolution {
             x: Array1::from_elem(3, 0.0),
             objectives: vec![],
         }];
-        let best = super::super::bo::choose_compromise(&front, &obj).unwrap();
-        assert_eq!(best.x.len(), 3);
+        assert!(super::super::bo::choose_compromise(&front, &obj).is_none());
     }
 
     #[test]
@@ -649,5 +678,41 @@ mod bo_branch_tests {
         // normal span
         let d3 = compromise_distance(&sol.objectives, &[0.0], &[10.0], &[1.0]);
         assert!((d3 - 0.5).abs() < 1e-12);
+    }
+
+    #[test]
+    fn choose_compromise_refuses_nonfinite_or_mismatched_objective_vectors() {
+        let obj = scalar_objective().0;
+        let nonfinite = vec![
+            BayesParetoSolution {
+                x: Array1::from_elem(3, 0.0),
+                objectives: vec![f64::INFINITY, f64::INFINITY],
+            },
+            BayesParetoSolution {
+                x: Array1::from_elem(3, 1.0),
+                objectives: vec![f64::INFINITY, f64::INFINITY],
+            },
+        ];
+        // The invalid all-infinite front had equal zero distances before
+        // validation, allowing iteration order to decide the winner.
+        assert!(super::super::bo::choose_compromise(&nonfinite, &obj).is_none());
+
+        let nan = vec![BayesParetoSolution {
+            x: Array1::from_elem(3, 0.0),
+            objectives: vec![f64::NAN, 1.0],
+        }];
+        assert!(super::super::bo::choose_compromise(&nan, &obj).is_none());
+
+        let mismatched = vec![
+            BayesParetoSolution {
+                x: Array1::from_elem(3, 0.0),
+                objectives: vec![0.0, 1.0],
+            },
+            BayesParetoSolution {
+                x: Array1::from_elem(3, 1.0),
+                objectives: vec![1.0],
+            },
+        ];
+        assert!(super::super::bo::choose_compromise(&mismatched, &obj).is_none());
     }
 }

@@ -2344,3 +2344,44 @@ open, and the full matrix is still pending watchdog review.
 - Remaining: wire the stop predicate through AutoEQ's controlled BO path, reproduce
   the deadline behavior on the real workload, then run the full matrix. UI remains
   deferred and the overall audit remains active.
+
+
+### A07 controlled EHVI deadline reproduced (2026-10-03)
+
+- Math follow-up `e97e924` checks cancellation before result/design allocation,
+  exposes the solver-observed `stop_requested` flag, and verifies partial later
+  batches. Frozen final math gates: **259 passed, one ignored**, eight focused
+  stop cases, strict library/test Clippy. Evidence:
+  `/Volumes/home_tmp/tmp/math-a07-bo-stop-evidence-v2`.
+- AutoEQ integration is isolated on `fix/a07-bo-controlled-stop`, commit
+  `7ce2f18` (reviewed benchmark harness cherry-pick `3ad520e`). It passes the
+  terminal control predicate into EHVI, preserves a typed search-stop outcome
+  even before the first objective admission, and commits EHVI parameters only
+  after completed success. The transaction regression covers helper-level
+  validation-stop behavior; it is not an end-to-end validation-race simulation.
+  **399 optimizer library tests pass; strict library/test Clippy passes.**
+- Real six-cell smoke used binary
+  `b98637b06f76f1d8f7126924fa6d0ad1d614a866cdd9cc20fa22a003f52d24c0`,
+  unchanged across execution. EHVI on analytic, DT1990Pro, and measured 8361A
+  fixtures returned typed timeouts at engine elapsed 10007, 10005, and approximately
+  10000 ms, respectively, instead of requiring the 30000 ms external watchdog.
+  Their admitted search totals were 164, 170, and 185, all drained, with zero
+  validation calls and no retained candidate. Scalar BO also returned a typed
+  timeout; COBRA and NSGA2 completed. These are cancellation results, not claims
+  that BO converged within the allotted time.
+- Six returned results passed the independent accounting verifier. Child log and
+  result hashes matched their receipts. Raw evidence:
+  `/Volumes/home_tmp/tmp/autoeq-a07-bo-stop-evidence/real-runner-smoke`;
+  independent receipt `/Users/pierre/a07-bo-stop-smoke-independent-review.json`.
+  The earlier failed compiler attempt is retained in `optim-tests.log`.
+- Tests/build used a command-only math path override. The isolated AutoEQ lock
+  was restored byte-for-byte to SHA
+  `2082914dd2275ae69a8ffb377ae597603d53ab99a8873cb188b623b64a42555a`.
+  Public publication of math `e80880a` and `e97e924` was requested with review patch
+  `/Users/pierre/math-bo-stop-publication-review.patch` (SHA
+  `5f2fa5c6a4b306621b028a1e42ba12326d95c5632b581cd70991189e3c14ef45`).
+  It remains pending; no public pin or root integration is claimed yet.
+- Full matrix remains next after the harness preserves authoritative backend
+  failures when a deadline also latches. That classification fix is in progress;
+  it does not affect the six smoke classifications, whose stage records agree
+  with their reported outcomes. UI remains deferred.

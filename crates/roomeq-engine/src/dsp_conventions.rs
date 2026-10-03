@@ -425,8 +425,8 @@ mod tests {
     #[test]
     fn convolution_padding_linear_not_circular() {
         use rustfft::{FftPlanner, num_complex::Complex};
-        let x = vec![1.0, 2.0, 3.0, 4.0];
-        let h = vec![0.5, -0.25, 0.125];
+        let x = [1.0, 2.0, 3.0, 4.0];
+        let h = [0.5, -0.25, 0.125];
         let mut linear = vec![0.0; x.len() + h.len() - 1];
         for (i, a) in x.iter().enumerate() {
             for (j, b) in h.iter().enumerate() {

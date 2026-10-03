@@ -234,8 +234,9 @@ fn prepared_fir_rejects_unaligned_target_before_boost_capping() {
             ] {
                 let error =
                     generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
-                        .err()
-                        .expect("prepared target grid must be aligned before coefficient design");
+                        .expect_err(
+                            "prepared target grid must be aligned before coefficient design",
+                        );
                 assert!(
                     error.to_string().contains("measurement frequency grid"),
                     "{error}"

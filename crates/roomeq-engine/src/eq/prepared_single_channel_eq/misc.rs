@@ -1,5 +1,6 @@
 use super::super::consts::decide_schroeder_override;
 use super::super::misc::build_optim_params;
+use super::super::optimize::{OptimizerStopped, latch_observer_stop};
 use super::super::representative::measure_bass_rt60;
 use super::super::resources::{self, EqResources};
 use super::super::types::PreparedSingleChannelEq;
@@ -779,6 +780,7 @@ pub(in super::super) fn run_optimization_pass(
         autoeq_optim::optim::setup::initial_guess(&optim_params, &lower_bounds, &upper_bounds);
 
     // Global optimization
+    let (callback, observer_stopped) = latch_observer_stop(callback);
     let opt_result = if let Some(cb) = callback {
         backend.optimize_filters_with_callback(
             &mut x,
@@ -797,6 +799,10 @@ pub(in super::super) fn run_optimization_pass(
             &optim_params,
         )
     };
+
+    if observer_stopped.load(std::sync::atomic::Ordering::Acquire) {
+        return Err(Box::new(OptimizerStopped));
+    }
 
     let mut global_evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
         &optim_params.algo,

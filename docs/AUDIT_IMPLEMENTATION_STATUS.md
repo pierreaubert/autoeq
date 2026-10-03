@@ -1570,9 +1570,14 @@ status, with a deterministic early-exit regression. The original failed logs
 remain preserved; they do not establish a production exit hang. The fixture,
 optimizer budget and 30-second pause hang guard were unchanged.
 
-Root independently compared the full saved state, all eight prior-output
-sentinels, APO rows and retained command/artifact hashes. This witness uses a
-command-only local math pause override. Its test and production pause sources
+The frozen final gate passes all seven CLI integration/parameter tests and
+88 CLI library tests. Strict Clippy passes both scoped test targets. Root
+independently compared 19 matching before/after file identities, the resolved
+metadata's 671 package entries and nine selected source identities, the four
+raw gate logs, the full saved state, all eight prior-output sentinels, APO rows
+and retained command/artifact hashes. This is a scoped source/lock/metadata
+inventory; dependency package bytes were not freshly inventoried. This witness
+uses a command-only local math pause override. Its test and production pause sources
 remain isolated pending public dependency integration; it does not close the
 broader recovery or hardware matrix.
 Evidence: `/Volumes/home_tmp/tmp/autoeq-a08-cli-sigint-e2e-evidence-20261003/`;
@@ -1590,7 +1595,10 @@ paths match. Root independently verified the bundle/script hashes, both
 bounded stream logs, the capability-refusal log and 17 recorded user-path
 entries, including current hashes of 11 files. The first report omitted the
 final readiness exception; the retained application log supplies the specific
-build refusal.
+startup refusal. Bytecode inspection shows that this message handles a
+`NoClassDefFoundError` from API initialization. Missing runtime classes or
+classpath resolution remain possible causes; the message alone does not
+establish a licensing or compiled-capability limitation.
 
 This supplies no REW parsing or engine PCM acceptance. The proposed text-parser
 and mapped-settings engine witness remains open. No measurement, playback,

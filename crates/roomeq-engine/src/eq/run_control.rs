@@ -100,6 +100,24 @@ impl<'a> EqRunControl<'a> {
         objective.with_validation_tracking(self.control.clone())
     }
 
+    pub fn stage_count(&self) -> usize {
+        self.stages.borrow().len()
+    }
+
+    /// Attach the normalization used to prepare one already-recorded stage.
+    /// The indexed update keeps its dispatch and counter snapshots unchanged.
+    pub fn attach_stage_normalization(
+        &self,
+        index: usize,
+        input: Option<roomeq_model::InputNormalizationEvidence>,
+        multi_input: Option<roomeq_model::MultiInputNormalizationEvidence>,
+    ) {
+        if let Some(stage) = self.stages.borrow_mut().get_mut(index) {
+            stage.evidence.input_normalization = input;
+            stage.evidence.multi_input_normalization = multi_input;
+        }
+    }
+
     pub fn finish(
         self,
         result: Result<EqOptimizationResult, Box<dyn Error>>,

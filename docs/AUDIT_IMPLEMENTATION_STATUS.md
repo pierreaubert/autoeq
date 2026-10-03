@@ -2448,3 +2448,37 @@ with the command-only math override. Evidence is being written under
 profile/provenance, and execute the same 841-cell inventory. It has not started
 at the time of this note. This is a deliberate profile correction, not a restart
 because a process observation timed out.
+
+
+### A07 optimized matrix and A09 local integration (2026-10-03)
+
+The release build completed successfully with unchanged source hashes. Its exact
+command, resolved lockfile and build receipt are retained in
+`/Volumes/home_tmp/tmp/autoeq-a07-release-evidence`. The replacement 841-cell
+matrix is running under `/Volumes/home_tmp/tmp/autoeq-a07-full-matrix-release-v2`
+with copied executable SHA-256
+`12ecfb32e25849f6eeb2b0deb88d77323fc49cb38be545ab388762b532c00c1b`,
+AutoEQ `52ab84d` and command-only local math `e97e924`. Supervisor session 42467
+and outer PID 85375 belong to this run. A progress snapshot observed 62 returned
+cells and zero runner failures; completion and algorithm quality remain unclaimed.
+Concurrent integration tests share the host, so elapsed-time rankings are not
+controlled performance measurements. The interrupted development run stays separate.
+
+A09 AutoEQ commit `d51a8d0` is integrated as `757c274`. Optional per-output
+`max_output_safety_attenuation_db` limits tagged static safety cuts along canonical
+physical routes. CLI export requires a derived acceptable report and refuses a
+failed budget stage. Worker gates passed 335 model and 1027 workflow tests
+(seven ignored), two actual conversion-refusal subprocess tests, one schema test,
+and scoped Clippy. Combined audit-branch integration gates are now running.
+
+The native SOTF slice is committed locally as `607bcdccf216743026a2ed4396d588fa5fd8902e`
+on `fix/a09-output-attenuation-native-gate` in
+`/Volumes/home_worktrees/sotf-a08-native-provenance`. Frozen and marked published
+artifacts require acceptance before deployment; direct rack refusal occurs before
+graph mutation. Final refusal tests passed 8/8, marked loader and rack regressions
+passed, four legacy graph tests passed, and scoped Clippy passed. The earlier full
+library run passed 796 tests with two ignored, before narrow marker hardening.
+The worktree is clean and its original lockfile SHA remains
+`f9504495efae1f70c543dd19fdaa96f620b2f89e8adc51c67bc9bcb55200a053`.
+No public push was made. Original Genelec acoustic/electrical failures and successful
+CTC/XTC routing remain open; the budget guard does not establish their acceptance.

@@ -2657,3 +2657,29 @@ uncaught exceptions; this is a robustness check, not a claim that every mutation
 must be rejected. Its receipt is
 `/Volumes/home_tmp/tmp/a07-analyzer-malformed-fields-jgnr8un_/mutation-summary.json`.
 The retained benchmark inputs and completed-result calculations were not changed.
+
+
+### A00 public DSP sources replace the sibling prerequisite (2026-10-03)
+
+Public math main was verified at `bc3afa204820bb8783fd75e4b8592248cd7500b6`,
+including the detailed wavelet API. Commit **6d6ffc2** (tested in isolated
+**8d4c6eb**) pins math-dsp, math-iir-fir and math-rir to that exact public revision
+and removes the development sibling patches. math-optimisation remains at its
+existing `acdea21` pin. Cargo.lock changes only three source identities, with no
+package-version changes. User-owned LR4/LR8 edits in the local math checkout were
+left untouched; native SOTF dependency selection was not changed.
+
+The isolated public-source release benchmark build passed and emitted all 841
+specs with the unchanged inventory digest. Its executable SHA-256 is
+`a47c876ab8554e39b979a752d840dced5f054b7c103a7859efb796184b1d448e`.
+All **12 measured-IR tests** passed and both AutoEQ/RoomEQ CLI packages passed
+`cargo check`. These commands used `--offline --locked` after fetching the public
+revision. Manifest, lock and configuration hashes stayed unchanged across gates.
+Main integration matches those three tested files byte for byte; locked metadata
+resolves with **zero external path dependencies**.
+
+Commands, logs, resolved metadata and integration hashes are retained under
+`/Volumes/home_tmp/tmp/autoeq-a00-public-pin-evidence/`. This closes the sibling
+checkout prerequisite for source builds. It does not establish registry package
+installation, cross-platform execution or a new benchmark quality result. The
+unpublished NSGA/BO changes remain separate prerequisites for their integrations.

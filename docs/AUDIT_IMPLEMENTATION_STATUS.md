@@ -1342,3 +1342,73 @@ Evidence: `/private/tmp/autoeq-a00-ci-just-evidence-20261003-final/` and
 `/private/tmp/autoeq-gitea-325-evidence-20261003/`.
 The earlier exact-whitespace assertion failure is preserved separately as a
 review-helper diagnostic; the final check uses the existing parity policy.
+
+
+## Bundle recovery after actual process death
+
+Commit `53a60a3`, integrated as `155b8f9f`, adds a test-only subprocess barrier
+matrix around 13 actual publication operations: backup/staged-file syncs,
+journal publication and parent sync, old/new assets renames, root replacement,
+and final transaction/journal cleanup. Each child publishes its exact ready
+phase atomically, then is killed and reaped. A fresh frozen load and repeated
+recovery select the complete previous generation before root replacement and
+the complete candidate afterward. Assertions bind exact root bytes, manifest
+hashes, curves, convolution WAV bytes and relocation to the selected generation.
+Journal-owned transactions are cleaned. Pre-journal staging directories remain
+unowned and are preserved; this test does not establish storage power-loss or
+cross-filesystem durability.
+
+The focused matrix, two existing Python pending-journal refusal tests, strict
+test-inclusive Clippy, formatting and diff checks pass. Its initial full
+workflow suite reports one failure also reproduced on clean baseline
+`b300b0a6`: a safety fixture still treated the text "stopped by callback" as
+typed cancellation. The optimizer deliberately classifies legacy status text
+without structured cancellation as best effort. Test-only commit `76401d1`,
+integrated as `94c3efa1`, applies an actual `OptimizerRunControl` cancellation
+snapshot in that fixture and keeps the rejection assertions. It adds one
+workspace dev dependency and lockfile edge without changing package revisions.
+All 19 safety-gate tests and the legacy-status control pass.
+
+The integrated `155b8f9f` workflow suite passes 1,018 tests with seven existing
+ignored tests; strict library/test Clippy, scoped formatting and diff checks
+pass. Matched before/after inputs include source, lock, metadata, configuration
+and dependency contents. Root independently rehashed all 367 reachable package
+trees (24,096 entries), 3,774 tracked/unignored source entries and all six
+integrated raw command logs. The four changed files equal the reviewed
+isolated candidates. Cargo metadata covers the complete resolved graph and
+was not host-filtered.
+Evidence: `/Volumes/home_tmp/tmp/autoeq-a11-process-death-evidence-20261003/`,
+`/private/tmp/autoeq-a08-typed-stop-fixture-evidence-20261003/` and
+`/private/tmp/autoeq-a08-a11-integrated-evidence-20261003/`;
+root review: `/Users/pierre/a08-a11-integrated-independent-review.json`.
+Consumer coverage for every advertised format and physical deployment remain
+open.
+
+## Independent harmonic scorer corrections
+
+Standalone V6 synthetic evidence corrects two oracle defects found during
+review: steady-tone convolution now includes periodic input history without a
+zero-padded measurement tail, and fitted polynomial ratios are converted using
+their actual sampled input normalization scale. The T=2 sweep peak is
+`0.39999999995474878`; substituting nominal `0.4` had manufactured a signed-H2
+cancellation error. V3 through V5 failures remain preserved, and the expected
+zero-order leakage bound remains `1e-12` relative to H1.
+
+The confirmed V6 run exits zero: 20 polynomial/short-FIR controls pass the
+unchanged 0.01 dB amplitude and 0.01 percentage-point THD gates, four long
+responses refuse the residual gate, and six scorer, two alias and two truncated
+tail negatives refuse as declared. PCM least-squares projections are compared
+against separate signed harmonic formulas. Phase errors are recorded; this
+run's numerical acceptance thresholds cover amplitude and total THD. The
+fixed five-tap common-LTI model anchors a nonzero linear coefficient and
+explicitly refuses the zero-fundamental scope control.
+
+Root reviewed the scorer changes, checked all probe/preregistration/confirmed
+log hashes and verified the complete case inventory. Python 3.9.6, NumPy 1.26.2
+and SciPy 1.11.4 versions are recorded. The contextual math HEAD/status records
+are not production-source byte inventories; the probe imports no Rust code.
+This remains narrow synthetic evidence. Production ESS harmonic separation,
+independently justified room-response support and physical calibration are
+still open.
+Evidence: `/private/tmp/ess-v6-hammerstein-oracle-20261003/`;
+root review: `/Users/pierre/ess-v6-independent-review.json`.

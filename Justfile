@@ -32,11 +32,11 @@ prod-autoeq:
 # Speaker-data visualization demos are owned by AutoEQ.
 [group('build')]
 demo-d3rs-spinorama:
-	{{cargo}} build --release -p autoeq-gpui-examples --bin d3rs-spinorama
+	{{cargo}} build --manifest-path crates/autoeq-gpui-examples/Cargo.toml --release --bin d3rs-spinorama
 
 [group('build')]
 demo-px-spinorama:
-	{{cargo}} build --release -p autoeq-gpui-examples --bin px-spinorama
+	{{cargo}} build --manifest-path crates/autoeq-gpui-examples/Cargo.toml --release --bin px-spinorama
 
 [group('build')]
 roomeq:

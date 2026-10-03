@@ -49,6 +49,7 @@ impl OptimizerBudgetProfile {
 #[derive(Clone)]
 pub struct OptimizerRunControl {
     inner: Arc<RunControlInner>,
+    stage: Option<Arc<RunStageInner>>,
 }
 
 /// Separates solver search work from safety/result validation work.
@@ -64,6 +65,28 @@ struct RunControlInner {
     budget: NonZeroUsize,
     state: Mutex<RunState>,
     idle: Condvar,
+}
+
+struct RunStageInner {
+    budget: NonZeroUsize,
+    state: Mutex<RunStageState>,
+}
+
+#[derive(Default)]
+struct RunStageState {
+    evaluations_started: usize,
+    evaluations_completed: usize,
+    evaluations_failed: usize,
+    component_evaluations_started: usize,
+    component_evaluations_completed: usize,
+    evaluations_refused: usize,
+    evaluations_in_flight: usize,
+    validation_evaluations_started: usize,
+    validation_evaluations_completed: usize,
+    validation_evaluations_failed: usize,
+    validation_component_evaluations_started: usize,
+    validation_component_evaluations_completed: usize,
+    validation_evaluations_in_flight: usize,
 }
 
 #[derive(Default)]
@@ -124,6 +147,49 @@ pub struct OptimizerRunSnapshot {
     pub budget_exhausted: bool,
 }
 
+/// Point-in-time accounting for one stage sharing a run-wide control.
+///
+/// Clones of a staged control share this quota and its counters. Creating a
+/// second stage with [`OptimizerRunControl::with_stage_budget`] creates fresh
+/// stage counters while retaining the same root budget and stop flags.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OptimizerStageSnapshot {
+    /// Hard cap for candidate evaluations in this stage.
+    pub evaluation_budget: usize,
+    /// Candidate evaluations admitted by the root and stage gates.
+    pub evaluations_started: usize,
+    /// Candidate evaluations that returned from the objective function.
+    pub evaluations_completed: usize,
+    /// Candidate evaluations whose objective function unwound with a panic.
+    pub evaluations_failed: usize,
+    /// Per-measurement objective components admitted by the gates.
+    pub component_evaluations_started: usize,
+    /// Per-measurement objective components that returned.
+    pub component_evaluations_completed: usize,
+    /// Candidate evaluations refused by either the root or stage gate.
+    pub evaluations_refused: usize,
+    /// Candidate evaluations still scoring when the snapshot was taken.
+    pub evaluations_in_flight: usize,
+    /// Validation scores made by this stage, outside both search caps.
+    pub validation_evaluations_started: usize,
+    /// Validation scores that returned.
+    pub validation_evaluations_completed: usize,
+    /// Validation scores whose objective function unwound with a panic.
+    pub validation_evaluations_failed: usize,
+    /// Measurement components scored during this stage's validation work.
+    pub validation_component_evaluations_started: usize,
+    /// Validation measurement components that returned.
+    pub validation_component_evaluations_completed: usize,
+    /// Validation scores active when the snapshot was taken.
+    pub validation_evaluations_in_flight: usize,
+    /// Whether an explicit user cancellation was requested for the root run.
+    pub cancellation_requested: bool,
+    /// Whether the root run's deadline elapsed.
+    pub deadline_reached: bool,
+    /// Whether this stage's score cap has been fully admitted.
+    pub budget_exhausted: bool,
+}
+
 impl OptimizerRunControl {
     /// Create a run gate with a positive objective-evaluation limit.
     pub fn new(evaluation_budget: NonZeroUsize) -> Self {
@@ -133,6 +199,22 @@ impl OptimizerRunControl {
                 state: Mutex::new(RunState::default()),
                 idle: Condvar::new(),
             }),
+            stage: None,
+        }
+    }
+
+    /// Create a fresh stage quota that shares this run's global cap and stop flags.
+    ///
+    /// Clones of the returned control share the new stage quota. Calling this
+    /// method again creates another independent stage quota against the same
+    /// remaining root budget.
+    pub fn with_stage_budget(&self, stage_budget: NonZeroUsize) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            stage: Some(Arc::new(RunStageInner {
+                budget: stage_budget,
+                state: Mutex::new(RunStageState::default()),
+            })),
         }
     }
 
@@ -141,12 +223,68 @@ impl OptimizerRunControl {
         self.inner.budget.get()
     }
 
+    /// Return the score capacity remaining in both the root run and this stage.
+    pub fn remaining_evaluations(&self) -> usize {
+        let state = self.lock_state();
+        let root_remaining = self
+            .inner
+            .budget
+            .get()
+            .saturating_sub(state.evaluations_started);
+        self.stage.as_ref().map_or(root_remaining, |stage| {
+            let stage_state = stage
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            root_remaining.min(
+                stage
+                    .budget
+                    .get()
+                    .saturating_sub(stage_state.evaluations_started),
+            )
+        })
+    }
+
+    /// Return the maximum search-score cap to configure for the next dispatch.
+    ///
+    /// This is the remaining root cap, limited by the remaining stage quota
+    /// when this control represents a stage. A fresh, unstaged control returns
+    /// its original cap, preserving single-dispatch behavior.
+    pub fn effective_evaluation_limit(&self) -> usize {
+        self.remaining_evaluations()
+    }
+
+    /// Read this control's stage counters, if it was created as a stage view.
+    pub fn stage_snapshot(&self) -> Option<OptimizerStageSnapshot> {
+        let root_state = self.lock_state();
+        self.stage.as_ref().map(|stage| {
+            let stage_state = stage
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            stage_snapshot(
+                stage.budget.get(),
+                &stage_state,
+                root_state.cancellation_requested,
+                root_state.deadline_reached,
+            )
+        })
+    }
+
     /// Whether the gate is closed by a user stop, deadline, or budget exhaustion.
     pub fn stop_requested(&self) -> bool {
         let state = self.lock_state();
-        state.cancellation_requested
+        let root_stopped = state.cancellation_requested
             || state.deadline_reached
-            || state.evaluations_started >= self.inner.budget.get()
+            || state.evaluations_started >= self.inner.budget.get();
+        root_stopped
+            || self.stage.as_ref().is_some_and(|stage| {
+                let stage_state = stage
+                    .state
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                stage_state.evaluations_started >= stage.budget.get()
+            })
     }
 
     /// Record an explicit user cancellation and close the gate.
@@ -196,14 +334,29 @@ impl OptimizerRunControl {
         objective_components: usize,
     ) -> Option<ObjectiveEvaluationGuard> {
         let mut state = self.lock_state();
+        let mut stage_state = self.stage.as_ref().map(|stage| {
+            stage
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
         let objective_components = objective_components.max(1);
         match stage {
             EvaluationStage::Search => {
                 if state.cancellation_requested
                     || state.deadline_reached
                     || state.evaluations_started >= self.inner.budget.get()
+                    || self.stage.as_ref().is_some_and(|stage| {
+                        stage_state
+                            .as_ref()
+                            .is_some_and(|state| state.evaluations_started >= stage.budget.get())
+                    })
                 {
                     state.evaluations_refused = state.evaluations_refused.saturating_add(1);
+                    if let Some(stage_state) = stage_state.as_mut() {
+                        stage_state.evaluations_refused =
+                            stage_state.evaluations_refused.saturating_add(1);
+                    }
                     return None;
                 }
                 state.evaluations_started += 1;
@@ -211,6 +364,13 @@ impl OptimizerRunControl {
                     .component_evaluations_started
                     .saturating_add(objective_components);
                 state.evaluations_in_flight += 1;
+                if let Some(stage_state) = stage_state.as_mut() {
+                    stage_state.evaluations_started += 1;
+                    stage_state.component_evaluations_started = stage_state
+                        .component_evaluations_started
+                        .saturating_add(objective_components);
+                    stage_state.evaluations_in_flight += 1;
+                }
             }
             EvaluationStage::Validation => {
                 state.validation_evaluations_started += 1;
@@ -218,6 +378,13 @@ impl OptimizerRunControl {
                     .validation_component_evaluations_started
                     .saturating_add(objective_components);
                 state.validation_evaluations_in_flight += 1;
+                if let Some(stage_state) = stage_state.as_mut() {
+                    stage_state.validation_evaluations_started += 1;
+                    stage_state.validation_component_evaluations_started = stage_state
+                        .validation_component_evaluations_started
+                        .saturating_add(objective_components);
+                    stage_state.validation_evaluations_in_flight += 1;
+                }
             }
         }
         Some(ObjectiveEvaluationGuard {
@@ -240,6 +407,7 @@ impl std::fmt::Debug for OptimizerRunControl {
         formatter
             .debug_struct("OptimizerRunControl")
             .field("snapshot", &self.snapshot())
+            .field("stage_snapshot", &self.stage_snapshot())
             .finish()
     }
 }
@@ -253,6 +421,12 @@ pub(crate) struct ObjectiveEvaluationGuard {
 impl Drop for ObjectiveEvaluationGuard {
     fn drop(&mut self) {
         let mut state = self.control.lock_state();
+        let mut stage_state = self.control.stage.as_ref().map(|stage| {
+            stage
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+        });
         let panicking = std::thread::panicking();
         match self.stage {
             EvaluationStage::Search => {
@@ -265,6 +439,18 @@ impl Drop for ObjectiveEvaluationGuard {
                         .saturating_add(self.objective_components);
                 }
                 state.evaluations_in_flight = state.evaluations_in_flight.saturating_sub(1);
+                if let Some(stage_state) = stage_state.as_mut() {
+                    if panicking {
+                        stage_state.evaluations_failed += 1;
+                    } else {
+                        stage_state.evaluations_completed += 1;
+                        stage_state.component_evaluations_completed = stage_state
+                            .component_evaluations_completed
+                            .saturating_add(self.objective_components);
+                    }
+                    stage_state.evaluations_in_flight =
+                        stage_state.evaluations_in_flight.saturating_sub(1);
+                }
             }
             EvaluationStage::Validation => {
                 if panicking {
@@ -277,11 +463,52 @@ impl Drop for ObjectiveEvaluationGuard {
                 }
                 state.validation_evaluations_in_flight =
                     state.validation_evaluations_in_flight.saturating_sub(1);
+                if let Some(stage_state) = stage_state.as_mut() {
+                    if panicking {
+                        stage_state.validation_evaluations_failed += 1;
+                    } else {
+                        stage_state.validation_evaluations_completed += 1;
+                        stage_state.validation_component_evaluations_completed = stage_state
+                            .validation_component_evaluations_completed
+                            .saturating_add(self.objective_components);
+                    }
+                    stage_state.validation_evaluations_in_flight = stage_state
+                        .validation_evaluations_in_flight
+                        .saturating_sub(1);
+                }
             }
         }
         if state.evaluations_in_flight + state.validation_evaluations_in_flight == 0 {
             self.control.inner.idle.notify_all();
         }
+    }
+}
+
+fn stage_snapshot(
+    budget: usize,
+    state: &RunStageState,
+    cancellation_requested: bool,
+    deadline_reached: bool,
+) -> OptimizerStageSnapshot {
+    OptimizerStageSnapshot {
+        evaluation_budget: budget,
+        evaluations_started: state.evaluations_started,
+        evaluations_completed: state.evaluations_completed,
+        evaluations_failed: state.evaluations_failed,
+        component_evaluations_started: state.component_evaluations_started,
+        component_evaluations_completed: state.component_evaluations_completed,
+        evaluations_refused: state.evaluations_refused,
+        evaluations_in_flight: state.evaluations_in_flight,
+        validation_evaluations_started: state.validation_evaluations_started,
+        validation_evaluations_completed: state.validation_evaluations_completed,
+        validation_evaluations_failed: state.validation_evaluations_failed,
+        validation_component_evaluations_started: state.validation_component_evaluations_started,
+        validation_component_evaluations_completed: state
+            .validation_component_evaluations_completed,
+        validation_evaluations_in_flight: state.validation_evaluations_in_flight,
+        cancellation_requested,
+        deadline_reached,
+        budget_exhausted: state.evaluations_started >= budget,
     }
 }
 
@@ -443,5 +670,103 @@ mod tests {
         assert_eq!(snapshot.component_evaluations_started, 3);
         assert_eq!(snapshot.component_evaluations_completed, 0);
         assert_eq!(snapshot.evaluations_in_flight, 0);
+    }
+
+    #[test]
+    fn stage_quotas_share_root_budget_but_start_with_fresh_counters() {
+        let root = OptimizerRunControl::new(NonZeroUsize::new(7).unwrap());
+        let first = root.with_stage_budget(NonZeroUsize::new(4).unwrap());
+        for _ in 0..4 {
+            drop(first.begin_evaluation(EvaluationStage::Search, 2).unwrap());
+        }
+        assert!(first.begin_evaluation(EvaluationStage::Search, 2).is_none());
+        assert_eq!(first.effective_evaluation_limit(), 0);
+        assert_eq!(root.snapshot().evaluations_started, 4);
+        assert_eq!(root.snapshot().evaluation_budget, 7);
+        assert!(!root.snapshot().budget_exhausted);
+        assert_eq!(first.stage_snapshot().unwrap().evaluations_started, 4);
+        assert!(first.stage_snapshot().unwrap().budget_exhausted);
+
+        let second = root.with_stage_budget(NonZeroUsize::new(5).unwrap());
+        assert_eq!(second.effective_evaluation_limit(), 3);
+        for _ in 0..3 {
+            drop(second.begin_evaluation(EvaluationStage::Search, 1).unwrap());
+        }
+        assert!(
+            second
+                .begin_evaluation(EvaluationStage::Search, 1)
+                .is_none()
+        );
+        assert_eq!(second.stage_snapshot().unwrap().evaluations_started, 3);
+        assert_eq!(root.snapshot().evaluations_started, 7);
+        assert!(root.snapshot().budget_exhausted);
+    }
+
+    #[test]
+    fn concurrent_stage_clones_never_exceed_stage_or_root_caps() {
+        let root = OptimizerRunControl::new(NonZeroUsize::new(17).unwrap());
+        let first_stage = root.with_stage_budget(NonZeroUsize::new(13).unwrap());
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let control = first_stage.clone();
+            workers.push(thread::spawn(move || {
+                while let Some(guard) = control.begin_evaluation(EvaluationStage::Search, 1) {
+                    drop(guard);
+                }
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(
+            first_stage.stage_snapshot().unwrap().evaluations_started,
+            13
+        );
+        assert_eq!(root.snapshot().evaluations_started, 13);
+        assert_eq!(first_stage.effective_evaluation_limit(), 0);
+
+        let second_stage = root.with_stage_budget(NonZeroUsize::new(10).unwrap());
+        assert_eq!(second_stage.effective_evaluation_limit(), 4);
+        let mut workers = Vec::new();
+        for _ in 0..4 {
+            let control = second_stage.clone();
+            workers.push(thread::spawn(move || {
+                drop(control.begin_evaluation(EvaluationStage::Search, 1));
+            }));
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(
+            second_stage.stage_snapshot().unwrap().evaluations_started,
+            4
+        );
+        assert_eq!(root.snapshot().evaluations_started, 17);
+        assert!(root.snapshot().budget_exhausted);
+    }
+
+    #[test]
+    fn stage_validation_is_separate_and_does_not_consume_search_quota() {
+        let root = OptimizerRunControl::new(NonZeroUsize::new(3).unwrap());
+        let stage = root.with_stage_budget(NonZeroUsize::new(1).unwrap());
+        drop(stage.begin_evaluation(EvaluationStage::Search, 2).unwrap());
+        drop(
+            stage
+                .begin_evaluation(EvaluationStage::Validation, 4)
+                .unwrap(),
+        );
+
+        let stage_snapshot = stage.stage_snapshot().unwrap();
+        let root_snapshot = root.snapshot();
+        assert_eq!(stage_snapshot.evaluations_started, 1);
+        assert_eq!(stage_snapshot.validation_evaluations_started, 1);
+        assert_eq!(stage_snapshot.validation_component_evaluations_started, 4);
+        assert_eq!(root_snapshot.evaluations_started, 1);
+        assert_eq!(root_snapshot.validation_evaluations_started, 1);
+        assert_eq!(root_snapshot.evaluation_budget, 3);
+        assert_eq!(stage.effective_evaluation_limit(), 0);
+
+        let next_stage = root.with_stage_budget(NonZeroUsize::new(2).unwrap());
+        assert_eq!(next_stage.effective_evaluation_limit(), 2);
     }
 }

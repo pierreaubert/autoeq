@@ -21,7 +21,7 @@ cannot replace them.
 | A04 measurement/live analysis | Partial | Live calibration implemented and bounded synthetic ESS diagnostic passes; production estimator/dependency integration, broader validity and hardware evidence remain |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
-| A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently; reusable analysis gate, public BO dependency integration and justified presets remain |
+| A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently and reusable strict analysis gate committed; public BO dependency integration and justified presets remain |
 | A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
 | A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
@@ -2610,3 +2610,35 @@ hashes stayed unchanged across the gates. Evidence and exact commands are in
 no bypass. Aggregate CM-1/2/3 gating was reviewed directly; the new unit tests cover
 acceptance, actual family, stale metadata and preservation of failure under the
 registry safe-revert policy.
+
+
+### A07 reusable matrix analysis gate (2026-10-03)
+
+Commit **49bf9b9** adds the strict persisted-result analyzer and registers its
+contracts in both CI mirrors. It verifies inventory and receipt identities,
+complete selection, budget accounting, required stage profiles/counters, finite
+paired metrics and realized filter bounds. Invalid completed results are excluded
+from quality distributions; typed timeouts/refusals remain separate outcomes.
+Malformed evidence produces a failed report, and existing output directories are
+never overwritten. Source hash declarations are checked structurally here;
+the separate independent PEQ receipt above recomputed actual source hashes.
+
+All **52 numerical Python contracts** passed, including **10 analyzer tests**.
+Workflow parity tests, mirrored bodies and YAML parsing passed. Strict analysis
+of the existing release run returned zero with 841 verified cells: 746 completed
+and quality-eligible, 79 timed out, 9 observer-stopped, 4 callback-unsupported and
+3 budget-refused. No benchmark was rerun. The command was:
+
+```sh
+python3 scripts/analyze_optimizer_benchmark_matrix.py \
+  --run /Volumes/home_tmp/tmp/autoeq-a07-full-matrix-release-v2/run \
+  --output /Volumes/home_tmp/tmp/autoeq-a07-persisted-analysis-v4-20261003 \
+  --require-complete
+```
+
+The report JSON SHA-256 is
+`6a104e0885fd31699b73fb4a2997a9db7368b13f7f7748b7f5b1e6be3528e878`.
+Shared-host elapsed times remain descriptive. Deterministic backend seed labels
+are not independent trials, and 8361 holdouts are perturbations of measured base
+curves rather than independent measured captures. No product preset is justified
+by this gate alone.

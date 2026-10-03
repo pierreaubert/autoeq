@@ -2174,3 +2174,19 @@ Evidence receipt:
 SHA-256 `fa0f40e8ec9d58d02b90bd850444b519afd2fe882152d6a88f24d70ba92f0ee6`.
 Backend capability labels and export instructions still require review against
 this limitation. The typed API numerical witness remains separately valid.
+
+### A11: REW reference-text contract clarified (2026-10-03)
+
+The CLI value help, export API documentation, architecture guide, output format
+guide, and manual now describe `rew` as Generic EQ reference text for manual
+entry. The installed REW beta132 help and static loader evidence recorded above
+show that Generic EQ text cannot be reloaded; saved filter settings use binary
+`.req`, which RoomEQ does not generate. Capability readiness describes rendering
+and resource availability, not external import or playback. Filter type and
+shelf conventions require response verification when entered manually.
+
+This change preserves renderer bytes, format identifiers, DSP behavior, and
+capability serialization. Validation passed: targeted rustfmt checks on the
+three Rust files, `git diff --check`, and
+`cargo check --locked --offline -p roomeq-export --lib` (11.66 seconds, existing
+audit target). No new consumer execution or import acceptance is claimed.

@@ -18,6 +18,7 @@ pub enum ExternalExportFormat {
     PipeWire,
     #[value(name = "roon")]
     RoonDsp,
+    /// REW Generic EQ reference text for manual entry; REW cannot reload this text.
     #[value(name = "rew")]
     Rew,
     #[value(name = "coefficients", alias = "biquad-coefficients")]

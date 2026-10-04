@@ -3272,3 +3272,81 @@ focused test passes 1/1 and strict workflow Clippy passes. The final receipt is
 This synthetic regression verifies the serialized artifact path, not physical
 playback or listening behavior. Full A09 mode/rate/time-domain and measured
 acceptance remain open.
+
+
+### A04 structured trial failure; A11 persistent readiness; A12 matched profile (2026-10-04)
+
+The input-only diagonal structured map completes the original four-case fixture
+trial in 120.36 seconds, with exact fit-child peak RSS 7,389,184 bytes. All four
+fits reach the unchanged 10,000-iteration limit. Training and held-out residual
+maxima are 8.7868e-7 and 9.0208e-7, failing the fixed 1e-8 gate. The frozen tone
+scorer also refuses H5 phase and expected-zero leakage comparisons. Aggregate
+tone maxima exclude refused comparisons and cannot establish that all tone gates
+passed. Source/fixture inventories match; all outputs and failures remain retained.
+Qualification remains unavailable; the next candidate uses cross-order frequency
+blocks with the exact objective and original solver/scoring settings.
+
+Root trial review: `/Users/pierre/a04-structured-original-trial-root-result-review-20261004.json`,
+SHA-256 `5e82e216095bf4418c9e37007ae1fe946c43cd2c507aa840d77f076c7dfd83eb`.
+
+A separate no-audio REW diagnostic passes the frozen health contract after five
+readiness attempts, then 125 empty measurement GETs and owner-verified Shutdown
+202 on the same HTTP/1.1 socket. The owned process exits zero without forced
+signals or descendants. The original five-second raw-bind gate passes in 0.02068
+seconds. All 138 responses share the socket; retained health/transient bodies and
+logs are independently rehashed. Runtime, source and user-path identities match.
+This diagnostic does not establish the cause of the original run06 failure or
+repeat its numerical filter matrix. A full numerical witness using this transport
+is being prepared; original failures remain preserved.
+
+Root lifecycle review: `/Users/pierre/rew-a11-readiness03-v2-root-result-review-20261004.json`,
+SHA-256 `d79b770d57d9572cce3a4b76d20bf8d17eb8cbdb2df6977c08df21f4b788d0a8`.
+
+Current-profile playback passes the source-removal integration test and strict
+package Clippy after a separate two-line unused-reexport cleanup. Matched gate
+inventories contain 1,301 packages, 83,559 rehashed files, 256 checked symlinks and
+76 expected absent tracked paths, with no differences or mismatches. These gates
+use private copies of current user prerequisites and command-only dependency
+overrides; clean-main dependency qualification and local feature integration remain
+separate work. No user prerequisites, locks or public branches were published.
+
+Root playback review: `/Users/pierre/a12-finalmatched-current-profile-root-review-20261004.json`,
+SHA-256 `8a284094fc64a818f3681a345131879a58f4d6d5476d357b03d793d69d5db402`.
+
+
+### A04 cross-order preflight; A11 archive recovery; A12 refusal regression (2026-10-04)
+
+The new cross-order frequency-block coordinate map passes four focused tests
+and strict example Clippy. Root reviewed the full source. The map includes a
+global scalar normalization and uses RMS order scales; the original-fixture
+harness must record their relation to the baseline. Sampled frequency blocks
+are an approximate preconditioner, with no finite-design rank or condition
+certificate. A complete outer allocation ledger and original-shape preflight
+are being prepared; no original-fixture fit or long-support run has started.
+Root review: `/Users/pierre/a04-cross-order-tiny-root-review-20261004.json`.
+
+The full REW transport derivative correctly refuses the changed executable and
+producer checkout before launch. The exact historical executable was recovered
+from the build archive. Root independently verifies all 128 inventoried files
+using five explicit path relocations, the clean historical guard commit, and
+the expected 29-path producer-to-guard delta. The next derivative must bind the
+successful readiness-v2 implementation and pass deterministic transport and
+cleanup mocks. A full numerical rerun remains pending.
+Root archive review: `/Users/pierre/rew-a11-archive-inputs-root-review-20261004.json`.
+
+A standalone public-API adapter harness reproduces a refusal gap: lowering
+removes a nested raw model-path parameter before asset validation, allowing
+that input. The resulting playback graph does not retain the reference.
+Corrected tests pass legacy refusal, invalid-rate refusal/valid gain acceptance,
+and the writer's empty-graph refusal; the nested-reference regression fails.
+Strict harness Clippy passes, and all 713 resolved packages remain unchanged.
+Pre-lowering validation is being added in the isolated integration candidate;
+the previously validated frozen profile stays unchanged.
+Root result: `/Users/pierre/a12-public-adapter-refusal-harness-20261004/evidence/root-refusal-result-v3.json`.
+
+The clean playback build initially selects SOTF's older nnnoiseless fork, which
+lacks APIs already present in clean DAW. The candidate now isolates the existing
+one-line dependency route to DAW. The unrelated staged FFT vendor migration is
+excluded. Clean-candidate compilation and backend feature landing remain pending;
+original user worktrees and staging are preserved.
+Root routing review: `/Users/pierre/a12-vendor-routing-root-review-20261004.json`.

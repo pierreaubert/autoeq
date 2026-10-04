@@ -1658,7 +1658,7 @@ mod tests {
             assert_eq!(magnitude.verdict, EligibilityVerdict::Unknown);
             assert_eq!(
                 crate::group_measurements::multisub_source_reference_scope(
-                    &[source.clone()],
+                    std::slice::from_ref(&source),
                     [20.0, upper_hz]
                 )
                 .is_some(),
@@ -3037,8 +3037,10 @@ mod tests {
         let source = inline_single(MeasurementProvenance::default());
         assert!(build_channel_evidence("left", &source, &[100.0], true).is_err());
         assert!(build_channel_evidence("left", &source, &[200.0, 100.0], true).is_err());
-        let mut bad_band = MeasurementProvenance::default();
-        bad_band.valid_band_hz = Some([9000.0, 1000.0]);
+        let bad_band = MeasurementProvenance {
+            valid_band_hz: Some([9000.0, 1000.0]),
+            ..Default::default()
+        };
         let source = inline_single(bad_band);
         assert!(build_channel_evidence("left", &source, &[20.0, 20000.0], true).is_err());
         for band in [[90.0, 110.0], [110.0, 900.0]] {
@@ -3050,8 +3052,10 @@ mod tests {
                 build_channel_evidence("left", &source, &[20.0, 100.0, 1000.0], true).unwrap_err();
             assert!(error.contains("at least two loaded samples"), "{error}");
         }
-        let mut disjoint = MeasurementProvenance::default();
-        disjoint.valid_band_hz = Some([30000.0, 40000.0]);
+        let disjoint = MeasurementProvenance {
+            valid_band_hz: Some([30000.0, 40000.0]),
+            ..Default::default()
+        };
         let source = inline_single(disjoint);
         assert!(build_channel_evidence("left", &source, &[20.0, 20000.0], true).is_err());
     }

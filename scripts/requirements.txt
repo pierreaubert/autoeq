@@ -1,6 +1,5 @@
 pandas
 numpy
-plotly
 scipy
 jupyterlab
 pyright

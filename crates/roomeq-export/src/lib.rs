@@ -205,7 +205,9 @@ fn export_format_preserves_convolution_paths(format: ExportFormat) -> bool {
     )
 }
 
-/// Export a single serial channel as a REW Generic EQ filter-settings file.
+/// Render single-channel REW Generic EQ reference text for manual entry.
+///
+/// REW saves and reloads filters as `.req` files; it cannot reload this text.
 fn export_rew(output: &DspGraph) -> anyhow::Result<String> {
     validate_serial_external_input(output, ExportFormat::Rew)?;
     let channels = sorted_channels(output);
@@ -625,6 +627,7 @@ fn camilladsp_routing_graph(output: &DspGraph) -> Option<BassManagementRoutingGr
                     routes,
                     matrix,
                     input_trim_db: Default::default(),
+                    post_dsp_main_alignment_band_hz: None,
                     stereo_routing: serde_json::from_value(
                         metadata
                             .get("stereo_routing")

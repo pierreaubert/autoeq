@@ -5,9 +5,21 @@ use autoeq::optim::{
 };
 use std::error::Error;
 
+pub(super) type CandidateProgressCallback =
+    Box<dyn FnMut(&autoeq::optim::setup::ProgressUpdate) -> Result<(), String> + Send + 'static>;
+
+struct OptimizationInvocationOptions {
+    progress_callback: Option<CandidateProgressCallback>,
+    direct_de_warm_start: bool,
+    exact_checkpoint: Option<autoeq::optim::setup::ExactDECheckpointOptions>,
+}
+
 /// Struct to hold optimization results including convergence status
 pub(super) struct OptimizationResult {
     pub(super) params: Vec<f64>,
+    /// Exact parameter and objective-constraint envelope selected for this
+    /// invocation, retained for validation of any serialized PEQ output.
+    pub(super) effective_envelope: EffectiveOptimizationEnvelope,
     pub(super) converged: bool,
     pub(super) pre_objective: Option<f64>,
     pub(super) post_objective: Option<f64>,
@@ -26,6 +38,145 @@ pub(super) struct OptimizationResult {
     pub(super) apo_roundtrip_gap: Option<f64>,
 }
 
+/// Immutable snapshot of the effective limits used by one optimizer run.
+///
+/// The parameter boxes are the exact vectors passed to the backend. The
+/// objective gain envelopes are retained separately because
+/// [`autoeq::optim::OwnedConstraintSpec`] carries Q limits but deliberately
+/// falls back to `ObjectiveData` for boost, cut, and composite checks.
+#[derive(Debug, Clone)]
+pub(super) struct EffectiveOptimizationEnvelope {
+    pub(super) peq_model: autoeq::PeqModel,
+    pub(super) num_filters: usize,
+    pub(super) sample_rate_hz: f64,
+    pub(super) loss_type: autoeq::LossType,
+    pub(super) lower_bounds: Vec<f64>,
+    pub(super) upper_bounds: Vec<f64>,
+    pub(super) constraints: autoeq::optim::OwnedConstraintSpec,
+    pub(super) max_boost_envelope: Option<Vec<(f64, f64)>>,
+    pub(super) min_cut_envelope: Option<Vec<(f64, f64)>>,
+    pub(super) composite_frequencies_hz: Vec<f64>,
+    pub(super) composite_band_hz: [f64; 2],
+    pub(super) objective_max_db: f64,
+    pub(super) objective_min_db: f64,
+}
+
+impl EffectiveOptimizationEnvelope {
+    pub(super) fn capture(
+        params: &autoeq::OptimParams,
+        objective_data: &ObjectiveData,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+    ) -> Result<Self, String> {
+        if params.peq_model != objective_data.peq_model {
+            return Err(format!(
+                "optimizer PEQ model {} does not match objective model {}",
+                params.peq_model, objective_data.peq_model
+            ));
+        }
+        if params.loss != objective_data.loss_type {
+            return Err(format!(
+                "optimizer loss {:?} does not match objective loss {:?}",
+                params.loss, objective_data.loss_type
+            ));
+        }
+        if !params.sample_rate.is_finite()
+            || params.sample_rate <= 0.0
+            || params.sample_rate != objective_data.srate
+        {
+            return Err(format!(
+                "optimizer sample rate {} does not match objective sample rate {}",
+                params.sample_rate, objective_data.srate
+            ));
+        }
+        if !objective_data.max_db.is_finite() || !objective_data.min_db.is_finite() {
+            return Err(String::from("objective gain limits must be finite"));
+        }
+        if lower_bounds.is_empty() || lower_bounds.len() != upper_bounds.len() {
+            return Err(format!(
+                "optimizer bounds must have matching non-empty vectors (lower={}, upper={})",
+                lower_bounds.len(),
+                upper_bounds.len()
+            ));
+        }
+        for (index, (&lower, &upper)) in lower_bounds.iter().zip(upper_bounds).enumerate() {
+            if !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err(format!(
+                    "optimizer bounds at parameter {index} are invalid: [{lower}, {upper}]"
+                ));
+            }
+        }
+        if autoeq::optim::is_peq_layout_loss(objective_data.loss_type) {
+            let expected_len = params
+                .num_filters
+                .checked_mul(autoeq_plot::param_utils::params_per_filter(
+                    params.peq_model,
+                ))
+                .ok_or_else(|| String::from("optimizer PEQ parameter count overflowed"))?;
+            if params.num_filters == 0 || lower_bounds.len() != expected_len {
+                return Err(format!(
+                    "optimizer bounds have {} parameters; model {} with {} filters requires {expected_len}",
+                    lower_bounds.len(),
+                    params.peq_model,
+                    params.num_filters
+                ));
+            }
+        }
+
+        let constraints = autoeq::optim::OwnedConstraintSpec::from_params(params)?;
+        constraints.as_spec().validate()?;
+        if let Some(knots) = objective_data.max_boost_envelope.as_deref() {
+            autoeq::optim::validate_envelope_knots(knots, "objective_max_boost", false)?;
+        }
+        if let Some(knots) = objective_data.min_cut_envelope.as_deref() {
+            autoeq::optim::validate_envelope_knots(knots, "objective_min_cut", false)?;
+        }
+        let has_composite_envelope = objective_data.max_boost_envelope.is_some()
+            || objective_data.min_cut_envelope.is_some();
+        let composite_frequencies_hz = if has_composite_envelope
+            && autoeq::optim::is_peq_layout_loss(objective_data.loss_type)
+        {
+            if !objective_data.min_freq.is_finite()
+                || !objective_data.max_freq.is_finite()
+                || objective_data.min_freq <= 0.0
+                || objective_data.min_freq >= objective_data.max_freq
+            {
+                return Err(String::from(
+                    "objective composite envelope has an invalid frequency band",
+                ));
+            }
+            let frequencies = objective_data.freqs.as_slice().ok_or_else(|| {
+                String::from("objective composite envelope requires a contiguous frequency grid")
+            })?;
+            autoeq::optim::validated_composite_grid(
+                frequencies,
+                objective_data.min_freq,
+                objective_data.max_freq,
+                constraints.subdivisions_per_bin,
+            )?;
+            frequencies.to_vec()
+        } else {
+            Vec::new()
+        };
+
+        Ok(Self {
+            peq_model: params.peq_model,
+            num_filters: params.num_filters,
+            sample_rate_hz: params.sample_rate,
+            loss_type: objective_data.loss_type,
+            lower_bounds: lower_bounds.to_vec(),
+            upper_bounds: upper_bounds.to_vec(),
+            constraints,
+            max_boost_envelope: objective_data.max_boost_envelope.clone(),
+            min_cut_envelope: objective_data.min_cut_envelope.clone(),
+            composite_frequencies_hz,
+            composite_band_hz: [objective_data.min_freq, objective_data.max_freq],
+            objective_max_db: objective_data.max_db,
+            objective_min_db: objective_data.min_db,
+        })
+    }
+}
+
 pub(super) fn perform_optimization(
     params: &autoeq::OptimParams,
     objective_data: &ObjectiveData,
@@ -41,6 +192,97 @@ pub(super) fn perform_optimization_with_bounds(
     perform_optimization_with_backend(params, objective_data, bounds, &RealOptimizerBackend::new())
 }
 
+pub(super) fn perform_optimization_with_candidate(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: &[f64],
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        bounds,
+        Some(initial_candidate),
+        &RealOptimizerBackend::new(),
+        OptimizationInvocationOptions {
+            progress_callback: None,
+            direct_de_warm_start: true,
+            exact_checkpoint: None,
+        },
+    )
+}
+
+/// Run AutoEQ DE with candidate-bearing progress events for durable checkpoints.
+/// Backends that expose only iteration/loss events cannot safely save a
+/// recoverable parameter vector, so this path rejects them explicitly.
+pub(super) fn perform_optimization_with_progress_callback(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: Option<&[f64]>,
+    callback: CandidateProgressCallback,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    let backend = autoeq::optim::backend::resolve(&params.algo)
+        .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return Err(std::io::Error::other(format!(
+            "periodic warm-start checkpoints require AutoEQ DE candidate progress; {} does not expose candidate snapshots",
+            backend.name()
+        ))
+        .into());
+    }
+    if matches!(
+        objective_data.loss_type,
+        autoeq::LossType::DriversFlat | autoeq::LossType::MultiSubFlat
+    ) {
+        return Err(std::io::Error::other(
+            "periodic warm-start checkpoints are not supported for multi-driver optimization",
+        )
+        .into());
+    }
+
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        bounds,
+        initial_candidate,
+        &RealOptimizerBackend::new(),
+        OptimizationInvocationOptions {
+            progress_callback: Some(callback),
+            direct_de_warm_start: true,
+            exact_checkpoint: None,
+        },
+    )
+}
+
+/// Run exact AutoEQ DE continuation with a full-state persistence callback.
+///
+/// This path defers baseline scoring until the math layer validates saved state.
+pub(super) fn perform_optimization_with_exact_checkpoint(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    continuation: autoeq::optim::setup::ExactDECheckpointOptions,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    if params.refine {
+        return Err(std::io::Error::other(
+            "exact DE continuation does not support a follow-up local-refinement stage",
+        )
+        .into());
+    }
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        None,
+        None,
+        &RealOptimizerBackend::new(),
+        OptimizationInvocationOptions {
+            progress_callback: None,
+            direct_de_warm_start: false,
+            exact_checkpoint: Some(continuation),
+        },
+    )
+}
+
 /// Backend-injectable optimization driver.
 ///
 /// Production callers pass [`RealOptimizerBackend`]; tests inject
@@ -53,27 +295,226 @@ pub(super) fn perform_optimization_with_backend(
     bounds: Option<(Vec<f64>, Vec<f64>)>,
     backend: &dyn OptimizerBackend,
 ) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend_and_candidate(params, objective_data, bounds, None, backend)
+}
+
+pub(super) fn perform_optimization_with_backend_and_candidate(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: Option<&[f64]>,
+    backend: &dyn OptimizerBackend,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    perform_optimization_with_backend_and_candidate_and_progress_callback(
+        params,
+        objective_data,
+        bounds,
+        initial_candidate,
+        backend,
+        OptimizationInvocationOptions {
+            progress_callback: None,
+            direct_de_warm_start: false,
+            exact_checkpoint: None,
+        },
+    )
+}
+
+fn perform_optimization_with_backend_and_candidate_and_progress_callback(
+    params: &autoeq::OptimParams,
+    objective_data: &ObjectiveData,
+    bounds: Option<(Vec<f64>, Vec<f64>)>,
+    initial_candidate: Option<&[f64]>,
+    backend: &dyn OptimizerBackend,
+    options: OptimizationInvocationOptions,
+) -> Result<OptimizationResult, Box<dyn Error>> {
+    let OptimizationInvocationOptions {
+        progress_callback,
+        direct_de_warm_start,
+        exact_checkpoint,
+    } = options;
+    let resolved_backend = autoeq::optim::backend::resolve(&params.algo)
+        .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+    if initial_candidate.is_some() && !resolved_backend.supports_initial_candidate() {
+        return Err(std::io::Error::other(format!(
+            "warm-start candidates are unsupported for {} because its optimizer path does not use the supplied initial candidate",
+            resolved_backend.name()
+        ))
+        .into());
+    }
     let (lower_bounds, upper_bounds) =
         bounds.unwrap_or_else(|| autoeq::workflow::setup_bounds(params));
+    let effective_envelope = EffectiveOptimizationEnvelope::capture(
+        params,
+        objective_data,
+        &lower_bounds,
+        &upper_bounds,
+    )
+    .map_err(std::io::Error::other)?;
 
-    // Generate initial guess based on loss type
-    let mut x = if objective_data.loss_type == autoeq::LossType::DriversFlat {
+    // Generate an initial guess or finalize the validated warm-start candidate.
+    let mut x = if let Some(candidate) = initial_candidate {
+        if candidate.is_empty()
+            || candidate.len() != lower_bounds.len()
+            || candidate.len() != upper_bounds.len()
+        {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidate has {} parameters; current bounds have {}",
+                candidate.len(),
+                lower_bounds.len()
+            ))
+            .into());
+        }
+        if let Some(index) = candidate.iter().position(|value| !value.is_finite()) {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidate parameter {index} is not finite"
+            ))
+            .into());
+        }
+        for (index, (&value, (&lower, &upper))) in candidate
+            .iter()
+            .zip(lower_bounds.iter().zip(&upper_bounds))
+            .enumerate()
+        {
+            if !lower.is_finite() || !upper.is_finite() || lower > upper {
+                return Err(std::io::Error::other(format!(
+                    "warm-start bounds at parameter {index} are invalid: [{lower}, {upper}]"
+                ))
+                .into());
+            }
+            if value < lower || value > upper {
+                return Err(std::io::Error::other(format!(
+                    "warm-start candidate parameter {index}={value} is outside current bounds [{lower}, {upper}]"
+                ))
+                .into());
+            }
+        }
+        let constraint_spec = autoeq::optim::OwnedConstraintSpec::from_params(params)
+            .map_err(std::io::Error::other)?;
+        autoeq::optim::finalize_candidate(
+            "cli-warm-start",
+            candidate,
+            objective_data,
+            &constraint_spec.as_spec(),
+        )
+        .map_err(|reason| {
+            std::io::Error::other(format!("warm-start candidate is infeasible: {reason}"))
+        })?
+        .params
+    } else if objective_data.loss_type == autoeq::LossType::DriversFlat {
         let n_drivers = objective_data.drivers_data.as_ref().unwrap().drivers.len();
         autoeq::workflow::drivers_initial_guess(&lower_bounds, &upper_bounds, n_drivers)
     } else {
         autoeq::workflow::initial_guess(params, &lower_bounds, &upper_bounds)
     };
 
-    // Calculate pre-optimization objective value
-    let pre_objective = Some(optim::compute_fitness_penalties_ref(&x, objective_data));
+    // Exact-resume validation must happen before scoring the requested objective.
+    let pre_objective = if exact_checkpoint.is_some() {
+        None
+    } else {
+        Some(optim::compute_fitness_penalties_ref(&x, objective_data))
+    };
 
-    let global_result = backend.optimize_filters(
-        &mut x,
-        &lower_bounds,
-        &upper_bounds,
-        objective_data.clone(),
-        params,
-    );
+    let global_result = if let Some(continuation) = exact_checkpoint {
+        if initial_candidate.is_some() {
+            return Err(std::io::Error::other(
+                "exact continuation cannot be combined with a warm-start candidate",
+            )
+            .into());
+        }
+        let mut global_params = params.clone();
+        global_params.refine = false;
+        let output =
+            autoeq::optim::setup::perform_optimization_with_run_descriptor_and_exact_checkpoint(
+                &global_params,
+                objective_data,
+                continuation,
+                Box::new(|_| autoeq::de::CallbackAction::Continue),
+            )?;
+        x.clone_from_slice(&output.parameters);
+        Ok((
+            output.descriptor.stopping_reason,
+            optim::compute_fitness_penalties_ref(&x, objective_data),
+        ))
+    } else if let Some(mut progress_callback) = progress_callback {
+        use std::sync::{Arc, Mutex};
+
+        let callback_error = Arc::new(Mutex::new(None));
+        let callback_error_for_de = Arc::clone(&callback_error);
+        let de_callback =
+            move |update: &autoeq::optim::setup::ProgressUpdate| match progress_callback(update) {
+                Ok(()) => autoeq::de::CallbackAction::Continue,
+                Err(error) => {
+                    *callback_error_for_de
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                    autoeq::de::CallbackAction::Stop
+                }
+            };
+        let mut global_params = params.clone();
+        // Keep the CLI's existing local-refinement path and its per-pass
+        // evidence contract. The candidate callback records the global pass.
+        global_params.refine = false;
+        let callback_config = autoeq::optim::setup::ProgressCallbackConfig {
+            interval: 1,
+            include_biquads: false,
+            include_filter_response: false,
+            frequencies: Vec::new(),
+        };
+        let output_result = if let Some(candidate) = initial_candidate {
+            autoeq::optim::setup::perform_optimization_with_progress_and_candidate(
+                &global_params,
+                objective_data,
+                callback_config,
+                candidate,
+                de_callback,
+            )
+        } else {
+            autoeq::optim::setup::perform_optimization_with_progress(
+                &global_params,
+                objective_data,
+                callback_config,
+                de_callback,
+            )
+        };
+        if let Some(error) = callback_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            return Err(std::io::Error::other(error).into());
+        }
+        let output = output_result?;
+        x.clone_from_slice(&output.params);
+        Ok((
+            output.optimization_run.stopping_reason,
+            optim::compute_fitness_penalties_ref(&x, objective_data),
+        ))
+    } else if direct_de_warm_start
+        && resolved_backend.name().eq_ignore_ascii_case("autoeq:de")
+        && let Some(candidate) = initial_candidate
+    {
+        let mut global_params = params.clone();
+        global_params.refine = false;
+        let output = autoeq::optim::setup::perform_optimization_with_run_descriptor_and_candidate(
+            &global_params,
+            objective_data,
+            candidate,
+            Box::new(|_| autoeq::de::CallbackAction::Continue),
+        )?;
+        x.clone_from_slice(&output.parameters);
+        Ok((
+            output.descriptor.stopping_reason,
+            optim::compute_fitness_penalties_ref(&x, objective_data),
+        ))
+    } else {
+        backend.optimize_filters(
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            objective_data.clone(),
+            params,
+        )
+    };
     let global_evidence = OptimizerRunEvidence::from_backend_result(
         &params.algo,
         global_result.clone(),
@@ -233,6 +674,7 @@ pub(super) fn perform_optimization_with_backend(
 
     Ok(OptimizationResult {
         params: x,
+        effective_envelope,
         converged,
         pre_objective,
         post_objective,

@@ -3110,6 +3110,15 @@ mod tests {
             40,
             Some(7),
         );
+        // The optimizer crate tests that run control creates this typed result.
+        // This workflow test consumes the serialized boundary without taking
+        // a test-only dependency on the optimizer implementation.
+        let mut evidence_json = serde_json::to_value(evidence)
+            .expect("serialize optimizer evidence fixture");
+        evidence_json["termination"] = serde_json::json!("user_stopped");
+        evidence_json["confidence"] = serde_json::json!("unusable");
+        let evidence = serde_json::from_value(evidence_json)
+            .expect("deserialize typed stopped optimizer evidence");
         result
             .channel_results
             .get_mut("left")

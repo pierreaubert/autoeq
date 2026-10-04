@@ -347,6 +347,7 @@ pub fn bass_management_routing_graph(
         routes,
         matrix,
         input_trim_db: HashMap::new(),
+        post_dsp_main_alignment_band_hz: None,
         stereo_routing,
         advisories,
     })

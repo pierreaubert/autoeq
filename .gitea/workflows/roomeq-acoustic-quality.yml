@@ -36,7 +36,10 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: extractions/setup-just@v4
+      - name: Install pinned Just
+        run: |
+          cargo install --locked --version 1.58.0 just
+          just --version
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: taiki-e/install-action@cargo-mutants
       - name: REW MDAT converter contracts

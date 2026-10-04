@@ -1,11 +1,700 @@
 //! Integration tests for the roomeq binary
 
+#[cfg(unix)]
+use std::collections::BTreeMap;
 use std::fs;
+#[cfg(unix)]
+use std::io::{self, Read};
+#[cfg(unix)]
+use std::path::Path;
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::process::{Child, Command, ExitStatus, Stdio};
+#[cfg(unix)]
+use std::sync::{Arc, Mutex, mpsc};
+#[cfg(unix)]
+use std::thread;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 mod common;
 
 use common::binary_runner::{BinaryRunner, ProcessBinaryRunner, run_roomeq};
+
+#[test]
+fn convert_refuses_graph_over_output_safety_budget_without_touching_export() {
+    let directory = tempfile::TempDir::new().expect("temporary export directory");
+    let graph_path = directory.path().join("rejected-diagnostic.json");
+    let export_path = directory.path().join("room.yml");
+    let prior_export = b"prior external preset";
+
+    let mut graph = autoeq::roomeq_model::DspGraph::new("1");
+    graph.add_channel("left", Vec::new());
+    graph.metadata = Some(
+        serde_json::from_value(serde_json::json!({
+            "pre_score": 1.0,
+            "post_score": 1.0,
+            "algorithm": "synthetic-budget-refusal",
+            "iterations": 0,
+            "timestamp": "fixture",
+            "correction_acceptance": {
+                "policy": "runtime_safety",
+                "decision": "accepted",
+                "accepted": true,
+                "outcome": "accepted",
+                "metrics": {
+                    "auditory_frequency_measure": "erb_rate",
+                    "pre_target_weighted_rms_db": 1.0,
+                    "post_target_weighted_rms_db": 1.0,
+                    "improvement_db": 0.0,
+                    "improvement_ratio": 0.0,
+                    "post_p95_abs_residual_db": 1.0,
+                    "post_worst_abs_residual_db": 1.0,
+                    "correction_rms_db": 0.0,
+                    "max_abs_correction_db": 0.0
+                }
+            },
+            "stage_outcomes": [{
+                "stage": "final_output_safety_attenuation_budget",
+                "status": "degraded",
+                "checks": [{
+                    "id": "max_output_safety_attenuation_db:[\"channel\",\"left\"]",
+                    "kind": "safety",
+                    "passed": false,
+                    "observed": 7.0,
+                    "limit": 6.0
+                }]
+            }]
+        }))
+        .expect("fixture metadata satisfies the serialized output contract"),
+    );
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&graph).unwrap())
+        .expect("write diagnostic graph");
+    std::fs::write(&export_path, prior_export).expect("write prior preset");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roomeq"))
+        .args([
+            "--convert",
+            graph_path.to_str().unwrap(),
+            "--export-format",
+            "camilladsp",
+            "--export-path",
+            export_path.to_str().unwrap(),
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("run the RoomEQ CLI conversion path");
+
+    assert!(
+        !output.status.success(),
+        "over-budget output must be refused"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("output safety-attenuation budget"),
+        "CLI should report the failed budget check: {stderr}"
+    );
+    assert_eq!(std::fs::read(&export_path).unwrap(), prior_export);
+}
+
+#[test]
+fn convert_refuses_stored_accepted_outcome_when_acceptance_details_derive_rejected() {
+    let directory = tempfile::TempDir::new().expect("temporary export directory");
+    let graph_path = directory.path().join("contradictory-acceptance.json");
+    let export_path = directory.path().join("room.yml");
+    let prior_export = b"prior external preset";
+
+    let mut graph = autoeq::roomeq_model::DspGraph::new("1");
+    graph.add_channel("left", Vec::new());
+    graph.metadata = Some(
+        serde_json::from_value(serde_json::json!({
+            "pre_score": 1.0,
+            "post_score": 1.0,
+            "algorithm": "synthetic-contradictory-acceptance",
+            "iterations": 0,
+            "timestamp": "fixture",
+            "correction_acceptance": {
+                "policy": "runtime_safety",
+                "decision": "rejected",
+                "accepted": true,
+                "outcome": "accepted",
+                "metrics": {
+                    "auditory_frequency_measure": "erb_rate",
+                    "pre_target_weighted_rms_db": 1.0,
+                    "post_target_weighted_rms_db": 1.0,
+                    "improvement_db": 0.0,
+                    "improvement_ratio": 0.0,
+                    "post_p95_abs_residual_db": 1.0,
+                    "post_worst_abs_residual_db": 1.0,
+                    "correction_rms_db": 0.0,
+                    "max_abs_correction_db": 0.0
+                }
+            }
+        }))
+        .expect("fixture metadata satisfies the serialized output contract"),
+    );
+    std::fs::write(&graph_path, serde_json::to_vec_pretty(&graph).unwrap())
+        .expect("write contradictory diagnostic graph");
+    std::fs::write(&export_path, prior_export).expect("write prior preset");
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_roomeq"))
+        .args([
+            "--convert",
+            graph_path.to_str().unwrap(),
+            "--export-format",
+            "camilladsp",
+            "--export-path",
+            export_path.to_str().unwrap(),
+        ])
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("run the RoomEQ CLI conversion path");
+
+    assert!(
+        !output.status.success(),
+        "stored Accepted must not override a derived Rejected outcome"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("no approved playback result") && stderr.contains("Rejected"),
+        "CLI should report the derived rejection: {stderr}"
+    );
+    assert_eq!(std::fs::read(&export_path).unwrap(), prior_export);
+}
+
+#[cfg(unix)]
+const MAX_CAPTURED_CHILD_OUTPUT_BYTES: usize = 2 * 1024 * 1024;
+#[cfg(unix)]
+const MAX_PROGRESS_LINE_BYTES: usize = 16 * 1024;
+#[cfg(unix)]
+const ROOM_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(90);
+#[cfg(unix)]
+const ROOM_OPTIMIZATION_READINESS_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(unix)]
+const ROOM_CANCELLATION_TIMEOUT: Duration = Duration::from_secs(20);
+
+#[cfg(unix)]
+#[derive(Default)]
+struct CapturedChildOutput {
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    truncated: bool,
+}
+
+#[cfg(unix)]
+struct SpawnedRoomEq {
+    child: Option<Child>,
+    terminal_status: Option<ExitStatus>,
+    output: Arc<Mutex<CapturedChildOutput>>,
+    progress_lines: mpsc::Receiver<String>,
+    reader_threads: Vec<thread::JoinHandle<()>>,
+}
+
+#[cfg(unix)]
+impl SpawnedRoomEq {
+    fn spawn(config_path: &Path, output_path: &Path, frequency_samples: usize) -> io::Result<Self> {
+        let mut child = Command::new(env!("CARGO_BIN_EXE_roomeq"))
+            .args([
+                "--config",
+                config_path.to_str().expect("UTF-8 config path"),
+                "--output",
+                output_path.to_str().expect("UTF-8 output path"),
+                "--sample-rate",
+                "48000",
+                "--freq-samples",
+            ])
+            .arg(frequency_samples.to_string())
+            .env("RUST_LOG", "info")
+            .env("RAYON_NUM_THREADS", "2")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        let stdout = child.stdout.take().expect("piped stdout");
+        let stderr = child.stderr.take().expect("piped stderr");
+        let output = Arc::new(Mutex::new(CapturedChildOutput::default()));
+        let (progress_sender, progress_lines) = mpsc::sync_channel(256);
+        let stdout_output = Arc::clone(&output);
+        let stderr_output = Arc::clone(&output);
+        let reader_threads = vec![
+            thread::spawn(move || capture_stdout(stdout, stdout_output)),
+            thread::spawn(move || capture_stderr(stderr, stderr_output, progress_sender)),
+        ];
+
+        Ok(Self {
+            child: Some(child),
+            terminal_status: None,
+            output,
+            progress_lines,
+            reader_threads,
+        })
+    }
+
+    fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        if let Some(status) = self.terminal_status {
+            return Ok(Some(status));
+        }
+        let Some(child) = self.child.as_mut() else {
+            return Ok(None);
+        };
+        let status = child.try_wait()?;
+        if let Some(status) = status {
+            self.terminal_status = Some(status);
+            self.child = None;
+        }
+        Ok(status)
+    }
+
+    fn send_interrupt(&mut self) -> io::Result<()> {
+        if self.try_wait()?.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "RoomEQ exited before the test could send SIGINT",
+            ));
+        }
+        let process_id = self.child.as_ref().expect("running child is retained").id();
+        let status = Command::new("kill")
+            .args(["-INT", &process_id.to_string()])
+            .status()?;
+        if !status.success() {
+            return Err(io::Error::other(format!(
+                "kill -INT {process_id} exited with {status}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn wait_for_parallel_progress(&mut self, timeout: Duration) -> Result<Vec<String>, String> {
+        let deadline = Instant::now() + timeout;
+        let mut stereo_route_seen = false;
+        let mut left_progress_seen = false;
+        let mut right_progress_seen = false;
+        let mut readiness_evidence = Vec::new();
+
+        loop {
+            if let Some(status) = self.try_wait().map_err(|error| error.to_string())? {
+                return Err(format!(
+                    "RoomEQ exited before both stereo workers reported progress ({status}); {}",
+                    self.output_text()
+                ));
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(format!(
+                    "timed out waiting for stereo route and both channel workers; {}",
+                    self.output_text()
+                ));
+            }
+            let wait = remaining.min(Duration::from_millis(100));
+            match self.progress_lines.recv_timeout(wait) {
+                Ok(line) => {
+                    if !stereo_route_seen && line.contains("Selected Stereo 2.0 workflow") {
+                        stereo_route_seen = true;
+                        readiness_evidence.push(line.clone());
+                    }
+                    let iteration = line
+                        .split_once("iter ")
+                        .and_then(|(_, progress)| progress.split_once('/'))
+                        .and_then(|(iteration, _)| iteration.trim().parse::<usize>().ok());
+                    if iteration.is_some_and(|iteration| iteration >= 100) {
+                        if !left_progress_seen && line.contains("[L]") {
+                            left_progress_seen = true;
+                            readiness_evidence.push(line.clone());
+                        }
+                        if !right_progress_seen && line.contains("[R]") {
+                            right_progress_seen = true;
+                            readiness_evidence.push(line.clone());
+                        }
+                    }
+                    if stereo_route_seen && left_progress_seen && right_progress_seen {
+                        if let Some(status) = self.try_wait().map_err(|error| error.to_string())? {
+                            return Err(format!(
+                                "RoomEQ exited after readiness but before SIGINT ({status}); {}",
+                                self.output_text()
+                            ));
+                        }
+                        return Ok(readiness_evidence);
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(format!(
+                        "RoomEQ closed its progress stream before readiness; {}",
+                        self.output_text()
+                    ));
+                }
+            }
+        }
+    }
+
+    fn wait_until_exit(&mut self, timeout: Duration) -> io::Result<ExitStatus> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.try_wait()? {
+                self.join_readers();
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "timed out waiting for RoomEQ child process",
+                ));
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    fn output_text(&self) -> String {
+        let output = self.output.lock().expect("captured output mutex");
+        let mut rendered = format!(
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if output.truncated {
+            rendered.push_str("\n[child output truncated at 2 MiB per stream]");
+        }
+        rendered
+    }
+
+    fn save_output(&self, directory: &Path, name: &str) -> io::Result<bool> {
+        let output = self.output.lock().expect("captured output mutex");
+        fs::write(directory.join(format!("{name}.stdout.log")), &output.stdout)?;
+        fs::write(directory.join(format!("{name}.stderr.log")), &output.stderr)?;
+        Ok(output.truncated)
+    }
+
+    fn join_readers(&mut self) {
+        for reader in self.reader_threads.drain(..) {
+            let _ = reader.join();
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SpawnedRoomEq {
+    fn drop(&mut self) {
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+            self.child = None;
+        }
+        self.join_readers();
+    }
+}
+
+#[cfg(unix)]
+fn capture_stdout(mut reader: impl Read, output: Arc<Mutex<CapturedChildOutput>>) {
+    let mut bytes = [0_u8; 4096];
+    loop {
+        match reader.read(&mut bytes) {
+            Ok(0) | Err(_) => return,
+            Ok(count) => append_captured_output(&output, false, &bytes[..count]),
+        }
+    }
+}
+
+#[cfg(unix)]
+fn capture_stderr(
+    reader: impl Read,
+    output: Arc<Mutex<CapturedChildOutput>>,
+    progress_sender: mpsc::SyncSender<String>,
+) {
+    let mut reader = reader;
+    let mut bytes = [0_u8; 4096];
+    let mut line = Vec::with_capacity(MAX_PROGRESS_LINE_BYTES);
+    let mut discard_line = false;
+    loop {
+        let count = match reader.read(&mut bytes) {
+            Ok(0) => {
+                if !discard_line && !line.is_empty() {
+                    let _ = progress_sender.try_send(String::from_utf8_lossy(&line).into_owned());
+                }
+                return;
+            }
+            Ok(count) => count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(_) => return,
+        };
+        append_captured_output(&output, true, &bytes[..count]);
+        for &byte in &bytes[..count] {
+            if byte == b'\n' {
+                if !discard_line {
+                    let _ = progress_sender.try_send(String::from_utf8_lossy(&line).into_owned());
+                }
+                line.clear();
+                discard_line = false;
+            } else if !discard_line {
+                if line.len() < MAX_PROGRESS_LINE_BYTES {
+                    line.push(byte);
+                } else {
+                    line.clear();
+                    discard_line = true;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn append_captured_output(output: &Arc<Mutex<CapturedChildOutput>>, is_stderr: bool, bytes: &[u8]) {
+    let mut output = output.lock().expect("captured output mutex");
+    let stream = if is_stderr {
+        &mut output.stderr
+    } else {
+        &mut output.stdout
+    };
+    let remaining = MAX_CAPTURED_CHILD_OUTPUT_BYTES.saturating_sub(stream.len());
+    let retained = bytes.len().min(remaining);
+    stream.extend_from_slice(&bytes[..retained]);
+    output.truncated |= retained < bytes.len();
+}
+
+#[cfg(unix)]
+fn write_signal_test_config(directory: &Path, max_iterations: usize) -> PathBuf {
+    let fixture_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/roomeq/test_config_stereo.json");
+    let fixture_directory = fixture_path.parent().expect("fixture parent");
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&fixture_path).expect("read checked-in stereo fixture"))
+            .expect("parse checked-in stereo fixture");
+    for speaker in ["left", "right"] {
+        let reference = config["speakers"][speaker]
+            .as_str()
+            .expect("fixture speaker path");
+        config["speakers"][speaker] = serde_json::json!(fixture_directory.join(reference));
+    }
+    config["system"] = serde_json::json!({
+        "model": "stereo",
+        "speakers": { "L": "left", "R": "right" }
+    });
+    config["optimizer"]["max_iter"] = serde_json::json!(max_iterations);
+    config["optimizer"]["algorithm"] = serde_json::json!("autoeq:de");
+    config["optimizer"]["population"] = serde_json::json!(36);
+    config["optimizer"]["seed"] = serde_json::json!(7);
+    config["optimizer"]["strategy"] = serde_json::json!("best1bin");
+
+    let config_path = directory.join(format!("signal-room-{max_iterations}.json"));
+    fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&config).expect("serialize signal-test config"),
+    )
+    .expect("write signal-test config");
+    config_path
+}
+
+#[cfg(unix)]
+fn collect_asset_files(
+    root: &Path,
+    current: &Path,
+    files: &mut BTreeMap<PathBuf, Vec<u8>>,
+) -> io::Result<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            collect_asset_files(root, &entry.path(), files)?;
+        } else if entry.file_type()?.is_file() {
+            let path = entry.path();
+            let path_from_root = path.strip_prefix(root).map_err(io::Error::other)?;
+            files.insert(path_from_root.to_path_buf(), fs::read(path)?);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn snapshot_room_bundle(output_path: &Path) -> io::Result<BTreeMap<PathBuf, Vec<u8>>> {
+    let parent = output_path
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let mut files = BTreeMap::new();
+    files.insert(PathBuf::from("native-output.json"), fs::read(output_path)?);
+    let assets = roomeq_workflow::assets_dir_for(output_path);
+    if assets.exists() {
+        collect_asset_files(parent, &assets, &mut files)?;
+    }
+    Ok(files)
+}
+
+#[cfg(unix)]
+fn room_stage_directories(directory: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut stages = Vec::new();
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(".roomeq-attempt-")
+            || name.starts_with(".roomeq-artifacts-")
+            || name.starts_with(".roomeq-fallback-")
+        {
+            stages.push(entry.path());
+        }
+    }
+    Ok(stages)
+}
+
+#[cfg(unix)]
+#[test]
+fn room_cli_sigint_drains_stereo_optimization_and_preserves_prior_bundle() {
+    let directory = tempfile::TempDir::new().expect("create RoomEQ signal test directory");
+    let output_path = directory.path().join("room-output.json");
+    let config_path = write_signal_test_config(directory.path(), 100);
+
+    let mut baseline =
+        SpawnedRoomEq::spawn(&config_path, &output_path, 64).expect("spawn baseline RoomEQ CLI");
+    let baseline_status = baseline
+        .wait_until_exit(ROOM_CONFIGURATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            panic!(
+                "baseline RoomEQ run did not finish: {error}; {}",
+                baseline.output_text()
+            )
+        });
+    assert!(
+        baseline_status.success(),
+        "baseline RoomEQ run failed: {}",
+        baseline.output_text()
+    );
+    assert_eq!(
+        baseline.try_wait().expect("cached baseline status"),
+        Some(baseline_status)
+    );
+    roomeq_workflow::load_output_bundle(&output_path)
+        .expect("baseline must produce a valid prior bundle");
+    let manifest = roomeq_workflow::bundle_manifest_path_for(&output_path);
+    assert!(manifest.is_file(), "baseline bundle manifest is present");
+    let prior_bundle = snapshot_room_bundle(&output_path).expect("snapshot prior graph and assets");
+
+    // The source curves, stereo mapping, DE seed/population, rate, PEQ count,
+    // sample grid, and two-thread Rayon pool are identical to the baseline.
+    // Only the optimizer iteration ceiling increases to provide a bounded
+    // window for observing live progress and sending SIGINT.
+    let config_path = write_signal_test_config(directory.path(), 100_000);
+    let mut interrupted = SpawnedRoomEq::spawn(&config_path, &output_path, 64)
+        .expect("spawn RoomEQ CLI to interrupt");
+    let readiness_evidence = interrupted
+        .wait_for_parallel_progress(ROOM_OPTIMIZATION_READINESS_TIMEOUT)
+        .unwrap_or_else(|error| panic!("RoomEQ readiness failed: {error}"));
+    eprintln!(
+        "RoomEQ SIGINT test observed route and both channel progress events:\n{}",
+        readiness_evidence.join("\n")
+    );
+    interrupted
+        .send_interrupt()
+        .expect("send SIGINT to the owned RoomEQ process");
+    let interrupted_status = interrupted
+        .wait_until_exit(ROOM_CANCELLATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            panic!(
+                "RoomEQ did not drain after SIGINT within the bounded wait: {error}; {}",
+                interrupted.output_text()
+            )
+        });
+    assert_eq!(
+        interrupted.try_wait().expect("cached terminal status"),
+        Some(interrupted_status),
+        "repeated status checks must retain the already-reaped child status"
+    );
+    assert!(
+        interrupted_status.code().is_some(),
+        "Tokio should handle SIGINT and the CLI should exit normally, not by signal"
+    );
+    assert!(
+        !interrupted_status.success(),
+        "cancelled run must not report success"
+    );
+    let child_output = interrupted.output_text();
+    assert!(
+        child_output
+            .to_ascii_lowercase()
+            .contains("stopped by observer")
+            || child_output
+                .to_ascii_lowercase()
+                .contains("cancelled before"),
+        "expected an explicit cancellation error; {child_output}"
+    );
+
+    assert_eq!(
+        snapshot_room_bundle(&output_path).expect("snapshot preserved bundle"),
+        prior_bundle,
+        "cancellation during optimization must preserve the full graph and asset bundle"
+    );
+    roomeq_workflow::load_output_bundle(&output_path)
+        .expect("preserved prior bundle remains loadable");
+    assert!(
+        room_stage_directories(directory.path())
+            .expect("inspect output parent")
+            .is_empty(),
+        "cancelled optimization must remove its private staging directories"
+    );
+
+    if std::env::var_os("ROOMEQ_KEEP_SIGNAL_TEST_ARTIFACTS").is_some() {
+        assert!(
+            !baseline
+                .save_output(directory.path(), "baseline")
+                .expect("save baseline child output"),
+            "baseline child output exceeded its bounded capture"
+        );
+        assert!(
+            !interrupted
+                .save_output(directory.path(), "interrupted")
+                .expect("save interrupted child output"),
+            "interrupted child output exceeded its bounded capture"
+        );
+        let retained_path = directory.keep();
+        eprintln!(
+            "Retained RoomEQ SIGINT child evidence: directory={}, baseline_config={}, cancel_config={}, canonical_bundle={}, assets={}",
+            retained_path.display(),
+            retained_path.join("signal-room-100.json").display(),
+            retained_path.join("signal-room-100000.json").display(),
+            retained_path.join("room-output.json").display(),
+            retained_path.join("room-output_files").display()
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn room_cli_cobra_publishes_a_loadable_stereo_bundle() {
+    let directory = tempfile::TempDir::new().expect("COBRA RoomEQ test directory");
+    let config_path = write_signal_test_config(directory.path(), 24);
+    let mut config: serde_json::Value =
+        serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+    config["optimizer"]["algorithm"] = serde_json::json!("autoeq:cobra");
+    config["optimizer"]["num_filters"] = serde_json::json!(1);
+    config["optimizer"]["refine"] = serde_json::json!(false);
+    fs::write(&config_path, serde_json::to_vec_pretty(&config).unwrap()).unwrap();
+    let output_path = directory.path().join("cobra-room.json");
+    let mut child =
+        SpawnedRoomEq::spawn(&config_path, &output_path, 64).expect("spawn COBRA RoomEQ");
+    let status = child
+        .wait_until_exit(ROOM_CONFIGURATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            panic!(
+                "COBRA RoomEQ did not finish: {error}; {}",
+                child.output_text()
+            )
+        });
+    assert!(
+        status.success(),
+        "COBRA RoomEQ failed: {}",
+        child.output_text()
+    );
+    roomeq_workflow::load_output_bundle(&output_path).expect("COBRA bundle is valid and loadable");
+    let graph: serde_json::Value =
+        serde_json::from_slice(&fs::read(&output_path).unwrap()).unwrap();
+    assert_eq!(graph["metadata"]["algorithm"], "autoeq:cobra");
+    assert!(graph["channels"].get("L").is_some());
+    assert!(graph["channels"].get("R").is_some());
+    let evidence = graph["metadata"]["optimizer_evidence"].to_string();
+    assert!(
+        evidence.contains("AutoEQ COBRA:"),
+        "missing actual COBRA run evidence: {evidence}"
+    );
+    assert!(room_stage_directories(directory.path()).unwrap().is_empty());
+}
 
 fn centered_rms_in_band(curve: &serde_json::Value, min_hz: f64, max_hz: f64) -> f64 {
     let frequencies = curve["freq"].as_array().expect("curve frequency array");
@@ -152,11 +841,38 @@ fn test_roomeq_multidriver_missing_phase_exports_rejected_diagnostic() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("not approved for playback"));
 
-    // Verify output file was created
-    assert!(output_path.exists(), "Output file was not created");
+    // An unapproved diagnostic is retained inside its attempt directory; it
+    // must not replace or create the canonical playback output.
+    assert!(
+        !output_path.exists(),
+        "rejected diagnostic must not publish canonical output"
+    );
+    let mut retained_attempts = Vec::new();
+    for entry in fs::read_dir(temp_dir.path()).expect("inspect output parent") {
+        let entry = entry.expect("read output-parent entry");
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".roomeq-attempt-")
+        {
+            retained_attempts.push(entry.path());
+        }
+    }
+    assert_eq!(
+        retained_attempts.len(),
+        1,
+        "expected exactly one retained diagnostic attempt"
+    );
+    let diagnostic_path =
+        retained_attempts[0].join(output_path.file_name().expect("output filename"));
+    assert!(
+        diagnostic_path.is_file(),
+        "retained diagnostic is missing: {}",
+        diagnostic_path.display()
+    );
 
     // Parse and validate output
-    let json_str = fs::read_to_string(&output_path).expect("Failed to read output file");
+    let json_str = fs::read_to_string(&diagnostic_path).expect("Failed to read diagnostic output");
     let json: serde_json::Value =
         serde_json::from_str(&json_str).expect("Failed to parse output JSON");
 

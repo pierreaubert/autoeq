@@ -16,6 +16,7 @@ use super::backend::{
 };
 use super::constraints_install::{build_crossover_monotonicity_constraint, install_constraints};
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref};
 use math_audio_optimisation::isres::{IsresConfig, IsresConstraint, IsresConstraintFn, isres};
 use ndarray::Array1;
@@ -36,6 +37,33 @@ impl FilterOptimizer for AutoeqIsresBackend {
     fn name(&self) -> &'static str {
         self.name
     }
+
+    fn supports_initial_candidate(&self) -> bool {
+        true
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let mu = params.population.max(2);
+        let solver_limit = params.maxeval.max(mu);
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            Some(solver_limit),
+            mu,
+            mu,
+            Some(mu.saturating_mul(7)),
+            Some(mu),
+            Some(solver_limit / mu),
+        ))
+    }
+
     fn library(&self) -> &'static str {
         "AutoEQ"
     }

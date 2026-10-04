@@ -3128,3 +3128,32 @@ recovery draft. Raw logs use the `autoeq-a00-windows-arm-*` prefix under the tas
 evidence root; PE details are retained at
 `/Users/pierre/autoeq-a00-windows-arm-pe-inspection.log`. Registry and runtime
 acceptance remain open.
+
+### A04 production estimator operator preparation (2026-10-04)
+
+Isolated math commits `092b7a4` and `0376233` add an offline FFT forward
+operator and its adjoint for causal first-through-fifth-order polynomial
+convolution. The operator retains reference amplitude and uses the same
+explicit output truncation in both directions. It reuses its buffers and
+rejects invalid shapes, non-finite values, FFT sample-limit violations and
+checked vector-byte-limit violations without replacing caller output.
+
+Independent direct time-domain tests cover 45 shape combinations, signed
+kernels, truncated tails and 2,295 transpose components. A separate 48 kHz,
+two-second sweep with 512 taps per order matches a sparse time-domain model
+within 2e-13 absolute error and passes the adjoint dot check within 1e-10.
+That case uses a 131,072-sample FFT and a 32 MiB vector limit. The vector limit
+excludes FFT plan storage and allocator overhead; it is not an RSS bound.
+
+The full DSP library suite passes 620/620 at `092b7a4` (815 seconds). The
+following test-only commit passes all three operator tests and strict scoped
+library/test Clippy; production code is unchanged. Evidence receipts are
+`/Users/pierre/a04-polynomial-operator-increment.json` and
+`/Users/pierre/a04-polynomial-operator-recording-scale.json`.
+
+This prepares the matrix-free estimator integration. It does not fit a model,
+certify identifiability/conditioning or harmonic support, enable capture
+analysis, or establish physical distortion. The commits remain on an isolated
+local math branch and have not been published or integrated into product
+main. The production estimator, calibrated acquisition and wider ESS
+acceptance remain open; the prior run05 diagnostic scope is unchanged.

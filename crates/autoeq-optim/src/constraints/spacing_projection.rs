@@ -155,7 +155,11 @@ fn project_in_order(
     let mut repaired = x.to_vec();
     for block in blocks {
         for rank in block.start..block.end {
-            repaired[indices[rank]] = block.value + rank as f64 * gap;
+            let index = indices[rank];
+            // Subtracting and adding the rank shift can move a fixed center
+            // by one ULP. Restore the exact per-filter box before checking
+            // decoded spacing, so fixed filters remain bit-identical.
+            repaired[index] = (block.value + rank as f64 * gap).clamp(lower[index], upper[index]);
         }
     }
 
@@ -405,6 +409,9 @@ mod tests {
         );
         for slot in 0..count {
             assert_eq!(&repaired[slot * 3 + 1..slot * 3 + 3], &x[slot * 3 + 1..slot * 3 + 3]);
+            if slot != 1 {
+                assert_eq!(repaired[slot * 3].to_bits(), x[slot * 3].to_bits());
+            }
         }
     }
 

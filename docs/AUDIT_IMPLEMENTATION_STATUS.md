@@ -18,11 +18,11 @@ cannot replace them.
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Live calibration and the bounded synthetic ESS diagnostic pass; an isolated guarded-operator increment is verified, while the production estimator, conditioning, capture integration, physical support and hardware evidence remain open |
+| A04 measurement/live analysis | Partial | Run06 independently evaluates a Rust fit on four synthetic ESS cases and four derived holdouts; it imports a dense QR factor and reuses the finite design certificate, while scalable factor construction, conditioning certification, capture integration, physical harmonic support and hardware evidence remain open |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
 | A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently and reusable strict analysis gate committed; public BO dependency integration and justified presets remain |
-| A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
+| A08 recoverable jobs | Partial | Opt-in schema-3 crash recovery is integrated and SIGKILL/fresh-process DE resume is verified for one seeded single-channel LowLatency path; multi-channel/NSGA and broader workflow recovery, Windows runtime and power-loss checks remain open |
 | A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; a later output-attenuation regression checks per-output cuts against the current serialized chain; Genelec still fails electrical-gain and bass-parity budgets, and full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Transaction/restart recovery and immutable playback contracts committed; 15 typed REW DSP cases pass with failed cleanup gate retained; text-import and broader deployed-consumer evidence remain |
@@ -3272,3 +3272,94 @@ focused test passes 1/1 and strict workflow Clippy passes. The final receipt is
 This synthetic regression verifies the serialized artifact path, not physical
 playback or listening behavior. Full A09 mode/rate/time-domain and measured
 acceptance remain open.
+
+### A08 exact RoomEQ crash-recovery lane (2026-10-04)
+
+Local main `650fc66d1a3b33dfacc95df70b9d3b2735098369` integrates an opt-in,
+crash-recovery path for one generic single-measurement channel using seeded
+AutoEQ differential evolution in LowLatency mode. The CLI options are
+`--recovery-dir DIR` and `--resume-recovery`. They are incompatible with
+fallback overrides, external exports, verification bundles/inputs/graphs and
+dry-run. Recovery refuses unsupported topology/backend, unseeded runs,
+refinement/adaptive or multi-measurement modes, and zero-filter requests before
+optimization scoring. Ordinary runs keep their existing path.
+
+The journal schema is version 3 with algorithm identity
+`autoeq-room-recovery-exact-de-v1`. Its run identity binds the resolved config,
+declared input files and parsed measurement samples, sample rate, frequency
+grid, output destination, and build identity. The build identity is a streamed
+SHA-256 of the current executable file, captured once when opening the session;
+it does not attest loaded code, dynamic libraries or runtime state. The math
+checkpoint binds the exact DE state, seed, budget/configuration, RNG and solver
+identities. Older schema, changed inputs/configuration/build, corrupted state
+and unsupported modes fail closed. A generation-barrier checkpoint survives a
+killed process; a fresh process resumes it, runs normal finalization and
+publishes through the existing output-bundle transaction/recovery boundary.
+This is crash recovery, not a graceful pause protocol. Cancellation remains
+terminal. NSGA continuation and other RoomEQ modes are not claimed.
+
+The actual-binary SIGKILL test runs a seeded synthetic RoomEQ job to a durable
+nonterminal barrier, kills the owned process, and resumes in a fresh process.
+The resumed terminal DE checkpoint, channel output and correction decisions
+match the uninterrupted run; the journal records 8,185 logical evaluations
+and one resume. A changed-config attempt refuses without replacing the prior
+canonical bundle. Root independently checked the retained child artifacts and
+confirmed the recorded build hash matches the tested binary.
+
+On the integrated source, strict scoped engine/workflow/CLI Clippy passes;
+recovery tests pass 11/11, engine exact-continuation tests 8/8, the CLI
+SIGKILL/resume test 1/1 and the current FIR all-rates regression 1/1. Full
+workflow and engine suites passed on the same A08 source before the latest
+main-only FIR test/documentation delta: 1,062 passed/7 ignored and
+892 passed/1 ignored, respectively. Locked metadata resolved 671 packages;
+the partition check passes 22 packages, 90 internal edges, zero cycles and
+zero exceptions. The recovery-enabled RoomEQ CLI and integration test also
+compile for `aarch64-pc-windows-gnullvm`; this is compile-only evidence. No
+Windows runtime, filesystem power-loss, physical playback or hardware behavior
+was tested.
+
+Receipt: `/Users/pierre/a08-room-recovery-main-integration.json`, SHA-256
+`ea645a9cb3c9a5bd3a68f88107af9bdba46e46abdb813c37ee6f5c435f902520`.
+It records source head/base and the independent retained-artifact review, and
+pins the detailed source/gate receipt by SHA-256. That detailed receipt binds
+the source and lock hashes, Cargo metadata, gate logs, child artifacts, binary
+identity and limitations. Detailed logs and receipt:
+`/Volumes/home_tmp/tmp/autoeq-a08-room-recovery-final-fd17-evidence/` and
+`/Volumes/home_tmp/tmp/autoeq-a08-room-recovery-final-fd17-evidence/final-receipt.json`
+(SHA-256 `f9b846ae00d031de63dabbabf6545bcec3054dd16cf34d4b1c0179d8a582aa05`).
+
+### A04 run06: independent evaluation of a synthetic Rust fit (2026-10-04)
+
+The Rust run06 fit from math commit
+`b51af8405eaa3a4a887c4e19f0158c4fcf51bcd6` passes an independent evaluator on
+four synthetic 4 kHz additive parallel-Hammerstein cases with five 320-tap
+orders. All 20 training records, four derived holdouts and 24 tone comparisons
+pass their predeclared numerical checks. Maximum normalized RMSE is
+`5.03e-16` on training and `4.96e-16` on heldout samples; maximum tone
+amplitude, phase and THD errors are `2.46e-9 dB`, `2.98e-8 degrees` and
+`9.24e-14` percentage points.
+
+The run uses an imported dense QR factor to fit the model; it does not
+construct a scalable factor. The five original forward/Q and adjoint/Q probes
+pass their unchanged `1e-8` limits (worst discrepancies `1.10e-10` and
+`1.10e-10`). All ten norm-scaled adjoint probes pass the unchanged `1e-10`
+limit; the worst discrepancy is `4.57e-13`. It reuses the finite design
+certificate from run05 and claims no new rank or Rust FFT condition
+certificate. The child exits zero;
+recorded peak RSS is 48,480,256 bytes against the 1,610,612,736-byte cap and
+elapsed time is 0.256 seconds against the 600-second cap. The runtime receipt
+also retains one external RSS sample; the exact child peak is based on the
+owner-recorded wait4 result.
+
+This is a synthetic numerical-fit result only. It does not demonstrate a
+production ESS estimator, scalable QR/preconditioner construction, capture
+integration, physical harmonic support, room acoustics or calibrated hardware.
+A04 remains partial.
+
+Independent evaluator receipt: `/Users/pierre/a04-rust-fit-independent-evaluation-originalprobes-v2-20261004.json`,
+SHA-256 `d385826fd67fa4b357d5a99ddbeba660c75cb3006c2636f55ef0ba6c546a6091`.
+Runtime receipt: `/Users/pierre/a04-rust-fit-runtime-receiptoriginalprobes.json`,
+SHA-256 `9d98e09a1130d99c12bc42c78a5cc9a5f7747847e55179bf259a3e6a20ed45b1`.
+The evaluator binds the fixture/probe manifests, source/binary hashes, math and
+harness commits, Python environment and criteria. The harness commit is
+`33ae081d93a29f79a4297edf7a1f463e073a4200`.

@@ -144,7 +144,7 @@ fn process_iir_channel_inner(
                 IirChannelMode::KautzModal => unreachable!(),
             };
             assemble::assemble_iir_result(
-                &request,
+                request,
                 output,
                 with_preprocessing_evidence(request.preprocessed, optimizer_evidence),
                 audibility_veto,
@@ -152,9 +152,9 @@ fn process_iir_channel_inner(
             )
         }
         IirChannelMode::KautzModal => {
-            let output = optimize_kautz_modal(&request, &optimization_curve)?;
+            let output = optimize_kautz_modal(request, &optimization_curve)?;
             assemble::assemble_iir_result(
-                &request,
+                request,
                 output,
                 request.preprocessed.optimizer_evidence.clone(),
                 Vec::new(),

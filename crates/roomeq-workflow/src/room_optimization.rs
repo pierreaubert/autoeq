@@ -272,8 +272,10 @@ fn optimize_room_pipeline_impl_with_optional_recovery(
         request.probe_arrival_overrides,
         observer,
         context.artifact_store,
-        frequency_samples,
-        recovery,
+        RoomOptimizationRecovery {
+            frequency_samples,
+            recovery,
+        },
     )?;
     // F4 graph boundary: compile relative advances to causal delays before
     // downstream replay, selection, and save. Amendment 4 enforces the
@@ -889,9 +891,16 @@ fn optimize_room_impl_with_frequency_samples(
         probe_arrival_overrides,
         observer,
         store,
-        frequency_samples,
-        None,
+        RoomOptimizationRecovery {
+            frequency_samples,
+            recovery: None,
+        },
     )
+}
+
+struct RoomOptimizationRecovery<'a> {
+    frequency_samples: usize,
+    recovery: Option<&'a crate::room_recovery::RoomRecoverySession>,
 }
 
 fn optimize_room_impl_with_recovery_and_frequency_samples(
@@ -901,9 +910,12 @@ fn optimize_room_impl_with_recovery_and_frequency_samples(
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer: Option<Box<dyn PipelineObserver>>,
     store: &dyn autoeq_artifacts::ArtifactStore,
-    frequency_samples: usize,
-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
+    recovery: RoomOptimizationRecovery<'_>,
 ) -> Result<RoomOptimizationResult> {
+    let RoomOptimizationRecovery {
+        frequency_samples,
+        recovery,
+    } = recovery;
     let (observer_shared, config) =
         prepare_room_optimization_with_frequency_samples(config, observer, frequency_samples)?;
     validate_room_optimization_with_frequency_samples(

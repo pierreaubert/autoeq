@@ -3405,3 +3405,78 @@ SHA-256 `9d98e09a1130d99c12bc42c78a5cc9a5f7747847e55179bf259a3e6a20ed45b1`.
 The evaluator binds the fixture/probe manifests, source/binary hashes, math and
 harness commits, Python environment and criteria. The harness commit is
 `33ae081d93a29f79a4297edf7a1f463e073a4200`.
+
+### A04 math primitives integrated on current math main (2026-10-04)
+
+Math main `3d5edf55d7f54afc1d3c57b42ccac30114d94a33` contains only the seven
+polynomial-convolution, bounded LSQR and triangular right-map commits
+rebased onto `bc3afa204820bb8783fd75e4b8592248cd7500b6`. The integration
+changes four analysis files; it does not import the older branch's DE,
+wavelet or CSV changes. The clean integration profile passes all 114 analysis
+tests, strict library/test Clippy, scoped rustfmt and diff checks. The
+original four dirty math files remain byte-identical. That user-modified
+Cargo/crossover profile was preserved, not claimed tested.
+
+Receipt: `/Users/pierre/a04-current-math-main-integration.json`, SHA-256
+`2ea8d09a8e40898aa0c23233998bc42d41560af740a9ea4ad9573d39ee7cb86f`.
+The retained test output starts after initial compilation and contains a
+truncated intermediate listing; its complete terminal summary records
+114 passed, zero failed. The Clippy log is retained separately. These
+primitives do not yet constitute a production ESS estimator.
+
+### A03/A12 capture compatibility fix integrated (2026-10-04)
+
+Capture main `0513842a325e743dfc2387405da0389072291b8d` initializes the
+optional `RecordingConfiguration.capture_handoff_file` field to `None`.
+This one-line compatibility change is based on `248d1f7`; it adds no UI
+feature. The clean isolated capture profile with AutoEQ `650fc66d` and math
+`bc3afa2` passes a locked offline library check and all 215 library tests.
+Its private lock was refreshed; capture explicitly ignores Cargo.lock, so
+no lock was committed. The original six dirty source files and ignored lock
+remain byte-identical. This does not establish that the user's dirty profile
+builds with its preserved lock.
+
+Receipt: `/Users/pierre/a12-capture-compatibility-main-integration.json`,
+SHA-256 `8620aa85e9f9b70986bd9ad9c0645afa62a14b49b1037d9df9e5b5c835b2b39d`.
+
+### A12 callback attribution prepared, external assets still open (2026-10-04)
+
+The isolated DAW feature commit
+`f94d167ddee0dcef04e687b54b5c05aa5a9322f7` follows a separate prerequisite
+commit containing six user-staged LabNull files. It has not been merged
+into the original dirty DAW checkout. The current private dependency profile
+passes graph-attribution tests 2/2, LabNull callback tests 8/8, decoder
+flush/ack 1/1, strict engine Clippy and scoped formatting. Root independently
+rehashed 27 source/log artifacts and verified the clean committed branch.
+
+The attribution identifies the acknowledged graph descriptor and host
+generation, checks audio format/latency, marks crossfades as transitions and
+invalidates binding after live mutation. It does not identify loaded external
+asset/plugin bytes, attest CPAL/device delivery or prove measured playback.
+Those A12 requirements remain open. No current-profile full suite pass is
+claimed; earlier absent-fixture failures remain recorded.
+
+Root review: `/Users/pierre/a12-root-integration-review-20261004.json`,
+SHA-256 `b3828c9ef1cce8444046560aff399ada6b636f55e91f275ca62b9ca3b033761a`.
+
+### A04 identical-repeat input-design diagnostic (2026-10-04)
+
+A separate input-only synthetic diagnostic compares the original five distinct
+run05 sweeps with five copies of the first sweep. Both finite designs have
+14,795 rows and 1,600 columns, use the original order scaling and convolution
+formula, and load no capture targets. The numerical SVD-of-R condition
+estimates are `3.92e7` for the original design and `1.70e16` for identical
+repeats. This supports a repeated-input rejection case; repeated takes must
+not inherit the distinct-sweep fixture's identification evidence. These are
+floating-point diagnostic estimates, not certified rank/condition bounds or
+a result for the actual production/hardware stimulus.
+
+The owned child exits zero in 9.38 seconds, with exact peak RSS 675,545,088
+bytes, below the original 600-second and 1.5 GiB caps. Eight frozen source/input
+hashes match before and after. The initial attempt stopped at a mistaken
+whole-file hash pin before matrix construction; its failure is retained.
+
+Report: `/Users/pierre/a04-repeat-design-diagnostic-result-attempt02-20261004.json`,
+SHA-256 `7eeecf5613c7a9f7e28717497ca6d6648496c319f0dda1fae53f9a8bfd4d6d3c`.
+Receipt: `/Users/pierre/a04-repeat-design-diagnostic-receipt-attempt02-20261004.json`,
+SHA-256 `0c7a695c3f0447dd7b6213e194b44e58d01e9e6657c21f087f4ca7df581e6328`.

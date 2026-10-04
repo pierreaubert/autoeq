@@ -3701,3 +3701,41 @@ separate work. No user prerequisites, locks or public branches were published.
 
 Root playback review: `/Users/pierre/a12-finalmatched-current-profile-root-review-20261004.json`,
 SHA-256 `8a284094fc64a818f3681a345131879a58f4d6d5476d357b03d793d69d5db402`.
+
+
+### A04 cross-order preflight; A11 archive recovery; A12 refusal regression (2026-10-04)
+
+The new cross-order frequency-block coordinate map passes four focused tests
+and strict example Clippy. Root reviewed the full source. The map includes a
+global scalar normalization and uses RMS order scales; the original-fixture
+harness must record their relation to the baseline. Sampled frequency blocks
+are an approximate preconditioner, with no finite-design rank or condition
+certificate. A complete outer allocation ledger and original-shape preflight
+are being prepared; no original-fixture fit or long-support run has started.
+Root review: `/Users/pierre/a04-cross-order-tiny-root-review-20261004.json`.
+
+The full REW transport derivative correctly refuses the changed executable and
+producer checkout before launch. The exact historical executable was recovered
+from the build archive. Root independently verifies all 128 inventoried files
+using five explicit path relocations, the clean historical guard commit, and
+the expected 29-path producer-to-guard delta. The next derivative must bind the
+successful readiness-v2 implementation and pass deterministic transport and
+cleanup mocks. A full numerical rerun remains pending.
+Root archive review: `/Users/pierre/rew-a11-archive-inputs-root-review-20261004.json`.
+
+A standalone public-API adapter harness reproduces a refusal gap: lowering
+removes a nested raw model-path parameter before asset validation, allowing
+that input. The resulting playback graph does not retain the reference.
+Corrected tests pass legacy refusal, invalid-rate refusal/valid gain acceptance,
+and the writer's empty-graph refusal; the nested-reference regression fails.
+Strict harness Clippy passes, and all 713 resolved packages remain unchanged.
+Pre-lowering validation is being added in the isolated integration candidate;
+the previously validated frozen profile stays unchanged.
+Root result: `/Users/pierre/a12-public-adapter-refusal-harness-20261004/evidence/root-refusal-result-v3.json`.
+
+The clean playback build initially selects SOTF's older nnnoiseless fork, which
+lacks APIs already present in clean DAW. The candidate now isolates the existing
+one-line dependency route to DAW. The unrelated staged FFT vendor migration is
+excluded. Clean-candidate compilation and backend feature landing remain pending;
+original user worktrees and staging are preserved.
+Root routing review: `/Users/pierre/a12-vendor-routing-root-review-20261004.json`.

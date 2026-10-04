@@ -3594,3 +3594,37 @@ The local fast-forward preserves the four existing user edits byte-for-byte.
 No public push occurred. Public BO/NSGA publication and AutoEQ public dependency
 pins remain pending. These library gates do not establish recovery of an entire
 multi-stage RoomEQ job, a passing full optimizer matrix, or Windows runtime.
+
+
+### A04 structured estimator review and A12 frozen source verification (2026-10-04)
+
+The separate structured estimator remains an example-only numerical candidate.
+Root review found and corrected four boundary issues before the original fixture
+trial: checked visible-vector sizing now precedes FFT planning, the composed
+operator retains a 256 MiB reserve, zero spectral floors are refused, and scaling
+stops after the supported fifth power. The revised candidate passes **five tiny
+tests** against dense/direct-convolution/DFT oracles and strict Clippy. Root
+verifies the source and log hashes. One original-fixture trial is authorized with
+unchanged numerical thresholds, a 600-second deadline and a 1.5 GiB RSS limit;
+no original-fixture or long-support result is accepted at this checkpoint.
+
+The diagonal-by-order map preserves the exact least-squares objective through
+`B = A D^-1 M`, with physical taps `D^-1 M z`. It does not certify finite-design
+rank/condition, noise/support bounds or hardware measurement validity.
+Root review: `/Users/pierre/a04-structured-prototype-root-reviewed-v2-20261004.json`,
+SHA-256 `adedbb4dc7a53c1137dfcd2b6db396c38830957dc2193b33e66d2996a22fb107`.
+
+The private frozen playback candidate passes **eight DAW frozen-identity tests**,
+the public SOTF bundle integration test, and strict production Clippy in both
+workspaces. Root independently rehashes **94,721 source/dependency entries** with
+zero mismatches. Git source trees, external package trees and combined package
+arrays match before/after. Raw Cargo metadata in each workspace is byte-identical;
+the combined catalog difference consists only of recorded before/after metadata
+filenames. Integration into the original checkouts remains pending because it
+must preserve staged DAW prerequisites and the user's existing SOTF graph changes.
+These tests do not establish hardware playback or listening qualification.
+
+Root source receipt: `/Users/pierre/a12-assets-combined-source-root-rehash-20261004.json`,
+SHA-256 `1289a91207c03a8ee360cc1f6e78d94f7be41bae31c04b02cbfb6833068451ae`.
+Root metadata receipt: `/Users/pierre/a12-assets-metadata-root-review-20261004.json`,
+SHA-256 `dd18fb625ad1fc1d85697e29af8ae86f9bdb9d410ff4c058d2d43d293cd34014`.

@@ -12,7 +12,6 @@ use std::process;
 #[command(author, about, long_about = None)]
 pub struct Args {
     /// Print the installed program's package version and exit.
-    /// The root-package launcher handles this before command execution.
     #[arg(short = 'V', long, default_value_t = false)]
     pub program_version: bool,
 

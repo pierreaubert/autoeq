@@ -3661,3 +3661,43 @@ and focused backend gates.
 Root preservation review:
 `/Users/pierre/a12-current-profile-original-root-preservation-review-v2-20261004.json`,
 SHA-256 `2dd6e4f2201cae584f227a8025f48d3ef3f516609003502f4df548d097791c88`.
+
+
+### A04 structured trial failure; A11 persistent readiness; A12 matched profile (2026-10-04)
+
+The input-only diagonal structured map completes the original four-case fixture
+trial in 120.36 seconds, with exact fit-child peak RSS 7,389,184 bytes. All four
+fits reach the unchanged 10,000-iteration limit. Training and held-out residual
+maxima are 8.7868e-7 and 9.0208e-7, failing the fixed 1e-8 gate. The frozen tone
+scorer also refuses H5 phase and expected-zero leakage comparisons. Aggregate
+tone maxima exclude refused comparisons and cannot establish that all tone gates
+passed. Source/fixture inventories match; all outputs and failures remain retained.
+Qualification remains unavailable; the next candidate uses cross-order frequency
+blocks with the exact objective and original solver/scoring settings.
+
+Root trial review: `/Users/pierre/a04-structured-original-trial-root-result-review-20261004.json`,
+SHA-256 `5e82e216095bf4418c9e37007ae1fe946c43cd2c507aa840d77f076c7dfd83eb`.
+
+A separate no-audio REW diagnostic passes the frozen health contract after five
+readiness attempts, then 125 empty measurement GETs and owner-verified Shutdown
+202 on the same HTTP/1.1 socket. The owned process exits zero without forced
+signals or descendants. The original five-second raw-bind gate passes in 0.02068
+seconds. All 138 responses share the socket; retained health/transient bodies and
+logs are independently rehashed. Runtime, source and user-path identities match.
+This diagnostic does not establish the cause of the original run06 failure or
+repeat its numerical filter matrix. A full numerical witness using this transport
+is being prepared; original failures remain preserved.
+
+Root lifecycle review: `/Users/pierre/rew-a11-readiness03-v2-root-result-review-20261004.json`,
+SHA-256 `d79b770d57d9572cce3a4b76d20bf8d17eb8cbdb2df6977c08df21f4b788d0a8`.
+
+Current-profile playback passes the source-removal integration test and strict
+package Clippy after a separate two-line unused-reexport cleanup. Matched gate
+inventories contain 1,301 packages, 83,559 rehashed files, 256 checked symlinks and
+76 expected absent tracked paths, with no differences or mismatches. These gates
+use private copies of current user prerequisites and command-only dependency
+overrides; clean-main dependency qualification and local feature integration remain
+separate work. No user prerequisites, locks or public branches were published.
+
+Root playback review: `/Users/pierre/a12-finalmatched-current-profile-root-review-20261004.json`,
+SHA-256 `8a284094fc64a818f3681a345131879a58f4d6d5476d357b03d793d69d5db402`.

@@ -75,6 +75,11 @@ impl FrozenBundleResource {
     pub fn bytes(&self) -> &[u8] {
         &self.bytes
     }
+
+    /// Clone the immutable captured-byte owner without reopening its source path.
+    pub fn bytes_arc(&self) -> Arc<[u8]> {
+        Arc::clone(&self.bytes)
+    }
 }
 
 /// A loaded graph with immutable identities and convolution bytes from one verified snapshot.

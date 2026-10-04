@@ -432,6 +432,7 @@ mod tests {
             for (candidate_gain, max_boost_db, expected_db) in
                 [(-6.0, None, 0.0), (3.0, None, 0.0), (-6.0, Some(3.0), -3.0)]
             {
+                let output_dir = tempfile::tempdir().unwrap();
                 let original = small_curve_no_phase();
                 let mut residual = original.clone();
                 residual.spl += candidate_gain;
@@ -454,12 +455,58 @@ mod tests {
                     &config,
                     None,
                     sample_rate,
-                    None,
+                    Some(output_dir.path()),
                     None,
                 )
                 .unwrap();
+                let wav_path = output_dir.path().join(&generated.filename);
+                assert!(wav_path.is_file(), "generated FIR sidecar must exist");
+
+                // Replay the serialized convolution plugin through the same
+                // sidecar loader used for RoomEQ response evaluation.
+                let mut chain = crate::test_fixtures::single_channel_room_result("L")
+                    .channels
+                    .remove("L")
+                    .unwrap();
+                chain.plugins = vec![roomeq_engine::output::create_convolution_plugin(
+                    &generated.filename,
+                )];
+                let serialized_chain = serde_json::to_vec(&chain).unwrap();
+                let serialized_chain: roomeq_model::ChannelDspChain =
+                    serde_json::from_slice(&serialized_chain).unwrap();
+                let replayed = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+                    &serialized_chain,
+                    &residual,
+                    sample_rate,
+                    output_dir.path(),
+                )
+                .unwrap();
+
+                // Decode the exact float32 WAV and calculate its DTFT directly,
+                // independent of RealizedDsp's response calculation.
+                let wav_reader = hound::WavReader::open(&wav_path).unwrap();
+                let wav_spec = wav_reader.spec();
+                assert_eq!(wav_spec.channels, 1, "generated FIR WAV must be mono");
+                assert_eq!(
+                    wav_spec.sample_rate, sample_rate as u32,
+                    "generated FIR WAV sample rate"
+                );
+                assert_eq!(wav_spec.bits_per_sample, 32);
+                assert_eq!(wav_spec.sample_format, hound::SampleFormat::Float);
+                let decoded_samples = wav_reader
+                    .into_samples::<f32>()
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .unwrap();
+                assert_eq!(decoded_samples.len(), generated.coeffs.len());
+                for (&decoded, &coefficient) in decoded_samples.iter().zip(&generated.coeffs) {
+                    assert_eq!(decoded, coefficient as f32);
+                }
+                let decoded_taps = decoded_samples
+                    .into_iter()
+                    .map(f64::from)
+                    .collect::<Vec<_>>();
                 // Independent DTFT: the residual's known constant gain and the
-                // delivered FIR should sum to unity over the interior band.
+                // delivered FIR should sum to the expected level over the band.
                 for bin in 0..257 {
                     let frequency = 500.0 * (10.0_f64).powf(bin as f64 / 256.0);
                     let (real, imaginary) = generated.coeffs.iter().enumerate().fold(
@@ -479,6 +526,59 @@ mod tests {
                         "rate={sample_rate} gain={candidate_gain} f={frequency} delivered={delivered_db}"
                     );
                 }
+                for (index, &frequency) in original.freq.iter().enumerate() {
+                    if !(500.0..=5_000.0).contains(&frequency) {
+                        continue;
+                    }
+                    let (real, imaginary) = decoded_taps.iter().enumerate().fold(
+                        (0.0, 0.0),
+                        |(real, imaginary), (tap, coefficient)| {
+                            let phase =
+                                -std::f64::consts::TAU * frequency * tap as f64 / sample_rate;
+                            (
+                                real + coefficient * phase.cos(),
+                                imaginary + coefficient * phase.sin(),
+                            )
+                        },
+                    );
+                    let independent_db = residual.spl[index] + 20.0 * real.hypot(imaginary).log10();
+                    assert!(
+                        (replayed.spl[index] - independent_db).abs() < 1e-4,
+                        "serialized replay differs from decoded-WAV DTFT: rate={sample_rate} f={frequency} replay={} direct={independent_db}",
+                        replayed.spl[index]
+                    );
+                    assert!(
+                        (independent_db - (original.spl[index] + expected_db)).abs() < 0.05,
+                        "rate={sample_rate} gain={candidate_gain} f={frequency} delivered={independent_db}"
+                    );
+                }
+
+                let mismatched_rate = sample_rate + 1.0;
+                let rate_error = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+                    &serialized_chain,
+                    &residual,
+                    mismatched_rate,
+                    output_dir.path(),
+                )
+                .unwrap_err();
+                assert!(
+                    rate_error.to_string().contains("sample rate"),
+                    "rate mismatch should be rejected as a sample-rate error: {rate_error}"
+                );
+                std::fs::remove_file(&wav_path).unwrap();
+                let missing_error = crate::ctc::apply_channel_dsp_chain_to_curve_with_sidecar_dir(
+                    &serialized_chain,
+                    &residual,
+                    sample_rate,
+                    output_dir.path(),
+                )
+                .unwrap_err();
+                assert!(
+                    missing_error
+                        .to_string()
+                        .contains("RoomEQ convolution IR WAV"),
+                    "missing sidecar should identify the convolution WAV: {missing_error}"
+                );
             }
         }
     }

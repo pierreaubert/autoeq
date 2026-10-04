@@ -3157,3 +3157,26 @@ analysis, or establish physical distortion. The commits remain on an isolated
 local math branch and have not been published or integrated into product
 main. The production estimator, calibrated acquisition and wider ESS
 acceptance remain open; the prior run05 diagnostic scope is unchanged.
+
+### A04 long-recording operator resource check (2026-10-04)
+
+Isolated test-only math commit `b96547c` extends the operator witness to a
+ten-second 48 kHz sweep and one-second kernels for all five polynomial orders.
+The 1,048,576-sample FFT retains signed taps near each kernel's end. Independent
+time-domain forward error is 1.67e-16 and the adjoint dot error is 1.18e-12,
+within the unchanged 2e-13 and 1e-10 limits. All four current operator tests
+and strict library/test Clippy pass; production code remains unchanged from
+the earlier 620-test DSP suite.
+
+The exact child exits zero and is reaped. Peak RSS is 198,967,296 bytes against
+the unchanged 1,610,612,736-byte cap. The runner's monotonic elapsed time and
+Darwin `time -l` real time differ; both are retained, and the larger 352.28
+seconds passes the unchanged 600-second gate. Operator vector storage is
+139,977,728 bytes against an explicit 256 MiB vector limit; this differs from
+whole-process RSS, which also includes FFT plans and test/oracle storage.
+
+Source, binary, runner and raw-log hashes are bound in
+`/Users/pierre/a04-polynomial-operator-long-final.json` and its linked execution
+and independent review receipts. This is a numerical/resource witness for the
+operator. Scalable conditioning, fitted-estimator equivalence, capture wiring,
+calibrated hardware and broader harmonic-support validity remain open.

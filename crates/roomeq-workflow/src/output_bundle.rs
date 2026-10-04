@@ -11,15 +11,17 @@
 //! waterfall/wavelet/early-late grids, deployed curves) are extracted to
 //! CSV/JSON files in the assets directory and stripped from the saved JSON.
 //! Publication keeps the canonical support-directory path for existing
-//! consumers. Concurrent readers can see a brief missing-directory
-//! window during the swap. The Rust loader recovers from the durable
-//! journal; the Python loader refuses to return a partial result while a
-//! journal remains. Non-Unix directory-entry flushes are best-effort.
+//! consumers. Public readers, recovery, and writers share a parent-directory
+//! advisory lock across the directory swap. Different bundles in one parent
+//! intentionally serialize, and the sibling lock file is persistent. The Python loader refuses to
+//! return a partial result while a journal remains. Non-Unix directory-entry
+//! flushes are best-effort.
 //! The Python viewer (`scripts/src/loaders.py`) re-injects them from the
 //! sibling directory, so plots are unchanged while `dsp.json` stays small.
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -714,6 +716,7 @@ fn extract_measurements_to_assets_with_index_writer(
 pub const ARTIFACT_BUNDLE_MANIFEST_FILENAME: &str = "artifact_bundle_manifest.json";
 
 const BUNDLE_TRANSACTION_SUFFIX: &str = ".autoeq-transaction.json";
+const BUNDLE_DIRECTORY_LOCK_FILE_NAME: &str = ".autoeq-bundle-directory.lock";
 const BUNDLE_MANIFEST_SCHEMA_VERSION: u32 = 1;
 // Native graphs may contain full optimization evidence, so allow substantially
 // more data than sidecars while still bounding reads from untrusted files.
@@ -743,6 +746,22 @@ struct BundleManifest {
     generation: String,
     graph_sha256: String,
     files: BTreeMap<String, BundleFileRecord>,
+}
+
+/// Stable content identity for the native graph and its optional integrity manifest.
+///
+/// The manifest digest omits only A11's transaction-local generation field.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct BundleContentIdentity {
+    pub(crate) graph_sha256: String,
+    pub(crate) manifest_content_sha256: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum BundleDestinationExpectation {
+    Any,
+    Matches(Option<BundleContentIdentity>),
 }
 
 type CapturedBundleFiles = BTreeMap<String, Arc<[u8]>>;
@@ -788,6 +807,124 @@ fn bundle_transaction_path(output_path: &Path) -> PathBuf {
         .unwrap_or_else(|| std::ffi::OsString::from("dsp.json"));
     file_name.push(BUNDLE_TRANSACTION_SUFFIX);
     output_path.with_file_name(file_name)
+}
+
+fn canonical_output_path_for_lock(output_path: &Path) -> io::Result<PathBuf> {
+    let absolute = if output_path.is_absolute() {
+        output_path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(output_path)
+    };
+    // Resolve the parent as the OS does before deriving a lock identity.
+    // Lexically popping `..` first is incorrect when an earlier component is
+    // a symlink: `a/link/../room.json` can name `b/room.json`, not `a/room.json`.
+    let file_name = absolute
+        .file_name()
+        .ok_or_else(|| io_invalid("native output path must include a file name"))?
+        .to_os_string();
+    if file_name == std::ffi::OsStr::new(BUNDLE_DIRECTORY_LOCK_FILE_NAME) {
+        return Err(io_invalid(
+            "native output path is reserved for the bundle directory lock",
+        ));
+    }
+    let parent = absolute
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(parent)?;
+    let canonical_parent = std::fs::canonicalize(parent)?;
+    let requested_output = canonical_parent.join(file_name);
+    // When the output exists, canonicalize its spelling where the platform
+    // exposes the canonical directory entry name. Parent locking below still
+    // serializes different root names in the same directory.
+    let canonical_output = match std::fs::symlink_metadata(&requested_output) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(io_invalid("native output root cannot be a symbolic link"));
+        }
+        Ok(_) => std::fs::canonicalize(&requested_output)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => requested_output,
+        Err(error) => return Err(error),
+    };
+    if std::fs::symlink_metadata(&canonical_output)
+        .is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        return Err(io_invalid("native output root cannot be a symbolic link"));
+    }
+    Ok(canonical_output)
+}
+
+/// Lock all parent directories used by the requested native output paths.
+///
+/// Lock files are persistent and must not be removed while held: unlinking a
+/// lock file could let another process lock a different inode for the same
+/// directory. Parent-level locking intentionally serializes different bundle
+/// roots in one directory. It also makes case-insensitive basename aliases
+/// and concurrent creation of a not-yet-existing destination share a lock.
+/// The kernel releases every advisory lock if its process exits.
+fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
+    let mut canonical_outputs = Vec::with_capacity(paths.len());
+    let mut directories = Vec::new();
+    for output_path in paths {
+        let canonical_output = canonical_output_path_for_lock(output_path)?;
+        let parent = canonical_output
+            .parent()
+            .ok_or_else(|| io_invalid("canonical native output has no parent"))?;
+        directories.push(parent.to_path_buf());
+        canonical_outputs.push(canonical_output);
+    }
+    directories.sort();
+    directories.dedup();
+
+    let mut locks = Vec::with_capacity(directories.len());
+    let mut lock_identities = Vec::<same_file::Handle>::with_capacity(directories.len());
+    for parent in directories {
+        let lock_path = parent.join(BUNDLE_DIRECTORY_LOCK_FILE_NAME);
+        match std::fs::symlink_metadata(&lock_path) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+                return Err(io_invalid("native bundle lock must be a regular file"));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&lock_path)?;
+        if !lock.metadata()?.is_file() {
+            return Err(io_invalid("native bundle lock must be a regular file"));
+        }
+        let identity = same_file::Handle::from_file(lock.try_clone()?)?;
+        for output_path in &canonical_outputs {
+            match same_file::Handle::from_path(output_path) {
+                Ok(output_identity) if output_identity == identity => {
+                    return Err(io_invalid(
+                        "native output path aliases the reserved bundle directory lock",
+                    ));
+                }
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+        if lock_identities.iter().any(|existing| existing == &identity) {
+            continue;
+        }
+        lock.try_lock().map_err(|error| {
+            io::Error::new(
+                io::ErrorKind::WouldBlock,
+                format!(
+                    "native output bundle is already being read, recovered, or published ({}): {error}",
+                    lock_path.display()
+                ),
+            )
+        })?;
+        lock_identities.push(identity);
+        locks.push(lock);
+    }
+    Ok(locks)
 }
 
 fn io_invalid(message: impl Into<String>) -> io::Error {
@@ -1963,6 +2100,11 @@ fn recover_pending_bundle(output_path: &Path) -> io::Result<()> {
 /// The native bundle is resolved first because its root digest decides whether
 /// the external package should be rolled back or completed.
 pub fn recover_output_bundle_transactions(output_path: &Path) -> io::Result<()> {
+    let _locks = lock_output_bundle_paths(&[output_path])?;
+    recover_output_bundle_transactions_locked(output_path)
+}
+
+fn recover_output_bundle_transactions_locked(output_path: &Path) -> io::Result<()> {
     recover_pending_bundle(output_path)?;
     crate::export::recover_pending_external_export_transaction(output_path)
         .map_err(|error| io_invalid(format!("external export recovery failed: {error:#}")))
@@ -1980,18 +2122,120 @@ pub fn native_output_sha256(output_path: &Path) -> io::Result<Option<String>> {
     Ok(Some(sha256_hex(&bytes)))
 }
 
+/// Hash validated manifest content independently of its A11 transaction generation.
+///
+/// A11 creates a new generation identifier when it republishes an otherwise
+/// identical graph and support tree. Recovery compares this canonical content
+/// digest while A11 remains responsible for validating the actual generation.
+///
+/// # Errors
+/// Returns an error when the graph, manifest, or manifested support tree is
+/// malformed, inconsistent, oversized, or changes while being inspected.
+pub(crate) fn capture_bundle_content_identity(
+    output_path: &Path,
+    require_manifest: bool,
+) -> io::Result<Option<BundleContentIdentity>> {
+    let _locks = lock_output_bundle_paths(&[output_path])?;
+    recover_output_bundle_transactions_locked(output_path)?;
+    capture_bundle_content_identity_locked(output_path, require_manifest)
+}
+
+fn capture_bundle_content_identity_locked(
+    output_path: &Path,
+    require_manifest: bool,
+) -> io::Result<Option<BundleContentIdentity>> {
+    let graph_bytes =
+        match read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph") {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
+        };
+    let graph_sha256 = sha256_hex(&graph_bytes);
+    let assets = assets_dir_for(output_path);
+    let manifest_path = assets.join(ARTIFACT_BUNDLE_MANIFEST_FILENAME);
+    let manifest_bytes = match read_bounded_file(
+        &manifest_path,
+        MAX_BUNDLE_MANIFEST_BYTES,
+        "artifact bundle manifest",
+    ) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == io::ErrorKind::NotFound && !require_manifest => {
+            if read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph")?
+                != graph_bytes
+            {
+                return Err(io_invalid(
+                    "native output graph changed during identity capture",
+                ));
+            }
+            return Ok(Some(BundleContentIdentity {
+                graph_sha256,
+                manifest_content_sha256: None,
+            }));
+        }
+        Err(error) => return Err(error),
+    };
+    let manifest: BundleManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|error| io_invalid(format!("invalid artifact bundle manifest: {error}")))?;
+    let checked_manifest = load_manifest(&assets)?
+        .ok_or_else(|| io_invalid("artifact bundle manifest disappeared during validation"))?;
+    if checked_manifest != manifest {
+        return Err(io_invalid(
+            "artifact bundle manifest changed during validation",
+        ));
+    }
+    if manifest.graph_sha256 != graph_sha256 {
+        return Err(io_invalid(
+            "native output graph does not match artifact bundle manifest",
+        ));
+    }
+    verify_bundle_tree_matches_manifest(&assets, &manifest)?;
+
+    if require_manifest {
+        load_output_bundle_frozen_snapshot(output_path, |_| Ok(()), |_| Ok(()))
+            .map_err(|error| io_invalid(format!("manifested bundle validation failed: {error}")))?;
+    }
+
+    let mut content_identity = manifest;
+    // This identifier is assigned by each A11 publication transaction and is
+    // intentionally excluded from recovery's content identity.
+    content_identity.generation.clear();
+    let canonical_bytes = serde_json::to_vec(&content_identity).map_err(io::Error::other)?;
+
+    if read_bounded_file(
+        &manifest_path,
+        MAX_BUNDLE_MANIFEST_BYTES,
+        "artifact bundle manifest",
+    )? != manifest_bytes
+        || read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph")?
+            != graph_bytes
+    {
+        return Err(io_invalid(
+            "native output graph or artifact manifest changed during identity capture",
+        ));
+    }
+    Ok(Some(BundleContentIdentity {
+        graph_sha256,
+        manifest_content_sha256: Some(sha256_hex(&canonical_bytes)),
+    }))
+}
+
 /// Save a DSP output as a small JSON plus sibling assets directory.
 ///
 /// Publication uses unique staging, a durable journal, and atomic root JSON
 /// replacement. Interrupted writes are recovered before a native loader
 /// returns. The root JSON remains the binding referenced by existing
 /// consumers; support assets are swapped at the canonical stem-files path.
-/// Concurrent readers are not isolated from the short directory-swap window.
+/// Readers and writers whose roots share a canonical parent directory share
+/// an advisory lock, so loaders do not observe the short directory-swap
+/// window. This intentionally serializes separate bundles in that directory.
+/// The persistent sibling file `.autoeq-bundle-directory.lock` must not be
+/// removed while the process holds the lock.
 pub fn save_output_bundle(
     output: &mut DspGraph,
     output_path: &Path,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    recover_output_bundle_transactions(output_path)?;
+    let _locks = lock_output_bundle_paths(&[output_path])?;
+    recover_output_bundle_transactions_locked(output_path)?;
     save_output_bundle_using(
         output,
         output_path,
@@ -2041,7 +2285,8 @@ pub fn save_output_bundle_with_resources_and_prepare(
     source_assets: &Path,
     prepare: &mut impl FnMut(&mut DspGraph, &Path) -> Result<(), Box<dyn std::error::Error>>,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    recover_output_bundle_transactions(output_path)?;
+    let _locks = lock_output_bundle_paths(&[output_path])?;
+    recover_output_bundle_transactions_locked(output_path)?;
     let mut rename = |from: &Path, to: &Path| std::fs::rename(from, to);
     let mut write_root = |path: &Path, bytes: &[u8]| write_file_atomically(path, bytes);
     let mut write_journal = |path: &Path, bytes: &[u8]| write_file_atomically(path, bytes);
@@ -2076,9 +2321,35 @@ pub fn publish_output_bundle_from(
     source_output_path: &Path,
     destination_output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    recover_output_bundle_transactions(source_output_path)?;
-    recover_output_bundle_transactions(destination_output_path)?;
-    publish_output_bundle_from_with_hook(source_output_path, destination_output_path, |_, _| Ok(()))
+    let _locks = lock_output_bundle_paths(&[source_output_path, destination_output_path])?;
+    recover_output_bundle_transactions_locked(source_output_path)?;
+    recover_output_bundle_transactions_locked(destination_output_path)?;
+    publish_output_bundle_from_with_expectation(
+        source_output_path,
+        destination_output_path,
+        |_, _| Ok(()),
+        BundleDestinationExpectation::Any,
+    )
+}
+
+/// Publish a staged bundle only if the canonical destination still has the
+/// recorded prior identity. This comparison and the A11 transaction run under
+/// one canonical-path lock, so another A11 writer cannot replace the prior
+/// output between validation and publication.
+pub(crate) fn publish_output_bundle_from_if_previous(
+    source_output_path: &Path,
+    destination_output_path: &Path,
+    expected_previous: Option<BundleContentIdentity>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let _locks = lock_output_bundle_paths(&[source_output_path, destination_output_path])?;
+    recover_output_bundle_transactions_locked(source_output_path)?;
+    recover_output_bundle_transactions_locked(destination_output_path)?;
+    publish_output_bundle_from_with_expectation(
+        source_output_path,
+        destination_output_path,
+        |_, _| Ok(()),
+        BundleDestinationExpectation::Matches(expected_previous),
+    )
 }
 
 /// Publish the native half of a coupled transaction without first resolving
@@ -2091,23 +2362,45 @@ pub fn publish_output_bundle_from_during_external_transaction_with_source_recove
     source_output_path: &Path,
     destination_output_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    recover_output_bundle_transactions(source_output_path)?;
+    let _locks = lock_output_bundle_paths(&[source_output_path, destination_output_path])?;
+    recover_output_bundle_transactions_locked(source_output_path)?;
     recover_pending_bundle(destination_output_path)?;
     crate::export::validate_pending_external_export_source(
         destination_output_path,
         source_output_path,
     )?;
-    publish_output_bundle_from_with_hook(source_output_path, destination_output_path, |_, _| Ok(()))
+    publish_output_bundle_from_with_expectation(
+        source_output_path,
+        destination_output_path,
+        |_, _| Ok(()),
+        BundleDestinationExpectation::Any,
+    )
 }
 
+#[cfg(test)]
 fn publish_output_bundle_from_with_hook(
     source_output_path: &Path,
     destination_output_path: &Path,
     after_source_validation: impl FnOnce(&Path, &Path) -> io::Result<()>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    publish_output_bundle_from_with_expectation(
+        source_output_path,
+        destination_output_path,
+        after_source_validation,
+        BundleDestinationExpectation::Any,
+    )
+}
+
+fn publish_output_bundle_from_with_expectation(
+    source_output_path: &Path,
+    destination_output_path: &Path,
+    after_source_validation: impl FnOnce(&Path, &Path) -> io::Result<()>,
+    destination_expectation: BundleDestinationExpectation,
+) -> Result<(), Box<dyn std::error::Error>> {
     recover_pending_bundle(source_output_path)?;
     if source_output_path == destination_output_path {
-        let _ = load_output_bundle(source_output_path)?;
+        verify_destination_expectation(destination_output_path, &destination_expectation)?;
+        let _ = load_output_bundle_frozen_snapshot(source_output_path, |_| Ok(()), |_| Ok(()))?;
         return Ok(());
     }
     let root_bytes = read_bounded_file(
@@ -2136,7 +2429,7 @@ fn publish_output_bundle_from_with_hook(
         return Err(io_invalid("source graph does not match its artifact bundle manifest").into());
     }
     let graph: DspGraph = serde_json::from_slice(&root_bytes)?;
-    let _ = load_output_bundle(source_output_path)?;
+    let _ = load_output_bundle_frozen_snapshot(source_output_path, |_| Ok(()), |_| Ok(()))?;
     if read_bounded_file(
         source_output_path,
         MAX_NATIVE_GRAPH_BYTES,
@@ -2170,6 +2463,7 @@ fn publish_output_bundle_from_with_hook(
     verify_bundle_tree_matches_manifest(&source_assets, &source_manifest)?;
 
     recover_pending_bundle(destination_output_path)?;
+    verify_destination_expectation(destination_output_path, &destination_expectation)?;
     let parent = destination_output_path
         .parent()
         .filter(|path| !path.as_os_str().is_empty())
@@ -2226,6 +2520,7 @@ fn publish_output_bundle_from_with_hook(
             had_assets,
         },
         &mut hooks,
+        &destination_expectation,
     )?;
     Ok(())
 }
@@ -2397,6 +2692,7 @@ fn save_output_bundle_using_hooks_and_assets(
             had_assets,
         },
         hooks,
+        &BundleDestinationExpectation::Any,
     )?;
     *output = candidate;
     Ok(files)
@@ -2405,6 +2701,7 @@ fn save_output_bundle_using_hooks_and_assets(
 fn publish_prepared_bundle(
     prepared: PreparedBundle<'_>,
     hooks: &mut BundleHooks<'_>,
+    destination_expectation: &BundleDestinationExpectation,
 ) -> io::Result<()> {
     let PreparedBundle {
         output_path,
@@ -2420,6 +2717,7 @@ fn publish_prepared_bundle(
         .unwrap_or_else(|| Path::new("."));
     let assets = assets_dir_for(output_path);
     let transaction_root = staging.root().to_path_buf();
+    verify_destination_expectation(output_path, destination_expectation)?;
     let output_hash = sha256_hex(output_bytes);
     let old_output = match std::fs::read(output_path) {
         Ok(bytes) => Some(bytes),
@@ -2451,6 +2749,10 @@ fn publish_prepared_bundle(
         new_output_sha256: output_hash,
     };
     let journal_bytes = serde_json::to_vec_pretty(&journal)?;
+    // Recheck at A11's durable reservation boundary while the canonical path
+    // lock is still held. A stale RoomEQ recovery attempt must never install
+    // over a bundle that changed after its recovery journal was opened.
+    verify_destination_expectation(output_path, destination_expectation)?;
     let kept_transaction_root = staging.keep();
     let journal_path = bundle_transaction_path(output_path);
     if let Err(error) = (hooks.write_journal)(&journal_path, &journal_bytes) {
@@ -2518,6 +2820,22 @@ fn publish_prepared_bundle(
                 pause_after_test_publication_phase("cleanup_parent_synced");
             }
         }
+    }
+    Ok(())
+}
+
+fn verify_destination_expectation(
+    output_path: &Path,
+    expectation: &BundleDestinationExpectation,
+) -> io::Result<()> {
+    let BundleDestinationExpectation::Matches(expected) = expectation else {
+        return Ok(());
+    };
+    let current = capture_bundle_content_identity_locked(output_path, false)?;
+    if current != *expected {
+        return Err(io_invalid(
+            "native output changed since the recovery publication identity was recorded",
+        ));
     }
     Ok(())
 }
@@ -2905,7 +3223,9 @@ fn load_output_bundle_with_hook(
 /// The returned graph is hydrated for existing report consumers. Its canonical
 /// identity and resource map remain bound to the slim graph bytes before
 /// hydration. Legacy outputs load with [`OutputBundleVerification::LegacyUnverified`]
-/// and do not expose trusted convolution resources.
+/// and do not expose trusted convolution resources. Reads share the persistent
+/// parent-directory lock used by writers; separate bundles in one directory
+/// therefore serialize during capture and publication.
 ///
 /// # Errors
 /// Returns an error when the graph, ledger, evidence, manifest, or any listed
@@ -2921,7 +3241,16 @@ fn load_output_bundle_frozen_with_hooks(
     after_manifest_check: impl FnOnce(&Path) -> io::Result<()>,
     after_snapshot_capture: impl FnOnce(&Path) -> io::Result<()>,
 ) -> Result<FrozenOutputBundle, Box<dyn std::error::Error>> {
-    recover_output_bundle_transactions(output_path)?;
+    let _locks = lock_output_bundle_paths(&[output_path])?;
+    recover_output_bundle_transactions_locked(output_path)?;
+    load_output_bundle_frozen_snapshot(output_path, after_manifest_check, after_snapshot_capture)
+}
+
+fn load_output_bundle_frozen_snapshot(
+    output_path: &Path,
+    after_manifest_check: impl FnOnce(&Path) -> io::Result<()>,
+    after_snapshot_capture: impl FnOnce(&Path) -> io::Result<()>,
+) -> Result<FrozenOutputBundle, Box<dyn std::error::Error>> {
     let root_bytes = read_bounded_file(output_path, MAX_NATIVE_GRAPH_BYTES, "native output graph")?;
     let assets_dir = assets_dir_for(output_path);
     match std::fs::symlink_metadata(&assets_dir) {
@@ -3329,6 +3658,160 @@ mod tests {
     use super::*;
 
     #[test]
+    fn canonical_output_lock_serializes_relative_aliases_and_keeps_lock_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let canonical = dir.path().join("room.json");
+        let relative_alias = dir.path().join("unused/../room.json");
+        let first = lock_output_bundle_paths(&[&canonical]).expect("first path lock");
+        let contention = lock_output_bundle_paths(&[&relative_alias])
+            .expect_err("relative aliases share one canonical destination lock");
+        assert_eq!(contention.kind(), io::ErrorKind::WouldBlock);
+        drop(first);
+
+        let reopened = lock_output_bundle_paths(&[&relative_alias])
+            .expect("lock is reusable after the first owner exits");
+        assert_eq!(reopened.len(), 1);
+        drop(reopened);
+        assert!(
+            std::fs::read_dir(dir.path())
+                .unwrap()
+                .filter_map(Result::ok)
+                .any(|entry| entry.file_name() == BUNDLE_DIRECTORY_LOCK_FILE_NAME)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_lock_resolves_parent_symlinks_before_dotdot() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(b.join("c")).unwrap();
+        symlink(b.join("c"), a.join("link")).expect("create parent symlink");
+
+        // OS path traversal follows the symlink and then applies `..`, so
+        // this alias names b/dsp.json rather than a/dsp.json.
+        let symlink_parent_alias = a.join("link/../dsp.json");
+        let actual_destination = b.join("dsp.json");
+        let first = lock_output_bundle_paths(&[&symlink_parent_alias])
+            .expect("lock symlink-parent destination");
+        let contention = lock_output_bundle_paths(&[&actual_destination])
+            .expect_err("symlink-parent alias resolves to the same output directory");
+        assert_eq!(contention.kind(), io::ErrorKind::WouldBlock);
+        drop(first);
+    }
+
+    #[test]
+    fn output_lock_serializes_distinct_and_case_variant_names_in_one_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let first_path = dir.path().join("DSP.json");
+        let case_variant = dir.path().join("dsp.json");
+        let first = lock_output_bundle_paths(&[&first_path]).expect("first directory lock");
+        let contention = lock_output_bundle_paths(&[&case_variant])
+            .expect_err("one directory lock also covers case aliases and absent roots");
+        assert_eq!(contention.kind(), io::ErrorKind::WouldBlock);
+        drop(first);
+    }
+
+    #[test]
+    fn output_lock_deduplicates_case_aliased_parent_directories() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let upper_parent = dir.path().join("Parent");
+        std::fs::create_dir_all(&upper_parent).expect("create parent");
+        let lower_parent = dir.path().join("parent");
+        let upper_probe = upper_parent.join("identity-probe");
+        let lower_probe = lower_parent.join("identity-probe");
+        std::fs::write(&upper_probe, b"same directory probe").expect("write probe");
+        if std::fs::metadata(&lower_parent).is_err()
+            || !same_file::is_same_file(&upper_probe, &lower_probe).unwrap_or(false)
+        {
+            // Case-sensitive filesystems treat these as separate directories.
+            return;
+        }
+
+        let upper_output = upper_parent.join("first.json");
+        let lower_output = lower_parent.join("second.json");
+        let both_aliases = lock_output_bundle_paths(&[&upper_output, &lower_output])
+            .expect("one operation should deduplicate aliases of one directory");
+        assert_eq!(both_aliases.len(), 1);
+        drop(both_aliases);
+
+        let first = lock_output_bundle_paths(&[&upper_output]).expect("first alias lock");
+        let contention = lock_output_bundle_paths(&[&lower_output])
+            .expect_err("case-aliased parent must contend on one fixed sibling lock");
+        assert_eq!(contention.kind(), io::ErrorKind::WouldBlock);
+        drop(first);
+    }
+
+    #[test]
+    fn bundle_directory_lock_name_is_reserved_from_output_roots() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let reserved = dir.path().join(BUNDLE_DIRECTORY_LOCK_FILE_NAME);
+        let error = canonical_output_path_for_lock(&reserved)
+            .expect_err("output cannot replace the persistent lock inode");
+        assert!(error.to_string().contains("reserved"));
+    }
+
+    #[test]
+    fn output_lock_rejects_case_alias_of_reserved_lock_when_supported() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let room = dir.path().join("room.json");
+        let first = lock_output_bundle_paths(&[&room]).expect("create directory lock");
+        drop(first);
+
+        let reserved = dir.path().join(BUNDLE_DIRECTORY_LOCK_FILE_NAME);
+        let case_alias = dir
+            .path()
+            .join(BUNDLE_DIRECTORY_LOCK_FILE_NAME.to_ascii_uppercase());
+        if !same_file::is_same_file(&reserved, &case_alias).unwrap_or(false) {
+            // Case-sensitive filesystems do not treat this name as an alias.
+            return;
+        }
+
+        let error = lock_output_bundle_paths(&[&case_alias])
+            .expect_err("case alias cannot replace the persistent lock inode");
+        assert!(error.to_string().contains("reserved bundle directory lock"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_lock_rejects_hard_link_alias_of_reserved_lock() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let room = dir.path().join("room.json");
+        let first = lock_output_bundle_paths(&[&room]).expect("create directory lock");
+        drop(first);
+
+        let reserved = dir.path().join(BUNDLE_DIRECTORY_LOCK_FILE_NAME);
+        let hard_link = dir.path().join("hard-linked-room.json");
+        std::fs::hard_link(&reserved, &hard_link).expect("hard-link reserved lock");
+        let error = lock_output_bundle_paths(&[&hard_link])
+            .expect_err("hard link cannot alias the persistent lock inode");
+        assert!(error.to_string().contains("reserved bundle directory lock"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_lock_refuses_a_symlink_lock_file() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let lock_target = dir.path().join("lock-target");
+        std::fs::write(&lock_target, b"not a lock").unwrap();
+        symlink(
+            &lock_target,
+            dir.path().join(BUNDLE_DIRECTORY_LOCK_FILE_NAME),
+        )
+        .expect("create lock symlink");
+        let output = dir.path().join("room.json");
+        let error = lock_output_bundle_paths(&[&output])
+            .expect_err("a symlink must not redirect the advisory lock");
+        assert!(error.to_string().contains("regular file"));
+    }
+
+    #[test]
     fn native_ir_sidecar_preserves_tails_and_time_origin() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("native.csv");
@@ -3374,6 +3857,46 @@ mod tests {
             run_log_path_for(Path::new("/tmp/out/dsp.json")),
             PathBuf::from("/tmp/out/dsp_files/roomeq.log")
         );
+    }
+
+    #[test]
+    fn conditional_publish_refuses_a_destination_changed_after_identity_capture() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path().join("staged/room.json");
+        let destination = dir.path().join("canonical/room.json");
+        let mut candidate = DspGraph::new("1");
+        candidate.add_channel("front_left", Vec::new());
+        save_output_bundle(&mut candidate, &staged).expect("save candidate bundle");
+
+        let mut prior = DspGraph::new("1");
+        prior.add_channel("front_left", Vec::new());
+        save_output_bundle(&mut prior, &destination).expect("save prior bundle");
+        let expected_prior = capture_bundle_content_identity(&destination, true)
+            .expect("capture prior identity")
+            .expect("prior bundle exists");
+
+        let mut changed = DspGraph::new("1");
+        changed.add_channel("front_right", Vec::new());
+        save_output_bundle(&mut changed, &destination).expect("replace prior output");
+        let changed_graph = std::fs::read(&destination).expect("changed canonical graph");
+        let changed_manifest_path =
+            assets_dir_for(&destination).join(ARTIFACT_BUNDLE_MANIFEST_FILENAME);
+        let changed_manifest =
+            std::fs::read(&changed_manifest_path).expect("changed canonical manifest");
+
+        let error =
+            publish_output_bundle_from_if_previous(&staged, &destination, Some(expected_prior))
+                .expect_err("conditional A11 publication must refuse a stale recovery intent");
+        assert!(error.to_string().contains("changed since"));
+        assert_eq!(
+            std::fs::read(&destination).expect("canonical graph remains changed"),
+            changed_graph
+        );
+        assert_eq!(
+            std::fs::read(&changed_manifest_path).expect("canonical manifest remains changed"),
+            changed_manifest
+        );
+        assert!(!bundle_transaction_path(&destination).exists());
     }
 
     #[test]
@@ -4225,6 +4748,7 @@ mod tests {
                         .file_name()
                         .to_string_lossy()
                         .starts_with(".autoeq-bundle-")
+                        && entry.file_type().is_ok_and(|kind| kind.is_dir())
                 })
                 .map(|entry| entry.path())
                 .collect::<Vec<_>>();
@@ -4601,6 +5125,46 @@ mod tests {
             restored.channels["L"].plugins[0].parameters["ir_file"],
             output.channels["L"].plugins[0].parameters["ir_file"]
         );
+    }
+
+    #[test]
+    fn publishing_bundle_to_same_path_validates_without_relocking() {
+        let dir = tempfile::tempdir().expect("output dir");
+        let output_path = dir.path().join("dsp.json");
+        let mut output = DspGraph::new("same-path publication");
+        output.add_channel("L", Vec::new());
+        save_output_bundle(&mut output, &output_path).expect("save bundle");
+        let before = std::fs::read(&output_path).expect("read saved bundle");
+
+        publish_output_bundle_from(&output_path, &output_path)
+            .expect("same-path publication validates as a no-op");
+
+        assert_eq!(std::fs::read(&output_path).unwrap(), before);
+        assert!(load_output_bundle_frozen(&output_path).is_ok());
+    }
+
+    #[test]
+    fn same_path_conditional_publish_still_checks_recorded_identity() {
+        let dir = tempfile::tempdir().expect("output dir");
+        let output_path = dir.path().join("dsp.json");
+        let mut output = DspGraph::new("same-path conditional publication");
+        output.add_channel("L", Vec::new());
+        save_output_bundle(&mut output, &output_path).expect("save bundle");
+        let before = std::fs::read(&output_path).expect("read saved bundle");
+        let mut wrong_identity = capture_bundle_content_identity(&output_path, true)
+            .expect("capture bundle identity")
+            .expect("bundle exists");
+        wrong_identity.graph_sha256 = "0".repeat(64);
+
+        let error = publish_output_bundle_from_if_previous(
+            &output_path,
+            &output_path,
+            Some(wrong_identity),
+        )
+        .expect_err("same-path conditional publish must validate its expected identity");
+
+        assert!(error.to_string().contains("changed since"), "{error}");
+        assert_eq!(std::fs::read(&output_path).unwrap(), before);
     }
 
     #[test]

@@ -4688,6 +4688,7 @@ dependencies = [
  "roomeq-model",
  "roomeq-quality",
  "rustfft",
+ "same-file",
  "schemars",
  "serde",
  "serde_ignored",

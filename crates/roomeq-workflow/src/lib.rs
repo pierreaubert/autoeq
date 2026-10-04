@@ -31,6 +31,7 @@ pub mod output_bundle;
 pub mod pipeline;
 pub mod pruning_audit;
 pub mod room_optimization;
+pub mod room_recovery;
 pub mod sidecar;
 pub mod supporting_source;
 pub mod symmetric_report;
@@ -84,6 +85,7 @@ pub use room_optimization::{
     RoomOptimizationResult, SpeakerOptimizationCallback, SpeakerOptimizationResult, optimize_room,
     optimize_room_with_probe_arrivals, optimize_speaker,
 };
+pub use room_recovery::{RoomRecoveryOpen, RoomRecoverySession, RoomRecoveryStatus};
 pub use roomeq_export::{
     ExportCapability, ExportCapabilityCode, ExportCapabilityReason, ExportFormat,
     query_export_capabilities, query_export_capabilities_at_sample_rate, query_export_capability,

@@ -67,6 +67,7 @@ pub(super) fn process_generic_channels(
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
     frequency_samples: usize,
+    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
 ) -> Result<Vec<SpeakerProcessResult>> {
     let total_speakers = channels_to_process.len();
 
@@ -166,6 +167,7 @@ pub(super) fn process_generic_channels(
             shared_mean_spl,
             probe_arrival_overrides,
             frequency_samples,
+            recovery,
         );
 
         match result {
@@ -274,6 +276,7 @@ pub(super) fn process_speaker_internal(
     shared_mean_spl: Option<f64>,
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     frequency_samples: usize,
+    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
 ) -> Result<MixedModeResult> {
     let output_dir = output_dir.unwrap_or(Path::new("."));
 
@@ -281,19 +284,38 @@ pub(super) fn process_speaker_internal(
         SpeakerConfig::Single(source) => {
             let probe_arrival_ms =
                 probe_arrival_overrides.and_then(|m| m.get(channel_name).copied());
-            process_single_channel_with_frequency_samples(
-                channel_name,
-                source,
-                room_config,
-                sample_rate,
-                output_dir,
-                callback,
-                probe_arrival_ms,
-                shared_mean_spl,
-                frequency_samples,
-            )
+            match recovery {
+                Some(recovery) => crate::channel::process_single_channel_with_recovery(
+                    channel_name,
+                    source,
+                    room_config,
+                    sample_rate,
+                    output_dir,
+                    callback,
+                    probe_arrival_ms,
+                    shared_mean_spl,
+                    frequency_samples,
+                    recovery,
+                ),
+                None => process_single_channel_with_frequency_samples(
+                    channel_name,
+                    source,
+                    room_config,
+                    sample_rate,
+                    output_dir,
+                    callback,
+                    probe_arrival_ms,
+                    shared_mean_spl,
+                    frequency_samples,
+                ),
+            }
         }
         SpeakerConfig::Group(group) => {
+            if recovery.is_some() {
+                return Err(roomeq_model::AutoeqError::InvalidConfiguration {
+                    message: "exact recovery is unsupported for grouped channels".into(),
+                });
+            }
             with_empty_veto(process_speaker_group_with_callback_and_frequency_samples(
                 channel_name,
                 group,
@@ -304,18 +326,30 @@ pub(super) fn process_speaker_internal(
                 frequency_samples,
             ))
         }
-        SpeakerConfig::Topology(topology) => with_empty_veto(
-            process_speaker_topology_with_callback_and_frequency_samples(
-                channel_name,
-                topology,
-                room_config,
-                sample_rate,
-                output_dir,
-                callback,
-                frequency_samples,
-            ),
-        ),
+        SpeakerConfig::Topology(topology) => {
+            if recovery.is_some() {
+                return Err(roomeq_model::AutoeqError::InvalidConfiguration {
+                    message: "exact recovery is unsupported for topology channels".into(),
+                });
+            }
+            with_empty_veto(
+                process_speaker_topology_with_callback_and_frequency_samples(
+                    channel_name,
+                    topology,
+                    room_config,
+                    sample_rate,
+                    output_dir,
+                    callback,
+                    frequency_samples,
+                ),
+            )
+        }
         SpeakerConfig::MultiSub(group) => {
+            if recovery.is_some() {
+                return Err(roomeq_model::AutoeqError::InvalidConfiguration {
+                    message: "exact recovery is unsupported for multi-sub channels".into(),
+                });
+            }
             with_empty_veto(process_multisub_group_with_callback_and_frequency_samples(
                 channel_name,
                 group,
@@ -327,6 +361,11 @@ pub(super) fn process_speaker_internal(
             ))
         }
         SpeakerConfig::Dba(config) => {
+            if recovery.is_some() {
+                return Err(roomeq_model::AutoeqError::InvalidConfiguration {
+                    message: "exact recovery is unsupported for DBA channels".into(),
+                });
+            }
             with_empty_veto(process_dba_with_callback_and_frequency_samples(
                 channel_name,
                 config,
@@ -338,6 +377,11 @@ pub(super) fn process_speaker_internal(
             ))
         }
         SpeakerConfig::Cardioid(config) => {
+            if recovery.is_some() {
+                return Err(roomeq_model::AutoeqError::InvalidConfiguration {
+                    message: "exact recovery is unsupported for cardioid channels".into(),
+                });
+            }
             with_empty_veto(process_cardioid_with_callback_and_frequency_samples(
                 channel_name,
                 config,

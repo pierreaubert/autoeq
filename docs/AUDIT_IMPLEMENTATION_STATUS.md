@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; a locked offline install from 650fc66 verifies four declared CLI binaries; Linux ARM build/help and Windows ARM cross-build verified; uniform CLI version reporting, registry, Windows runtime and Linux x86 evidence remain |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; four CLI binaries have version/help checks; Linux ARM build/help, Windows ARM cross-build, and Linux x86 debug cross-build plus QEMU smoke verified; registry installation, native Linux runtime and Windows runtime remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -3057,18 +3057,53 @@ exit zero for `--help` inside the same isolated Ubuntu image. The existing
 explicitly. Network access was disabled and source/dependency mounts were
 read-only. Generic CPU flags avoid inheriting this Mac host CPU identity.
 
-Separate Mac-host cross-checks for Linux x86 and Windows MSVC x86 stopped
-before our code could be checked: Linux lacks `x86_64-linux-gnu-gcc`, and
-Windows lacks C runtime/SDK headers needed by `aws-lc-sys`. They remain
-unavailable evidence. Initial container attempts selected an absent stable
-toolchain and failed offline; those logs remain alongside the successful
-pinned-toolchain check. No physical audio device was opened, and this is
-not a release-package or Windows runtime verification.
+The initial Mac-host cross-checks for Linux x86 and Windows MSVC x86 stopped
+before our code could be checked: Linux lacked `x86_64-linux-gnu-gcc`, and
+Windows lacked the C runtime/SDK headers needed by `aws-lc-sys`. Those host
+failures remain historical. Linux x86 was later cross-built and smoke-tested
+under a separate pinned runtime below; Windows MSVC x86 remains unverified.
+Initial container attempts selected an absent stable toolchain and failed
+offline; those logs remain alongside the successful pinned-toolchain check.
+No physical audio device was opened, and this is not release-package or
+Windows runtime verification.
 
 Raw logs use the `autoeq-a00-linux-arm-*` prefix under the task evidence
 root. `/Users/pierre/a00-cross-platform-cli-verification.json` binds the
-source/image/toolchain, raw logs and four binary hashes. Registry packaging
-and the remaining platform requirements are still open.
+source/image/toolchain, raw logs and four binary hashes. Registry packaging,
+native Linux execution and Windows runtime remain open.
+
+### A00 Linux x86 debug cross-build and QEMU smoke (2026-10-04)
+
+Four CLI binaries (`autoeq`, `roomeq`, `benchmark-autoeq-speaker` and
+`roomeq-qa-quality`) compiled and linked for `x86_64-unknown-linux-gnu` in the
+pinned Rust 1.95 debug build. The source was
+`a454c74a0e2e2bc4b5a9c7b5ac235ab4bae001a7`; 3,824 tracked files were
+unchanged. The cross-build used image
+`sha256:8a9f1c9dad4e7e073bf6c70824998b110f8481a785fac7d92016fd2b8a988eb6`.
+
+The same four binaries, identified by their recorded hashes, passed ten
+bounded smoke commands under QEMU 10.0.13 in a separate signed Debian trixie
+runtime image
+(`sha256:f1259ea3ea1512d7de29ee008025f9a12c6b10685e20cae250c558e2c31503c1`).
+The checks covered each CLI's version and help output, `autoeq --algo-list`,
+and `roomeq-qa-quality --list` (38 listed entries, including Stereo 2.0 and
+Genelec). They test Linux x86 user-mode execution of debug binaries; they do
+not establish native Linux execution, release installation, DSP quality,
+playback or long-running stability. Earlier QEMU 8.2 emulator crashes remain
+retained as failed diagnostic attempts and are not counted as application
+results. The QEMU 8 failure summary is
+`/Volumes/home_tmp/tmp/autoeq-a00-linux-x86-evidence/qemu8-failure-diagnostic-receipt.json`
+(SHA-256 `f0a68cfcd7a4028fecc6dadc585e3cf38cbb60bc0955c5bc6dcd52ce773816d0`).
+
+The cross-build receipt is
+`/Volumes/home_tmp/tmp/autoeq-a00-linux-x86-evidence/build-attempt02-result.json`
+(SHA-256 `b27300bd1b18ae9ec9d35586fe0574161d6be6e45446c2e450dd2487327a76d7`);
+the successful runtime receipt is
+`/Volumes/home_tmp/tmp/autoeq-a00-linux-x86-evidence/qemu10-runtime-result.json`
+(SHA-256 `d660830710686f2c570d1d73e2dcf4036bdb3018ccefe3c3b5eb7b817851fc83`).
+Root independently reviewed the runtime evidence in
+`/Users/pierre/a00-linux-x86-root-review-20261004.json` (SHA-256
+`b0273fd4207a81e33933ecea04f4b430ff233321a7a61cbaab79c5feca515bb3`).
 
 ### A00 dependency partition repairs (2026-10-03)
 

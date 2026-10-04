@@ -14,7 +14,7 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; Linux ARM build/help and Windows ARM cross-build verified; registry, Windows runtime and Linux x86 evidence remain |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; a locked offline install from 650fc66 verifies four declared CLI binaries; Linux ARM build/help and Windows ARM cross-build verified; uniform CLI version reporting, registry, Windows runtime and Linux x86 evidence remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
@@ -3321,12 +3321,54 @@ was tested.
 Receipt: `/Users/pierre/a08-room-recovery-main-integration.json`, SHA-256
 `ea645a9cb3c9a5bd3a68f88107af9bdba46e46abdb813c37ee6f5c435f902520`.
 It records source head/base and the independent retained-artifact review, and
-pins the detailed source/gate receipt by SHA-256. That detailed receipt binds
-the source and lock hashes, Cargo metadata, gate logs, child artifacts, binary
-identity and limitations. Detailed logs and receipt:
+pins the detailed source/gate receipt by SHA-256; it does not duplicate that
+receipt's per-file hashes. The detailed receipt binds the source and lock
+hashes, Cargo metadata, gate logs, child artifacts, binary identity and
+limitations. Detailed logs and receipt:
 `/Volumes/home_tmp/tmp/autoeq-a08-room-recovery-final-fd17-evidence/` and
 `/Volumes/home_tmp/tmp/autoeq-a08-room-recovery-final-fd17-evidence/final-receipt.json`
 (SHA-256 `f9b846ae00d031de63dabbabf6545bcec3054dd16cf34d4b1c0179d8a582aa05`).
+
+### A00 current integrated source-install proof (2026-10-04)
+
+A locked offline source install from clean commit
+`650fc66d1a3b33dfacc95df70b9d3b2735098369` built package `autoeq 0.5.74`
+with `cli,qa` features into a new private prefix; it did not modify the user's
+installed binaries or PATH. Cargo's default install profile is release. The
+four actual manifest targets are `autoeq`, `roomeq`,
+`benchmark-autoeq-speaker` and `roomeq-qa-quality` (the QA-quality binary
+requires `qa`, which includes `cli`). All four installed `--help` checks pass.
+The RoomEQ recovery flags `--recovery-dir` and `--resume-recovery` parse
+successfully, and the installed CLI help documents the single-channel exact-DE
+recovery scope. The AutoEQ renderer-capabilities query exits successfully and
+reports schema version 3. Both AutoEQ algorithm lists include `autoeq:cobra`;
+the QA-quality binary's list-only mode also exits successfully.
+
+One bounded installed-binary smoke used an eight-point local analytic curve,
+one PK filter, seed 42 and a 32-evaluation cap at 48 kHz. The `autoeq:cobra`
+command exits zero and logs `nfev=32`, but reports a best-effort result because
+the budget was reached. It also warns that APO integer-Hz serialization drifts
+the objective by `9e-6`, above its `1e-6` limit. This confirms CLI dispatch
+and the bounded optimizer path only; it is not an accepted quality or acoustic
+result. The CSV, logs and generated files are retained.
+
+Version reporting is not uniform: `roomeq --version` prints
+`roomeq-cli 0.5.8`, while AutoEQ and the speaker benchmark use `--version` for
+the API measurement version and reject `-V`. The QA-quality binary has a custom
+help/list interface without a program-version flag. Uniform installed-binary
+version reporting remains open. Registry installation, cross-platform runtime,
+physical playback and hardware behavior were not tested.
+
+The exact installation command, lock/toolchain metadata, source-before/after
+hashes, 17 CLI probes and four executable identities are bound in:
+`/Volumes/home_tmp/tmp/autoeq-a00-installed-650fc66-evidence/receipt.json`
+(SHA-256 `d001c1cf4f8ac09b80310bb25473476bc8b86d18d20544a469b00d2d8b9ba524`).
+The integrity review passed 15/15 checks:
+`integrity-review.json` (SHA-256
+`439ddb62b8a409ebefb3ec6f6cc77e5463fbf5adc19878aa797eb0148c57d2b4`). Root
+independently rehashed 49 retained artifacts; review:
+`/Users/pierre/a00-current-install-root-review.json` (SHA-256
+`42d7b52be467192320de28e0e05a1370a13dfabfbedcd63797c8dae51dbc63f4`).
 
 ### A04 run06: independent evaluation of a synthetic Rust fit (2026-10-04)
 
@@ -3335,15 +3377,15 @@ The Rust run06 fit from math commit
 four synthetic 4 kHz additive parallel-Hammerstein cases with five 320-tap
 orders. All 20 training records, four derived holdouts and 24 tone comparisons
 pass their predeclared numerical checks. Maximum normalized RMSE is
-`5.03e-16` on training and `4.96e-16` on heldout samples; maximum tone
+`5.03e-16` on training and `4.95e-16` on heldout samples; maximum tone
 amplitude, phase and THD errors are `2.46e-9 dB`, `2.98e-8 degrees` and
 `9.24e-14` percentage points.
 
 The run uses an imported dense QR factor to fit the model; it does not
-construct a scalable factor. The five original forward/Q and adjoint/Q probes
-pass their unchanged `1e-8` limits (worst discrepancies `1.10e-10` and
-`1.10e-10`). All ten norm-scaled adjoint probes pass the unchanged `1e-10`
-limit; the worst discrepancy is `4.57e-13`. It reuses the finite design
+construct a scalable factor. The five original forward/Q and adjoint/Q
+probes pass unchanged `1e-8` limits; the maximum discrepancies are `1.05e-10`
+and `1.10e-10`, respectively. All ten norm-scaled adjoint probes pass the
+unchanged `1e-10` limit; the worst discrepancy is `4.57e-13`. It reuses the finite design
 certificate from run05 and claims no new rank or Rust FFT condition
 certificate. The child exits zero;
 recorded peak RSS is 48,480,256 bytes against the 1,610,612,736-byte cap and

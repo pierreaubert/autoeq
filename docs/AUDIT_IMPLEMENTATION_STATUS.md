@@ -3352,12 +3352,14 @@ the objective by `9e-6`, above its `1e-6` limit. This confirms CLI dispatch
 and the bounded optimizer path only; it is not an accepted quality or acoustic
 result. The CSV, logs and generated files are retained.
 
-Version reporting is not uniform: `roomeq --version` prints
-`roomeq-cli 0.5.8`, while AutoEQ and the speaker benchmark use `--version` for
-the API measurement version and reject `-V`. The QA-quality binary has a custom
-help/list interface without a program-version flag. Uniform installed-binary
-version reporting remains open. Registry installation, cross-platform runtime,
-physical playback and hardware behavior were not tested.
+At the time of this source-install proof, version reporting was not uniform:
+`roomeq --version` printed `roomeq-cli 0.5.8`, while AutoEQ and the speaker
+benchmark reserved `--version` for the API measurement version and rejected
+`-V`; QA-quality also lacked a program-version flag. A follow-up adds an
+additive `-V, --program-version` surface without changing AutoEQ's API-data
+`--version` argument; its build and process checks are recorded below.
+Registry installation, cross-platform runtime, physical playback and hardware
+behavior were not tested.
 
 The exact installation command, lock/toolchain metadata, source-before/after
 hashes, 17 CLI probes and four executable identities are bound in:
@@ -3369,6 +3371,38 @@ The integrity review passed 15/15 checks:
 independently rehashed 49 retained artifacts; review:
 `/Users/pierre/a00-current-install-root-review.json` (SHA-256
 `42d7b52be467192320de28e0e05a1370a13dfabfbedcd63797c8dae51dbc63f4`).
+
+### A00 installed CLI program-version surface (2026-10-04)
+
+The shared AutoEQ argument parser now accepts `-V, --program-version` while
+preserving `--version <VERSION>` for API measurement data. The `autoeq` and
+`benchmark-autoeq-speaker` launchers report the installed root package version
+(`0.5.74`). `roomeq-qa-quality` reports that executable version and labels its
+library package version separately (`roomeq-qa 0.5.67`). The existing
+`roomeq --version` output remains `roomeq-cli 0.5.8`.
+
+The three changed manifest binaries were rebuilt in release mode from
+integrated commit `f8376603418c9ce6d54d13943cec16b122ef15dd`. Four focused
+parser tests passed across `autoeq-optim`, `autoeq-cli` and `roomeq-qa`; strict
+scoped Clippy over their library and test targets passed. Ten process checks
+passed from `/private/tmp`, outside the repository: the version flags and
+help output, the unchanged API-data `--version` value, and the rule that text
+after `--` is not treated as a program-version flag. The QA version command
+returned the version line without needing registry or workspace files. No
+second `cargo install` was run, so this verifies the newly built release
+binaries rather than replacing the earlier private-prefix installation.
+
+The tested source commit is `c50e40a1da2793795ef0ee83a6745fff00825d67`; its
+eight source files match the integrated commit byte-for-byte, and
+`Cargo.toml`, `Cargo.lock`, and `.cargo/config.toml` are unchanged. Locked
+offline Cargo metadata resolved all 22 workspace packages. The integration
+receipt is `/Volumes/home_tmp/tmp/autoeq-a00-cli-program-version-evidence/integration-source-identity.json`;
+formatting, diff and metadata gates are in
+`integration-gates.json`. Focused test, strict Clippy and release-build logs
+are bound by `gate-receipt.json`; process stdout/stderr and binary hashes are
+in `process-check.json` and `short-alias-check.json`, all under
+`/Volumes/home_tmp/tmp/autoeq-a00-cli-program-version-evidence/`. These checks
+do not establish registry publication or cross-platform runtime behavior.
 
 ### A04 run06: independent evaluation of a synthetic Rust fit (2026-10-04)
 

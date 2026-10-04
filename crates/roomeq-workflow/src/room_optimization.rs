@@ -60,6 +60,24 @@ pub(crate) fn rebuild_routed_pruning_test_candidate(
 }
 
 #[cfg(test)]
+pub(crate) fn run_full_strength_output_attenuation_trial_for_test(
+    result: &RoomOptimizationResult,
+    config: &RoomConfig,
+    sample_rate: f64,
+    directory: &Path,
+) -> Result<(
+    RoomOptimizationResult,
+    std::collections::BTreeMap<String, f64>,
+)> {
+    finalization::run_full_strength_output_attenuation_trial_for_test(
+        result,
+        config,
+        sample_rate,
+        directory,
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn publish_structural_baseline_for_test(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,

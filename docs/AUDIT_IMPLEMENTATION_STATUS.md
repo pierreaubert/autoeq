@@ -2979,3 +2979,21 @@ to reset only generated trims and their duplicated routing metadata, then reuse
 the topology calibration and safety logic on the changed correction.
 Root receipts: `/Users/pierre/a09-run02-derived-trim-diagnosis.json` and
 `/Users/pierre/a09-run02-stale-safety-peak-analysis.json`.
+
+### Verified local main integration (2026-10-03)
+
+The user-requested merge combines audit branch `c6e714d`, newer main changes
+through `af6baba`, and preparation commit `baa676f`. It preserves the demos,
+PipeWire QA changes, recording configuration and base64 0.23 update, while
+retaining the public math pins and headless report geometry dependency.
+
+The final combined tree resolves against main's actual sibling repositories.
+Its locked release RoomEQ workflow suite passes 1,037 tests with seven existing
+tests ignored. All 83 report tests and the headless report library check pass.
+Evidence is in `/Volumes/home_tmp/tmp/autoeq-main-merge-20261003`.
+
+The new unpublished GPUI demo workspace member still uses sibling path
+dependencies. The earlier standalone source-install evidence belongs to its
+frozen audit revision; it does not prove standalone installation of this newly
+combined workspace. Recovery and derived-trim fixes remain isolated until their
+acceptance tests pass. This merge does not complete the audit or publish it.

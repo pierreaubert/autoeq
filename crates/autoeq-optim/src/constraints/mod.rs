@@ -23,8 +23,11 @@ pub mod crossover_monotonicity;
 pub mod min_gain;
 /// Minimum frequency spacing constraint between adjacent filters.
 pub mod min_spacing;
+/// Bounded projection of filter centers onto the requested spacing.
+pub mod spacing_projection;
 
 pub use ceiling::*;
 pub use crossover_monotonicity::*;
 pub use min_gain::*;
 pub use min_spacing::*;
+pub use spacing_projection::*;

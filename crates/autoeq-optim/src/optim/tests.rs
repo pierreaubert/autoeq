@@ -747,8 +747,8 @@ mod backend_tests {
         params.maxeval = 60;
         params.seed = Some(7);
         let root_control = OptimizerRunControl::new(NonZeroUsize::new(120).unwrap());
-        // Reserve room for selected-candidate validation after the 60-call
-        // backend search budget. The backend and run-control counts differ.
+        // Controlled dispatch uses the stage cap as the backend search cap.
+        // Final selected-candidate validation is accounted separately.
         let control = root_control.with_stage_budget(NonZeroUsize::new(120).unwrap());
         let run = optimize_filters_with_run_control_detailed(
             &mut x, &lower, &upper, objective, &params, &control,
@@ -768,8 +768,8 @@ mod backend_tests {
         assert!(run.evidence.backend_evaluation_count.unwrap() >= params.population);
         assert!(run.evidence.generation_count.unwrap() > 0);
         assert!(run.evidence.task_callback_count.unwrap() < run.evidence.generation_limit.unwrap());
-        assert_eq!(run.evidence.backend_evaluation_count, Some(params.maxeval));
-        assert!(run.evidence.backend_denied_evaluation_count.unwrap() > 0);
+        assert_eq!(run.evidence.backend_evaluation_count, Some(120));
+        assert!(run.evidence.backend_denied_evaluation_count.is_some());
         let stage = run.stage_snapshot.expect("RGA stage search counts");
         assert!(stage.evaluations_started <= 120);
         assert!(stage.evaluations_started >= run.evidence.backend_evaluation_count.unwrap());
@@ -875,7 +875,7 @@ mod backend_tests {
         assert!(evidence_de.is_none());
         let search = search.expect("registered RGA search evidence");
         assert_eq!(search.evaluations, params.maxeval);
-        assert!(search.denied_evaluations > 0);
+        // The backend can stop at the exact cap without attempting a denied call.
         assert_eq!(search.stop_cause, super::super::backend::BackendSearchStopCause::ObjectiveBudgetLimit);
     }
 

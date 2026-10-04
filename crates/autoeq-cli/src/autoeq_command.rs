@@ -771,6 +771,51 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
     .map_err(|e| anyhow!("{}", e))
     .context("Failed to compute post-optimization metrics")?;
 
+    // QA diagnostic: compare the selected vector's optimizer components with
+    // the independently reported CEA score, without changing either result.
+    if args.qa.is_some()
+        && objective_data.loss_type == autoeq::LossType::SpeakerScore
+        && let Some(score_data) = objective_data.speaker_score_data.as_ref()
+    {
+        let ctx = autoeq::optim::loss::ObjectiveContext {
+            freqs: objective_data.freqs.as_ref(),
+            target: objective_data.target.as_ref(),
+            deviation: objective_data.deviation.as_ref(),
+            srate: objective_data.srate,
+            peq_model: objective_data.peq_model,
+            min_freq: objective_data.min_freq,
+            max_freq: objective_data.max_freq,
+            smooth: objective_data.smooth,
+            smooth_n: objective_data.smooth_n,
+            audibility_deadband: objective_data.audibility_deadband.as_ref(),
+            smoothness_penalty: objective_data.smoothness_penalty.as_ref(),
+        };
+        let response = ctx.peq_spl(&opt_result.params);
+        let optimizer_score =
+            autoeq::loss::speaker_score_loss(score_data, ctx.freqs, &response);
+        let error = &response - ctx.deviation;
+        let flatness = autoeq::loss::flat_loss(
+            ctx.freqs,
+            &ctx.apply_deadband(&error),
+            ctx.min_freq,
+            ctx.max_freq,
+        ) / 3.0;
+        let smoothness = ctx.smoothness_penalty(&response);
+        let reported_cea = post_metrics
+            .cea2034_metrics
+            .as_ref()
+            .map(|metrics| metrics.pref_score);
+        info!(
+            "QA selected-x speaker components: optimizer_score={:.9} flatness_third={:.9} smoothness={:.9} recomposed_base_objective={:.9} reported_cea={:?} selected_objective={:?}",
+            optimizer_score,
+            flatness,
+            smoothness,
+            100.0 - optimizer_score + flatness + smoothness,
+            reported_cea,
+            opt_result.post_objective,
+        );
+    }
+
     // Print pre and post optimization scores
     postscore::print_optimization_scores(
         &args,
@@ -839,6 +884,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
         }
         qa::display_qa_analysis(&qa_result);
         qa::require_qa_pass(&qa_result)?;
+
         return Ok(());
     }
 

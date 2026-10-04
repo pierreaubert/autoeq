@@ -1,3 +1,5 @@
+use anyhow::{Result, bail};
+
 /// Structure to hold QA analysis results
 pub(super) struct QaAnalysisResult {
     pub(super) converge_ok: bool,
@@ -6,6 +8,12 @@ pub(super) struct QaAnalysisResult {
     pub(super) improvement_threshold: f64,
     pub(super) pre_value: f64,
     pub(super) post_value: f64,
+}
+
+impl QaAnalysisResult {
+    fn passes(&self) -> bool {
+        self.converge_ok && self.spacing_ok && self.improvement_ok
+    }
 }
 
 /// Perform QA analysis similar to qa_check.sh
@@ -66,9 +74,23 @@ pub(super) fn display_qa_analysis(result: &QaAnalysisResult) {
     println!();
 
     // Final result
-    if result.converge_ok && result.spacing_ok && result.improvement_ok {
+    if result.passes() {
         println!("OK");
     } else {
         println!("FAIL");
+    }
+}
+
+/// Return a failing process result for any failed QA criterion.
+pub(super) fn require_qa_pass(result: &QaAnalysisResult) -> Result<()> {
+    if result.passes() {
+        Ok(())
+    } else {
+        bail!(
+            "AutoEQ QA failed: convergence={}, spacing={}, improvement={}",
+            result.converge_ok,
+            result.spacing_ok,
+            result.improvement_ok
+        )
     }
 }

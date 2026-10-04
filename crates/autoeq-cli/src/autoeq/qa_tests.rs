@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::autoeq_command::qa::{QaAnalysisResult, display_qa_analysis, perform_qa_analysis};
+    use crate::autoeq_command::qa::{
+        QaAnalysisResult, display_qa_analysis, perform_qa_analysis, require_qa_pass,
+    };
 
     #[test]
     fn test_perform_qa_analysis_all_pass() {
@@ -15,6 +17,7 @@ mod tests {
         assert!(result.converge_ok);
         assert!(result.spacing_ok);
         assert!(result.improvement_ok);
+        assert!(require_qa_pass(&result).is_ok());
     }
 
     #[test]
@@ -30,6 +33,17 @@ mod tests {
         assert!(result.converge_ok);
         assert!(result.spacing_ok);
         assert!(!result.improvement_ok);
+        assert!(require_qa_pass(&result).is_err());
+    }
+
+    #[test]
+    fn test_perform_qa_analysis_no_convergence_returns_error() {
+        let result = perform_qa_analysis(false, true, Some(5.0), Some(6.0), 0.5);
+
+        assert!(!result.converge_ok);
+        assert!(result.spacing_ok);
+        assert!(result.improvement_ok);
+        assert!(require_qa_pass(&result).is_err());
     }
 
     #[test]
@@ -45,6 +59,7 @@ mod tests {
         // Should handle NaN gracefully
         assert!(result.pre_value.is_nan());
         assert!(!result.improvement_ok); // Won't pass with NaN
+        assert!(require_qa_pass(&result).is_err());
     }
 
     #[test]
@@ -60,5 +75,6 @@ mod tests {
 
         // Should not panic
         display_qa_analysis(&result);
+        assert!(require_qa_pass(&result).is_err());
     }
 }

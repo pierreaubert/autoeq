@@ -3219,3 +3219,56 @@ rebuild rollback/fallback regression remains separate evidence. The Genelec
 canary's electrical-gain and bass-parity failures remain unresolved, and this
 synthetic regression does not complete mode/rate/time-domain or physical
 acceptance.
+
+### A04 bounded LSQR and right-map interface increment (2026-10-04)
+
+Isolated math commit `50b730bd99fb63119dadd844a9896e20b061e02c` adds an
+undamped LSQR solver with a zero initial vector, actual residual checks and
+explicit cancellation, iteration and vector-storage outcomes. It supports a
+caller-supplied triangular right map and inverse coefficient mapping; the
+factor is not constructed or certified by this increment. Seven focused tests
+pass, and strict library/test Clippy passes. Evidence is in
+`/Users/pierre/a04-lsqr-increment.json` (SHA-256
+`a6bb15d88f308f106e67d7ff78a5ead94975b49067335d49dc743f56dad2dcff`),
+`/Users/pierre/a04-lsqr-tests-cancellation-final.log` and
+`/Users/pierre/a04-lsqr-clippy-cancellation-final.log`.
+
+This does not fit the ESS production model, certify rank or conditioning,
+validate physical harmonic support, or establish capture/hardware acceptance.
+The preconditioner factor construction and the production estimator remain
+open.
+
+### A04 caller-supplied triangular right map (2026-10-04)
+
+Isolated math commit `833de6b476cc0a5d2f7310d55889b2e3719a0111` adds the
+matrix-free application of a caller-supplied upper-triangular right map, its
+adjoint, and the inverse mapping from fitted coordinates. Three focused tests
+check forward and transpose identities, signed factors, coefficient recovery,
+and fail-closed storage and solve errors; strict library/test Clippy passes.
+The factor remains caller-supplied and is not produced or certified here.
+Evidence is in `/Users/pierre/a04-right-map-increment.json` (SHA-256
+`23811ed66aa5a5407455de5abe4998ace774104487a249044b4421450d00e2a0`),
+`/Users/pierre/a04-right-map-tests-final.log` and
+`/Users/pierre/a04-right-map-clippy-final.log`.
+
+This does not provide scalable QR construction, a rank/conditioning
+certificate, a fitted ESS result or physical capture evidence. The documented
+vector cap excludes underlying operator, solver and caller storage, plus
+allocator overhead.
+
+### A09 serialized Hybrid FIR sidecar replay (2026-10-04)
+
+Isolated commit `7ce94fe63a027da30c96971295a1565955ebc490` extends the
+device-free Hybrid post-FIR regression to write a WAV, serialize and reload a
+convolution chain, and replay it through the sidecar loader at 44.1, 48 and
+96 kHz. An independent Hound decode verifies mono float32 format, sample rate,
+tap count and exact float32 coefficient values; a direct DTFT of those decoded
+samples is compared with serialized-chain replay and the expected response.
+Wrong-rate and missing-sidecar cases check their refusal reasons. The final
+focused test passes 1/1 and strict workflow Clippy passes. The final receipt is
+`/Volumes/home_tmp/tmp/a09-fir-replay-evidence-20261004/gates-hound-oracle-final.json`
+(SHA-256 `483eac41b674da7f13eb5622a02bcd1cb9ae4ca2bf164fff7128613c91341733`).
+
+This synthetic regression verifies the serialized artifact path, not physical
+playback or listening behavior. Full A09 mode/rate/time-domain and measured
+acceptance remain open.

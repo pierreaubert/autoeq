@@ -507,7 +507,7 @@ fn optimize_filters_mh_with_callback_seeded_report(
             // Report progress periodically
             if let Ok(mut state) = callback_state_task.lock() {
                 state.iterations = current_iter;
-                state.generations = ctx.gen as usize;
+                state.generations = ctx.r#gen as usize;
                 let fitness = &ctx.pool_y;
                 state.population_mean = None;
                 state.population_stddev = None;

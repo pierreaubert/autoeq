@@ -3374,35 +3374,40 @@ independently rehashed 49 retained artifacts; review:
 
 ### A00 installed CLI program-version surface (2026-10-04)
 
-The shared AutoEQ argument parser now accepts `-V, --program-version` while
+The shared AutoEQ argument parser accepts `-V, --program-version` while
 preserving `--version <VERSION>` for API measurement data. The `autoeq` and
 `benchmark-autoeq-speaker` launchers report the installed root package version
 (`0.5.74`). `roomeq-qa-quality` reports that executable version and labels its
 library package version separately (`roomeq-qa 0.5.67`). The existing
 `roomeq --version` output remains `roomeq-cli 0.5.8`.
 
-The three changed manifest binaries were rebuilt in release mode from
-integrated commit `f8376603418c9ce6d54d13943cec16b122ef15dd`. Four focused
-parser tests passed across `autoeq-optim`, `autoeq-cli` and `roomeq-qa`; strict
-scoped Clippy over their library and test targets passed. Ten process checks
-passed from `/private/tmp`, outside the repository: the version flags and
-help output, the unchanged API-data `--version` value, and the rule that text
-after `--` is not treated as a program-version flag. The QA version command
-returned the version line without needing registry or workspace files. No
-second `cargo install` was run, so this verifies the newly built release
-binaries rather than replacing the earlier private-prefix installation.
+The three changed manifest binaries were rebuilt in release mode from final
+integrated source commit `9d14aa69dc5ceeadb19a9c11cf7ed79dbc547139`. Four
+focused parser tests and strict scoped Clippy over the library and test targets
+passed on source commit `c50e40a1da2793795ef0ee83a6745fff00825d67`. A follow-up
+removed one launcher-detail sentence from generated help; the final release
+rebuild and process checks below use the updated source commit
+`097bd0aca9192c0f035ae6bb641536a01e06a77c` (integrated as `9d14aa69...`).
+Ten process checks passed from `/private/tmp`, outside the repository. They
+cover both version flags, help output (including absence of launcher internals),
+the unchanged API-data `--version` value, and the rule that text after `--` is
+not treated as a program-version flag. The QA version command returned its
+version line without needing registry or workspace files. No second `cargo
+install` was run, so this verifies the rebuilt release binaries rather than
+replacing the earlier private-prefix installation.
 
-The tested source commit is `c50e40a1da2793795ef0ee83a6745fff00825d67`; its
-eight source files match the integrated commit byte-for-byte, and
-`Cargo.toml`, `Cargo.lock`, and `.cargo/config.toml` are unchanged. Locked
-offline Cargo metadata resolved all 22 workspace packages. The integration
-receipt is `/Volumes/home_tmp/tmp/autoeq-a00-cli-program-version-evidence/integration-source-identity.json`;
-formatting, diff and metadata gates are in
-`integration-gates.json`. Focused test, strict Clippy and release-build logs
-are bound by `gate-receipt.json`; process stdout/stderr and binary hashes are
-in `process-check.json` and `short-alias-check.json`, all under
-`/Volumes/home_tmp/tmp/autoeq-a00-cli-program-version-evidence/`. These checks
-do not establish registry publication or cross-platform runtime behavior.
+The final eight source files in the isolated and integration worktrees match
+byte-for-byte; `Cargo.toml`, `Cargo.lock`, and `.cargo/config.toml` are
+unchanged. Locked offline Cargo metadata resolved all 22 workspace packages.
+The final source and manifest comparison is in
+`/Volumes/home_tmp/tmp/autoeq-a00-cli-program-version-evidence/integration-source-identity-final.json`;
+formatting, metadata and commit checks are in `integration-gates-final.json`.
+The final release-build log is `final-release-build.log`; final process logs,
+checks and executable hashes are in `process-check-final.json` and
+`short-alias-check-final.json`, under the same evidence directory. Focused
+test and strict Clippy logs from the implementation commit remain in
+`gate-receipt.json`. These checks do not establish registry publication or
+cross-platform runtime behavior.
 
 ### A04 run06: independent evaluation of a synthetic Rust fit (2026-10-04)
 

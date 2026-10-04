@@ -9,9 +9,41 @@
 //! This module replaces the old per-library `match` dispatchers in
 //! [`super::optimize_filters`] and the parallel `AlgorithmInfo` table.
 
+use super::optimize::OptimizerBackendCompletion;
 use super::params::OptimParams;
 use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode};
+
+/// Stop condition observed by the metaheuristics solver task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BackendSearchStopCause {
+    /// The configured number of task callbacks was reached.
+    GenerationLimit,
+    /// The progress callback requested an early stop.
+    ProgressCallbackStop,
+}
+
+/// Search statistics captured by the backend that performed this invocation.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackendSearchEvidence {
+    /// Typed stop classification, independent of a status string.
+    pub completion: OptimizerBackendCompletion,
+    /// Exact solver-task stop condition.
+    pub stop_cause: BackendSearchStopCause,
+    /// Fitness calls observed by the backend objective.
+    pub evaluations: usize,
+    /// Completed solver generations (the upstream context's zero-based `gen`).
+    pub generations: usize,
+    /// Configured maximum number of task callbacks.
+    pub generation_limit: usize,
+    /// Task callbacks, including the initial population callback.
+    pub task_callbacks: usize,
+    /// Mean finite population fitness at termination, when available.
+    pub population_mean: Option<f64>,
+    /// Population fitness standard deviation at termination, when available.
+    pub population_stddev: Option<f64>,
+}
 
 /// Result shape for a backend that can retain post-search Pareto evidence.
 #[derive(Debug, Clone, PartialEq)]
@@ -27,6 +59,13 @@ pub enum FilterOptimizerOutput {
         /// Validated Pareto evidence from this invocation, when available.
         pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     },
+    /// Backend completed with statistics observed during the same search.
+    CompletedWithSearchEvidence {
+        /// Historical backend tuple.
+        result: Result<(String, f64), (String, f64)>,
+        /// Search completion and counters from this invocation.
+        search: BackendSearchEvidence,
+    },
     /// A validation score was refused because this invocation was stopped.
     StoppedDuringValidation {
         /// Human-readable location of the refused validation step.
@@ -38,7 +77,9 @@ impl FilterOptimizerOutput {
     /// Convert the typed outcome to the historical optimizer tuple contract.
     pub fn into_legacy_result(self) -> Result<(String, f64), (String, f64)> {
         match self {
-            Self::Completed { result, .. } => result,
+            Self::Completed { result, .. } | Self::CompletedWithSearchEvidence { result, .. } => {
+                result
+            }
             Self::StoppedDuringValidation { reason } => Err((reason, f64::INFINITY)),
         }
     }

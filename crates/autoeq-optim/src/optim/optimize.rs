@@ -204,6 +204,26 @@ pub struct OptimizerRunEvidence {
     /// counter; validation/finalization scores remain in the run snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation_count: Option<usize>,
+    /// Fitness calls counted by the backend objective before finalization.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_evaluation_count: Option<usize>,
+    /// Solver task stop cause, distinct from the run-control verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_stop_cause: Option<super::backend::BackendSearchStopCause>,
+    /// Completed solver generations reported by the backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_count: Option<usize>,
+    /// Configured solver task-callback limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_limit: Option<usize>,
+    /// Solver task callbacks, including the initial population callback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_callback_count: Option<usize>,
+    /// Final finite population fitness mean and standard deviation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub population_fitness_mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub population_fitness_stddev: Option<f64>,
     pub evaluation_limit: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
@@ -295,6 +315,13 @@ impl OptimizerRunEvidence {
             converged: false,
             best_effort: false,
             evaluation_count: parse_evaluation_count(&status),
+            backend_evaluation_count: None,
+            backend_stop_cause: None,
+            generation_count: None,
+            generation_limit: None,
+            task_callback_count: None,
+            population_fitness_mean: None,
+            population_fitness_stddev: None,
             evaluation_limit,
             seed,
             status,
@@ -638,12 +665,14 @@ struct ControlledOptimizationDispatch {
     evaluation_limit: usize,
     validation_stop_refusal: bool,
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    search_evidence: Option<super::backend::BackendSearchEvidence>,
 }
 
 struct NormalizedBackendOutput {
     result: Result<(String, f64), (String, f64)>,
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     validation_stop_refusal: bool,
+    search_evidence: Option<super::backend::BackendSearchEvidence>,
 }
 
 fn normalize_backend_output(
@@ -656,7 +685,16 @@ fn normalize_backend_output(
             result: Err((reason, f64::INFINITY)),
             pareto_report: None,
             validation_stop_refusal: true,
+            search_evidence: None,
         },
+        FilterOptimizerOutput::CompletedWithSearchEvidence { result, search } => {
+            NormalizedBackendOutput {
+                result,
+                pareto_report: None,
+                validation_stop_refusal: false,
+                search_evidence: Some(search),
+            }
+        }
         FilterOptimizerOutput::Completed {
             result,
             pareto_report,
@@ -669,6 +707,7 @@ fn normalize_backend_output(
                     )),
                     pareto_report: None,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 };
             }
             let Some(report) = pareto_report.as_ref() else {
@@ -676,6 +715,7 @@ fn normalize_backend_output(
                     result,
                     pareto_report: None,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 };
             };
             let invalid = report.validate().err().or_else(|| {
@@ -705,11 +745,13 @@ fn normalize_backend_output(
                     )),
                     pareto_report: None,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 },
                 None => NormalizedBackendOutput {
                     result,
                     pareto_report,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 },
             }
         }
@@ -742,6 +784,7 @@ fn optimize_filters_with_run_control_dispatch(
         evaluation_limit,
         validation_stop_refusal: false,
         pareto_report: None,
+        search_evidence: None,
     };
     let algorithm = algo_override.unwrap_or(&params.algo);
     let Some(backend) = super::registry::resolve(algorithm) else {
@@ -814,6 +857,7 @@ fn optimize_filters_with_run_control_dispatch(
             evaluation_limit,
             validation_stop_refusal: false,
             pareto_report: None,
+            search_evidence: None,
         };
     }
 
@@ -856,6 +900,7 @@ fn optimize_filters_with_run_control_dispatch(
         result: backend_result,
         pareto_report,
         validation_stop_refusal: typed_validation_stop,
+        search_evidence,
     } = normalize_backend_output(backend_output, backend.name(), x);
     let snapshot = run_control.snapshot();
     let stage_snapshot_before_finalization = run_control.stage_snapshot();
@@ -904,6 +949,7 @@ fn optimize_filters_with_run_control_dispatch(
         evaluation_limit,
         validation_stop_refusal,
         pareto_report,
+        search_evidence,
     }
 }
 
@@ -977,6 +1023,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     let evaluation_limit = dispatch_result.evaluation_limit;
     let validation_stop_refusal = dispatch_result.validation_stop_refusal;
     let pareto_report = dispatch_result.pareto_report;
+    let search_evidence = dispatch_result.search_evidence;
     let snapshot = run_control.snapshot();
     let stage_snapshot = run_control.stage_snapshot();
     let algorithm = algo_override.unwrap_or(&params.algo);
@@ -994,6 +1041,18 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
             stage.evaluations_started
         }),
     );
+    if let Some(search) = search_evidence {
+        evidence.backend_evaluation_count = Some(search.evaluations);
+        evidence.backend_stop_cause = Some(search.stop_cause);
+        evidence.generation_count = Some(search.generations);
+        evidence.generation_limit = Some(search.generation_limit);
+        evidence.task_callback_count = Some(search.task_callbacks);
+        evidence.population_fitness_mean = search.population_mean;
+        evidence.population_fitness_stddev = search.population_stddev;
+        if result.is_ok() {
+            evidence.apply_backend_completion(search.completion);
+        }
+    }
     if matches!(
         dispatch,
         OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)

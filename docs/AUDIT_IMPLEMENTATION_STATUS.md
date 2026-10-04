@@ -18,7 +18,7 @@ cannot replace them.
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Run06 independently evaluates a Rust fit on four synthetic ESS cases and four derived holdouts; it imports a dense QR factor and reuses the finite design certificate, while scalable factor construction, conditioning certification, capture integration, physical harmonic support and hardware evidence remain open |
+| A04 measurement/live analysis | Partial | Input-only preparation and reusable Rust fitting are merged into local math main; independent original-fixture checks pass for four synthetic 4 kHz cases. Production-rate long-tail scalability, conditioning certification, capture integration, physical harmonic support and hardware evidence remain open |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
 | A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently and reusable strict analysis gate committed; public BO dependency integration and justified presets remain |
@@ -3554,3 +3554,43 @@ Report: `/Users/pierre/a04-repeat-design-diagnostic-result-attempt02-20261004.js
 SHA-256 `7eeecf5613c7a9f7e28717497ca6d6648496c319f0dda1fae53f9a8bfd4d6d3c`.
 Receipt: `/Users/pierre/a04-repeat-design-diagnostic-receipt-attempt02-20261004.json`,
 SHA-256 `0c7a695c3f0447dd7b6213e194b44e58d01e9e6657c21f087f4ca7df581e6328`.
+
+
+### A04 composed input-only estimator merged locally (2026-10-04)
+
+Math commit **77cd896** adds bounded input-only QR/SVD preparation and a borrowed
+prepared design reusable across capture fits. The composed API constructs its
+own factor; it does not import the old probe factor. The clean candidate passes
+**122 analysis tests**, focused reuse/validation gates, strict Clippy and formatting.
+
+The original frozen synthetic 4 kHz fixture independently passes four fits,
+20 training records, four held-outs and 24 tone comparisons. Maximum direct
+normalized RMS error is **4.875e-16**. The externally supervised end-to-end run
+takes **8.30 seconds**, with fit-process peak RSS **216,809,472 bytes**, below
+the retained 600-second/1.5 GiB limits. Source and input inventories match
+before/after; the root review verifies 942 current source/input/protocol files.
+Earlier compile and evaluator-schema failures remain retained.
+
+This establishes a bounded numerical-only estimator. Rank and condition remain
+numerical estimates; physical support, calibration and hardware qualification
+are unavailable. The dense builder cannot cover long room tails at production
+rates. A separate structured prototype is in progress and has no accepted
+original-fixture or long-support result yet.
+
+### A07/A08 math checkpoint and stop foundations merged locally (2026-10-04)
+
+Math main **9b9fbd3** integrates the reviewed DE checkpoint prerequisite, NSGA-II/III
+checkpoint continuation and cooperative multi-objective BO stopping on the current
+math base. The original source changes are retained; crate dependency declarations
+were reconciled without changing the root manifest.
+
+The isolated macOS aarch64/Rust 1.92.0 candidate passes **265 optimization library
+tests, one ignored**, strict library/test Clippy and workspace formatting. Root
+verifies 908 source-file hashes, matching pre/post locked dependency metadata, and
+19 imported source files equal to their reviewed commits. The initial missing
+dependency and missing DE-prerequisite builds remain recorded as failures.
+
+The local fast-forward preserves the four existing user edits byte-for-byte.
+No public push occurred. Public BO/NSGA publication and AutoEQ public dependency
+pins remain pending. These library gates do not establish recovery of an entire
+multi-stage RoomEQ job, a passing full optimizer matrix, or Windows runtime.

@@ -100,7 +100,7 @@ log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"
 nalgebra = { version = "0.35", default-features = false, features = ["std"] }
-metaheuristics-nature = "10.1"
+metaheuristics-nature = { version = "10.1", git = "https://github.com/pierreaubert/metaheuristics-nature-rs.git", rev = "4f0b603c521e0b4e20239c827f1a0975442bb740" }
 rustfft = "6.4"
 hound = "3.5"
 # Reports are self-contained HTML+WASM documents (no Plotly dependency).

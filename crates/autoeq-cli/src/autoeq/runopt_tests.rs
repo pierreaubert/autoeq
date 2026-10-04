@@ -11,11 +11,77 @@ mod tests {
     use autoeq::optim::{
         MockOptimizerBackend, ObjectiveData, ObjectiveDataBuilder, OptimizerBackend,
     };
+    use autoeq::optim::backend::{BackendSearchEvidence, BackendSearchStopCause};
+    use autoeq::optim::OptimizerBackendCompletion;
     use clap::Parser;
     use ndarray::Array1;
 
     const GLOBAL_STATUS: &str = "AutoEQ DE converged (nfev=100)";
     const LOCAL_STATUS: &str = "AutoEQ COBYLA converged (nfev=50)";
+
+    struct DiagnosticBackend;
+
+    impl OptimizerBackend for DiagnosticBackend {
+        fn optimize_filters(
+            &self, _x: &mut [f64], _lower: &[f64], _upper: &[f64],
+            _objective: ObjectiveData, _params: &OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            Ok(("Metaheuristics(rga)".to_string(), 1.0))
+        }
+
+        fn optimize_filters_with_completion_evidence(
+            &self, x: &mut [f64], lower: &[f64], upper: &[f64],
+            objective: ObjectiveData, params: &OptimParams,
+        ) -> (Result<(String, f64), (String, f64)>, Option<autoeq::optim::de::DECompletion>,
+              Option<BackendSearchEvidence>) {
+            (self.optimize_filters(x, lower, upper, objective, params), None,
+             Some(BackendSearchEvidence {
+                 completion: OptimizerBackendCompletion::EvaluationLimit,
+                 stop_cause: BackendSearchStopCause::GenerationLimit,
+                 evaluations: 72,
+                 denied_evaluations: 0,
+                 generations: 9,
+                 generation_limit: 10,
+                 task_callbacks: 10,
+                 population_mean: Some(1.5),
+                 population_stddev: Some(0.25),
+             }))
+        }
+
+        fn optimize_filters_with_callback(
+            &self, x: &mut [f64], lower: &[f64], upper: &[f64],
+            objective: ObjectiveData, params: &OptimParams,
+            _callback: autoeq::optim::OptimProgressCallback,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.optimize_filters(x, lower, upper, objective, params)
+        }
+
+        fn optimize_filters_with_algo_override(
+            &self, x: &mut [f64], lower: &[f64], upper: &[f64],
+            objective: ObjectiveData, params: &OptimParams, _algo: Option<&str>,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.optimize_filters(x, lower, upper, objective, params)
+        }
+    }
+
+    #[test]
+    fn ordinary_cli_route_exports_rga_search_counters_without_claiming_convergence() {
+        let mut params = test_params(false);
+        params.algo = "mh:rga".to_string();
+        let result = perform_optimization_with_backend(
+            &params, &test_objective_data(), None, &DiagnosticBackend,
+        ).expect("diagnostic backend returns a finite candidate");
+        let evidence = &result.optimizer_evidence[0];
+        assert_eq!(evidence.backend_evaluation_count, Some(72));
+        assert_eq!(evidence.backend_stop_cause, Some(BackendSearchStopCause::GenerationLimit));
+        assert_eq!(evidence.generation_count, Some(9));
+        assert_eq!(evidence.generation_limit, Some(10));
+        assert_eq!(evidence.task_callback_count, Some(10));
+        assert_eq!(evidence.population_fitness_mean, Some(1.5));
+        assert_eq!(evidence.population_fitness_stddev, Some(0.25));
+        assert_eq!(evidence.termination, autoeq::optim::OptimizerTermination::NonConverged);
+        assert!(!result.converged);
+    }
 
     fn test_params(refine: bool) -> OptimParams {
         let mut argv = vec![

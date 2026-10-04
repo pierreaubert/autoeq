@@ -121,3 +121,31 @@ fn explicit_initial_candidate_rejects_invalid_shape_values_and_bounds() {
         assert!(error.0.contains(expected), "unexpected error: {}", error.0);
     }
 }
+
+#[test]
+fn registered_de_route_returns_report_for_the_final_selected_vector() {
+    let mut args = crate::cli::Args::speaker_defaults();
+    args.num_filters = 1;
+    let mut params = crate::OptimParams::from(&args);
+    params.algo = "autoeq:de".to_string();
+    params.maxeval = 1_000;
+    params.seed = Some(4);
+    let lower = [1.0, 0.5, -6.0];
+    let upper = [4.0, 8.0, 6.0];
+    let mut selected = [2.0, 1.0, 0.0];
+    let (result, report) = super::super::optimize_filters_with_de_completion(
+        &mut selected,
+        &lower,
+        &upper,
+        test_objective_data(),
+        &params,
+    );
+    let report = report.expect("registered AutoEQ DE must retain its typed report");
+    assert!(result.is_ok(), "registered DE route failed: {result:?}");
+    assert!(report.generations <= report.generation_limit);
+    assert!(report.evaluations > 0 && report.evaluations <= params.maxeval);
+    assert!(selected.iter().all(|value| value.is_finite()));
+    assert!(selected.iter().zip(lower).zip(upper).all(|((&value, low), high)| {
+        value >= low && value <= high
+    }));
+}

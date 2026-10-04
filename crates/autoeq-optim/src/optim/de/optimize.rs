@@ -407,6 +407,14 @@ fn optimize_filters_autoeq_with_callback_and_initial_and_exact(
     // Use constraint helpers for nonlinear constraints
     let mut config_builder = DEConfigBuilder::new()
         .maxiter(setup.max_iter)
+        // Speaker-score searches can have a narrow population-fitness spread
+        // before the scored preference has improved. Use the existing
+        // generation/evaluation cap before accepting population convergence.
+        .min_convergence_iter(if setup.penalty_data.loss_type == crate::LossType::SpeakerScore {
+            setup.max_iter
+        } else {
+            0
+        })
         .popsize(setup.pop_multiplier)
         .tol(tolerance)
         .atol(atolerance)

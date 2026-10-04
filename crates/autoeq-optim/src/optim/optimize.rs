@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 fn finalize_dispatch_winner(
     candidate_id: &str,
     x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
     data: &ObjectiveData,
     params: &crate::OptimParams,
     result: Result<(String, f64), (String, f64)>,
@@ -28,10 +30,78 @@ fn finalize_dispatch_winner(
         Ok(owned) => owned,
         Err(reason) => return failed(reason),
     };
-    match finalize_candidate(candidate_id, x, data, &owned.as_spec()) {
+    let required_spacing = params.min_spacing_oct.max(data.min_spacing_oct);
+    let repaired = if super::constraint_envelope::is_peq_layout_loss(data.loss_type) {
+        match crate::constraints::project_min_spacing(
+            x,
+            lower_bounds,
+            upper_bounds,
+            data.peq_model,
+            required_spacing,
+        ) {
+            Ok(repaired) => repaired,
+            Err(reason) => return failed(reason),
+        }
+    } else {
+        x.to_vec()
+    };
+    let adjusted = repaired != x;
+    match finalize_candidate(candidate_id, &repaired, data, &owned.as_spec()) {
         Ok(finalized) => {
+            let is_peq = super::constraint_envelope::is_peq_layout_loss(data.loss_type);
+            let spacing = if is_peq {
+                crate::constraints::viol_spacing_from_xs(
+                    &finalized.params,
+                    data.peq_model,
+                    required_spacing,
+                )
+            } else {
+                0.0
+            };
+            let ceiling = if is_peq && data.max_db > 0.0 {
+                super::compute::compute_ceiling_violation_into(
+                    &data.freqs,
+                    &finalized.params,
+                    data.srate,
+                    data.peq_model,
+                    data.max_db,
+                )
+            } else {
+                0.0
+            };
+            let min_gain = if is_peq && data.min_db > 0.0 {
+                crate::constraints::viol_min_gain_from_xs(
+                    &finalized.params,
+                    data.peq_model,
+                    data.min_db,
+                )
+            } else {
+                0.0
+            };
+            let within_bounds = finalized
+                .params
+                .iter()
+                .zip(lower_bounds.iter().zip(upper_bounds))
+                .all(|(&value, (&lower, &upper))| {
+                    value.is_finite() && value >= lower && value <= upper
+                });
+            if !within_bounds
+                || spacing > 0.0
+                || ceiling > 0.0
+                || min_gain > 0.0
+                || !finalized.loss.is_finite()
+            {
+                return failed(format!(
+                    "spacing repair refused: within_bounds={within_bounds}, spacing={spacing}, ceiling={ceiling}, min_gain={min_gain}"
+                ));
+            }
             x.copy_from_slice(&finalized.params);
-            Ok((algo, finalized.loss))
+            let status = if adjusted {
+                format!("{algo}; minimum-spacing projection applied")
+            } else {
+                algo
+            };
+            Ok((status, finalized.loss))
         }
         Err(reason) => failed(reason),
     }
@@ -41,6 +111,8 @@ fn finalize_dispatch_winner(
 #[serde(rename_all = "snake_case")]
 pub enum OptimizerTermination {
     Converged,
+    /// The backend reached its configured evaluation or generation limit.
+    /// Actual evaluation and generation counts are reported separately.
     EvaluationLimit,
     NonConverged,
     UserStopped,
@@ -467,6 +539,44 @@ pub fn optimize_filters(
     optimize_filters_with_algo_override(x, lower_bounds, upper_bounds, objective_data, params, None)
 }
 
+/// Preserve the actual DE completion counters when the ordinary production
+/// path selects AutoEQ DE. Other backends retain their legacy result.
+pub fn optimize_filters_with_de_completion(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+) -> (Result<(String, f64), (String, f64)>, Option<super::de::DECompletion>) {
+    let Some(backend) = super::registry::resolve(&params.algo) else {
+        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+    };
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+    }
+    let snapshot = objective_data.clone();
+    let (result, completion) = super::de::optimize_filters_autoeq_with_completion(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        backend.name(),
+        params,
+    );
+    (
+        finalize_dispatch_winner(
+            backend.name(),
+            x,
+            lower_bounds,
+            upper_bounds,
+            &snapshot,
+            params,
+            result,
+        ),
+        completion,
+    )
+}
+
 /// Optimize filters and return structured termination/convergence evidence.
 pub fn optimize_filters_detailed(
     x: &mut [f64],
@@ -761,6 +871,8 @@ fn optimize_filters_with_run_control_dispatch(
         let finalized = finalize_dispatch_winner(
             backend.name(),
             x,
+            lower_bounds,
+            upper_bounds,
             &validation_snapshot,
             &controlled_params,
             backend_result.clone(),
@@ -936,7 +1048,7 @@ pub fn optimize_filters_with_algo_override(
         .ok_or_else(|| (format!("Unknown algorithm: {}", algo), f64::INFINITY))?;
     let snapshot = objective_data.clone();
     let result = backend.optimize(x, lower_bounds, upper_bounds, objective_data, params, None);
-    finalize_dispatch_winner(algo, x, &snapshot, params, result)
+    finalize_dispatch_winner(algo, x, lower_bounds, upper_bounds, &snapshot, params, result)
 }
 
 /// Optimize filter parameters with a progress callback for per-iteration updates.
@@ -976,7 +1088,9 @@ pub fn optimize_filters_with_callback(
             backend.name(),
             callback,
         );
-        return finalize_dispatch_winner(backend.name(), x, &snapshot, params, result);
+        return finalize_dispatch_winner(
+            backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+        );
     }
 
     if backend.capabilities().iteration_callback
@@ -1008,7 +1122,9 @@ pub fn optimize_filters_with_callback(
         params,
         cb_for_backend,
     );
-    finalize_dispatch_winner(backend.name(), x, &snapshot, params, result)
+    finalize_dispatch_winner(
+        backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+    )
 }
 
 /// Callback variant of [`optimize_filters_detailed`].

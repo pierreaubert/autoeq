@@ -61,6 +61,25 @@ pub trait OptimizerBackend: Send + Sync {
         params: &OptimParams,
     ) -> Result<(String, f64), (String, f64)>;
 
+    /// Retain typed DE completion when the backend can provide it.
+    /// Test doubles and non-DE backends keep the historical result contract.
+    fn optimize_filters_with_de_completion(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+    ) -> (
+        Result<(String, f64), (String, f64)>,
+        Option<super::de::DECompletion>,
+    ) {
+        (
+            self.optimize_filters(x, lower_bounds, upper_bounds, objective, params),
+            None,
+        )
+    }
+
     /// Run the configured global optimizer with a per-iteration progress callback.
     fn optimize_filters_with_callback(
         &self,
@@ -157,6 +176,26 @@ impl OptimizerBackend for RealOptimizerBackend {
         params: &OptimParams,
     ) -> Result<(String, f64), (String, f64)> {
         super::optimize_filters(x, lower_bounds, upper_bounds, objective, params)
+    }
+
+    fn optimize_filters_with_de_completion(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+    ) -> (
+        Result<(String, f64), (String, f64)>,
+        Option<super::de::DECompletion>,
+    ) {
+        super::optimize_filters_with_de_completion(
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective,
+            params,
+        )
     }
 
     fn optimize_filters_with_callback(

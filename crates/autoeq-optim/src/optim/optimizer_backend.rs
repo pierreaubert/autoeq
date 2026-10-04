@@ -80,6 +80,29 @@ pub trait OptimizerBackend: Send + Sync {
         )
     }
 
+    /// Retain same-invocation MH search diagnostics when available.
+    ///
+    /// Test doubles preserve their historical result unless they explicitly
+    /// supply diagnostics. The search report is observational and cannot turn
+    /// a best-effort result into a converged one.
+    fn optimize_filters_with_completion_evidence(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+    ) -> (
+        Result<(String, f64), (String, f64)>,
+        Option<super::de::DECompletion>,
+        Option<super::backend::BackendSearchEvidence>,
+    ) {
+        let (result, de_completion) = self.optimize_filters_with_de_completion(
+            x, lower_bounds, upper_bounds, objective, params,
+        );
+        (result, de_completion, None)
+    }
+
     /// Run the configured global optimizer with a per-iteration progress callback.
     fn optimize_filters_with_callback(
         &self,
@@ -143,6 +166,23 @@ impl RealOptimizerBackend {
 }
 
 impl OptimizerBackend for RealOptimizerBackend {
+    fn optimize_filters_with_completion_evidence(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+    ) -> (
+        Result<(String, f64), (String, f64)>,
+        Option<super::de::DECompletion>,
+        Option<super::backend::BackendSearchEvidence>,
+    ) {
+        super::optimize_filters_with_completion_evidence(
+            x, lower_bounds, upper_bounds, objective, params,
+        )
+    }
+
     fn evaluation_budget_profile(
         &self,
         lower_bounds: &[f64],

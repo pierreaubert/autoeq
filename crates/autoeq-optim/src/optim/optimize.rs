@@ -604,6 +604,45 @@ pub fn optimize_filters_with_de_completion(
     )
 }
 
+/// Preserve same-invocation search diagnostics on the ordinary MH route.
+///
+/// This dispatch performs the same solver call and candidate finalization as
+/// [`optimize_filters_with_de_completion`]. The extra value is observational:
+/// it does not classify a generation-limit result as converged.
+pub fn optimize_filters_with_completion_evidence(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+) -> (
+    Result<(String, f64), (String, f64)>,
+    Option<super::de::DECompletion>,
+    Option<super::backend::BackendSearchEvidence>,
+) {
+    if let Some(backend) = super::registry::resolve(&params.algo)
+        && backend.name().starts_with("mh:")
+    {
+        let snapshot = objective_data.clone();
+        let output = backend.optimize_with_report(
+            x, lower_bounds, upper_bounds, objective_data, params, None,
+        );
+        let normalized = normalize_backend_output(output, backend.name(), x);
+        return (
+            finalize_dispatch_winner(
+                &params.algo, x, lower_bounds, upper_bounds, &snapshot, params,
+                normalized.result,
+            ),
+            None,
+            normalized.search_evidence,
+        );
+    }
+    let (result, de_completion) = optimize_filters_with_de_completion(
+        x, lower_bounds, upper_bounds, objective_data, params,
+    );
+    (result, de_completion, None)
+}
+
 /// Optimize filters and return structured termination/convergence evidence.
 pub fn optimize_filters_detailed(
     x: &mut [f64],

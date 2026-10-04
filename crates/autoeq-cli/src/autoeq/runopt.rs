@@ -70,6 +70,19 @@ fn apply_de_completion(
     Ok(())
 }
 
+fn attach_search_diagnostics(
+    evidence: &mut OptimizerRunEvidence,
+    search: &autoeq::optim::backend::BackendSearchEvidence,
+) {
+    evidence.backend_evaluation_count = Some(search.evaluations);
+    evidence.backend_stop_cause = Some(search.stop_cause);
+    evidence.generation_count = Some(search.generations);
+    evidence.generation_limit = Some(search.generation_limit);
+    evidence.task_callback_count = Some(search.task_callbacks);
+    evidence.population_fitness_mean = search.population_mean;
+    evidence.population_fitness_stddev = search.population_stddev;
+}
+
 /// Immutable snapshot of the effective limits used by one optimizer run.
 ///
 /// The parameter boxes are the exact vectors passed to the backend. The
@@ -446,7 +459,8 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         Some(optim::compute_fitness_penalties_ref(&x, objective_data))
     };
 
-    let (global_result, global_de_completion) = if let Some(continuation) = exact_checkpoint {
+    let (global_result, global_de_completion, global_search_evidence) =
+        if let Some(continuation) = exact_checkpoint {
         if initial_candidate.is_some() {
             return Err(std::io::Error::other(
                 "exact continuation cannot be combined with a warm-start candidate",
@@ -466,7 +480,7 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         (Ok((
             output.descriptor.stopping_reason,
             optim::compute_fitness_penalties_ref(&x, objective_data),
-        )), None)
+        )), None, None)
     } else if let Some(mut progress_callback) = progress_callback {
         use std::sync::{Arc, Mutex};
 
@@ -520,7 +534,7 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         (Ok((
             output.optimization_run.stopping_reason,
             optim::compute_fitness_penalties_ref(&x, objective_data),
-        )), None)
+        )), None, None)
     } else if direct_de_warm_start
         && resolved_backend.name().eq_ignore_ascii_case("autoeq:de")
         && let Some(candidate) = initial_candidate
@@ -537,9 +551,9 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         (Ok((
             output.descriptor.stopping_reason,
             optim::compute_fitness_penalties_ref(&x, objective_data),
-        )), None)
+        )), None, None)
     } else {
-        backend.optimize_filters_with_de_completion(
+        backend.optimize_filters_with_completion_evidence(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -558,6 +572,9 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
     );
     if let Some(completion) = &global_de_completion {
         apply_de_completion(&mut global_evidence, completion, params.maxeval)?;
+    }
+    if let Some(search) = &global_search_evidence {
+        attach_search_diagnostics(&mut global_evidence, search);
     }
 
     match &global_result {

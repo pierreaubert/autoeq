@@ -783,6 +783,32 @@ mod backend_tests {
     }
 
     #[test]
+    fn registered_rga_completion_evidence_preserves_legacy_candidate() {
+        use super::super::optimize::{
+            optimize_filters_with_completion_evidence, optimize_filters_with_de_completion,
+        };
+
+        let (objective, mut params, lower, upper, x) = scalar_objective();
+        params.algo = "mh:rga".into();
+        params.maxeval = 60;
+        params.seed = Some(7);
+        let mut legacy_x = x.clone();
+        let mut evidence_x = x;
+        let (legacy_result, legacy_de) = optimize_filters_with_de_completion(
+            &mut legacy_x, &lower, &upper, objective.clone(), &params,
+        );
+        let (evidence_result, evidence_de, search) = optimize_filters_with_completion_evidence(
+            &mut evidence_x, &lower, &upper, objective, &params,
+        );
+
+        assert_eq!(evidence_result, legacy_result);
+        assert_eq!(evidence_x, legacy_x);
+        assert!(legacy_de.is_none());
+        assert!(evidence_de.is_none());
+        assert!(search.expect("registered RGA search evidence").evaluations > 0);
+    }
+
+    #[test]
     fn registered_rga_callback_stop_preserves_run_control_priority() {
         use super::super::backend::BackendSearchStopCause;
         use super::super::optimize::{

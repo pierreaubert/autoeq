@@ -11,12 +11,18 @@ from scripts import check_crate_partition as checker
 from scripts import run_crate_test_matrix as matrix_runner
 
 
-def package(name: str, dependencies: list[str]) -> dict:
+def package(name: str, dependencies: list[str | tuple[str, str]]) -> dict:
     return {
         "id": f"{name} 0.1.0 (path+file:///tmp/{name})",
         "name": name,
         "manifest_path": f"/tmp/{name}/Cargo.toml",
-        "dependencies": [{"name": dependency} for dependency in dependencies],
+        "dependencies": [
+            {
+                "name": dependency[0] if isinstance(dependency, tuple) else dependency,
+                "kind": dependency[1] if isinstance(dependency, tuple) else None,
+            }
+            for dependency in dependencies
+        ],
     }
 
 
@@ -28,6 +34,8 @@ def policy() -> dict:
             "core": [],
             "engine": ["core"],
         },
+        "allowed_dev_dependencies": {},
+        "allowed_build_dependencies": {},
         "temporary_exceptions": [],
         "metric_budgets": {
             "root_rust_loc": 100,
@@ -46,7 +54,8 @@ class DependencyPolicyTests(unittest.TestCase):
         }
         edges, errors = checker.check_dependency_policy(packages, policy())
         self.assertEqual(
-            edges, {("app", "engine"), ("engine", "core")}
+            edges,
+            {("app", "engine", "normal"), ("engine", "core", "normal")},
         )
         self.assertEqual(errors, [])
 
@@ -100,7 +109,76 @@ class DependencyPolicyTests(unittest.TestCase):
         }
         _, errors = checker.check_dependency_policy(packages, current_policy)
         self.assertTrue(
-            any(error.startswith("workspace dependency cycle:") for error in errors)
+            any(
+                error.startswith("workspace dependency cycle (normal/build):")
+                for error in errors
+            )
+        )
+
+    def test_build_dependency_cycles_are_rejected(self) -> None:
+        current_policy = policy()
+        current_policy["allowed_direct_dependencies"]["core"] = ["engine"]
+        current_policy["allowed_build_dependencies"]["engine"] = ["core"]
+        packages = {
+            "app": package("app", []),
+            "core": package("core", [("engine", "normal")]),
+            "engine": package("engine", [("core", "build")]),
+        }
+
+        _, errors = checker.check_dependency_policy(packages, current_policy)
+
+        self.assertTrue(
+            any(
+                error.startswith("workspace dependency cycle (normal/build):")
+                for error in errors
+            )
+        )
+
+    def test_dev_only_cycle_is_not_a_runtime_cycle(self) -> None:
+        current_policy = policy()
+        current_policy["allowed_direct_dependencies"]["core"] = ["engine"]
+        current_policy["allowed_dev_dependencies"]["engine"] = ["core"]
+        packages = {
+            "app": package("app", []),
+            "core": package("core", [("engine", "normal")]),
+            "engine": package("engine", [("core", "dev")]),
+        }
+
+        edges, errors = checker.check_dependency_policy(packages, current_policy)
+
+        self.assertEqual(
+            edges,
+            {("core", "engine", "normal"), ("engine", "core", "dev")},
+        )
+        self.assertEqual(errors, [])
+
+    def test_unlisted_dev_edge_is_rejected_by_kind(self) -> None:
+        packages = {
+            "app": package("app", []),
+            "core": package("core", []),
+            "engine": package("engine", [("core", "dev")]),
+        }
+
+        _, errors = checker.check_dependency_policy(packages, policy())
+
+        self.assertIn("forbidden dev workspace edge: engine -> core", errors)
+
+    def test_required_external_edges_are_checked(self) -> None:
+        current_policy = policy()
+        current_policy["required_external_dependencies"] = {
+            "engine": {"normal": ["sha2", "tempfile"]}
+        }
+        packages = {
+            "app": package("app", []),
+            "core": package("core", []),
+            "engine": package("engine", [("core", "normal"), "sha2"]),
+        }
+
+        _, errors = checker.check_dependency_policy(packages, current_policy)
+
+        self.assertIn(
+            "required external dependency is missing: engine -> tempfile (normal)",
+            errors,
         )
 
 
@@ -117,13 +195,49 @@ class RatchetTests(unittest.TestCase):
             }
         ]
         current["metric_budgets"]["root_rust_loc"] = 101
-        errors = checker.check_monotonic_ratchets(current, baseline)
+        errors = checker.check_monotonic_ratchets(
+            current, baseline, {"root_rust_loc": 100}
+        )
         self.assertIn(
             "temporary exception list may only shrink: added engine -> app", errors
         )
         self.assertIn(
-            "metric budget may only shrink: root_rust_loc 100 -> 101", errors
+            "metric budget increase exceeds measured base source: root_rust_loc 100 -> 101, base source 100",
+            errors,
         )
+
+    def test_budget_increase_cannot_exceed_actual_baseline_source(self) -> None:
+        baseline = policy()
+        baseline["metric_budgets"]["root_rust_loc"] = 100
+        current = policy()
+        current["metric_budgets"]["root_rust_loc"] = 103
+        self.assertEqual(
+            checker.check_monotonic_ratchets(
+                current, baseline, {"root_rust_loc": 103}
+            ),
+            [],
+        )
+
+        current["metric_budgets"]["root_rust_loc"] = 104
+        self.assertIn(
+            "metric budget increase exceeds measured base source: root_rust_loc 100 -> 104, base source 103",
+            checker.check_monotonic_ratchets(
+                current, baseline, {"root_rust_loc": 103}
+            ),
+        )
+
+    def test_rejects_duplicate_policy_json_keys(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = pathlib.Path(temporary_directory) / "duplicate.json"
+            path.write_text(
+                '{"roomeq-qa": [], "roomeq-qa": ["core"]}',
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(
+                ValueError, "duplicate JSON object key: roomeq-qa"
+            ):
+                checker.load_json(path)
 
     def test_metric_values_cannot_exceed_budgets(self) -> None:
         metrics = {
@@ -194,6 +308,42 @@ class FocusedTestMatrixTests(unittest.TestCase):
     def test_rejects_unknown_package(self) -> None:
         with self.assertRaisesRegex(ValueError, "unknown focused-test package"):
             matrix_runner.command_for_package({}, "missing", release=False)
+
+    def test_rejects_nonexistent_feature_in_focused_recipe(self) -> None:
+        package_data = {
+            "core": {
+                "features": {"default": []},
+                "targets": [{"kind": ["lib"]}],
+            }
+        }
+        self.assertIn(
+            "focused test command for core names unknown feature plotly",
+            checker.check_focused_tests(
+                package_data,
+                {
+                    "focused_tests": {
+                        "core": "cargo test -p core --locked --features plotly"
+                    }
+                },
+            ),
+        )
+
+    def test_recognizes_rlib_output_as_a_library_target(self) -> None:
+        package_data = {
+            "gpui": {
+                "features": {"default": []},
+                "targets": [
+                    {"kind": ["cdylib", "rlib"], "crate_types": ["cdylib", "rlib"]}
+                ],
+            }
+        }
+
+        errors = checker.check_focused_tests(
+            package_data,
+            {"focused_tests": {"gpui": "cargo test -p gpui --locked --lib"}},
+        )
+
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":

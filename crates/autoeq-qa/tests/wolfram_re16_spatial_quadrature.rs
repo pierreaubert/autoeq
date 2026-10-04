@@ -12,7 +12,7 @@
 //! against the engine analytic value.
 
 use autoeq_qa::require_reference;
-use autoeq_qa::{QaResult, assert_case_id, emit_result, provenance};
+use autoeq_qa::{QaResult, assert_case_id, emit_result, provenance, rel_error};
 
 const CASE: &str = "re16_spatial_quadrature";
 const CASE_ID: &str = "autoeq-qa.re16-spatial-quadrature.v1";
@@ -124,6 +124,7 @@ fn wolfram_re16_spatial_quadrature() {
     let ref_json = require_reference(CASE, "re16_spatial_quadrature.wls");
     assert_case_id(&ref_json, CASE_ID, CASE);
     let mut max_err = 0.0f64;
+    let mut max_rel_err = 0.0f64;
 
     // Explicit 8x6 midpoint quadrature of the Gaussian field.
     let (a, cx, cy, s, b) = (5.0, 1.0, 0.5, 0.4, 20.0);
@@ -144,6 +145,7 @@ fn wolfram_re16_spatial_quadrature() {
         "{CASE}: quadrature: rust={qsum:.12e} expected={want_quad:.12e}"
     );
     max_err = max_err.max(qerr);
+    max_rel_err = max_rel_err.max(rel_error(qsum, want_quad));
     // Constant field: quadrature is exact.
     let const_quad = w * (nx * ny) as f64 * b;
     let const_err = (const_quad - ref_json["const_field_analytic"].as_f64().unwrap()).abs();
@@ -151,6 +153,11 @@ fn wolfram_re16_spatial_quadrature() {
         const_err <= TOL_EXACT,
         "{CASE}: const quadrature err={const_err:.3e}"
     );
+    max_err = max_err.max(const_err);
+    max_rel_err = max_rel_err.max(rel_error(
+        const_quad,
+        ref_json["const_field_analytic"].as_f64().unwrap(),
+    ));
     // Stated approximation budget against the analytic integral.
     let analytic = ref_json["analytic_integral"].as_f64().unwrap();
     let gap = (qsum - analytic).abs();
@@ -158,29 +165,43 @@ fn wolfram_re16_spatial_quadrature() {
         gap <= QUAD_ANALYTIC_BUDGET,
         "{CASE}: quadrature-vs-analytic gap {gap:.3e} exceeds budget"
     );
-    max_err = max_err.max(gap);
+    // This discretization allowance has its own budget; transcription errors
+    // below use the much tighter formula-agreement tolerances. Retain both.
+    println!(
+        "QA_APPROXIMATION: {}",
+        serde_json::json!({
+            "case": CASE_ID,
+            "quantity": "quadrature_vs_analytic_integral",
+            "absolute_error": gap,
+            "budget": QUAD_ANALYTIC_BUDGET,
+        })
+    );
 
     // Normal CDF against the engine Erf reference.
     let cdf_x: Vec<f64> = serde_json::from_value(ref_json["cdf_points"].clone()).unwrap();
     let cdf_ref: Vec<f64> = serde_json::from_value(ref_json["cdf_reference"].clone()).unwrap();
     for (x, want) in cdf_x.iter().zip(cdf_ref.iter()) {
-        let err = (standard_normal_cdf(*x) - want).abs();
+        let actual = standard_normal_cdf(*x);
+        let err = (actual - want).abs();
         assert!(
             err <= TOL_CDF,
             "{CASE}: Phi({x}): err={err:.3e} exceeds {TOL_CDF:.1e}"
         );
         max_err = max_err.max(err);
+        max_rel_err = max_rel_err.max(rel_error(actual, *want));
     }
     // Inverse normal against the engine InverseErf reference.
     let inv_p: Vec<f64> = serde_json::from_value(ref_json["inverse_points"].clone()).unwrap();
     let inv_ref: Vec<f64> = serde_json::from_value(ref_json["inverse_reference"].clone()).unwrap();
     for (p, want) in inv_p.iter().zip(inv_ref.iter()) {
-        let err = (inv_standard_normal(*p) - want).abs();
+        let actual = inv_standard_normal(*p);
+        let err = (actual - want).abs();
         assert!(
             err <= TOL_INV,
             "{CASE}: Phi^-1({p}): err={err:.3e} exceeds {TOL_INV:.1e}"
         );
         max_err = max_err.max(err);
+        max_rel_err = max_rel_err.max(rel_error(actual, *want));
     }
 
     // Exact discrete expected value and fractional-tail CVaR.
@@ -189,18 +210,23 @@ fn wolfram_re16_spatial_quadrature() {
     let expected: f64 = losses.iter().zip(weights.iter()).map(|(l, w)| l * w).sum();
     let eerr = (expected - ref_json["expected_loss"].as_f64().unwrap()).abs();
     assert!(eerr <= TOL_EXACT, "{CASE}: expected err={eerr:.3e}");
+    max_rel_err = max_rel_err.max(rel_error(
+        expected,
+        ref_json["expected_loss"].as_f64().unwrap(),
+    ));
     for (alpha, key) in [(0.5, "cvar_alpha_0p5"), (0.9, "cvar_alpha_0p9")] {
         let got = cvar(alpha, &losses, &weights);
         let want = ref_json[key].as_f64().unwrap();
         let err = (got - want).abs();
         assert!(err <= TOL_EXACT, "{CASE}: CVaR({alpha}) err={err:.3e}");
         max_err = max_err.max(err.max(eerr));
+        max_rel_err = max_rel_err.max(rel_error(got, want));
     }
 
     emit_result(&QaResult {
         case: CASE_ID.to_string(),
         pass: true,
-        max_rel_error: 0.0,
+        max_rel_error: max_rel_err,
         max_abs_error: max_err,
         tolerance: TOL_CDF,
         tolerance_kind: "abs".to_string(),

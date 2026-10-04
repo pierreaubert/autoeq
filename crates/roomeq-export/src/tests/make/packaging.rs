@@ -36,13 +36,8 @@ fn package_convolution_sidecars_returns_hashed_member_and_rewritten_graph() {
     let resources = [resource("L_fir_96000hz.wav", b"wav".to_vec())];
 
     let (packaged, members) =
-        package_convolution_sidecars(
-            &output,
-            &resources,
-            &BTreeSet::new(),
-            &HashMap::new(),
-        )
-        .unwrap();
+        package_convolution_sidecars(&output, &resources, &BTreeSet::new(), &HashMap::new())
+            .unwrap();
 
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].relative_path, Path::new("L_fir_96000hz.wav"));
@@ -57,27 +52,60 @@ fn bound_wav_identity_is_enforced_by_camilla_and_roon_packages() {
     add_convolution(&mut output, "left", "left.wav");
     let original = resource("left.wav", test_wav(48_000, 1, 64));
     output.metadata.as_mut().unwrap().final_convolution_sha256 = Some(
-        std::collections::BTreeMap::from([("left.wav".into(), Some(original.sha256()))]));
+        std::collections::BTreeMap::from([("left.wav".into(), Some(original.sha256()))]),
+    );
     let build = |graph: &DspGraph, format, resources: &[ConvolutionResource]| {
-        build_export_package(graph, format, Path::new("room.json"), 48_000.0,
-            resources, &BTreeSet::new(), &HashMap::new())
+        build_export_package(
+            graph,
+            format,
+            Path::new("room.json"),
+            48_000.0,
+            resources,
+            &BTreeSet::new(),
+            &HashMap::new(),
+        )
     };
     for format in [ExportFormat::CamillaDsp, ExportFormat::RoonDsp] {
         let package = build(&output, format, std::slice::from_ref(&original)).unwrap();
         package.validate_integrity().unwrap();
         // Another valid mono WAV would be accepted by format validation alone.
         let replacement = resource("left.wav", test_wav(48_000, 1, 128));
-        let error = build(&output, format, &[replacement]).err().expect("replacement WAV must be rejected");
-        assert!(error.to_string().contains("changed since workflow completion"), "{format:?}: {error}");
+        let error =
+            build(&output, format, &[replacement]).expect_err("replacement WAV must be rejected");
+        assert!(
+            error
+                .to_string()
+                .contains("changed since workflow completion"),
+            "{format:?}: {error}"
+        );
 
         let mut missing_identity = output.clone();
-        missing_identity.metadata.as_mut().unwrap().final_convolution_sha256.as_mut().unwrap().clear();
-        let error = build(&missing_identity, format, std::slice::from_ref(&original)).err().expect("missing identity must be rejected");
-        assert!(error.to_string().contains("inventory does not match"), "{format:?}: {error}");
+        missing_identity
+            .metadata
+            .as_mut()
+            .unwrap()
+            .final_convolution_sha256
+            .as_mut()
+            .unwrap()
+            .clear();
+        let error = build(&missing_identity, format, std::slice::from_ref(&original))
+            .expect_err("missing identity must be rejected");
+        assert!(
+            error.to_string().contains("inventory does not match"),
+            "{format:?}: {error}"
+        );
 
         let mut unbound = output.clone();
-        unbound.metadata.as_mut().unwrap().final_convolution_sha256.as_mut().unwrap().insert("left.wav".into(), None);
-        let error = build(&unbound, format, std::slice::from_ref(&original)).err().expect("unbound WAV must be rejected");
+        unbound
+            .metadata
+            .as_mut()
+            .unwrap()
+            .final_convolution_sha256
+            .as_mut()
+            .unwrap()
+            .insert("left.wav".into(), None);
+        let error = build(&unbound, format, std::slice::from_ref(&original))
+            .expect_err("unbound WAV must be rejected");
         assert!(error.to_string().contains("unbound"), "{format:?}: {error}");
     }
 }
@@ -94,10 +122,7 @@ fn package_convolution_sidecars_avoids_explicit_destination_collisions() {
 
     assert_eq!(members[0].relative_path, Path::new("L_fir_96000hz_002.wav"));
     assert_eq!(members[0].bytes.as_ref(), b"new");
-    assert_eq!(
-        convolution_path(&packaged, "left"),
-        "L_fir_96000hz_002.wav"
-    );
+    assert_eq!(convolution_path(&packaged, "left"), "L_fir_96000hz_002.wav");
 }
 
 #[test]
@@ -128,13 +153,9 @@ fn package_convolution_sidecars_deduplicates_reference_aliases_by_content() {
         resource("/absolute/shared.wav", b"same wav".to_vec()),
     ];
 
-    let (packaged, members) = package_convolution_sidecars(
-        &output,
-        &resources,
-        &BTreeSet::new(),
-        &HashMap::new(),
-    )
-    .unwrap();
+    let (packaged, members) =
+        package_convolution_sidecars(&output, &resources, &BTreeSet::new(), &HashMap::new())
+            .unwrap();
 
     assert_eq!(members.len(), 1);
     assert_eq!(convolution_path(&packaged, "left"), "shared.wav");
@@ -187,10 +208,8 @@ fn roon_export_builds_deterministic_routed_convolver_archive() {
         &HashMap::new(),
     )
     .unwrap();
-    let manifest: serde_json::Value = serde_json::from_slice(
-        &first.member(Path::new("room_eq.json")).unwrap().bytes,
-    )
-    .unwrap();
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&first.member(Path::new("room_eq.json")).unwrap().bytes).unwrap();
     assert_eq!(manifest["manifest_version"], json!(1));
     assert_eq!(manifest["importable_preset"], json!(false));
     assert_eq!(
@@ -202,9 +221,7 @@ fn roon_export_builds_deterministic_routed_convolver_archive() {
         json!("3")
     );
 
-    let archive_member = first
-        .member(Path::new("room_eq_convolution.zip"))
-        .unwrap();
+    let archive_member = first.member(Path::new("room_eq_convolution.zip")).unwrap();
     let mut archive = zip::ZipArchive::new(Cursor::new(&archive_member.bytes)).unwrap();
     let names: Vec<_> = (0..archive.len())
         .map(|index| archive.by_index(index).unwrap().name().to_string())

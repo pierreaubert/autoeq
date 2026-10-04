@@ -33,13 +33,14 @@ rustfft = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_ignored = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+sha2 = { workspace = true }
 sofa-reader = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
-tempfile = { workspace = true }
 
 [[bench]]
 name = "end_to_end_scaling"

@@ -13,6 +13,34 @@ npx ajv validate -s input_schema.json -d your_config.json
 check-jsonschema --schemafile input_schema.json your_config.json
 ```
 
+## Verified capture handoff
+
+New canonical capture configurations set
+`recording_config.capture_handoff_file` to `capture-handoff.json`. Keep that
+sidecar and its inventory files with the configuration. RoomEQ verifies the
+configuration, raw and processed audio, response and calibration identities;
+missing or changed files are refused. Captured responses are parsed from the
+verified bytes and retained in memory for later optimization loads.
+
+Relative inventory paths support moving a whole capture directory. Optimization
+settings can be overridden; overrides cannot replace acquisition identities or
+measurements. Cancelled/failed sessions and repeated takes require an explicit
+review/selection projection before correction. Hashes detect changed bytes;
+physical calibration, coherent phase and device accuracy still need their own
+evidence. Legacy recording imports remain available with their stated unknowns.
+
+## Legacy recording import
+
+`convert_recording input.json output.json` preserves recorded response arrays,
+channel names, original CSV/WAV references and recording settings. File-only
+summaries require a CSV reference. Missing or malformed responses and duplicate
+channel names are refused. Legacy driver groups require explicit topology and
+crossover configuration before import.
+
+A saved calibration filename does not prove calibration was applied. Legacy
+imports retain unknown acquisition quality, absolute-level and coherent-timing
+evidence; raw IR and analysis summaries do not become verified captures.
+
 ## Root Structure
 
 ```json

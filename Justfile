@@ -32,11 +32,11 @@ prod-autoeq:
 # Speaker-data visualization demos are owned by AutoEQ.
 [group('build')]
 demo-d3rs-spinorama:
-	{{cargo}} build --release -p autoeq-gpui-examples --bin d3rs-spinorama
+	{{cargo}} build --manifest-path crates/autoeq-gpui-examples/Cargo.toml --release --bin d3rs-spinorama
 
 [group('build')]
 demo-px-spinorama:
-	{{cargo}} build --release -p autoeq-gpui-examples --bin px-spinorama
+	{{cargo}} build --manifest-path crates/autoeq-gpui-examples/Cargo.toml --release --bin px-spinorama
 
 [group('build')]
 roomeq:
@@ -48,17 +48,24 @@ roomeq:
 # 0.2.128 on PATH (or set WANDBIN). Reports embed dist/ at generation time.
 # The 2D exports live in the cdylib-only autoeq-report-wasm-shell crate;
 # autoeq-report-wasm itself is a plain rlib (see its Cargo.toml).
+# Resolve Cargo metadata so CARGO_TARGET_DIR and configured target directories work.
 [group('build')]
 report-dist:
-	{{cargo}} build --release --target wasm32-unknown-unknown -p autoeq-report-wasm-shell
-	${WANDBIN:-wasm-bindgen} --target web --out-name report2d --out-dir crates/autoeq-report-wasm/pkg2d target/wasm32-unknown-unknown/release/autoeq_report_wasm_shell.wasm
+	#!/usr/bin/env bash
+	set -euo pipefail
+	target_dir="$({{cargo}} metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+	{{cargo}} build --release --target wasm32-unknown-unknown -p autoeq-report-wasm-shell --target-dir "$target_dir"
+	"${WANDBIN:-wasm-bindgen}" --target web --out-name report2d --out-dir crates/autoeq-report-wasm/pkg2d "$target_dir/wasm32-unknown-unknown/release/autoeq_report_wasm_shell.wasm"
 	cp crates/autoeq-report-wasm/pkg2d/report2d.js crates/autoeq-report-wasm/dist/report2d.js
 	cp crates/autoeq-report-wasm/pkg2d/report2d_bg.wasm crates/autoeq-report-wasm/dist/report2d.wasm
 
 [group('build')]
 report-dist-gpui:
-	cargo +nightly build --release --target wasm32-unknown-unknown -p autoeq-report-gpui
-	${WANDBIN:-wasm-bindgen} --target web --out-name reportgpui --out-dir crates/autoeq-report-gpui/pkg target/wasm32-unknown-unknown/release/autoeq_report_gpui.wasm
+	#!/usr/bin/env bash
+	set -euo pipefail
+	target_dir="$(cargo +nightly metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+	cargo +nightly build --release --target wasm32-unknown-unknown -p autoeq-report-gpui --target-dir "$target_dir"
+	"${WANDBIN:-wasm-bindgen}" --target web --out-name reportgpui --out-dir crates/autoeq-report-gpui/pkg "$target_dir/wasm32-unknown-unknown/release/autoeq_report_gpui.wasm"
 	cp crates/autoeq-report-gpui/pkg/reportgpui.js crates/autoeq-report-wasm/dist/reportgpui.js
 	cp crates/autoeq-report-gpui/pkg/reportgpui_bg.wasm crates/autoeq-report-wasm/dist/reportgpui.wasm
 
@@ -139,9 +146,6 @@ recording-gui *args:
 
 [group('lint')]
 lint:
-	# The optional plotly dependency embeds templates from an external cache path
-	# that is not available in all checkout environments. Keep lint hermetic and
-	# lint the default production surface; plotly builds remain covered by CI.
 	{{cargo}} clippy --all -- -D warnings
 
 [group('lint')]
@@ -174,10 +178,10 @@ dist-autoeq:
 dist-roomeq:
 	{{cargo}} build --profile dist --features cli --bin roomeq
 
-# Plotly-gated bins (skipped by `--workspace` because of required-features).
+# AutoEQ QA fuzzer is gated by the workspace `qa` feature.
 [group('dist')]
 dist-plot-bins:
-	{{cargo}} build --profile dist --bin roomeq-fuzzer --features qa,plotly
+	{{cargo}} build --profile dist --bin roomeq-fuzzer --features qa
 
 # ----------------------------------------------------------------------
 # CLEAN
@@ -234,7 +238,7 @@ publish-autoeq:
 
 [group('demo')]
 demo-headphone-loss:
-	{{cargo}} run --release --example headphone_loss_demo --features="plotly" -- \
+	{{cargo}} run --release --example headphone_loss_demo -- \
 	--spl "./data_tests/headphones/asr/bowerwilkins_p7/Bowers & Wilkins P7.csv" \
 	--target "./data_tests/targets/harman-over-ear-2018.csv"
 
@@ -242,4 +246,4 @@ demo-headphone-loss:
 # QA
 # ----------------------------------------------------------------------
 
-qa : qa-autoeq-all qa-roomeq-all qa-export-all
+qa : qa-autoeq-all qa-roomeq-all qa-export-all qa-wolfram-validation

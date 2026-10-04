@@ -1561,6 +1561,19 @@
           },
           "type": "array"
         },
+        "post_dsp_main_alignment_band_hz": {
+          "description": "Original measured-curve band used for post-DSP main-level alignment.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "routes": {
           "items": {
             "$ref": "#/$defs/BassManagementRoute"
@@ -5698,6 +5711,14 @@
           "format": "double",
           "type": "number"
         },
+        "max_output_safety_attenuation_db": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Optional cumulative additional static safety attenuation limits by physical output, in dB.\nOnly serial `room_eq_safety_gain` gains count; common pre-route cuts count for every\naffected output. Baseline calibration and untagged trims remain separate. This is an\noperator-declared output-loss budget, not calibrated SPL or hardware-capacity evidence.\nRuntime limiting is never credited toward physical-drive attenuation. Unknown output IDs\nare refused before search; omitted outputs keep the existing behavior.",
+          "type": "object"
+        },
         "max_useful_output_loss_db": {
           "default": 3.0,
           "description": "Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.\nSubwoofers are exempt. This is not input attenuation or PEQ boost.",
@@ -8210,7 +8231,7 @@
           "type": "integer"
         },
         "loss_type": {
-          "description": "Loss function that the optimizer minimized.\nOne of `\"flat\"`, `\"score\"`, `\"epa\"`.\n\nNote: `pre_score` and `post_score` are *not* values of this loss\nfunction — they are always computed by\n`crate::roomeq::workflows::compute_flat_loss` over the\nrole/crossover-aware evaluation window so that routes do not penalize\nintentional crossover rolloff. Runs with different `loss_type` values\nstay on the same scale within that channel role. To compare *perceptual* outcomes across\nloss types use `epa_per_channel.{pre,post}.preference` instead,\nwhich is computed identically for every run.",
+          "description": "Loss function that the optimizer minimized.\nOne of `\"flat\"`, `\"headphone_flat\"`, `\"score\"`, `\"epa\"`.\n\nNote: `pre_score` and `post_score` are *not* values of this loss\nfunction — they are always computed by\n`crate::roomeq::workflows::compute_flat_loss` over the\nrole/crossover-aware evaluation window so that routes do not penalize\nintentional crossover rolloff. Runs with different `loss_type` values\nstay on the same scale within that channel role. To compare *perceptual* outcomes across\nloss types use `epa_per_channel.{pre,post}.preference` instead,\nwhich is computed identically for every run.",
           "type": [
             "string",
             "null"
@@ -8672,7 +8693,7 @@
         },
         "loss_type": {
           "default": "flat",
-          "description": "Loss function type. Supported values:\n- `\"flat\"` — minimize deviation from target (default)\n- `\"score\"` — maximize Harman/Olive preference score\n- `\"epa\"` — EPA (Evaluation/Potency/Activity) psychoacoustic\n  loss combining spectral flatness with sharpness, roughness,\n  and loudness-balance penalties derived from Zwicker metrics.\n  When selected, the EPA penalty weights can be customized via\n  the [`epa_config`](Self::epa_config) field; otherwise the\n  defaults from [`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default)\n  are used.",
+          "description": "Loss function type. Supported values:\n- `\"flat\"` — minimize deviation from target (default)\n- `\"headphone_flat\"` — minimize headphone response deviation from target\n- `\"score\"` — maximize Harman/Olive preference score\n- `\"epa\"` — EPA (Evaluation/Potency/Activity) psychoacoustic\n  loss combining spectral flatness with sharpness, roughness,\n  and loudness-balance penalties derived from Zwicker metrics.\n  When selected, the EPA penalty weights can be customized via\n  the [`epa_config`](Self::epa_config) field; otherwise the\n  defaults from [`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default)\n  are used.",
           "type": "string"
         },
         "max_boost_envelope": {
@@ -8989,6 +9010,17 @@
           ],
           "description": "Unified target response configuration (shape + preference shelves + broadband pre-correction)"
         },
+        "tilt_stage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TiltStageConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Trailing LS plus HS tilt pair appended after the main filters."
+        },
         "tolerance": {
           "default": 1e-05,
           "description": "Optimization convergence tolerance (relative)",
@@ -9112,6 +9144,17 @@
             "null"
           ]
         },
+        "pareto_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParetoDispatchReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Pareto selection evidence from this invocation, when the backend emitted it."
+        },
         "restart_history": {
           "items": {
             "$ref": "#/$defs/OptimizerRestartEvidence"
@@ -9156,6 +9199,7 @@
         "evaluation_limit",
         "non_converged",
         "user_stopped",
+        "timed_out",
         "backend_failure",
         "invalid_result"
       ],
@@ -9211,6 +9255,273 @@
       "required": [
         "id",
         "driver_ids"
+      ],
+      "type": "object"
+    },
+    "ParetoCandidateEvidence": {
+      "description": "One source front member and its post-envelope validation result.",
+      "properties": {
+        "crowding_distance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParetoCrowdingDistance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Backend crowding distance, when it reports one."
+        },
+        "rank": {
+          "description": "Backend non-dominated rank, when it reports one.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scalar_loss": {
+          "description": "Configured scalar loss already computed during this invocation.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "search_objectives": {
+          "description": "Search-stage objectives attached to the nominated member.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "search_parameters": {
+          "description": "Parameters nominated by the search backend.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "source_index": {
+          "description": "Position in the optimizer's submitted front.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "validated_objectives": {
+          "description": "Validation-stage objectives evaluated at `validated_parameters`.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "validated_parameters": {
+          "description": "Parameters retained after shared envelope validation and repair.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "source_index",
+        "search_parameters",
+        "search_objectives",
+        "validated_parameters",
+        "validated_objectives"
+      ],
+      "type": "object"
+    },
+    "ParetoCrowdingDistance": {
+      "description": "A JSON-safe crowding distance from a Pareto backend.",
+      "oneOf": [
+        {
+          "description": "A finite crowding distance.",
+          "properties": {
+            "kind": {
+              "const": "finite",
+              "type": "string"
+            },
+            "value": {
+              "format": "double",
+              "type": "number"
+            }
+          },
+          "required": [
+            "kind",
+            "value"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "An unbounded boundary-point distance, represented without non-finite JSON numbers.",
+          "properties": {
+            "kind": {
+              "const": "unbounded",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ParetoDispatchReport": {
+      "description": "Invocation-local, post-validation evidence for a Pareto optimizer result.",
+      "properties": {
+        "backend": {
+          "description": "Backend that nominated the source front.",
+          "type": "string"
+        },
+        "candidates": {
+          "description": "Feasible members, in submitted-front order.",
+          "items": {
+            "$ref": "#/$defs/ParetoCandidateEvidence"
+          },
+          "type": "array"
+        },
+        "generations": {
+          "description": "Search generations completed, when reported by the backend.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "refused_source_indices": {
+          "description": "Submitted-front indices refused by shared validation.",
+          "items": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "array"
+        },
+        "returned_parameters": {
+          "description": "Exact parameters returned by the optimizer invocation.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "schema": {
+          "description": "Schema marker: `roomeq.pareto_dispatch/v1`.",
+          "type": "string"
+        },
+        "search_evaluations": {
+          "description": "Search objective evaluations, when reported by the backend.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "selection": {
+          "$ref": "#/$defs/ParetoSelectionEvidence",
+          "description": "Selection policy and winner identity."
+        },
+        "submitted_count": {
+          "description": "Number of members submitted for shared validation.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema",
+        "backend",
+        "submitted_count",
+        "candidates",
+        "selection",
+        "returned_parameters"
+      ],
+      "type": "object"
+    },
+    "ParetoSelectionEvidence": {
+      "description": "Policy and winner identity for one validated Pareto front.",
+      "properties": {
+        "ideal": {
+          "description": "Per-objective ideal point.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "nadir": {
+          "description": "Per-objective nadir point.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        },
+        "rule": {
+          "description": "Selection rule, such as `normalized_compromise`.",
+          "type": "string"
+        },
+        "scalar_baseline_rule": {
+          "description": "Scalar baseline policy, when the backend computed one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scalar_best_loss": {
+          "description": "Scalar-best loss, when computed.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "scalar_best_source_index": {
+          "description": "Original submitted-front index of the scalar-best member, when computed.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "selected_candidate_index": {
+          "description": "Index into [`ParetoDispatchReport::candidates`] of the selected member.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "selected_source_index": {
+          "description": "Original submitted-front index of the selected member.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "weights": {
+          "description": "Objective weights used by the selection rule.",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rule",
+        "weights",
+        "ideal",
+        "nadir",
+        "selected_candidate_index",
+        "selected_source_index"
       ],
       "type": "object"
     },
@@ -10507,6 +10818,13 @@
           "format": "float",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "capture_handoff_file": {
+          "description": "Required acquisition inventory for newly exported capture configurations.\nThe canonical filename is `capture-handoff.json`; missing or changed\ninventories are refused before correction. Absent on legacy imports.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -12691,6 +13009,43 @@
       },
       "type": "object"
     },
+    "TiltStageConfig": {
+      "description": "Appends an optimizer-driven LS plus HS tilt pair at the DSP chain end.\n\nThe pair extends `num_filters` by two instead of replacing peak slots, so\nenabling tilt never moves the main filters' bounds. Both shelves use the\nexisting shelf limits (+/-`max_db` gain, pinned Q) and flow through the\nsame HF guard, audibility veto, and headroom stages as every other filter.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Enable the trailing tilt pair.",
+          "type": "boolean"
+        },
+        "hs_band_hz": {
+          "description": "HS hinge band `[lo, hi]` in Hz (`None` selects the upper geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "ls_band_hz": {
+          "description": "LS hinge band `[lo, hi]` in Hz (`None` selects the lower geometric\nhalf of the correction band).",
+          "items": {
+            "format": "double",
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "TimingDiagnosticsReport": {
       "properties": {
         "advisories": {
@@ -13107,6 +13462,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "DSP chain output (AudioEngine PluginConfig format)",
   "properties": {
+    "artifact_bundle_schema_version": {
+      "description": "Required artifact-bundle manifest schema for newly published bundles.\nAbsent on legacy graphs, which may still use embedded measurements.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
     "channels": {
       "additionalProperties": {
         "$ref": "#/$defs/ChannelDspChain"

@@ -1,5 +1,33 @@
 # RoomEQ Input Format
 
+## Verified capture handoff
+
+New canonical capture configurations set
+`recording_config.capture_handoff_file` to `capture-handoff.json`. Keep that
+sidecar and its inventory files with the configuration. RoomEQ verifies the
+configuration, raw and processed audio, response and calibration identities;
+missing or changed files are refused. Captured responses are parsed from the
+verified bytes and retained in memory for later optimization loads.
+
+Relative inventory paths support moving a whole capture directory. Optimization
+settings can be overridden; overrides cannot replace acquisition identities or
+measurements. Cancelled/failed sessions and repeated takes require an explicit
+review/selection projection before correction. Hashes detect changed bytes;
+physical calibration, coherent phase and device accuracy still need their own
+evidence. Legacy recording imports remain available with their stated unknowns.
+
+## Legacy recording import
+
+`convert_recording input.json output.json` preserves recorded response arrays,
+channel names, original CSV/WAV references and recording settings. File-only
+summaries require a CSV reference. Missing or malformed responses and duplicate
+channel names are refused. Legacy driver groups require explicit topology and
+crossover configuration before import.
+
+A saved calibration filename does not prove calibration was applied. Legacy
+imports retain unknown acquisition quality, absolute-level and coherent-timing
+evidence; raw IR and analysis summaries do not become verified captures.
+
 ## Recording configuration and room dimensions
 
 The optional root `recording_config` object describes the room and capture
@@ -415,7 +443,8 @@ combined main/sub response through the main speaker's measured passband.
   "default_input_peak": 1.0,
   "input_peak_limits": {"L": 1.0, "R": 1.0, "LFE": 1.0},
   "output_ceiling_dbfs": 0.0,
-  "max_attenuation_db": 12.0
+  "max_attenuation_db": 12.0,
+  "max_output_safety_attenuation_db": {"Sub1": 8.0}
 }
 ```
 
@@ -488,6 +517,23 @@ training and held-out seat is checked against the same structural acoustic
 baseline, including single-seat systems. No valid candidate means an
 optimization error. Rejected alternatives are diagnostic search outcomes;
 the selected graph has separate enforced safety checks.
+
+`optimizer.finalization.max_output_safety_attenuation_db` is an optional map
+from canonical physical-output IDs to finite, nonnegative additional static
+safety-attenuation limits. An omitted or empty map keeps the existing behavior.
+Routed output IDs use resolved physical-output names; independent channel and
+driver IDs use the exact JSON tuple strings emitted by electrical-headroom
+diagnostics (for example, `["channel","L"]` or
+`["driver","L",0,"woofer"]`). Unknown or stale IDs refuse before candidate
+search. For each configured output, the bound sums tagged static
+`room_eq_safety_gain` cuts along the most attenuated complete input-to-output
+path. A common pre-route cut counts for every physical output it feeds, and
+successive pre-route and post-route cuts add together. Baseline calibration and
+untagged level trims are outside this additional-loss budget; frequency-
+selective EQ is governed by its existing checks. A runtime limiter does not
+earn credit toward physical-drive attenuation. This operator-declared output-
+loss budget is not calibrated SPL or evidence of hardware capacity.
+
 Frequency-selective trials add at most twelve common PEQ/shelf sections, keep
 their centers inside the declared correction band, and bound the sum
 of their cuts by `max_attenuation_db`. Complete-graph replay, rather than section
@@ -1372,3 +1418,13 @@ of the configured directivity model, replacing geometric angles in supported
 bins only. This remains a magnitude-only spatial-weight approximation, not
 coherent reconstruction of the reflected field. Invalid capture evidence or
 ambiguous geometry retains the geometric weighting path.
+
+
+### COBRA optimizer
+
+Select the constrained surrogate solver with `optimizer.algorithm: "autoeq:cobra"`
+(or `"cobra"`). It uses `max_iter` as the objective-evaluation budget and `seed`
+for reproducibility. It supports native inequality constraints, with progress
+and stop callbacks after surrogate infill evaluations. Its initial Halton design
+does not use a saved candidate. Internal true-function polish is disabled; the
+existing `refine`/`local_algo` settings control RoomEQ local refinement.

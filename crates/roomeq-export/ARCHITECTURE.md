@@ -12,7 +12,9 @@ correction; it serializes the already-finalized `ChannelDspChain`s.
 
 CamillaDSP (YAML) · Equalizer APO / Peace (text) · EasyEffects (JSON) ·
 Wavelet (GraphicEQ text) · PipeWire filter-chain (SPA-JSON) · Roon DSP Engine
-(JSON) · REW Generic EQ (text) · canonical normalized biquad coefficients (JSON).
+(JSON) · REW Generic EQ (reference text for manual entry) · canonical normalized
+biquad coefficients (JSON). REW cannot reload Generic EQ text; its saved filter
+format is binary `.req`, which this crate does not generate.
 
 ## Key modules
 
@@ -21,7 +23,7 @@ Wavelet (GraphicEQ text) · PipeWire filter-chain (SPA-JSON) · Roon DSP Engine
 | `channel`, `collect`, `extract` | Per-channel plugin harvesting into export rows |
 | `format`, `export_format`, `write` | Target renderers and file writers |
 | `conformance` | Per-target rule checks (what each engine can express) |
-| `roundtrip` (+ `tests/`) | Parse-back verification: exported files must re-import to the same DSP |
+| `roundtrip` (+ `tests/`) | Internal parse-back verification of supported formats; external consumer import requires separate evidence |
 | `package` | Multi-file export bundles |
 | `delay`, `hash` | Delay encoding, artifact identity |
 | `pipewire`, `roon_convolver` | Target-specific adapters |

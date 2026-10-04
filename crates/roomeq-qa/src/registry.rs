@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use clap::ValueEnum;
 use roomeq_engine::room_result::RoomOptimizationResult;
 use roomeq_model::{MeasurementSource, RoomConfig, SpeakerConfig, SubwooferStrategy, SystemModel};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, ValueEnum)]
@@ -303,6 +303,107 @@ pub struct DecisionCaseSpec {
     pub expect: ScenarioExpect,
 }
 
+/// Public workflow branches that have a deterministic executable contract,
+/// separate from the acoustic quality gates in [`QualityCaseSpec`].
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicWorkflowKind {
+    Ctc,
+    Dba,
+    SupportingSource,
+    Multiway,
+}
+
+/// Evidence class for public workflow contracts. These fixtures are
+/// generated analytically and do not represent measured-room performance.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkflowEvidenceClass {
+    SyntheticAnalytic,
+}
+
+/// Explicit optimizer controls used by public workflow contracts that invoke
+/// a stochastic optimizer.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicOptimizerControls {
+    pub algorithm: String,
+    pub max_iter: usize,
+    pub population: usize,
+    pub num_filters: usize,
+    pub min_freq_hz: f64,
+    pub max_freq_hz: f64,
+    pub min_gain_db: f64,
+    pub max_gain_db: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicCtcControls {
+    pub fir_taps: usize,
+    pub minimax_iterations: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicDbaControls {
+    pub frequency_samples: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicSupportingSourceControls {
+    pub delay_ms: f64,
+    pub fir_taps: usize,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicMultiwayControls {
+    pub crossover_type: String,
+    pub crossover_frequency_hz: f64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicWorkflowControls {
+    #[serde(default)]
+    pub optimizer: Option<PublicOptimizerControls>,
+    #[serde(default)]
+    pub ctc: Option<PublicCtcControls>,
+    #[serde(default)]
+    pub dba: Option<PublicDbaControls>,
+    #[serde(default)]
+    pub supporting_source: Option<PublicSupportingSourceControls>,
+    #[serde(default)]
+    pub multiway: Option<PublicMultiwayControls>,
+}
+
+/// A deterministic public-API workflow and its corresponding refusal case.
+/// These cases assert delivered artifacts/transfers and explicit refusal
+/// semantics; they carry no invented acoustic-improvement threshold.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct PublicWorkflowCaseSpec {
+    pub id: String,
+    pub kind: PublicWorkflowKind,
+    pub evidence_class: WorkflowEvidenceClass,
+    pub fixture_id: String,
+    /// SHA-256 of the exact canonical fixture bytes passed to the workflow.
+    pub input_sha256: String,
+    pub refusal_fixture_id: String,
+    /// SHA-256 of the exact refusal-variant fixture bytes.
+    pub refusal_input_sha256: String,
+    /// Explicit control changed to exercise the expected refusal/diagnostic.
+    pub refusal_trigger: String,
+    pub sample_rate_hz: f64,
+    /// `None` only for deterministic workflows that do not consume randomness.
+    pub seed: Option<u64>,
+    pub controls: PublicWorkflowControls,
+    pub expected_positive_artifact: String,
+    pub expected_refusal: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScenarioRegistry {
     pub version: u32,
@@ -311,6 +412,8 @@ pub struct ScenarioRegistry {
     pub quality_cases: Vec<QualityCaseSpec>,
     #[serde(default)]
     pub decision_cases: Vec<DecisionCaseSpec>,
+    #[serde(default)]
+    pub public_workflow_cases: Vec<PublicWorkflowCaseSpec>,
     pub suites: Vec<SuiteSpec>,
 }
 
@@ -602,6 +705,162 @@ impl ScenarioRegistry {
                 );
             }
         }
+        let expected_workflow_kinds = [
+            PublicWorkflowKind::Ctc,
+            PublicWorkflowKind::Dba,
+            PublicWorkflowKind::SupportingSource,
+            PublicWorkflowKind::Multiway,
+        ];
+        if self.public_workflow_cases.len() != expected_workflow_kinds.len() {
+            bail!(
+                "RoomEQ QA registry needs exactly {} public workflow contract cases",
+                expected_workflow_kinds.len()
+            );
+        }
+        let mut workflow_kinds = HashSet::new();
+        for case in &self.public_workflow_cases {
+            if !ids.insert(&case.id) {
+                bail!("duplicate RoomEQ QA registry id '{}'", case.id);
+            }
+            if !workflow_kinds.insert(case.kind) {
+                bail!("duplicate public workflow contract kind '{:?}'", case.kind);
+            }
+            if case.id.trim().is_empty()
+                || case.fixture_id.trim().is_empty()
+                || case.refusal_fixture_id.trim().is_empty()
+                || case.refusal_trigger.trim().is_empty()
+            {
+                bail!("public workflow case '{}' has an empty identity", case.id);
+            }
+            if case.evidence_class != WorkflowEvidenceClass::SyntheticAnalytic {
+                bail!(
+                    "public workflow case '{}' uses an unsupported evidence class",
+                    case.id
+                );
+            }
+            if !valid_sha256(&case.input_sha256) || !valid_sha256(&case.refusal_input_sha256) {
+                bail!(
+                    "public workflow case '{}' has an invalid fixture SHA-256",
+                    case.id
+                );
+            }
+            if !case.sample_rate_hz.is_finite() || case.sample_rate_hz <= 0.0 {
+                bail!(
+                    "public workflow case '{}' has an invalid sample rate",
+                    case.id
+                );
+            }
+            if case.expected_positive_artifact.trim().is_empty()
+                || case.expected_refusal.trim().is_empty()
+                || case.expected_positive_artifact == case.expected_refusal
+            {
+                bail!(
+                    "public workflow case '{}' needs distinct positive and refusal outcomes",
+                    case.id
+                );
+            }
+            let controls = &case.controls;
+            let optimizer_valid = controls.optimizer.as_ref().is_some_and(|optimizer| {
+                !optimizer.algorithm.trim().is_empty()
+                    && optimizer.max_iter > 0
+                    && optimizer.population >= 4
+                    && optimizer.num_filters > 0
+                    && optimizer.min_freq_hz.is_finite()
+                    && optimizer.max_freq_hz.is_finite()
+                    && optimizer.min_freq_hz > 0.0
+                    && optimizer.max_freq_hz > optimizer.min_freq_hz
+                    && optimizer.min_gain_db.is_finite()
+                    && optimizer.max_gain_db.is_finite()
+                    && optimizer.max_gain_db > optimizer.min_gain_db
+            });
+            let shape_matches = match case.kind {
+                PublicWorkflowKind::Ctc => {
+                    optimizer_valid
+                        && controls
+                            .ctc
+                            .as_ref()
+                            .is_some_and(|ctc| ctc.fir_taps >= 16 && ctc.minimax_iterations > 0)
+                        && controls.dba.is_none()
+                        && controls.supporting_source.is_none()
+                        && controls.multiway.is_none()
+                }
+                PublicWorkflowKind::Dba => {
+                    optimizer_valid
+                        && controls.ctc.is_none()
+                        && controls
+                            .dba
+                            .as_ref()
+                            .is_some_and(|dba| dba.frequency_samples >= 16)
+                        && controls.supporting_source.is_none()
+                        && controls.multiway.is_none()
+                }
+                PublicWorkflowKind::SupportingSource => {
+                    controls.optimizer.is_none()
+                        && controls.ctc.is_none()
+                        && controls.dba.is_none()
+                        && controls.multiway.is_none()
+                        && controls.supporting_source.as_ref().is_some_and(|support| {
+                            support.delay_ms.is_finite()
+                                && support.delay_ms >= 0.0
+                                && support.fir_taps >= 16
+                        })
+                }
+                PublicWorkflowKind::Multiway => {
+                    optimizer_valid
+                        && controls.ctc.is_none()
+                        && controls.dba.is_none()
+                        && controls.supporting_source.is_none()
+                        && controls.multiway.as_ref().is_some_and(|multiway| {
+                            !multiway.crossover_type.trim().is_empty()
+                                && multiway.crossover_frequency_hz.is_finite()
+                                && controls.optimizer.as_ref().is_some_and(|optimizer| {
+                                    multiway.crossover_frequency_hz > optimizer.min_freq_hz
+                                        && multiway.crossover_frequency_hz < optimizer.max_freq_hz
+                                })
+                        })
+                }
+            };
+            if !shape_matches {
+                bail!(
+                    "public workflow case '{}' has invalid controls for {:?}",
+                    case.id,
+                    case.kind
+                );
+            }
+            if matches!(case.kind, PublicWorkflowKind::SupportingSource) != case.seed.is_none() {
+                bail!(
+                    "public workflow case '{}' must declare a seed only when its optimizer consumes one",
+                    case.id
+                );
+            }
+        }
+        if expected_workflow_kinds
+            .iter()
+            .any(|kind| !workflow_kinds.contains(kind))
+        {
+            bail!(
+                "public workflow contracts must cover CTC, DBA, supporting-source, and multiway exactly once"
+            );
+        }
+        let workflow_ids = self
+            .public_workflow_cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .collect::<HashSet<_>>();
+        let Some(workflow_suite) = self.suite_for_runner("public_workflows") else {
+            bail!("RoomEQ QA registry is missing the public_workflows runner");
+        };
+        let suite_ids = workflow_suite
+            .cases
+            .iter()
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        if workflow_suite.cases.len() != workflow_ids.len() || suite_ids != workflow_ids {
+            bail!("public_workflows suite must reference every public workflow case exactly once");
+        }
+        if workflow_suite.tier != QaTier::Pr {
+            bail!("public workflow contracts must run in the PR tier");
+        }
         // Reject empty or filtered-away decision matrices: every release tier
         // must select at least one decision case.
         for tier in [QaTier::Pr, QaTier::Nightly] {
@@ -651,6 +910,10 @@ impl ScenarioRegistry {
             .iter()
             .filter(move |entry| tier.includes(entry.tier))
     }
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn source_is_multi(source: &MeasurementSource) -> bool {
@@ -901,12 +1164,63 @@ mod tests {
             "integration",
             "quality",
             "fuzzer",
+            "public_workflows",
         ] {
             assert!(
                 registry.suite_for_runner(runner).is_some(),
                 "missing {runner}"
             );
         }
+    }
+
+    #[test]
+    fn public_workflow_registry_is_complete_and_distinguishes_outcomes() {
+        let registry = load_registry().unwrap();
+        assert_eq!(registry.public_workflow_cases.len(), 4);
+        let suite = registry.suite_for_runner("public_workflows").unwrap();
+        assert_eq!(suite.cases.len(), 4);
+        for case in &registry.public_workflow_cases {
+            assert_eq!(
+                case.evidence_class,
+                WorkflowEvidenceClass::SyntheticAnalytic
+            );
+            assert_ne!(case.expected_positive_artifact, case.expected_refusal);
+            assert!(valid_sha256(&case.input_sha256));
+            assert!(valid_sha256(&case.refusal_input_sha256));
+        }
+    }
+
+    #[test]
+    fn public_workflow_registry_rejects_missing_or_duplicate_rows() {
+        let mut registry = load_registry().unwrap();
+        registry.public_workflow_cases.pop();
+        let error = registry.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("exactly 4 public workflow contract cases"),
+            "{error}"
+        );
+
+        let mut registry = load_registry().unwrap();
+        registry.public_workflow_cases[1].kind = registry.public_workflow_cases[0].kind;
+        let error = registry.validate().unwrap_err().to_string();
+        assert!(
+            error.contains("duplicate public workflow contract kind"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn public_workflow_controls_reject_unknown_keys() {
+        let error = serde_json::from_value::<PublicWorkflowControls>(serde_json::json!({
+            "optimizer": null,
+            "ctc": null,
+            "dba": { "frequency_samples": 64 },
+            "supporting_source": null,
+            "multiway": null,
+            "frequncy_samples": 64
+        }))
+        .unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
     }
 
     #[test]

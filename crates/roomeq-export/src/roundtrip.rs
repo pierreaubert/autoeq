@@ -36,7 +36,7 @@ pub fn verify_biquad_json_roundtrip(
     sample_rate: f64,
     tolerance: f64,
 ) -> anyhow::Result<BiquadRoundtripReport> {
-    if !(tolerance > 0.0) || !tolerance.is_finite() {
+    if !tolerance.is_finite() || tolerance <= 0.0 {
         anyhow::bail!("round-trip tolerance must be finite and positive");
     }
     let artifact = super::export_normalized_biquad_coefficients(graph, sample_rate)?;
@@ -192,7 +192,7 @@ pub fn verify_convolution_wav_roundtrip(
     resources: &[super::package::ConvolutionResource],
     sample_tolerance: f32,
 ) -> anyhow::Result<ConvolutionRoundtripReport> {
-    if !(sample_tolerance >= 0.0) || !sample_tolerance.is_finite() {
+    if !sample_tolerance.is_finite() || sample_tolerance < 0.0 {
         anyhow::bail!("sample tolerance must be finite and non-negative");
     }
     anyhow::ensure!(!members.is_empty(), "no convolution sidecars packaged");

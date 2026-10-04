@@ -44,6 +44,7 @@ impl OptimizerConfigExt for OptimizerConfig {
         let loss = match self.loss_type.as_str() {
             "flat" if self.asymmetric_loss => LossType::SpeakerFlatAsymmetric,
             "flat" => LossType::SpeakerFlat,
+            "headphone_flat" => LossType::HeadphoneFlat,
             "score" => LossType::SpeakerScore,
             "epa" => LossType::Epa,
             _ => LossType::SpeakerFlat,
@@ -332,6 +333,18 @@ mod tests {
     }
 
     #[test]
+    fn optimizer_adapter_preserves_headphone_flat_loss() {
+        let config = OptimizerConfig {
+            loss_type: "headphone_flat".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.to_optim_params(48_000.0).loss,
+            LossType::HeadphoneFlat
+        );
+    }
+
+    #[test]
     fn optimizer_adapter_resolves_schroeder_frequency_and_bo_options() {
         let config = OptimizerConfig {
             smoothness_penalty: Some(smoothness_config(None)),
@@ -375,11 +388,15 @@ mod tests {
 
     #[test]
     fn optimizer_adapter_carries_frequency_q_policy() {
-        let mut high = roomeq_model::HighFrequencyCorrectionConfig::default();
-        high.start_hz = 1_600.0;
-        high.max_q = 0.8;
-        let mut config = OptimizerConfig::default();
-        config.high_frequency_correction = Some(high);
+        let high = roomeq_model::HighFrequencyCorrectionConfig {
+            start_hz: 1_600.0,
+            max_q: 0.8,
+            ..Default::default()
+        };
+        let config = OptimizerConfig {
+            high_frequency_correction: Some(high),
+            ..Default::default()
+        };
         let params = config.to_optim_params(48_000.0);
         let policy = params
             .frequency_q_policy

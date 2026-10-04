@@ -14,10 +14,11 @@
 use clap::Parser;
 use consts::PAIR_TIE_EPS;
 use std::error::Error;
+use std::fmt;
+use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::select;
 use tokio::sync::{Semaphore, mpsc};
 use tokio::task::JoinSet;
@@ -63,41 +64,69 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
         autoeq::cli::display_algorithm_list();
     }
 
+    // Validate before starting the signal listener, whose lifetime is then
+    // bounded by the result of `run_benchmark` below.
+    autoeq::cli::validate_args_or_exit(&args.base);
+
     // Set up signal handling for graceful shutdown
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let shutdown_clone = Arc::clone(&shutdown);
+    let shutdown = ShutdownSignal::new();
+    let shutdown_clone = shutdown.clone();
 
     // Spawn a dedicated signal handler task
-    tokio::spawn(async move {
-        let mut sigint_count = 0;
+    let signal_task = SignalTaskGuard::new(tokio::spawn(async move {
         loop {
             if let Err(e) = tokio::signal::ctrl_c().await {
                 eprintln!("⚠️ Error setting up signal handler: {}", e);
                 break;
             }
 
-            sigint_count += 1;
+            eprintln!("\n🛑 Received interrupt signal. Stopping benchmark work cooperatively...");
+            eprintln!("📝 Press Ctrl+C again within 5 seconds to force immediate termination.");
+            shutdown_clone.request();
 
-            if sigint_count == 1 {
-                eprintln!("\n🛑 Received interrupt signal (1/2). Stopping benchmark gracefully...");
-                eprintln!("📝 Press Ctrl+C again within 5 seconds to force immediate termination.");
-                shutdown_clone.store(true, Ordering::Relaxed);
-
-                // Wait 5 seconds for graceful shutdown (longer than autoeq since benchmarks can take time)
-                let start = Instant::now();
-                while start.elapsed() < Duration::from_secs(5) {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(5)) => {}
+                result = tokio::signal::ctrl_c() => {
+                    if let Err(error) = result {
+                        eprintln!("⚠️ Error waiting for second interrupt signal: {error}");
+                    } else {
+                        eprintln!("\n‼️ Received second interrupt signal. Forcing immediate termination!");
+                        std::process::exit(130);
+                    }
                 }
-            } else {
-                eprintln!("\n‼️ Received second interrupt signal. Forcing immediate termination!");
-                std::process::exit(130); // Standard exit code for SIGINT
             }
         }
-    });
+    }));
 
-    // Validate CLI arguments
-    autoeq::cli::validate_args_or_exit(&args.base);
+    let result = run_benchmark(args, shutdown).await;
+    signal_task.abort_and_join().await;
+    result
+}
 
+struct SignalTaskGuard(Option<tokio::task::JoinHandle<()>>);
+
+impl SignalTaskGuard {
+    fn new(task: tokio::task::JoinHandle<()>) -> Self {
+        Self(Some(task))
+    }
+
+    async fn abort_and_join(mut self) {
+        if let Some(mut task) = self.0.take() {
+            task.abort();
+            let _ = (&mut task).await;
+        }
+    }
+}
+
+impl Drop for SignalTaskGuard {
+    fn drop(&mut self) {
+        if let Some(task) = &self.0 {
+            task.abort();
+        }
+    }
+}
+
+async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), Box<dyn Error>> {
     // Enumerate speakers as subdirectories of ./data_cached/speakers/org.spinorama/
     let speakers_dir = PathBuf::from(DATA_CACHED)
         .join("speakers")
@@ -122,6 +151,14 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
     eprintln!("Running benchmark with {} parallel jobs", jobs);
     eprintln!("Press Ctrl+C to gracefully stop the benchmark and save partial results...");
 
+    // Prepare the output before any workers start. If the destination cannot
+    // be opened or the header cannot be written, there is no blocking work to
+    // cancel or drain.
+    let mut wtr =
+        csv::Writer::from_path(std::path::Path::new(DATA_GENERATED).join("benchmark.csv"))?;
+    wtr.write_record(CSV_HEADER)?;
+    wtr.flush()?;
+
     // Channel for rows; writer runs on main task
     let (tx, mut rx) = mpsc::channel::<BenchRow>(jobs * 2);
     let sem = std::sync::Arc::new(Semaphore::new(jobs));
@@ -131,13 +168,14 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
         let tx = tx.clone();
         let sem = sem.clone();
         let base_args = args.base.clone();
-        let shutdown_clone = Arc::clone(&shutdown);
+        let shutdown_clone = shutdown.clone();
         set.spawn(async move {
-            let _permit = sem.acquire_owned().await.expect("semaphore");
+            let Some(_permit) = acquire_slot_or_shutdown(sem, shutdown_clone.clone()).await else {
+                return;
+            };
 
             // Check for shutdown signal before starting work
-            if shutdown_clone.load(Ordering::Relaxed) {
-                let _ = tx.send(BenchRow::empty(speaker)).await;
+            if shutdown_clone.is_requested() {
                 return;
             }
 
@@ -151,10 +189,10 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
             a1.measurement = Some("CEA2034".to_string());
             a1.curve_name = "Listening Window".to_string();
             a1.loss = autoeq::LossType::SpeakerFlat;
-            let s1 = if shutdown_clone.load(Ordering::Relaxed) {
+            let s1 = if shutdown_clone.is_requested() {
                 None
             } else {
-                run_one(&a1, Arc::clone(&shutdown_clone))
+                run_one(&a1, shutdown_clone.clone())
                     .await
                     .ok()
                     .map(|m| m.pref_score)
@@ -167,10 +205,10 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
             a2.measurement = Some("Estimated In-Room Response".to_string());
             a2.curve_name = "Estimated In-Room Response".to_string();
             a2.loss = autoeq::LossType::SpeakerFlat;
-            let s2 = if shutdown_clone.load(Ordering::Relaxed) {
+            let s2 = if shutdown_clone.is_requested() {
                 None
             } else {
-                run_one(&a2, Arc::clone(&shutdown_clone))
+                run_one(&a2, shutdown_clone.clone())
                     .await
                     .ok()
                     .map(|m| m.pref_score)
@@ -183,10 +221,10 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
             a3.measurement = Some("CEA2034".to_string());
             a3.loss = autoeq::LossType::SpeakerScore;
             a3.algo = "mh:rga".to_string();
-            let s3 = if shutdown_clone.load(Ordering::Relaxed) {
+            let s3 = if shutdown_clone.is_requested() {
                 None
             } else {
-                run_one(&a3, Arc::clone(&shutdown_clone))
+                run_one(&a3, shutdown_clone.clone())
                     .await
                     .ok()
                     .map(|m| m.pref_score)
@@ -199,10 +237,10 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
             a4.measurement = Some("CEA2034".to_string());
             a4.loss = autoeq::LossType::SpeakerScore;
             a4.algo = "mh:pso".to_string();
-            let s4 = if shutdown_clone.load(Ordering::Relaxed) {
+            let s4 = if shutdown_clone.is_requested() {
                 None
             } else {
-                run_one(&a4, Arc::clone(&shutdown_clone))
+                run_one(&a4, shutdown_clone.clone())
                     .await
                     .ok()
                     .map(|m| m.pref_score)
@@ -215,10 +253,10 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
             a5.measurement = Some("CEA2034".to_string());
             a5.loss = autoeq::LossType::SpeakerScore;
             a5.algo = "autoeq:de".to_string();
-            let s5 = if shutdown_clone.load(Ordering::Relaxed) {
+            let s5 = if shutdown_clone.is_requested() {
                 None
             } else {
-                run_one(&a5, Arc::clone(&shutdown_clone))
+                run_one(&a5, shutdown_clone.clone())
                     .await
                     .ok()
                     .map(|m| m.pref_score)
@@ -231,10 +269,10 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
             a6.measurement = Some("CEA2034".to_string());
             a6.loss = autoeq::LossType::SpeakerScore;
             a6.algo = "autoeq:cmaes".to_string();
-            let s6 = if shutdown_clone.load(Ordering::Relaxed) {
+            let s6 = if shutdown_clone.is_requested() {
                 None
             } else {
-                run_one(&a6, Arc::clone(&shutdown_clone))
+                run_one(&a6, shutdown_clone.clone())
                     .await
                     .ok()
                     .map(|m| m.pref_score)
@@ -259,11 +297,6 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
     }
     drop(tx); // close sender when tasks finish
 
-    // CSV writer: header then rows as they arrive (unordered)
-    let mut wtr =
-        csv::Writer::from_path(std::path::Path::new(DATA_GENERATED).join("benchmark.csv"))?;
-    wtr.write_record(CSV_HEADER)?;
-
     // Collect deltas (scenario - metadata) for end-of-run statistics
     let mut deltas_s1: Vec<f64> = Vec::new();
     let mut deltas_s2: Vec<f64> = Vec::new();
@@ -282,11 +315,16 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
 
     let mut completed_speakers = 0;
     let total_speakers = speakers.len();
+    let mut shutdown_seen = false;
+    let mut receiver_closed = false;
+    let mut worker_failures = Vec::new();
+    let mut first_record_error = None;
 
-    // Main result collection loop with signal handling
-    loop {
+    // Drain rows and join wrappers concurrently. A panicking worker requests
+    // cancellation immediately; queued jobs then leave without starting.
+    while !receiver_closed || !set.is_empty() {
         select! {
-            result = rx.recv() => {
+            result = rx.recv(), if !receiver_closed => {
                 match result {
                     Some(row) => {
                         completed_speakers += 1;
@@ -295,31 +333,12 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
                             completed_speakers, total_speakers, row.speaker
                         );
 
-                        wtr.write_record([
-                            row.speaker.as_str(),
-                            fmt_opt_f64(row.flat_cea2034_lw).as_str(),
-                            fmt_opt_f64(row.flat_eir).as_str(),
-                            fmt_opt_f64(row.score_cea2034_mh_rga).as_str(),
-                            fmt_opt_f64(row.score_cea2034_mh_pso).as_str(),
-                            fmt_opt_f64(row.score_cea2034_autoeq_de).as_str(),
-                            fmt_opt_f64(row.score_cea2034_autoeq_cmaes).as_str(),
-                            fmt_opt_f64(finite_diff(
-                                row.score_cea2034_mh_rga,
-                                row.score_cea2034_autoeq_de,
-                            ))
-                            .as_str(),
-                            fmt_opt_f64(finite_diff(
-                                row.score_cea2034_mh_pso,
-                                row.score_cea2034_autoeq_de,
-                            ))
-                            .as_str(),
-                            fmt_opt_f64(finite_diff(
-                                row.score_cea2034_autoeq_cmaes,
-                                row.score_cea2034_autoeq_de,
-                            ))
-                            .as_str(),
-                            fmt_opt_f64(row.metadata_pref).as_str(),
-                        ])?;
+                        write_bench_row(
+                            &mut wtr,
+                            &row,
+                            &shutdown,
+                            &mut first_record_error,
+                        );
 
                         // Accumulate deltas vs metadata when both values are present and finite
                         if let (Some(v), Some(m)) = (row.flat_cea2034_lw, row.metadata_pref)
@@ -393,31 +412,31 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
                         }
                     }
                     None => {
-                        // Channel closed, all tasks are done
-                        break;
+                        receiver_closed = true;
                     }
                 }
             }
-            _ = tokio::time::sleep(Duration::from_millis(100)) => {
-                // Check for shutdown signal periodically
-                if shutdown.load(Ordering::Relaxed) {
-                    eprintln!("\n🛑 Shutdown signal detected. Stopping benchmark gracefully...");
-
-                    // Abort all pending tasks
-                    set.abort_all();
-
-                    eprintln!("⏹️  Aborted {} pending tasks. Saving partial results...",
-                             total_speakers - completed_speakers);
-                    break;
+            result = set.join_next(), if !set.is_empty() => {
+                if let Some(Err(error)) = result {
+                    remember_worker_failure(error, &mut worker_failures, &shutdown);
                 }
+            }
+            _ = shutdown.cancelled(), if !shutdown_seen => {
+                shutdown_seen = true;
+                eprintln!("\n🛑 Shutdown signal detected. Waiting for active optimizers to stop and flushing completed rows...");
             }
         }
     }
-    wtr.flush()?;
 
-    // Ensure all remaining tasks are cleaned up
-    while let Some(_res) = set.join_next().await {
-        // ignore task result; errors are reflected as empty row fields
+    // The channel closes only after every worker has sent its row and dropped
+    // its sender. Join wrappers before flushing so started blocking optimizers
+    // cannot outlive the partial CSV publication.
+    let drain_error = join_workers_then_flush(&mut set, worker_failures, || wtr.flush()).await;
+    if first_record_error.is_some() || drain_error.is_some() {
+        return Err(Box::new(BenchmarkRunError {
+            record_error: first_record_error,
+            drain_error,
+        }));
     }
 
     if completed_speakers < total_speakers {
@@ -461,4 +480,294 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+async fn acquire_slot_or_shutdown(
+    semaphore: Arc<Semaphore>,
+    shutdown: ShutdownSignal,
+) -> Option<tokio::sync::OwnedSemaphorePermit> {
+    tokio::select! {
+        biased;
+        _ = shutdown.cancelled() => None,
+        permit = semaphore.acquire_owned() => permit.ok(),
+    }
+}
+
+async fn join_workers_then_flush<F>(
+    set: &mut JoinSet<()>,
+    mut worker_failures: Vec<String>,
+    flush: F,
+) -> Option<BenchmarkDrainError>
+where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    while let Some(result) = set.join_next().await {
+        if let Err(error) = result {
+            worker_failures.push(error.to_string());
+        }
+    }
+    let flush_error = flush().err();
+    if worker_failures.is_empty() && flush_error.is_none() {
+        None
+    } else {
+        Some(BenchmarkDrainError {
+            worker_failures,
+            flush_error,
+        })
+    }
+}
+
+fn remember_worker_failure(
+    error: tokio::task::JoinError,
+    worker_failures: &mut Vec<String>,
+    shutdown: &ShutdownSignal,
+) {
+    worker_failures.push(error.to_string());
+    shutdown.request();
+}
+
+fn write_bench_row<W: io::Write>(
+    writer: &mut csv::Writer<W>,
+    row: &BenchRow,
+    shutdown: &ShutdownSignal,
+    first_error: &mut Option<csv::Error>,
+) {
+    if first_error.is_some() {
+        return;
+    }
+    let record_result = writer.write_record([
+        row.speaker.as_str(),
+        fmt_opt_f64(row.flat_cea2034_lw).as_str(),
+        fmt_opt_f64(row.flat_eir).as_str(),
+        fmt_opt_f64(row.score_cea2034_mh_rga).as_str(),
+        fmt_opt_f64(row.score_cea2034_mh_pso).as_str(),
+        fmt_opt_f64(row.score_cea2034_autoeq_de).as_str(),
+        fmt_opt_f64(row.score_cea2034_autoeq_cmaes).as_str(),
+        fmt_opt_f64(finite_diff(
+            row.score_cea2034_mh_rga,
+            row.score_cea2034_autoeq_de,
+        ))
+        .as_str(),
+        fmt_opt_f64(finite_diff(
+            row.score_cea2034_mh_pso,
+            row.score_cea2034_autoeq_de,
+        ))
+        .as_str(),
+        fmt_opt_f64(finite_diff(
+            row.score_cea2034_autoeq_cmaes,
+            row.score_cea2034_autoeq_de,
+        ))
+        .as_str(),
+        fmt_opt_f64(row.metadata_pref).as_str(),
+    ]);
+    if let Err(error) = record_result {
+        *first_error = Some(error);
+        shutdown.request();
+        return;
+    }
+    if let Err(error) = writer.flush() {
+        *first_error = Some(error.into());
+        shutdown.request();
+    }
+}
+
+#[derive(Debug)]
+struct BenchmarkDrainError {
+    worker_failures: Vec<String>,
+    flush_error: Option<io::Error>,
+}
+
+impl fmt::Display for BenchmarkDrainError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !self.worker_failures.is_empty() {
+            write!(
+                f,
+                "benchmark worker failure(s): {}",
+                self.worker_failures.join("; ")
+            )?;
+        }
+        if let Some(error) = &self.flush_error {
+            if !self.worker_failures.is_empty() {
+                f.write_str("; ")?;
+            }
+            write!(f, "failed to flush benchmark CSV: {error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for BenchmarkDrainError {}
+
+#[derive(Debug)]
+struct BenchmarkRunError {
+    record_error: Option<csv::Error>,
+    drain_error: Option<BenchmarkDrainError>,
+}
+
+impl fmt::Display for BenchmarkRunError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(error) = &self.record_error {
+            write!(f, "failed to write benchmark CSV row: {error}")?;
+        }
+        if let Some(error) = &self.drain_error {
+            if self.record_error.is_some() {
+                f.write_str("; after draining workers: ")?;
+            }
+            write!(f, "{error}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Error for BenchmarkRunError {}
+
+#[cfg(test)]
+mod worker_drain_tests {
+    use std::io;
+    use std::num::NonZeroUsize;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    use super::misc::{ActiveRunControl, BlockingOutcome, await_blocking_worker};
+    use super::{
+        BenchRow, ShutdownSignal, SignalTaskGuard, join_workers_then_flush,
+        remember_worker_failure, write_bench_row,
+    };
+
+    struct FailingWriter;
+
+    impl io::Write for FailingWriter {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "injected CSV failure",
+            ))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "injected flush failure",
+            ))
+        }
+    }
+
+    fn row() -> BenchRow {
+        BenchRow {
+            speaker: "test-speaker".into(),
+            flat_cea2034_lw: Some(1.0),
+            flat_eir: None,
+            score_cea2034_mh_rga: None,
+            score_cea2034_mh_pso: None,
+            score_cea2034_autoeq_de: None,
+            score_cea2034_autoeq_cmaes: None,
+            metadata_pref: None,
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn csv_record_failure_cancels_and_joins_active_optimizer() {
+        let shutdown = ShutdownSignal::new();
+        let active = ActiveRunControl::default();
+        let worker_active = active.clone();
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_worker = Arc::clone(&completed);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            let control = autoeq::optim::run_control::OptimizerRunControl::new(
+                NonZeroUsize::new(8).expect("nonzero test budget"),
+            );
+            worker_active.register(control.clone());
+            let _ = started_tx.send(());
+            while !control.stop_requested() {
+                std::thread::yield_now();
+            }
+            completed_worker.store(true, Ordering::Release);
+        });
+        started_rx.await.expect("optimizer worker started");
+
+        let mut writer = csv::WriterBuilder::new()
+            .buffer_capacity(1)
+            .from_writer(FailingWriter);
+        let mut first_error = None;
+
+        write_bench_row(&mut writer, &row(), &shutdown, &mut first_error);
+        let first_message = first_error
+            .as_ref()
+            .expect("injected writer fails while recording")
+            .to_string();
+        assert!(shutdown.is_requested());
+
+        write_bench_row(&mut writer, &row(), &shutdown, &mut first_error);
+        assert_eq!(
+            first_error.expect("first error retained").to_string(),
+            first_message
+        );
+
+        let outcome = await_blocking_worker(worker, shutdown, active)
+            .await
+            .expect("optimizer worker join succeeds");
+        assert!(matches!(outcome, BlockingOutcome::Cancelled(())));
+        assert!(completed.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn worker_panic_is_reported_after_other_workers_and_flush_complete() {
+        let shutdown = ShutdownSignal::new();
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_worker = Arc::clone(&completed);
+        let mut workers = tokio::task::JoinSet::new();
+        workers.spawn(async { panic!("injected worker panic") });
+        workers.spawn(async move {
+            completed_worker.store(true, Ordering::Release);
+        });
+
+        let result = workers.join_next().await.expect("panic result");
+        let mut failures = Vec::new();
+        if let Err(error) = result {
+            remember_worker_failure(error, &mut failures, &shutdown);
+        }
+        assert!(shutdown.is_requested());
+
+        let flushed = Arc::new(AtomicBool::new(false));
+        let flushed_after_drain = Arc::clone(&flushed);
+        let error = join_workers_then_flush(&mut workers, failures, || {
+            assert!(completed.load(Ordering::Acquire));
+            flushed_after_drain.store(true, Ordering::Release);
+            Ok(())
+        })
+        .await
+        .expect("a worker panic must be returned after drain");
+
+        assert!(error.worker_failures[0].contains("injected worker panic"));
+        assert!(error.flush_error.is_none());
+        assert!(completed.load(Ordering::Acquire));
+        assert!(flushed.load(Ordering::Acquire));
+    }
+
+    #[tokio::test]
+    async fn signal_task_guard_aborts_and_joins_listener() {
+        struct MarkDropped(Arc<AtomicBool>);
+
+        impl Drop for MarkDropped {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+
+        let dropped = Arc::new(AtomicBool::new(false));
+        let dropped_in_task = Arc::clone(&dropped);
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let listener = tokio::spawn(async move {
+            let _mark_dropped = MarkDropped(dropped_in_task);
+            let _ = started_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        let guard = SignalTaskGuard::new(listener);
+        started_rx.await.expect("listener started");
+
+        guard.abort_and_join().await;
+
+        assert!(dropped.load(Ordering::Acquire));
+    }
 }

@@ -3082,8 +3082,8 @@ unchanged. The cross-build used image
 `sha256:8a9f1c9dad4e7e073bf6c70824998b110f8481a785fac7d92016fd2b8a988eb6`.
 
 The same four binaries, identified by their recorded hashes, passed ten
-bounded smoke commands under QEMU 10.0.13 in a separate signed Debian trixie
-runtime image
+bounded smoke commands under QEMU 10.0.13 in a separate Debian trixie runtime
+image built from authenticated Debian packages
 (`sha256:f1259ea3ea1512d7de29ee008025f9a12c6b10685e20cae250c558e2c31503c1`).
 The checks covered each CLI's version and help output, `autoeq --algo-list`,
 and `roomeq-qa-quality --list` (38 listed entries, including Stereo 2.0 and

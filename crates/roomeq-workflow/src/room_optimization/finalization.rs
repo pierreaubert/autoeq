@@ -377,6 +377,121 @@ fn apply_safety_gate_with_level_recalibration(
     Ok(())
 }
 
+fn apply_trial_output_attenuation_and_safety_gate(
+    candidate: &mut RoomOptimizationResult,
+    required: &std::collections::BTreeMap<String, f64>,
+    physical_requires_attenuation: bool,
+    attenuation_mode: &str,
+    attenuation_db: f64,
+    context: &CorrectionSafetyGateContext<'_>,
+) -> Result<()> {
+    attenuation_budget::check(
+        candidate,
+        context.config,
+        required,
+        (attenuation_mode == "common").then_some(attenuation_db),
+        "final graph",
+    )?;
+    if !(attenuation_db > 1e-6 || physical_requires_attenuation) {
+        return Ok(());
+    }
+
+    // A small numerical reserve avoids accepting a positive residue caused by
+    // serializing gain parameters and replaying the chain.
+    if attenuation_mode == "spectral" {
+        // Large sub-only cuts must not consume the common spectral budget.
+        // Preserve existing spectral trials within budget.
+        let sub_cuts = attenuation_budget::sub_requirements(candidate, context.config, required);
+        install_output_attenuation_requirements(candidate, &sub_cuts)?;
+        install_spectral_attenuation(
+            candidate,
+            context.config,
+            context.sample_rate,
+            context.sidecar_dir,
+        )?;
+    } else if attenuation_mode == "common" {
+        install_attenuation(candidate, attenuation_db + 1e-6)?;
+    } else {
+        install_output_attenuation_requirements(candidate, required)?;
+    }
+    refresh_responses(candidate, context.sample_rate, context.sidecar_dir)?;
+    refresh_final_reports(
+        candidate,
+        context.config,
+        context.sample_rate,
+        context.sidecar_dir,
+    );
+    apply_safety_gate_with_level_recalibration(candidate, context)?;
+    refresh_responses(candidate, context.sample_rate, context.sidecar_dir)?;
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn run_full_strength_output_attenuation_trial_for_test(
+    original: &RoomOptimizationResult,
+    config: &RoomConfig,
+    sample_rate: f64,
+    sidecar_dir: &Path,
+) -> Result<(
+    RoomOptimizationResult,
+    std::collections::BTreeMap<String, f64>,
+)> {
+    let store = autoeq_artifacts::MemoryArtifactStore::new();
+    let sub_roles = original
+        .channels
+        .keys()
+        .filter(|name| is_subwoofer_channel(config, name))
+        .cloned()
+        .collect();
+    let prepared = prepare_candidate(
+        original,
+        (1.0, 1.0),
+        &sub_roles,
+        config,
+        &HashMap::new(),
+        sample_rate,
+        sidecar_dir,
+        &store,
+    )?;
+    let protected =
+        sub_output_limiter::protected_outputs(&prepared.result, &config.optimizer.finalization)?;
+    let electrical: Vec<_> = prepared
+        .electrical
+        .iter()
+        .filter(|output| !protected.contains(&output.output))
+        .cloned()
+        .collect();
+    let required = physical_drive::combined_attenuations(
+        &electrical,
+        &prepared.physical,
+        config.optimizer.finalization.output_ceiling_dbfs,
+    );
+    let attenuation_db = required.values().copied().fold(0.0_f64, f64::max);
+    let physical_requires_attenuation = prepared
+        .physical
+        .values()
+        .any(|requirement| requirement.attenuation_db > 0.0);
+    let mut candidate = prepared.result;
+    let context = CorrectionSafetyGateContext {
+        config,
+        sample_rate,
+        smoothing_n: config.optimizer.smooth_n,
+        evaluation_band: (config.optimizer.min_freq, config.optimizer.max_freq),
+        sidecar_dir,
+        processing_mode: config.optimizer.processing_mode.clone(),
+        group_delay_budget_ms: group_delay_budget_ms(config),
+    };
+    apply_trial_output_attenuation_and_safety_gate(
+        &mut candidate,
+        &required,
+        physical_requires_attenuation,
+        "output",
+        attenuation_db,
+        &context,
+    )?;
+    Ok((candidate, required))
+}
+
 fn output_safety_attenuation_budget_checks(
     result: &RoomOptimizationResult,
     config: &RoomConfig,
@@ -1192,42 +1307,23 @@ fn select_inner(
                 capture.required_attenuation = capture.failure.is_none();
             }
             let attenuation = required.values().copied().fold(0.0_f64, f64::max) + drive_cut_db;
-            attenuation_budget::check(
-                &candidate,
+            let safety_gate = CorrectionSafetyGateContext {
                 config,
+                sample_rate: fs,
+                smoothing_n: config.optimizer.smooth_n,
+                evaluation_band: (config.optimizer.min_freq, config.optimizer.max_freq),
+                sidecar_dir: dir,
+                processing_mode: config.optimizer.processing_mode.clone(),
+                group_delay_budget_ms: group_delay_budget_ms(config),
+            };
+            apply_trial_output_attenuation_and_safety_gate(
+                &mut candidate,
                 &required,
-                (attenuation_mode == "common").then_some(attenuation),
-                "final graph",
+                physical.values().any(|value| value.attenuation_db > 0.0),
+                attenuation_mode,
+                attenuation,
+                &safety_gate,
             )?;
-            if attenuation > 1e-6 || physical.values().any(|value| value.attenuation_db > 0.0) {
-                // A small numerical reserve avoids accepting a positive residue
-                // caused by serializing gain parameters and replaying the chain.
-                if attenuation_mode == "spectral" {
-                    // Large sub-only cuts must not consume the common spectral
-                    // budget. Preserve existing spectral trials within budget.
-                    let sub_cuts =
-                        attenuation_budget::sub_requirements(&candidate, config, &required);
-                    install_output_attenuation_requirements(&mut candidate, &sub_cuts)?;
-                    install_spectral_attenuation(&mut candidate, config, fs, dir)?;
-                } else if attenuation_mode == "common" {
-                    install_attenuation(&mut candidate, attenuation + 1e-6)?;
-                } else {
-                    install_output_attenuation_requirements(&mut candidate, &required)?;
-                }
-                refresh_responses(&mut candidate, fs, dir)?;
-                refresh_final_reports(&mut candidate, config, fs, dir);
-                let safety_gate = CorrectionSafetyGateContext {
-                    config,
-                    sample_rate: fs,
-                    smoothing_n: config.optimizer.smooth_n,
-                    evaluation_band: (config.optimizer.min_freq, config.optimizer.max_freq),
-                    sidecar_dir: dir,
-                    processing_mode: config.optimizer.processing_mode.clone(),
-                    group_delay_budget_ms: group_delay_budget_ms(config),
-                };
-                apply_safety_gate_with_level_recalibration(&mut candidate, &safety_gate)?;
-                refresh_responses(&mut candidate, fs, dir)?;
-            }
             if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
                 let graph_hashes = diagnostic_graph_hashes(&candidate)?;
                 capture.write(

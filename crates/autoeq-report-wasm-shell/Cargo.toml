@@ -24,7 +24,7 @@ autoeq-report-wasm = { workspace = true }
 serde_json = { workspace = true }
 # The wasm-bindgen stack also compiles on the host (DOM APIs stub out), so
 # the shell stays fully type-checked by plain `cargo check` / `cargo test`.
-wasm-bindgen = "=0.2.128"
+wasm-bindgen = "=0.2.129"
 js-sys = "0.3"
 web-sys = { version = "0.3", features = [
     "Window",

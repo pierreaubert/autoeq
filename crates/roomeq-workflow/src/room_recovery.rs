@@ -19,7 +19,8 @@ use tempfile::NamedTempFile;
 
 /// File containing the single-writer RoomEQ recovery journal.
 pub const ROOM_RECOVERY_FILE_NAME: &str = "room-recovery.json";
-const ROOM_RECOVERY_SCHEMA_VERSION: u32 = 2;
+const ROOM_RECOVERY_SCHEMA_VERSION: u32 = 3;
+const ROOM_RECOVERY_ALGORITHM_VERSION: &str = "autoeq-room-recovery-exact-de-v1";
 const ROOM_RECOVERY_LOCK_FILE_NAME: &str = ".room-recovery.lock";
 const MAX_RECOVERY_ERROR_CHARS: usize = 2048;
 const MAX_ROOM_RECOVERY_JOURNAL_BYTES: usize = 32 * 1024 * 1024;
@@ -86,6 +87,10 @@ struct StageCandidate {
 #[serde(deny_unknown_fields)]
 struct RoomRecoveryJournal {
     schema_version: u32,
+    algorithm_version: String,
+    /// SHA-256 of the executable file bytes read when this process opened the
+    /// recovery session. This does not attest loaded code or dynamic libraries.
+    build_sha256: String,
     run_identity: String,
     channel_id: String,
     config_sha256: String,
@@ -129,8 +134,10 @@ impl RoomRecoverySession {
     ///
     /// This lane accepts one generic single-measurement channel, LowLatency
     /// processing, seeded AutoEQ DE, and a positive PEQ count. It hashes the
-    /// resolved config and all declared measurement/target/calibration/IR files
-    /// before allowing the pipeline to start.
+    /// resolved config, all declared measurement/target/calibration/IR files,
+    /// and the current executable file once before allowing the pipeline to
+    /// start. The executable hash binds exact file bytes only; it does not
+    /// attest loaded code, dynamic libraries, or runtime environment.
     ///
     /// # Errors
     /// Returns an error for unsupported configurations, changed input/output
@@ -143,6 +150,7 @@ impl RoomRecoverySession {
         if request.frequency_samples == 0 {
             return Err("RoomEQ recovery requires a positive frequency sample count".into());
         }
+        let build_sha256 = current_executable_sha256()?;
         let (config_sha256, input_sha256_by_path, measurement_curve_sha256) =
             config_and_input_identity(&identity_config, true)?;
         let run_identity = make_run_identity(
@@ -150,9 +158,13 @@ impl RoomRecoverySession {
             request.sample_rate_hz,
             request.frequency_samples,
             request.output_path,
-            &config_sha256,
-            &input_sha256_by_path,
-            &measurement_curve_sha256,
+            RecoveryRunIdentity {
+                config_sha256: &config_sha256,
+                input_sha256_by_path: &input_sha256_by_path,
+                measurement_curve_sha256: &measurement_curve_sha256,
+                algorithm_version: ROOM_RECOVERY_ALGORITHM_VERSION,
+                build_sha256: &build_sha256,
+            },
         )?;
 
         fs::create_dir_all(request.directory).map_err(|error| {
@@ -209,6 +221,8 @@ impl RoomRecoverySession {
                 let previous_output = capture_output_identity(request.output_path, false)?;
                 let journal = RoomRecoveryJournal {
                     schema_version: ROOM_RECOVERY_SCHEMA_VERSION,
+                    algorithm_version: ROOM_RECOVERY_ALGORITHM_VERSION.to_owned(),
+                    build_sha256,
                     run_identity: run_identity.clone(),
                     channel_id: only_channel_name(&identity_config)?.to_owned(),
                     config_sha256,
@@ -236,6 +250,8 @@ impl RoomRecoverySession {
             Some(mut journal) => {
                 validate_journal(&journal)?;
                 if journal.run_identity != run_identity
+                    || journal.algorithm_version != ROOM_RECOVERY_ALGORITHM_VERSION
+                    || journal.build_sha256 != build_sha256
                     || journal.config_sha256 != config_sha256
                     || journal.input_sha256_by_path != input_sha256_by_path
                     || journal.measurement_curve_sha256 != measurement_curve_sha256
@@ -417,9 +433,13 @@ impl RoomRecoverySession {
             sample_rate_hz,
             frequency_samples,
             &state.output_path,
-            &config_sha256,
-            &input_sha256_by_path,
-            &measurement_curve_sha256,
+            RecoveryRunIdentity {
+                config_sha256: &config_sha256,
+                input_sha256_by_path: &input_sha256_by_path,
+                measurement_curve_sha256: &measurement_curve_sha256,
+                algorithm_version: &state.journal.algorithm_version,
+                build_sha256: &state.journal.build_sha256,
+            },
         )?;
         if run_identity != state.journal.run_identity
             || config_sha256 != state.journal.config_sha256
@@ -569,7 +589,7 @@ impl RoomRecoverySession {
         let checkpoint = state.journal.checkpoint.clone();
         if checkpoint
             .as_ref()
-            .is_some_and(|saved| is_callback_cancelled_checkpoint(saved))
+            .is_some_and(is_callback_cancelled_checkpoint)
         {
             return Err("RoomEQ exact checkpoint records terminal observer cancellation".into());
         }
@@ -1083,17 +1103,32 @@ fn add_file(path: &Path, inputs: &mut BTreeMap<String, String>) -> Result<(), St
     Ok(())
 }
 
+struct RecoveryRunIdentity<'a> {
+    config_sha256: &'a str,
+    input_sha256_by_path: &'a BTreeMap<String, String>,
+    measurement_curve_sha256: &'a str,
+    algorithm_version: &'a str,
+    build_sha256: &'a str,
+}
+
 fn make_run_identity(
     config: &RoomConfig,
     sample_rate_hz: f64,
     frequency_samples: usize,
     output_path: &Path,
-    config_sha256: &str,
-    input_sha256_by_path: &BTreeMap<String, String>,
-    measurement_curve_sha256: &str,
+    recovery_identity: RecoveryRunIdentity<'_>,
 ) -> Result<String, String> {
+    let RecoveryRunIdentity {
+        config_sha256,
+        input_sha256_by_path,
+        measurement_curve_sha256,
+        algorithm_version,
+        build_sha256,
+    } = recovery_identity;
     let identity = serde_json::json!({
-        "schema": "roomeq-exact-de-run-v1",
+        "schema": "roomeq-exact-de-run-v2",
+        "algorithm_version": algorithm_version,
+        "build_sha256": build_sha256,
         "channel_id": only_channel_name(config)?,
         "config_sha256": config_sha256,
         "input_sha256_by_path": input_sha256_by_path,
@@ -1182,20 +1217,49 @@ fn preserves_failure_status(status: RoomRecoveryStatus) -> bool {
     )
 }
 
+fn current_executable_sha256() -> Result<String, String> {
+    let executable = std::env::current_exe()
+        .map_err(|_| "cannot identify current executable for RoomEQ recovery".to_owned())?;
+    let file = File::open(&executable)
+        .map_err(|_| "cannot open current executable for RoomEQ recovery".to_owned())?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "cannot inspect current executable for RoomEQ recovery".to_owned())?;
+    if !metadata.is_file() {
+        return Err("current executable is not a regular file for RoomEQ recovery".into());
+    }
+    // Keep memory bounded while making the persisted identity depend on the
+    // exact executable file bytes at session open.
+    const MAX_EXECUTABLE_BYTES: u64 = 512 * 1024 * 1024;
+    if metadata.len() > MAX_EXECUTABLE_BYTES {
+        return Err("current executable exceeds the RoomEQ recovery identity size limit".into());
+    }
+    sha256_reader(file).map_err(|_| "cannot hash current executable for RoomEQ recovery".to_owned())
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.strip_prefix("sha256:").is_some_and(|digest| {
+        digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
 fn sha256_bytes(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     format!("sha256:{}", hex_bytes(digest.as_slice()))
 }
 
 fn sha256_file(path: &Path) -> Result<String, String> {
-    let mut file = File::open(path)
+    let file = File::open(path)
         .map_err(|error| format!("cannot read recovery input {}: {error}", path.display()))?;
+    sha256_reader(file)
+        .map_err(|error| format!("cannot hash recovery input {}: {error}", path.display()))
+}
+
+fn sha256_reader(mut reader: impl Read) -> io::Result<String> {
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 64 * 1024];
     loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|error| format!("cannot hash recovery input {}: {error}", path.display()))?;
+        let count = reader.read(&mut buffer)?;
         if count == 0 {
             break;
         }
@@ -1235,12 +1299,21 @@ fn validate_journal(journal: &RoomRecoveryJournal) -> Result<(), String> {
     if journal.run_identity.trim().is_empty() || journal.channel_id.trim().is_empty() {
         return Err("RoomEQ recovery journal is missing run or channel identity".into());
     }
+    if journal.algorithm_version != ROOM_RECOVERY_ALGORITHM_VERSION {
+        return Err("unsupported RoomEQ recovery algorithm version".into());
+    }
+    if !is_sha256(&journal.build_sha256) {
+        return Err("RoomEQ recovery journal has an invalid executable build identity".into());
+    }
     if let Some(state) = &journal.checkpoint {
         let checkpoint_run_identity = journal
             .checkpoint_run_identity
             .as_deref()
             .ok_or("RoomEQ recovery checkpoint is missing its prepared-objective identity")?;
         state.check_compatible(checkpoint_run_identity)?;
+        if state.checkpoint().build_identity != journal.build_sha256 {
+            return Err("RoomEQ recovery build identity disagrees with the DE checkpoint".into());
+        }
         let logical = state.checkpoint().evaluations.saturating_add(
             state
                 .checkpoint()
@@ -1314,10 +1387,10 @@ fn validate_journal(journal: &RoomRecoveryJournal) -> Result<(), String> {
             journal.status
         ));
     }
-    if let (Some(candidate), Some(intent)) = (&journal.stage_candidate, &journal.output_intent) {
-        if candidate.identity != intent.intended {
-            return Err("RoomEQ output intent disagrees with completed stage identity".into());
-        }
+    if let (Some(candidate), Some(intent)) = (&journal.stage_candidate, &journal.output_intent)
+        && candidate.identity != intent.intended
+    {
+        return Err("RoomEQ output intent disagrees with completed stage identity".into());
     }
     Ok(())
 }
@@ -1354,24 +1427,25 @@ fn write_journal(path: &Path, journal: &RoomRecoveryJournal) -> io::Result<()> {
         .filter(|parent| !parent.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
     let mut temporary = NamedTempFile::new_in(parent)?;
-    let mut writer = BoundedWriter {
-        file: temporary.as_file_mut(),
-        written: 0,
-        limit: MAX_ROOM_RECOVERY_JOURNAL_BYTES,
-        exceeded: false,
-    };
-    serde_json::to_writer_pretty(&mut writer, journal).map_err(|error| {
-        if writer.exceeded {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "RoomEQ recovery journal exceeds the 32 MiB size limit",
-            )
-        } else {
-            io::Error::new(io::ErrorKind::InvalidData, error)
-        }
-    })?;
-    writer.flush()?;
-    drop(writer);
+    {
+        let mut writer = BoundedWriter {
+            file: temporary.as_file_mut(),
+            written: 0,
+            limit: MAX_ROOM_RECOVERY_JOURNAL_BYTES,
+            exceeded: false,
+        };
+        serde_json::to_writer_pretty(&mut writer, journal).map_err(|error| {
+            if writer.exceeded {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "RoomEQ recovery journal exceeds the 32 MiB size limit",
+                )
+            } else {
+                io::Error::new(io::ErrorKind::InvalidData, error)
+            }
+        })?;
+        writer.flush()?;
+    }
     temporary.as_file().sync_all()?;
     temporary.persist(path).map_err(|error| error.error)?;
     #[cfg(unix)]
@@ -1634,7 +1708,9 @@ mod tests {
 
         let path = recovery_dir.join(ROOM_RECOVERY_FILE_NAME);
         let original: RoomRecoveryJournal = read_journal(&path).unwrap().unwrap();
-        let tamperers: [fn(&mut RoomRecoveryJournal); 5] = [
+        let tamperers: [fn(&mut RoomRecoveryJournal); 7] = [
+            |journal: &mut RoomRecoveryJournal| journal.algorithm_version.push('x'),
+            |journal: &mut RoomRecoveryJournal| journal.build_sha256.push('x'),
             |journal: &mut RoomRecoveryJournal| journal.config_sha256.push('x'),
             |journal: &mut RoomRecoveryJournal| journal.measurement_curve_sha256.push('x'),
             |journal: &mut RoomRecoveryJournal| journal.sample_rate_bits.push('x'),
@@ -1654,6 +1730,113 @@ mod tests {
                 resume: true,
             });
             assert!(result.is_err(), "tampered journal field was accepted");
+        }
+    }
+
+    #[test]
+    fn changed_build_refuses_stage_complete_and_publishing_before_replay() {
+        let root = tempfile::tempdir().unwrap();
+        let config = inline_config();
+        let current_build = current_executable_sha256().unwrap();
+        let changed_build = sha256_bytes(b"different exact RoomEQ executable");
+        assert_ne!(current_build, changed_build);
+
+        for status in [
+            RoomRecoveryStatus::StageComplete,
+            RoomRecoveryStatus::Publishing,
+        ] {
+            let case = root.path().join(format!("{status:?}"));
+            let recovery_dir = case.join("recovery");
+            let output_path = case.join("room.json");
+            let mut prior_graph = roomeq_model::DspGraph::new("1");
+            prior_graph.add_channel("front_left", Vec::new());
+            crate::output_bundle::save_output_bundle(&mut prior_graph, &output_path).unwrap();
+            let prior_identity = capture_output_identity(&output_path, true).unwrap();
+            let session = RoomRecoverySession::open(RoomRecoveryOpen {
+                directory: &recovery_dir,
+                output_path: &output_path,
+                room_config: &config,
+                sample_rate_hz: 48_000.0,
+                frequency_samples: 512,
+                resume: false,
+            })
+            .unwrap();
+            let staged_path = session.prepare_stage_output().unwrap();
+            run_exact_de_for_session(&session, &config).unwrap();
+            let mut graph = roomeq_model::DspGraph::new("1");
+            graph.add_channel("front_left", Vec::new());
+            crate::output_bundle::save_output_bundle(&mut graph, &staged_path).unwrap();
+            session.mark_stage_complete(&staged_path).unwrap();
+            if status == RoomRecoveryStatus::Publishing {
+                session.mark_publishing(&staged_path).unwrap();
+            }
+            drop(session);
+
+            let journal_path = recovery_dir.join(ROOM_RECOVERY_FILE_NAME);
+            let before = fs::read(&journal_path).unwrap();
+            let mut stored: serde_json::Value = serde_json::from_slice(&before).unwrap();
+            assert_eq!(stored["status"], serde_json::to_value(status).unwrap());
+            let journal: RoomRecoveryJournal = serde_json::from_value(stored.clone()).unwrap();
+            let identity_config = {
+                let mut resolved = config.clone();
+                resolved.resolve_room_dimensions();
+                resolved
+            };
+            let (config_sha256, input_sha256_by_path, measurement_curve_sha256) =
+                config_and_input_identity(&identity_config, true).unwrap();
+            let changed_run_identity = make_run_identity(
+                &identity_config,
+                48_000.0,
+                512,
+                &output_path,
+                RecoveryRunIdentity {
+                    config_sha256: &config_sha256,
+                    input_sha256_by_path: &input_sha256_by_path,
+                    measurement_curve_sha256: &measurement_curve_sha256,
+                    algorithm_version: ROOM_RECOVERY_ALGORITHM_VERSION,
+                    build_sha256: &changed_build,
+                },
+            )
+            .unwrap();
+            assert_ne!(journal.run_identity, changed_run_identity);
+
+            stored["build_sha256"] = serde_json::json!(changed_build);
+            stored["run_identity"] = serde_json::json!(changed_run_identity);
+            stored["checkpoint_run_identity"] = serde_json::json!(changed_run_identity);
+            stored["checkpoint"]["run_identity"] = serde_json::json!(changed_run_identity);
+            stored["checkpoint"]["checkpoint"]["run_identity"] =
+                serde_json::json!(changed_run_identity);
+            stored["checkpoint"]["checkpoint"]["build_identity"] = serde_json::json!(changed_build);
+            fs::write(&journal_path, serde_json::to_vec_pretty(&stored).unwrap()).unwrap();
+            let changed_journal_bytes = fs::read(&journal_path).unwrap();
+            let stored: RoomRecoveryJournal = read_journal(&journal_path).unwrap().unwrap();
+            let logical_evaluations = stored.logical_search_evaluations;
+
+            let error = RoomRecoverySession::open(RoomRecoveryOpen {
+                directory: &recovery_dir,
+                output_path: &output_path,
+                room_config: &config,
+                sample_rate_hz: 48_000.0,
+                frequency_samples: 512,
+                resume: true,
+            })
+            .err()
+            .expect("different executable identity must refuse before stage reuse");
+            assert!(error.contains("identity mismatch"), "{error}");
+            assert_eq!(fs::read(&journal_path).unwrap(), changed_journal_bytes);
+            assert_eq!(
+                read_journal(&journal_path)
+                    .unwrap()
+                    .unwrap()
+                    .logical_search_evaluations,
+                logical_evaluations,
+                "build refusal must not replay or rescore the terminal DE stage"
+            );
+            assert_eq!(
+                capture_output_identity(&output_path, true).unwrap(),
+                prior_identity,
+                "build refusal must preserve the previous canonical bundle"
+            );
         }
     }
 

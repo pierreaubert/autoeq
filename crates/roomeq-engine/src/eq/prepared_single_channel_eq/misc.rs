@@ -765,6 +765,15 @@ impl OptimizationPassContext<'_> {
     }
 }
 
+/// Invocation-specific controls passed together so exact recovery remains an
+/// additive extension of the existing optimization-pass contract.
+pub(in super::super) struct OptimizationPassExecution<'backend, 'control, 'run> {
+    pub(in super::super) callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    pub(in super::super) backend: &'backend dyn OptimizerBackend,
+    pub(in super::super) control: Option<&'control EqRunControl<'run>>,
+    pub(in super::super) exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+}
+
 /// Run a single optimization pass with the given number of filters.
 ///
 /// Returns (filters, loss, parameter_vector, optimizer evidence).
@@ -791,10 +800,12 @@ pub(in super::super) fn run_optimization_pass(
         num_filters,
         max_iter,
         config,
-        callback,
-        backend,
-        control,
-        None,
+        OptimizationPassExecution {
+            callback,
+            backend,
+            control,
+            exact: None,
+        },
     )
 }
 
@@ -805,10 +816,7 @@ pub(in super::super) fn run_optimization_pass_with_exact_checkpoint(
     num_filters: usize,
     max_iter: usize,
     config: &OptimizerConfig,
-    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
-    backend: &dyn OptimizerBackend,
-    control: Option<&EqRunControl<'_>>,
-    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+    execution: OptimizationPassExecution<'_, '_, '_>,
 ) -> Result<
     (
         Vec<Biquad>,
@@ -830,10 +838,7 @@ pub(in super::super) fn run_optimization_pass_with_exact_checkpoint(
         num_filters,
         max_iter,
         config,
-        callback,
-        backend,
-        control,
-        exact,
+        execution,
     )
 }
 
@@ -861,10 +866,12 @@ pub(in super::super) fn run_optimization_pass_with_context(
         num_filters,
         max_iter,
         config,
-        callback,
-        backend,
-        control,
-        None,
+        OptimizationPassExecution {
+            callback,
+            backend,
+            control,
+            exact: None,
+        },
     )
 }
 
@@ -875,10 +882,7 @@ pub(in super::super) fn run_optimization_pass_with_context_and_exact_checkpoint(
     num_filters: usize,
     max_iter: usize,
     config: &OptimizerConfig,
-    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
-    backend: &dyn OptimizerBackend,
-    control: Option<&EqRunControl<'_>>,
-    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+    execution: OptimizationPassExecution<'_, '_, '_>,
 ) -> Result<
     (
         Vec<Biquad>,
@@ -888,6 +892,12 @@ pub(in super::super) fn run_optimization_pass_with_context_and_exact_checkpoint(
     ),
     Box<dyn Error>,
 > {
+    let OptimizationPassExecution {
+        callback,
+        backend,
+        control,
+        exact,
+    } = execution;
     let has_exact_checkpoint = exact.is_some();
     if has_exact_checkpoint && config.refine {
         return Err("exact DE continuation cannot admit a local-refinement stage".into());

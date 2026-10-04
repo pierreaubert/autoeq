@@ -6,7 +6,9 @@ use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optim
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_normalization;
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
 use super::prepared_single_channel_eq::run_optimization_pass_with_context;
-use super::prepared_single_channel_eq::{OptimizationPassContext, OptimizationPassNormalization};
+use super::prepared_single_channel_eq::{
+    OptimizationPassContext, OptimizationPassExecution, OptimizationPassNormalization,
+};
 use super::prepared_single_channel_eq::{
     run_optimization_pass, run_optimization_pass_with_exact_checkpoint,
 };
@@ -1650,10 +1652,12 @@ fn optimize_channel_eq_inner_with_control(
             config.num_filters,
             config.max_iter,
             config,
-            callback,
-            backend,
-            control,
-            Some(exact),
+            OptimizationPassExecution {
+                callback,
+                backend,
+                control,
+                exact: Some(exact),
+            },
         )?,
         None => run_optimization_pass(
             &prep,

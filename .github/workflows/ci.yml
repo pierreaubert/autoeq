@@ -264,6 +264,8 @@ jobs:
       - uses: taiki-e/install-action@cargo-mutants
       - name: Verify ownership and mutation-runner failure contracts
         run: python3 -m unittest scripts.test_escaped_defect_ownership scripts.test_run_escaped_defect_mutations
+      - name: Fetch locked Cargo dependencies for offline mutation discovery
+        run: cargo fetch --locked
       - name: Registered escaped-defect mutations
         run: just qa-roomeq-escaped-defect-mutants
       - name: Upload mutation execution evidence

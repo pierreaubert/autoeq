@@ -18,12 +18,12 @@ cannot replace them.
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Live calibration implemented and bounded synthetic ESS diagnostic passes; production estimator/dependency integration, broader validity and hardware evidence remain |
+| A04 measurement/live analysis | Partial | Live calibration and the bounded synthetic ESS diagnostic pass; an isolated guarded-operator increment is verified, while the production estimator, conditioning, capture integration, physical support and hardware evidence remain open |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
 | A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently and reusable strict analysis gate committed; public BO dependency integration and justified presets remain |
 | A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
-| A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; Genelec canary still fails electrical-gain and bass-parity budgets; full mode/rate/time-domain acceptance remains |
+| A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; a later output-attenuation regression checks per-output cuts against the current serialized chain; Genelec still fails electrical-gain and bass-parity budgets, and full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Transaction/restart recovery and immutable playback contracts committed; 15 typed REW DSP cases pass with failed cleanup gate retained; text-import and broader deployed-consumer evidence remain |
 | A12 applied playback/verification | Partial | Frozen native preparation and typed processing-commit receipts committed; physical callback/device identity, device stress and associated measured capture remain |
@@ -3180,3 +3180,42 @@ Source, binary, runner and raw-log hashes are bound in
 and independent review receipts. This is a numerical/resource witness for the
 operator. Scalable conditioning, fitted-estimator equivalence, capture wiring,
 calibrated hardware and broader harmonic-support validity remain open.
+
+### A04 guarded polynomial-operator increment (2026-10-04)
+
+Isolated math commit `ab563ae17ed43c65adf703678d56212072294cf8` aligns the
+finite operator with the capture run05 output convention:
+`input + support - 1 + GUARD_SAMPLES`. The forward operator emits an exact-zero
+guard. The adjoint validates supplied guard samples as finite and ignores them,
+preserving the finite operator contract. Five operator tests pass, including 60
+shapes, 3,060 independently checked transpose components, guards larger than
+the FFT, and refusal of nonfinite guard samples. Strict scoped Clippy, rustfmt
+and diff checks pass. Logs and the receipt are
+`/Users/pierre/a04-polynomial-guard-tests.log`,
+`/Users/pierre/a04-polynomial-guard-clippy.log`, and
+`/Users/pierre/a04-polynomial-guard-increment.json`.
+
+This is an isolated operator-contract increment, not a fitted estimator or
+capture-analysis result. The preconditioner, fit accuracy/conditioning,
+capture integration, physical response support and calibrated acquisition
+remain open. It makes no new full-suite or whole-process resource claim.
+
+### A09 later output attenuation: current-chain regression (2026-10-04)
+
+The A09 integration at `53aef64c791307046573bd629f0ac579aca9f9b6` adds
+`later_output_attenuation_keeps_per_output_cuts_current` in
+`crates/roomeq-workflow/src/topology/home_cinema.rs`. The device-free fixture
+keeps its correction accepted through the later output-attenuation path and
+checks distinct L/R/Sub1 electrical cuts against a fresh replay of the current
+chain with only tagged final headroom cuts removed. The delivered graph remains
+finite and under the configured ceiling; the test also verifies configured
+speaker and subwoofer gain parameters are unchanged. The focused test and
+strict workflow Clippy pass; the integration receipt is
+`/Volumes/home_tmp/tmp/a09-output-attenuation-rollback-evidence-20261004/integrated-evidence-receipt.json`.
+
+This fixture did not reproduce a rollback at the later output-attenuation gate;
+it verifies the accepted branch and current-chain cut accounting. The earlier
+rebuild rollback/fallback regression remains separate evidence. The Genelec
+canary's electrical-gain and bass-parity failures remain unresolved, and this
+synthetic regression does not complete mode/rate/time-domain or physical
+acceptance.

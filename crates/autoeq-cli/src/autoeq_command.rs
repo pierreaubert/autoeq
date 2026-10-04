@@ -883,6 +883,31 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             spacing::print_freq_spacing(&opt_result.params, &optim_params, "qa-final");
         }
         qa::display_qa_analysis(&qa_result);
+        if let Some(path) = std::env::var_os("AUTOEQ_QA_EVIDENCE_PATH") {
+            let evidence = serde_json::json!({
+                "schema": 1,
+                "selected_x": &opt_result.params,
+                "optimizer_evidence": &opt_result.optimizer_evidence,
+                "model": opt_result.effective_envelope.peq_model.to_string(),
+                "loss": format!("{:?}", opt_result.effective_envelope.loss_type),
+                "sample_rate_hz": opt_result.effective_envelope.sample_rate_hz,
+                "lower_bounds": &opt_result.effective_envelope.lower_bounds,
+                "upper_bounds": &opt_result.effective_envelope.upper_bounds,
+                "min_spacing_oct": optim_params.min_spacing_oct,
+                "maxeval": optim_params.maxeval,
+                "seed": optim_params.seed,
+                "converged": opt_result.converged,
+                "spacing_ok": spacing_ok,
+                "pre_score": pre_score,
+                "post_score": post_score,
+                "qa_threshold": qa_threshold,
+                "qa_improvement_ok": qa_result.improvement_ok,
+                "qa_spacing_ok": qa_result.spacing_ok,
+                "qa_converge_ok": qa_result.converge_ok,
+            });
+            std::fs::write(&path, serde_json::to_vec_pretty(&evidence)?)
+                .with_context(|| format!("failed to write AutoEQ QA evidence to {}", PathBuf::from(path).display()))?;
+        }
         qa::require_qa_pass(&qa_result)?;
 
         return Ok(());

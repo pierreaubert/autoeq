@@ -9,18 +9,3 @@ pub(super) struct BenchRow {
     pub(super) score_cea2034_autoeq_cmaes: Option<f64>,
     pub(super) metadata_pref: Option<f64>,
 }
-
-impl BenchRow {
-    pub(super) fn empty(speaker: String) -> Self {
-        Self {
-            speaker,
-            flat_cea2034_lw: None,
-            flat_eir: None,
-            score_cea2034_mh_rga: None,
-            score_cea2034_mh_pso: None,
-            score_cea2034_autoeq_de: None,
-            score_cea2034_autoeq_cmaes: None,
-            metadata_pref: None,
-        }
-    }
-}

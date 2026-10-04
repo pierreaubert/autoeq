@@ -58,6 +58,7 @@ fn graph(
         routes,
         matrix: None,
         input_trim_db: trims,
+        post_dsp_main_alignment_band_hz: None,
         stereo_routing: None,
         advisories: vec![],
     }

@@ -1,5 +1,11 @@
 # Unreleased
 
+- Move RoomEQ signal supervision and runtime startup into the CLI crate,
+  keeping the root binary as a compatibility launcher.
+
+- Keep local GPUI demos in a separate workspace so backend source installs
+  resolve without sibling GPUI checkouts; preserve the existing demo recipes.
+
 - Fix non-routed channel-level alignment reading a stale pre-headroom cache:
   response refresh now republishes the just-replayed channel curves as the
   deployed source curves, so the final alignment pass sees differential
@@ -14,6 +20,21 @@
   analysis report (`Results summary`, `Time of flight`) and color the
   `T60 within ITU recommendation (%)` column green/yellow/red with the
   same >80 / ≥50 thresholds as the flatness column.
+- Fix `convert-recording --help` and `--version` to exit before file access;
+  reject unknown options and excess paths before conversion.
+
+- Add `autoeq:cobra` / `cobra` for RoomEQ constrained surrogate optimization,
+  with seeded search, native inequalities, evaluation accounting and callbacks.
+
+- Add explicit speaker/headphone source, target, rig compatibility and per-machine
+  device profiles, with verified Equalizer APO serialization and preset provenance.
+- Publish native RoomEQ bundles through recoverable staging, validate immutable
+  resource hashes, and keep fallback attempts private until selection.
+- Reject nonfinite optimizer candidates and invalid bounds, malformed joint-sub
+  measurements, incompatible shared-EQ grids, and invalid or nonfinite FIR
+  designs before accepting correction results.
+- Reject incomplete or ambiguous independent-reference approvals and invalid
+  observed error magnitudes before perceptual evidence can pass its gate.
 - Add an optimizer tilt stage: `optimizer.tilt_stage` appends an
   optimizer-driven low-shelf plus high-shelf pair at the end of the DSP
   chain (new `pk-ls-hs` layout) to fit broadband bass/treble tilt. The pair

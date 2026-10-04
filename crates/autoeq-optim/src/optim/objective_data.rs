@@ -149,6 +149,58 @@ impl ObjectiveData {
             .get_or_init(|| super::prepared_objective::PreparedObjective::new(self))
     }
 
+    pub(crate) fn with_run_control(
+        &self,
+        run_control: super::run_control::OptimizerRunControl,
+    ) -> Self {
+        self.with_evaluation_tracking(run_control, super::run_control::EvaluationStage::Search)
+    }
+
+    /// Count post-search scores separately from the shared search cap.
+    ///
+    /// Finalization and pipeline safety checks remain possible after the search
+    /// cap is exhausted. Callers must check cancellation before starting them.
+    pub fn with_validation_tracking(
+        &self,
+        run_control: super::run_control::OptimizerRunControl,
+    ) -> Self {
+        self.with_evaluation_tracking(run_control, super::run_control::EvaluationStage::Validation)
+    }
+
+    /// Preserve shared accounting while moving post-search scores to validation.
+    pub(crate) fn post_search_validation_view(&self) -> Self {
+        self.prepared().run_control.as_ref().map_or_else(
+            || self.clone(),
+            |control| self.with_validation_tracking(control.clone()),
+        )
+    }
+
+    /// Check explicit terminal requests independently of search-cap exhaustion.
+    pub(crate) fn terminal_stop_requested(&self) -> bool {
+        self.prepared().run_control.as_ref().is_some_and(|control| {
+            let snapshot = control.snapshot();
+            snapshot.cancellation_requested || snapshot.deadline_reached
+        })
+    }
+
+    fn with_evaluation_tracking(
+        &self,
+        run_control: super::run_control::OptimizerRunControl,
+        stage: super::run_control::EvaluationStage,
+    ) -> Self {
+        // Do not share a source cache that may already have been initialized:
+        // every controlled run gets candidate-independent data tied to this
+        // ObjectiveData and its own accounting gate.
+        let prepared = std::sync::OnceLock::new();
+        let mut prepared_objective =
+            super::prepared_objective::PreparedObjective::new(self).with_run_control(run_control);
+        prepared_objective.evaluation_stage = stage;
+        let _ = prepared.set(prepared_objective);
+        let mut controlled = self.clone();
+        controlled.prepared = Arc::new(prepared);
+        controlled
+    }
+
     /// Build the [`Objective`] strategy that corresponds to the configured
     /// [`LossType`] and payload fields.
     pub fn build_objective(&self) -> Arc<dyn Objective> {

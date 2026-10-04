@@ -458,6 +458,7 @@ mod tests {
             }],
             matrix: None,
             input_trim_db: HashMap::from([("L".to_string(), input_trim_db)]),
+            post_dsp_main_alignment_band_hz: None,
             advisories: Vec::new(),
         }
     }

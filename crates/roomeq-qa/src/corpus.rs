@@ -56,7 +56,14 @@ pub struct CorpusCapture {
 /// Reject captures with missing seat/source identity or duplicated payloads.
 ///
 /// A duplicated capture hash under a different seat would invent seats by
-/// copying; each seat must contribute its own capture.
+/// copying; each seat must contribute its own capture. Measured and independent
+/// reference sources also need distinct payloads, and one payload cannot carry
+/// contradictory acquisition provenance. Generated controls may deliberately
+/// use identical responses for different sources at the same seat.
+///
+/// # Errors
+///
+/// Returns an error for missing identities, duplicate capture IDs, or conflicting payload identities.
 pub fn validate_corpus(captures: &[CorpusCapture]) -> Result<(), String> {
     if captures.is_empty() {
         return Err(String::from("corpus has no captures"));
@@ -90,6 +97,20 @@ pub fn validate_corpus(captures: &[CorpusCapture]) -> Result<(), String> {
         }
         if let Some(first) = hashes.insert(capture.capture_hash.as_str(), capture) {
             let same_seat = first.scenario == capture.scenario && first.seat == capture.seat;
+            if first.provenance != capture.provenance {
+                return Err(format!(
+                    "capture hash '{}' has contradictory acquisition provenance",
+                    capture.capture_hash,
+                ));
+            }
+            if first.source != capture.source
+                && capture.provenance != CorpusProvenance::GeneratedControl
+            {
+                return Err(format!(
+                    "capture hash '{}' shared by sources '{}' and '{}': independent sources must not duplicate captures",
+                    capture.capture_hash, first.source, capture.source,
+                ));
+            }
             if !same_seat {
                 return Err(format!(
                     "capture hash '{}' shared by '{}:{}' and '{}:{}': seats must not duplicate captures",
@@ -388,6 +409,40 @@ mod corpus_tests {
     }
 
     #[test]
+    fn measured_payload_cannot_invent_an_independent_source() {
+        let mut captures = valid_corpus();
+        captures.push(capture("room_a", "R", "seat_1", "cap_4", "hash_1", true));
+        assert!(
+            validate_corpus(&captures)
+                .unwrap_err()
+                .contains("independent sources")
+        );
+    }
+
+    #[test]
+    fn duplicate_payload_cannot_change_acquisition_provenance() {
+        let mut captures = valid_corpus();
+        let mut alias = capture("room_a", "L", "seat_1", "cap_4", "hash_1", true);
+        alias.provenance = CorpusProvenance::GeneratedControl;
+        captures.push(alias);
+        assert!(
+            validate_corpus(&captures)
+                .unwrap_err()
+                .contains("contradictory acquisition provenance")
+        );
+    }
+
+    #[test]
+    fn identical_generated_source_responses_remain_valid_controls() {
+        let mut left = capture("analytic", "L", "seat_1", "left", "flat-plant", false);
+        left.provenance = CorpusProvenance::GeneratedControl;
+        let mut right = left.clone();
+        right.source = "R".into();
+        right.capture_id = "right".into();
+        assert!(validate_corpus(&[left, right]).is_ok());
+    }
+
+    #[test]
     fn qa_held_out_partition_never_trains_candidate() {
         let held_out = validate_held_out_separation(&valid_corpus()).unwrap();
         assert_eq!(held_out.get("room_a"), Some(&1));
@@ -421,7 +476,7 @@ mod corpus_tests {
             assert!(!id.trim().is_empty(), "scenario without id");
             let provenance = scenario["provenance"].as_str().unwrap_or("");
             assert!(
-                matches!(provenance, "fem" | "real_measurement"),
+                matches!(provenance, "fem" | "real_measurement" | "synthetic"),
                 "scenario '{id}' has unknown provenance '{provenance}'"
             );
             let rate = scenario["sample_rate"].as_f64().unwrap_or(0.0);
@@ -431,6 +486,9 @@ mod corpus_tests {
             );
             let held_out = scenario["held_out"].as_array();
             let mut paths = std::collections::HashSet::new();
+            let mut evidence_classes = std::collections::HashSet::new();
+            let mut independent_seats = std::collections::HashSet::new();
+            let mut independent_response_paths = std::collections::HashSet::new();
             for entry in held_out.into_iter().flatten() {
                 let capture = entry["path"].as_str().unwrap_or("");
                 assert!(
@@ -441,7 +499,53 @@ mod corpus_tests {
                     paths.insert(capture),
                     "scenario '{id}' duplicates held-out '{capture}'"
                 );
+                let evidence_class = entry
+                    .get("evidence_class")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("unknown");
+                assert!(
+                    matches!(
+                        evidence_class,
+                        "unknown"
+                            | "independent_real_measurement"
+                            | "deterministic_perturbation"
+                            | "fem_generated"
+                            | "synthetic_control"
+                    ),
+                    "scenario '{id}' has unknown held-out evidence class '{evidence_class}'"
+                );
+                evidence_classes.insert(evidence_class);
+                match evidence_class {
+                    "independent_real_measurement" => {
+                        assert_eq!(provenance, "real_measurement", "scenario '{id}'");
+                        let seat = entry["seat_id"].as_str().unwrap_or("");
+                        assert!(
+                            !seat.trim().is_empty() && seat.trim() == seat,
+                            "scenario '{id}' independent measured row needs an explicit trimmed seat_id"
+                        );
+                        let channel = entry["channel"].as_str().unwrap_or("");
+                        assert!(
+                            independent_seats.insert((channel, seat)),
+                            "scenario '{id}' repeats independent seat '{seat}' for channel '{channel}'"
+                        );
+                        assert!(
+                            independent_response_paths.insert((channel, capture)),
+                            "scenario '{id}' reuses independent response '{capture}' for channel '{channel}'"
+                        );
+                    }
+                    "deterministic_perturbation" => {
+                        assert_eq!(provenance, "real_measurement", "scenario '{id}'");
+                    }
+                    "fem_generated" => assert_eq!(provenance, "fem", "scenario '{id}'"),
+                    "synthetic_control" => assert_eq!(provenance, "synthetic", "scenario '{id}'"),
+                    "unknown" => {}
+                    _ => unreachable!("held-out evidence class was validated above"),
+                }
             }
+            assert!(
+                evidence_classes.len() <= 1,
+                "scenario '{id}' mixes held-out evidence classes"
+            );
             if paths.is_empty() {
                 assert_eq!(
                     provenance, "real_measurement",

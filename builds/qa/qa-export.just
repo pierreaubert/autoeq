@@ -11,7 +11,7 @@ ensure-venv:
 		echo "Creating Python venv..."
 		python3 -m venv ./venv
 	fi
-	if ! ./venv/bin/python3 -c "import plotly" 2>/dev/null; then
+	if ! ./venv/bin/python3 -c "import numpy" 2>/dev/null; then
 		echo "Installing Python dependencies..."
 		./venv/bin/pip install -r ./scripts/requirements.txt
 	fi

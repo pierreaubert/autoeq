@@ -234,8 +234,9 @@ fn prepared_fir_rejects_unaligned_target_before_boost_capping() {
             ] {
                 let error =
                     generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0)
-                        .err()
-                        .expect("prepared target grid must be aligned before coefficient design");
+                        .expect_err(
+                            "prepared target grid must be aligned before coefficient design",
+                        );
                 assert!(
                     error.to_string().contains("measurement frequency grid"),
                     "{error}"
@@ -591,6 +592,97 @@ fn test_generate_fir_correction_kirkeby_mode() {
     assert!(result.is_ok(), "Kirkeby FIR correction should succeed");
     let coeffs = result.unwrap();
     assert_eq!(coeffs.len(), 2048);
+}
+
+#[test]
+fn prepared_fir_rejects_invalid_inputs_before_numerical_design() {
+    let measurement = create_test_curve(&[20.0, 1000.0, 20000.0], &[80.0; 3]);
+    for phase in ["linear", "minimum", "kirkeby"] {
+        for mutation in 0..11 {
+            let mut measurement = measurement.clone();
+            let mut target = flat_target_like(&measurement);
+            let mut config = OptimizerConfig {
+                min_freq: 20.0,
+                max_freq: 20_000.0,
+                fir: Some(FirConfig {
+                    taps: 64,
+                    phase: phase.into(),
+                    ..FirConfig::default()
+                }),
+                ..OptimizerConfig::default()
+            };
+            let mut sample_rate = 48_000.0;
+            match mutation {
+                0 => sample_rate = f64::NAN,
+                1 => config.fir.as_mut().unwrap().taps = 0,
+                2 => config.fir.as_mut().unwrap().taps = autoeq_fir::MAX_CHECKED_TAPS + 1,
+                3 => {
+                    measurement.freq[1] = 20.0;
+                    target.freq = measurement.freq.clone();
+                }
+                4 => measurement.spl[1] = f64::INFINITY,
+                5 => target.spl[1] = f64::NAN,
+                6 => config.max_freq = 30_000.0,
+                7 => config.fir.as_mut().unwrap().max_boost_db = Some(f64::NAN),
+                8 => config.fir.as_mut().unwrap().phase_smoothing = -1.0,
+                9 => {
+                    config.fir.as_mut().unwrap().pre_ringing = Some(PreRingingSerdeConfig {
+                        threshold_db: -30.0,
+                        max_time_s: f64::NAN,
+                    })
+                }
+                _ => target.phase = Some(ndarray::array![0.0]),
+            }
+            assert!(
+                generate_fir_correction_prepared(&measurement, &config, &target, sample_rate)
+                    .is_err(),
+                "{phase} accepted invalid input case {mutation}"
+            );
+        }
+    }
+}
+
+#[test]
+fn prepared_magnitude_fir_refuses_nonfinite_realized_coefficients() {
+    let measurement = create_test_curve(&[20.0, 1000.0, 20000.0], &[80.0; 3]);
+    let mut target = flat_target_like(&measurement);
+    target.spl.fill(1_000_000.0);
+    let config = OptimizerConfig {
+        fir: Some(FirConfig {
+            taps: 64,
+            phase: "linear".into(),
+            ..FirConfig::default()
+        }),
+        ..OptimizerConfig::default()
+    };
+    let error =
+        generate_fir_correction_prepared(&measurement, &config, &target, 48_000.0).unwrap_err();
+    assert!(
+        error.to_string().contains("nonfinite coefficients"),
+        "{error}"
+    );
+}
+
+#[test]
+fn prepared_kirkeby_excess_phase_requires_phase_data() {
+    let measurement = create_test_curve(&[20.0, 1000.0, 20000.0], &[80.0; 3]);
+    let config = OptimizerConfig {
+        fir: Some(FirConfig {
+            taps: 64,
+            phase: "kirkeby".into(),
+            correct_excess_phase: true,
+            ..FirConfig::default()
+        }),
+        ..OptimizerConfig::default()
+    };
+    let error = generate_fir_correction_prepared(
+        &measurement,
+        &config,
+        &flat_target_like(&measurement),
+        48_000.0,
+    )
+    .unwrap_err();
+    assert!(error.to_string().contains("phase"), "{error}");
 }
 
 #[test]

@@ -1,0 +1,13 @@
+{
+  "id": "portable-system-96k",
+  "playback_device_id": "coreaudio:built-in-output",
+  "renderer": "equalizer_apo",
+  "sample_rate_hz": 96000.0,
+  "maximum_filter_count": 6,
+  "supported_peq_models": ["pk"],
+  "supported_filter_types": ["PK"],
+  "frequency_hz": { "minimum": 30.0, "maximum": 22000.0 },
+  "q": { "minimum": 0.7, "maximum": 8.0 },
+  "gain_db": { "minimum": -9.0, "maximum": 9.0 },
+  "preamp_db": -1.0
+}

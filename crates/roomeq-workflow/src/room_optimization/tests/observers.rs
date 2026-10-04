@@ -450,6 +450,7 @@ fn validation_bundle_matches_final_pipeline_playback_evidence() {
         &context,
         None,
         crate::DEFAULT_FREQUENCY_SAMPLES,
+        None,
     )
     .unwrap();
     let bytes = store
@@ -515,6 +516,7 @@ fn rejected_final_seat_validation_does_not_publish_validation_bundle() {
         &context,
         None,
         crate::DEFAULT_FREQUENCY_SAMPLES,
+        None,
     );
     let error = result.unwrap_err();
     assert!(
@@ -620,6 +622,7 @@ fn optimize_room_pipeline_impl_direct_call() {
         &context,
         None,
         crate::DEFAULT_FREQUENCY_SAMPLES,
+        None,
     );
     assert!(
         result.is_ok(),

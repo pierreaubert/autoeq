@@ -33,6 +33,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -92,6 +95,8 @@ jobs:
         package: ${{ fromJSON(needs.check-and-test.outputs.crate-test-packages) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -115,6 +120,8 @@ jobs:
     needs: crate-unit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -167,6 +174,8 @@ jobs:
       ROOMEQ_QA_DIR: target/qa
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -234,6 +243,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
@@ -258,6 +269,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
@@ -291,6 +304,8 @@ jobs:
     needs: crate-unit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -321,6 +336,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -343,6 +360,8 @@ jobs:
     needs: crate-unit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

@@ -19,7 +19,7 @@ autoeq-report-wasm = { workspace = true }
 # GPUI stack is wasm-only: the native build keeps just the explorer model
 # (schema types + statistics), so `cargo check` on the host stays light.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasm-bindgen = "=0.2.128"
+wasm-bindgen = "=0.2.129"
 wasm-bindgen-futures = "0.4"
 console_error_panic_hook = "0.1.7"
 js-sys = "0.3"

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Display roomeq optimization results using Plotly.
+Display roomeq optimization results as an HTML report.
 
 Reads a roomeq-generated JSON file and creates an HTML file with interactive
 plots comparing initial (without EQ) and final (with EQ) frequency response
@@ -80,7 +80,7 @@ def infer_mode_name(filepath: Path) -> str:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Display roomeq optimization results using Plotly.",
+        description="Display roomeq optimization results.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

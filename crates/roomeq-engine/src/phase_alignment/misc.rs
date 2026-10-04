@@ -72,6 +72,10 @@ pub(super) fn golden_section_maximize<F>(
 where
     F: Fn(f64) -> f64,
 {
+    #[expect(
+        clippy::approx_constant,
+        reason = "Preserve search coefficients on toolchains predating the GOLDEN_RATIO constant"
+    )]
     const PHI: f64 = 1.618033988749895;
     const RESPHI: f64 = 2.0 - PHI;
 

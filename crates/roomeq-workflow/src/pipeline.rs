@@ -1,6 +1,7 @@
 //! RoomEQ application pipeline composition.
 
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 
 use autoeq_artifacts::{ArtifactStore, FsArtifactStore};
@@ -10,6 +11,26 @@ use roomeq_engine::{
 use roomeq_model::{Curve, Result, RoomConfig};
 
 use crate::DEFAULT_FREQUENCY_SAMPLES;
+
+/// Receives immutable JSON events from an explicitly enabled finalization trace.
+pub trait FinalizationDiagnosticSink {
+    /// Persist one named event without changing optimization behavior.
+    ///
+    /// Implementations should reject duplicate event names and use atomic,
+    /// no-overwrite file publication when writing to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the event cannot be serialized or durably stored.
+    fn write_event(&self, name: &str, json: &[u8]) -> io::Result<()>;
+}
+
+/// Exact finalization trial selected for opt-in diagnostic capture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalizationDiagnosticTrial {
+    /// Capture the unmodified-strength, output-safety candidate before fallback selection.
+    ZeroStrengthOutput,
+}
 
 /// Application-owned data accompanying an in-memory engine request.
 pub struct WorkflowContext<'a> {
@@ -39,6 +60,10 @@ pub struct RoomPipeline<'a> {
     request: RoomPipelineRequest<'a>,
     validation_measurements: HashMap<String, Vec<Curve>>,
     frequency_samples: usize,
+    finalization_diagnostic: Option<(
+        FinalizationDiagnosticTrial,
+        &'a dyn FinalizationDiagnosticSink,
+    )>,
 }
 
 impl<'a> RoomPipeline<'a> {
@@ -48,7 +73,21 @@ impl<'a> RoomPipeline<'a> {
             request,
             validation_measurements: HashMap::new(),
             frequency_samples: DEFAULT_FREQUENCY_SAMPLES,
+            finalization_diagnostic: None,
         }
+    }
+
+    /// Attach a sink for opt-in finalization candidate diagnostics.
+    ///
+    /// The trace is restricted to the zero-strength output candidate. Normal
+    /// runs perform no diagnostic writes when no sink is attached.
+    pub fn with_finalization_diagnostic_sink(
+        mut self,
+        trial: FinalizationDiagnosticTrial,
+        sink: &'a dyn FinalizationDiagnosticSink,
+    ) -> Self {
+        self.finalization_diagnostic = Some((trial, sink));
+        self
     }
 
     /// Set the number of log-frequency samples used when reducing dense
@@ -101,13 +140,16 @@ impl<'a> RoomPipeline<'a> {
             artifact_store,
             validation_measurements: &self.validation_measurements,
         };
+        let finalization_diagnostic = self.finalization_diagnostic;
+        let frequency_samples = self.frequency_samples;
 
         RoomEngine.run(engine_request, observer, move |request, observer| {
             crate::room_optimization::optimize_room_pipeline_impl_with_frequency_samples(
                 request,
                 &context,
                 observer,
-                self.frequency_samples,
+                frequency_samples,
+                finalization_diagnostic,
             )
         })
     }

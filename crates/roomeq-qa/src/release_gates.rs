@@ -601,8 +601,14 @@ mod release_gates_tests {
         };
         let registry = roomeq_model::reference_registry::ApprovedReferenceRegistry::default();
         assert!(
-            !assess_verified_perceptual_gate(&model, &readiness, &registry, &[vector.clone()], &[])
-                .passed
+            !assess_verified_perceptual_gate(
+                &model,
+                &readiness,
+                &registry,
+                std::slice::from_ref(&vector),
+                &[]
+            )
+            .passed
         );
 
         // A test-local approved fixture exercises the positive software path;
@@ -635,8 +641,13 @@ mod release_gates_tests {
             }],
         };
         readiness.reference_evidence = Some(evidence);
-        let accepted =
-            assess_verified_perceptual_gate(&model, &readiness, &registry, &[vector.clone()], &[]);
+        let accepted = assess_verified_perceptual_gate(
+            &model,
+            &readiness,
+            &registry,
+            std::slice::from_ref(&vector),
+            &[],
+        );
         assert!(accepted.passed);
         assert!(accepted.evidence.contains(&vector.hash));
         assert!(accepted.evidence.contains(&model.implementation_commit));
@@ -647,7 +658,7 @@ mod release_gates_tests {
                 &mismatched,
                 &readiness,
                 &registry,
-                &[vector.clone()],
+                std::slice::from_ref(&vector),
                 &[]
             )
             .passed
@@ -659,7 +670,7 @@ mod release_gates_tests {
                 &mismatched,
                 &readiness,
                 &registry,
-                &[vector.clone()],
+                std::slice::from_ref(&vector),
                 &[]
             )
             .passed

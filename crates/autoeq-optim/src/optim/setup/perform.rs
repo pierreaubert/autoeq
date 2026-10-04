@@ -1,5 +1,11 @@
-use super::super::constraint_envelope::project_gains_onto_envelopes;
-use super::super::de::optimize_filters_autoeq_with_callback;
+use super::super::constraint_envelope::{
+    OwnedConstraintSpec, finalize_candidate, project_gains_onto_envelopes,
+};
+use super::super::de::{
+    DECheckpointSaveCallback, optimize_filters_autoeq_with_callback,
+    optimize_filters_autoeq_with_callback_and_initial,
+    optimize_filters_autoeq_with_exact_checkpoint,
+};
 use super::super::run_descriptor::OptimizationRunResult;
 use super::super::{ObjectiveData, optimize_filters_with_algo_override};
 use super::misc::initial_guess;
@@ -13,6 +19,27 @@ use crate::read;
 use crate::x2peq::x2peq;
 use ndarray::Array1;
 use std::error::Error;
+
+/// State and save callback for exact DE continuation.
+pub struct ExactDECheckpointOptions {
+    /// Saved state to restore, or None to start a newly checkpointed run.
+    pub checkpoint: Option<crate::de::DECheckpoint>,
+    /// Identity for the measurement, objective, normalization, and config.
+    pub run_identity: String,
+    /// Atomically saves each generation barrier; errors stop the optimizer.
+    pub save_callback: DECheckpointSaveCallback,
+}
+
+impl std::fmt::Debug for ExactDECheckpointOptions {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ExactDECheckpointOptions")
+            .field("checkpoint", &self.checkpoint)
+            .field("run_identity", &self.run_identity)
+            .field("save_callback", &"<generation-barrier callback>")
+            .finish()
+    }
+}
 
 /// Run global (and optional local refine) optimization and return the parameter vector.
 pub fn perform_optimization(
@@ -34,6 +61,98 @@ pub fn perform_optimization_with_run_descriptor(
     objective_data: &ObjectiveData,
     callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
 ) -> Result<OptimizationRunResult, Box<dyn Error>> {
+    perform_optimization_with_optional_candidate(params, objective_data, None, callback, None)
+}
+
+/// Run optimization from a validated warm-start candidate.
+///
+/// The candidate is revalidated and finalized against the run's complete
+/// current constraint specification before search. This includes gain,
+/// global/local-Q, and composite envelopes.
+///
+/// # Errors
+///
+/// Returns an error when the candidate has invalid dimensions, non-finite
+/// values, violates current bounds, or remains infeasible after constraint
+/// finalization.
+pub fn perform_optimization_with_run_descriptor_and_candidate(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    initial_candidate: &[f64],
+    callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
+) -> Result<OptimizationRunResult, Box<dyn Error>> {
+    perform_optimization_with_optional_candidate(
+        params,
+        objective_data,
+        Some(initial_candidate),
+        callback,
+        None,
+    )
+}
+
+/// Run exact DE continuation and retain its serializable run descriptor.
+///
+/// Exact state is supported for seeded AutoEQ DE runs without local
+/// refinement or multi-driver or multi-sub objectives. Candidate warm starts
+/// continue to use the separate candidate API.
+///
+/// # Errors
+///
+/// Returns an error when the selected optimizer is not AutoEQ DE, the seed is
+/// absent, local refinement or a multi-driver objective is requested, the
+/// saved checkpoint identity or configuration is invalid, or checkpoint
+/// persistence fails.
+pub fn perform_optimization_with_run_descriptor_and_exact_checkpoint(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    continuation: ExactDECheckpointOptions,
+    callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
+) -> Result<OptimizationRunResult, Box<dyn Error>> {
+    if params.refine {
+        return Err(std::io::Error::other(
+            "exact DE continuation does not support a follow-up local-refinement stage",
+        )
+        .into());
+    }
+    if params.seed.is_none() {
+        return Err(
+            std::io::Error::other("exact DE continuation requires an explicit --seed").into(),
+        );
+    }
+    let backend = super::super::backend::resolve(&params.algo)
+        .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return Err(std::io::Error::other(format!(
+            "exact continuation is supported only for AutoEQ DE; resolved {}",
+            backend.name()
+        ))
+        .into());
+    }
+    if matches!(
+        objective_data.loss_type,
+        crate::LossType::DriversFlat | crate::LossType::MultiSubFlat
+    ) {
+        return Err(std::io::Error::other(
+            "exact DE continuation is not supported for multi-driver or multi-sub optimization",
+        )
+        .into());
+    }
+    perform_optimization_with_optional_candidate(
+        params,
+        objective_data,
+        None,
+        callback,
+        Some(continuation),
+    )
+}
+
+fn perform_optimization_with_optional_candidate(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    initial_candidate: Option<&[f64]>,
+    callback: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send>,
+    exact_continuation: Option<ExactDECheckpointOptions>,
+) -> Result<OptimizationRunResult, Box<dyn Error>> {
     let (lower_bounds, upper_bounds) = setup_bounds(params);
     let mut descriptor = super::super::run_descriptor::OptimizationRunDescriptor::started(
         params,
@@ -41,20 +160,57 @@ pub fn perform_optimization_with_run_descriptor(
         &lower_bounds,
         &upper_bounds,
     );
+    if initial_candidate.is_some() {
+        let backend = super::super::backend::resolve(&params.algo)
+            .ok_or_else(|| std::io::Error::other(format!("unknown optimizer: {}", params.algo)))?;
+        if !backend.supports_initial_candidate() {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidates are unsupported for {} because this optimizer path does not use the supplied initial candidate",
+                backend.name()
+            ))
+            .into());
+        }
+    }
     // O1: project the seed onto the configured per-filter gain envelopes so
     // the search starts inside the feasible region. Deterministic
     // post-processing that consumes no RNG; bit-identical without envelopes.
+    let initial = match initial_candidate {
+        Some(candidate) => {
+            validate_initial_candidate(candidate, &lower_bounds, &upper_bounds)?;
+            let constraint_spec =
+                OwnedConstraintSpec::from_params(params).map_err(std::io::Error::other)?;
+            let finalized = finalize_candidate(
+                "warm-start",
+                candidate,
+                objective_data,
+                &constraint_spec.as_spec(),
+            )
+            .map_err(|reason| {
+                std::io::Error::other(format!("warm-start candidate is infeasible: {reason}"))
+            })?;
+            validate_initial_candidate(&finalized.params, &lower_bounds, &upper_bounds)?;
+            finalized.params
+        }
+        None => initial_guess(params, &lower_bounds, &upper_bounds),
+    };
     let mut x = project_gains_onto_envelopes(
-        &initial_guess(params, &lower_bounds, &upper_bounds),
+        &initial,
         params.peq_model,
         objective_data.loss_type,
         objective_data.max_boost_envelope.as_deref(),
         objective_data.min_cut_envelope.as_deref(),
     )
     .0;
+    validate_initial_candidate(&x, &lower_bounds, &upper_bounds)?;
 
-    let result = if resolves_to_backend(&params.algo, "autoeq:de") {
-        optimize_filters_autoeq_with_callback(
+    let result = if let Some(continuation) = exact_continuation {
+        if initial_candidate.is_some() {
+            return Err(std::io::Error::other(
+                "exact continuation cannot be combined with a warm-start candidate",
+            )
+            .into());
+        }
+        optimize_filters_autoeq_with_exact_checkpoint(
             &mut x,
             &lower_bounds,
             &upper_bounds,
@@ -62,7 +218,36 @@ pub fn perform_optimization_with_run_descriptor(
             &params.algo,
             params,
             callback,
+            super::super::de::DEExactContinuation {
+                checkpoint: continuation.checkpoint,
+                run_identity: continuation.run_identity,
+                save_callback: continuation.save_callback,
+            },
         )
+    } else if resolves_to_backend(&params.algo, "autoeq:de") {
+        if initial_candidate.is_some() {
+            let explicit_initial_candidate = x.clone();
+            optimize_filters_autoeq_with_callback_and_initial(
+                &mut x,
+                &lower_bounds,
+                &upper_bounds,
+                objective_data.clone(),
+                &params.algo,
+                params,
+                Some(&explicit_initial_candidate),
+                callback,
+            )
+        } else {
+            optimize_filters_autoeq_with_callback(
+                &mut x,
+                &lower_bounds,
+                &upper_bounds,
+                objective_data.clone(),
+                &params.algo,
+                params,
+                callback,
+            )
+        }
     } else {
         optimize_filters_with_algo_override(
             &mut x,
@@ -135,6 +320,51 @@ pub fn perform_optimization_with_run_descriptor(
     })
 }
 
+fn validate_initial_candidate(
+    candidate: &[f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+) -> Result<(), Box<dyn Error>> {
+    if candidate.is_empty()
+        || candidate.len() != lower_bounds.len()
+        || candidate.len() != upper_bounds.len()
+    {
+        return Err(std::io::Error::other(format!(
+            "warm-start candidate has {} parameters; bounds have {} lower and {} upper values",
+            candidate.len(),
+            lower_bounds.len(),
+            upper_bounds.len()
+        ))
+        .into());
+    }
+    for (index, ((&value, &lower), &upper)) in candidate
+        .iter()
+        .zip(lower_bounds)
+        .zip(upper_bounds)
+        .enumerate()
+    {
+        if !lower.is_finite() || !upper.is_finite() || lower > upper {
+            return Err(std::io::Error::other(format!(
+                "warm-start bounds at parameter {index} are invalid: [{lower}, {upper}]"
+            ))
+            .into());
+        }
+        if !value.is_finite() {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidate parameter {index} is not finite"
+            ))
+            .into());
+        }
+        if value < lower || value > upper {
+            return Err(std::io::Error::other(format!(
+                "warm-start candidate parameter {index}={value} is outside current bounds [{lower}, {upper}]"
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// Run optimization with a DE progress callback (only used for AutoEQ DE).
 pub fn perform_optimization_with_callback(
     params: &crate::OptimParams,
@@ -164,6 +394,53 @@ pub fn perform_optimization_with_progress<F>(
     params: &crate::OptimParams,
     objective_data: &ObjectiveData,
     config: ProgressCallbackConfig,
+    callback: F,
+) -> Result<OptimizationOutput, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
+    perform_optimization_with_progress_and_optional_candidate(
+        params,
+        objective_data,
+        config,
+        None,
+        callback,
+    )
+}
+
+/// Run optimization from a warm-start candidate and report progress.
+///
+/// The candidate is revalidated and finalized against the run's complete
+/// current constraint specification before it reaches the optimizer.
+///
+/// # Errors
+///
+/// Returns an error when the candidate has invalid dimensions, non-finite
+/// values, or values outside the current parameter bounds.
+pub fn perform_optimization_with_progress_and_candidate<F>(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    config: ProgressCallbackConfig,
+    initial_candidate: &[f64],
+    callback: F,
+) -> Result<OptimizationOutput, Box<dyn Error>>
+where
+    F: FnMut(&ProgressUpdate) -> crate::de::CallbackAction + Send + 'static,
+{
+    perform_optimization_with_progress_and_optional_candidate(
+        params,
+        objective_data,
+        config,
+        Some(initial_candidate),
+        callback,
+    )
+}
+
+fn perform_optimization_with_progress_and_optional_candidate<F>(
+    params: &crate::OptimParams,
+    objective_data: &ObjectiveData,
+    config: ProgressCallbackConfig,
+    initial_candidate: Option<&[f64]>,
     mut callback: F,
 ) -> Result<OptimizationOutput, Box<dyn Error>>
 where
@@ -259,8 +536,13 @@ where
         }
     };
 
-    let run =
-        perform_optimization_with_run_descriptor(params, objective_data, Box::new(de_callback))?;
+    let run = perform_optimization_with_optional_candidate(
+        params,
+        objective_data,
+        initial_candidate,
+        Box::new(de_callback),
+        None,
+    )?;
 
     let final_history = Arc::try_unwrap(history)
         .map(|m| m.into_inner().unwrap())

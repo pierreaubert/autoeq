@@ -71,6 +71,7 @@ fn graph() -> DspGraph {
     DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels,
         metadata: Some(OptimizationMetadata {

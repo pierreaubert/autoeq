@@ -550,6 +550,7 @@ fn bass_route_upper_frequency_hz_with_graph() {
         ],
         matrix: None,
         input_trim_db: Default::default(),
+        post_dsp_main_alignment_band_hz: None,
         advisories: vec![],
     };
 

@@ -43,7 +43,7 @@ impl ProgrammeSet {
     /// # Errors
     ///
     /// Returns an error on blank identities or hashes, an empty holdout
-    /// set, or any holdout that also ran in tuning.
+    /// set, or a programme identity or stimulus hash shared with tuning.
     pub fn verify_holdout_disjoint(&self) -> Result<(), String> {
         if self.held_out.is_empty() {
             return Err(String::from(
@@ -58,9 +58,13 @@ impl ProgrammeSet {
             }
         }
         for held in &self.held_out {
-            if self.tuning.iter().any(|tuned| tuned.id == held.id) {
+            if self
+                .tuning
+                .iter()
+                .any(|tuned| tuned.id == held.id || tuned.stimulus_hash == held.stimulus_hash)
+            {
                 return Err(format!(
-                    "held-out programme {} also ran in tuning: holdouts stay disjoint",
+                    "held-out programme {} shares a programme identity or stimulus with tuning: holdouts stay disjoint",
                     held.id
                 ));
             }
@@ -364,6 +368,31 @@ mod promotion_tests {
             held_out: Vec::new(),
         };
         assert!(empty.verify_holdout_disjoint().is_err());
+    }
+
+    #[test]
+    fn promotion_holdout_rejects_renamed_tuning_stimulus() {
+        let tuned = programme("tuning-speech-01");
+        let renamed = ProgrammeEntry {
+            id: String::from("heldout-speech-renamed"),
+            stimulus_hash: tuned.stimulus_hash.clone(),
+        };
+        let leaked = ProgrammeSet {
+            tuning: vec![tuned],
+            held_out: vec![renamed],
+        };
+        let error = leaked
+            .verify_holdout_disjoint()
+            .expect_err("renaming a tuned stimulus cannot make it held out");
+        assert!(error.contains("stimulus"), "{error}");
+
+        // A distinct rendered stimulus with a distinct programme identity
+        // satisfies this identity check; it does not establish study validity.
+        let distinct = ProgrammeSet {
+            tuning: vec![programme("tuning-speech-01")],
+            held_out: vec![programme("heldout-piano-09")],
+        };
+        assert!(distinct.verify_holdout_disjoint().is_ok());
     }
 
     #[test]

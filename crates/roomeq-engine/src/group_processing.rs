@@ -58,9 +58,11 @@ mod tests {
             spl: ndarray::array![80.0, 85.0, 60.0, 40.0, 82.0, 68.0, 45.0, 20.0],
             ..Default::default()
         };
-        let mut config = roomeq_model::OptimizerConfig::default();
-        config.min_freq = 20.0;
-        config.max_freq = 16_000.0;
+        let config = roomeq_model::OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 16_000.0,
+            ..Default::default()
+        };
         assert_eq!(bounded_sub_eq_max(&curve, &config), 130.0);
     }
 
@@ -104,9 +106,11 @@ mod tests {
             phase: None,
             ..Default::default()
         };
-        let mut config = roomeq_model::OptimizerConfig::default();
-        config.min_freq = 20.0;
-        config.max_freq = 16_000.0;
+        let config = roomeq_model::OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 16_000.0,
+            ..Default::default()
+        };
         let bounded = bounded_sub_eq_max(&combined, &config);
         assert!(
             bounded < 249.0,
@@ -125,18 +129,20 @@ mod tests {
             spl: ndarray::array![10.0, 0.0, 0.0, 0.0, -10.0],
             ..Default::default()
         };
-        let mut config = OptimizerConfig::default();
-        config.min_freq = 20.0;
-        config.max_freq = 20_000.0;
-        config.correction_band = Some(CorrectionBandPolicy {
-            min_hz: 40.0,
-            max_hz: 16_000.0,
-            allow_natural_rolloff: true,
-        });
-        config.num_filters = 1;
-        config.max_iter = 8;
-        config.population = 8;
-        config.seed = Some(7);
+        let config = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            correction_band: Some(CorrectionBandPolicy {
+                min_hz: 40.0,
+                max_hz: 16_000.0,
+                allow_natural_rolloff: true,
+            }),
+            num_filters: 1,
+            max_iter: 8,
+            population: 8,
+            seed: Some(7),
+            ..Default::default()
+        };
 
         let observation_score = flat_loss_score(&curve, config.min_freq, config.max_freq);
         let active_score = flat_loss_score(&curve, 40.0, 16_000.0);

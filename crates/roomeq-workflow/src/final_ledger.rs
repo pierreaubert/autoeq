@@ -616,7 +616,7 @@ pub fn reconcile_ledger(
             seat_refs,
             frequency_band_hz: superseded.and_then(|record| record.frequency_band_hz),
             filter_center_hz: None,
-            action: superseded.map_or(DecisionAction::Equalize, |record| record.action.clone()),
+            action: superseded.map_or(DecisionAction::Equalize, |record| record.action),
             status: DecisionStatus::Reverted,
             reason_codes: vec![if superseded.is_some_and(|record| {
                 record

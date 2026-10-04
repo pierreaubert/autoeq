@@ -30,6 +30,9 @@ class EvidenceTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        registry = self.root / "qa/registry/parameter-matrix-pr.json"
+        registry.parent.mkdir(parents=True)
+        registry.write_bytes((runner.ROOT / "qa/registry/parameter-matrix-pr.json").read_bytes())
         self.directory = self.root / "target/qa/roomeq-parameter-bundles/row-00-test"
         self.directory.mkdir(parents=True)
         self.patch = patch.object(runner, "ROOT", self.root)
@@ -138,12 +141,34 @@ class EvidenceTests(unittest.TestCase):
 
     def test_missing_backend_is_failure(self):
         matrix = self.root / "target/qa/roomeq-parameter-matrix.json"
-        matrix.write_text(json.dumps([{"row": i} for i in range(16)]))
+        matrix.write_text(json.dumps([
+            {"row": i, "requested_axes": axes}
+            for i, axes in enumerate(runner.expected_matrix_axes())
+        ]))
         with patch.object(runner.shutil, "which", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "binary is required"):
                 runner.main([])
         record = json.loads((matrix.parent / "roomeq-matrix-backend.json").read_text())
         self.assertEqual(record["status"], "failed")
+
+    def test_registry_inventory_rejects_missing_duplicate_reordered_or_changed_axes(self):
+        expected = runner.expected_matrix_axes()
+        rows = [{"row": i, "requested_axes": axes} for i, axes in enumerate(expected)]
+        runner.validate_matrix_inventory(rows, expected)
+        challenges = [rows[:-1], rows + [rows[-1]], [rows[1], rows[0]] + rows[2:]]
+        changed = json.loads(json.dumps(rows))
+        changed[0]["requested_axes"]["phase"] = 1 - changed[0]["requested_axes"]["phase"]
+        challenges.append(changed)
+        boolean_row = json.loads(json.dumps(rows))
+        boolean_row[0]["row"] = False
+        challenges.append(boolean_row)
+        boolean_axis = json.loads(json.dumps(rows))
+        boolean_axis[0]["requested_axes"]["phase"] = bool(boolean_axis[0]["requested_axes"]["phase"])
+        challenges.append(boolean_axis)
+        for challenge in challenges:
+            with self.subTest(challenge=challenge[:1]):
+                with self.assertRaisesRegex(ValueError, "completed ordered"):
+                    runner.validate_matrix_inventory(challenge, expected)
 
     def test_partial_matrix_is_failure(self):
         matrix = self.root / "target/qa/roomeq-parameter-matrix.json"

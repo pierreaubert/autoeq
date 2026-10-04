@@ -96,8 +96,10 @@ fn tool_contract_camilladsp_fractional_gd_matches_exported_response() {
                 assert_eq!(output.stdout.len() % 4, 0);
                 let pcm: Vec<_> = output
                     .stdout
-                    .chunks_exact(4)
-                    .map(|sample| i32::from_le_bytes(sample.try_into().unwrap()))
+                    .as_chunks::<4>()
+                    .0
+                    .iter()
+                    .map(|sample| i32::from_le_bytes(*sample))
                     .collect();
                 let report = &results["left"].final_curve;
                 let taps = results["left"].fir_coeffs.as_ref().unwrap().len();

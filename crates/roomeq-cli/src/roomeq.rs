@@ -19,7 +19,10 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use log::{info, warn};
 use schemars::schema_for;
+use std::io::Read;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Use the library types
 use roomeq_engine::{PipelineControl, PipelineEvent, PipelineObserver};
@@ -28,12 +31,13 @@ use roomeq_model::{DspChainOutput, MeasurementRef, MeasurementSource, RoomConfig
 use roomeq_workflow::{
     ChannelOptimizationResult, DEFAULT_FREQUENCY_SAMPLES, ExportFormat, RoomOptimizationResult,
     RoomPipeline, RoomPipelineRequest, export_dsp_chain_with_convolution_sidecars,
-    load_config_with_frequency_samples, load_merged_config_strict, output_bundle as bundle,
-    save_dsp_chain,
+    load_config_with_frequency_samples, load_merged_config_strict,
+    output_bundle::{self as bundle, FsArtifactStore},
 };
 
 /// Version of the [`RunManifest`] schema written next to every pipeline output.
 const RUN_MANIFEST_VERSION: u32 = 1;
+const MAX_RUN_MANIFEST_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Completion status recorded in [`RunManifest::status`].
 const RUN_STATUS_COMPLETE: &str = "complete";
@@ -49,6 +53,29 @@ fn require_playback_outcome(outcome: Option<roomeq_model::RoomEqOutcome>) -> Res
         }
         other => Err(anyhow!("RoomEQ has no approved playback result: {other:?}")),
     }
+}
+
+fn require_output_playback_approval(output: &DspChainOutput) -> Result<()> {
+    if let Some(metadata) = &output.metadata {
+        let exceeded_safety_budget = metadata
+            .stage_outcomes
+            .iter()
+            .filter(|stage| stage.stage == "final_output_safety_attenuation_budget")
+            .flat_map(|stage| &stage.checks)
+            .any(|check| {
+                check.id.starts_with("max_output_safety_attenuation_db:") && !check.passed
+            });
+        if exceeded_safety_budget {
+            anyhow::bail!("RoomEQ output exceeds its configured output safety-attenuation budget");
+        }
+        return require_playback_outcome(
+            metadata
+                .correction_acceptance
+                .as_ref()
+                .map(|report| report.derived_outcome()),
+        );
+    }
+    require_playback_outcome(None)
 }
 
 /// Whether an outcome approves playback. Only `Accepted` and `Unchanged`
@@ -308,10 +335,10 @@ fn owned_assets(
             owned.push(required);
         }
     }
-    if let Some(path) = export_path {
-        if !owned.contains(&path.to_path_buf()) {
-            owned.push(path.to_path_buf());
-        }
+    if let Some(path) = export_path
+        && !owned.contains(&path.to_path_buf())
+    {
+        owned.push(path.to_path_buf());
     }
     owned
 }
@@ -709,6 +736,16 @@ struct Args {
 }
 
 pub fn run_command() -> Result<()> {
+    run_command_with_shutdown(Arc::new(AtomicBool::new(false)))
+}
+
+/// Run the RoomEQ CLI while observing a caller-owned Ctrl-C/shutdown flag.
+///
+/// The optimization pipeline checks the flag at observer and publication
+/// boundaries. A cancellation observed before candidate publication returns an
+/// error and preserves the existing canonical bundle. A flag set after bundle
+/// publication has begun does not interrupt or roll back that transaction.
+pub fn run_command_with_shutdown(shutdown: Arc<AtomicBool>) -> Result<()> {
     // Initialize logger safely
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -747,6 +784,8 @@ pub fn run_command() -> Result<()> {
             .with_context(|| format!("Failed to read DSP chain from {:?}", convert_path))?;
         let dsp_output: DspChainOutput = serde_json::from_str(&json_str)
             .with_context(|| format!("Failed to parse DSP chain from {:?}", convert_path))?;
+
+        require_output_playback_approval(&dsp_output)?;
 
         let export_path = args
             .export_path
@@ -874,6 +913,7 @@ pub fn run_command() -> Result<()> {
                 stimulus_hash: args.stimulus_hash,
                 seats: args.verification_seats,
             },
+            shutdown,
         );
     }
     if args.export_format.is_some() || args.verification_bundle.is_some() {
@@ -888,6 +928,8 @@ pub fn run_command() -> Result<()> {
         output_path,
         args.override_config,
         args.fallback_overrides,
+        shutdown,
+        execute_fallback_candidate,
     )
 }
 
@@ -897,6 +939,37 @@ enum FallbackAttemptOutcome {
     Accepted,
     Unchanged,
     NotShippable,
+}
+
+struct FallbackCandidateRequest {
+    sample_rate: f64,
+    freq_samples: usize,
+    config_path: PathBuf,
+    output_path: PathBuf,
+    override_config: Option<PathBuf>,
+    shutdown: Arc<AtomicBool>,
+}
+
+fn execute_fallback_candidate(request: FallbackCandidateRequest) -> Result<()> {
+    execute_optimization_candidate(
+        request.sample_rate,
+        request.freq_samples,
+        request.config_path,
+        request.output_path,
+        request.override_config,
+        None,
+        None,
+        None,
+        BundleOptions {
+            prediction_manifest: None,
+            dest_dir: None,
+            baseline_graph: None,
+            calibration_id: None,
+            stimulus_hash: None,
+            seats: None,
+        },
+        request.shutdown,
+    )
 }
 
 /// Winner selection over complete attempt outcomes: the first accepted
@@ -930,49 +1003,25 @@ fn read_saved_outcome(output_path: &std::path::Path) -> FallbackAttemptOutcome {
     }
 }
 
-/// Remove one attempt's outputs while preserving the cumulative run log.
-fn clean_attempt_outputs(output_path: &std::path::Path) {
-    let log_path = run_log_path_for(output_path);
-    let preserved_log = std::fs::read_to_string(&log_path).unwrap_or_default();
-    let _ = std::fs::remove_file(output_path);
-    let _ = std::fs::remove_dir_all(bundle::assets_dir_for(output_path));
-    if !preserved_log.is_empty()
-        && let Some(parent) = log_path.parent()
-        && std::fs::create_dir_all(parent).is_ok()
-    {
-        let _ = std::fs::write(&log_path, preserved_log);
-    }
-}
-
-fn copy_dir_all(source: &std::path::Path, dest: &std::path::Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dest)?;
-    for entry in std::fs::read_dir(source)? {
-        let entry = entry?;
-        let target = dest.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_dir_all(&entry.path(), &target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
-}
-
 /// Try the primary override plus fallbacks in order; ship the winner.
 ///
-/// Stops at the first accepted outcome. A first-unchanged result is cached
-/// aside and restored when nothing accepts. Attempts that leave no output
-/// file are infrastructure failures and abort the sequence immediately
-/// instead of burning optimization budget on a broken setup.
+/// Stops at the first accepted outcome. A first-unchanged result stays in its
+/// private attempt directory until all overrides finish. No attempt mutates
+/// the canonical bundle before a winner is selected.
 #[allow(clippy::too_many_arguments)]
-fn execute_with_fallback(
+fn execute_with_fallback<F>(
     sample_rate: f64,
     freq_samples: usize,
     config_path: PathBuf,
     output_path: PathBuf,
     override_config: Option<PathBuf>,
     fallback_overrides: Vec<PathBuf>,
-) -> Result<()> {
+    shutdown: Arc<AtomicBool>,
+    mut run_candidate: F,
+) -> Result<()>
+where
+    F: FnMut(FallbackCandidateRequest) -> Result<()>,
+{
     let mut attempts: Vec<Option<PathBuf>> = vec![override_config];
     attempts.extend(fallback_overrides.into_iter().map(Some));
     attempts.dedup();
@@ -985,57 +1034,63 @@ fn execute_with_fallback(
         Some(path) => path.display().to_string(),
         None => "(no override)".to_string(),
     };
-    let cache_dir = std::env::temp_dir().join(format!("roomeq-fallback-{}", std::process::id()));
-    let mut cached_unchanged: Option<PathBuf> = None;
+    let parent = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("Failed to create output directory {parent:?}"))?;
+    let file_name = output_path
+        .file_name()
+        .ok_or_else(|| anyhow!("Output path must include a file name"))?;
+    let mut cached_unchanged: Option<(tempfile::TempDir, PathBuf)> = None;
+    let mut rejected_diagnostics: Vec<(tempfile::TempDir, PathBuf)> = Vec::new();
     let mut outcomes: Vec<FallbackAttemptOutcome> = Vec::with_capacity(attempts.len());
     for (index, attempt_override) in attempts.iter().enumerate() {
+        if shutdown.load(Ordering::Acquire) {
+            anyhow::bail!("RoomEQ optimization cancelled before fallback attempt");
+        }
         info!(
             "Fallback attempt {}/{}: override {}",
             index + 1,
             attempts.len(),
             outcome_of(attempt_override)
         );
-        append_run_log(
-            &output_path,
-            &[format!(
-                "fallback: attempt {}/{} override {}",
-                index + 1,
-                attempts.len(),
-                outcome_of(attempt_override)
-            )],
-        );
-        clean_attempt_outputs(&output_path);
-        let attempt_result = execute_optimization(
+        let attempt_dir = tempfile::Builder::new()
+            .prefix(".roomeq-fallback-")
+            .tempdir_in(parent)
+            .with_context(|| format!("Failed to stage fallback attempt beside {output_path:?}"))?;
+        let attempt_path = attempt_dir.path().join(file_name);
+        let attempt_result = run_candidate(FallbackCandidateRequest {
             sample_rate,
             freq_samples,
-            config_path.clone(),
-            output_path.clone(),
-            attempt_override.clone(),
-            None,
-            None,
-            BundleOptions {
-                prediction_manifest: None,
-                dest_dir: None,
-                baseline_graph: None,
-                calibration_id: None,
-                stimulus_hash: None,
-                seats: None,
-            },
-        );
-        if !output_path.is_file() {
-            let _ = std::fs::remove_dir_all(&cache_dir);
-            return attempt_result.with_context(|| {
+            config_path: config_path.clone(),
+            output_path: attempt_path.clone(),
+            override_config: attempt_override.clone(),
+            shutdown: Arc::clone(&shutdown),
+        });
+        if !attempt_path.is_file() {
+            let error = attempt_result.err().unwrap_or_else(|| {
+                anyhow!("fallback attempt completed without publishing its candidate bundle")
+            });
+            let mut retained =
+                retain_attempt_diagnostics(std::mem::take(&mut rejected_diagnostics));
+            if let Some((unchanged_dir, unchanged_path)) = cached_unchanged.take() {
+                let _ = unchanged_dir.keep();
+                retained.push(unchanged_path);
+            }
+            return Err(error).with_context(|| {
                 format!(
-                    "Fallback attempt {}/{} left no output; aborting sequence",
+                    "Fallback attempt {}/{} left no candidate; canonical output is unchanged. Retained diagnostics: {retained:?}",
                     index + 1,
                     attempts.len()
                 )
             });
         }
-        let outcome = read_saved_outcome(&output_path);
+        let outcome = read_saved_outcome(&attempt_path);
         outcomes.push(outcome);
         append_run_log(
-            &output_path,
+            &attempt_path,
             &[format!(
                 "fallback: attempt {}/{} outcome {outcome:?}",
                 index + 1,
@@ -1050,7 +1105,7 @@ fn execute_with_fallback(
                     attempts.len()
                 );
                 append_run_log(
-                    &output_path,
+                    &attempt_path,
                     &[format!(
                         "fallback: selected attempt {}/{} override {}",
                         index + 1,
@@ -1058,6 +1113,20 @@ fn execute_with_fallback(
                         outcome_of(attempt_override)
                     )],
                 );
+                if shutdown.load(Ordering::Acquire) {
+                    anyhow::bail!("RoomEQ optimization cancelled before fallback publication");
+                }
+                if let Err(error) = bundle::publish_output_bundle_from(&attempt_path, &output_path)
+                {
+                    let retained = attempt_dir.keep();
+                    let mut diagnostics =
+                        retain_attempt_diagnostics(std::mem::take(&mut rejected_diagnostics));
+                    diagnostics.push(retained.join(file_name));
+                    return Err(anyhow::Error::msg(error.to_string()).context(format!(
+                        "could not publish accepted fallback; canonical output was preserved. Retained diagnostics: {diagnostics:?}"
+                    )));
+                }
+                relocate_published_run_manifest(&attempt_path, &output_path, None, None);
                 record_fallback_provenance(
                     &output_path,
                     Some(index),
@@ -1065,41 +1134,35 @@ fn execute_with_fallback(
                     index + 1,
                     &outcome_of,
                 );
-                let _ = std::fs::remove_dir_all(&cache_dir);
+                let retained_diagnostics = retain_attempt_diagnostics(rejected_diagnostics);
+                if !retained_diagnostics.is_empty() {
+                    append_run_log(
+                        &output_path,
+                        &retained_diagnostics
+                            .iter()
+                            .map(|path| {
+                                format!("fallback: rejected attempt retained at {}", path.display())
+                            })
+                            .collect::<Vec<_>>(),
+                    );
+                }
                 return Ok(());
             }
             FallbackAttemptOutcome::Unchanged if cached_unchanged.is_none() => {
-                let cache = cache_dir.join(format!("unchanged-{index}"));
-                let assets = bundle::assets_dir_for(&output_path);
-                if std::fs::create_dir_all(&cache).is_ok()
-                    && std::fs::copy(&output_path, cache.join("output.json")).is_ok()
-                    && (!assets.is_dir() || copy_dir_all(&assets, &cache.join("assets")).is_ok())
-                {
-                    cached_unchanged = Some(cache);
-                }
+                cached_unchanged = Some((attempt_dir, attempt_path));
             }
-            _ => {}
+            FallbackAttemptOutcome::NotShippable => {
+                rejected_diagnostics.push((attempt_dir, attempt_path));
+            }
+            FallbackAttemptOutcome::Unchanged => {}
         }
-        let _ = attempt_result;
     }
     if let Some(winner) = select_fallback_winner(&outcomes)
         && outcomes[winner] == FallbackAttemptOutcome::Unchanged
-        && let Some(cache) = &cached_unchanged
+        && let Some((unchanged_dir, unchanged_path)) = cached_unchanged
     {
-        clean_attempt_outputs(&output_path);
-        std::fs::copy(cache.join("output.json"), &output_path).with_context(|| {
-            format!(
-                "Failed to restore unchanged fallback result to {}",
-                output_path.display()
-            )
-        })?;
-        let cached_assets = cache.join("assets");
-        if cached_assets.is_dir() {
-            copy_dir_all(&cached_assets, &bundle::assets_dir_for(&output_path))
-                .with_context(|| "Failed to restore unchanged fallback assets")?;
-        }
         append_run_log(
-            &output_path,
+            &unchanged_path,
             &[format!(
                 "fallback: selected unchanged attempt {}/{} (no accepted outcome)",
                 winner + 1,
@@ -1111,27 +1174,72 @@ fn execute_with_fallback(
             winner + 1,
             attempts.len()
         );
+        if shutdown.load(Ordering::Acquire) {
+            anyhow::bail!("RoomEQ optimization cancelled before unchanged fallback publication");
+        }
+        if let Err(error) = bundle::publish_output_bundle_from(&unchanged_path, &output_path) {
+            let retained = unchanged_dir.keep();
+            let mut diagnostics =
+                retain_attempt_diagnostics(std::mem::take(&mut rejected_diagnostics));
+            diagnostics.push(retained.join(file_name));
+            return Err(anyhow::Error::msg(error.to_string()).context(format!(
+                "could not publish unchanged fallback; canonical output was preserved. Retained diagnostics: {diagnostics:?}"
+            )));
+        }
+        relocate_published_run_manifest(&unchanged_path, &output_path, None, None);
         let ran = attempts.len();
         record_fallback_provenance(&output_path, Some(winner), &attempts, ran, &outcome_of);
-        let _ = std::fs::remove_dir_all(&cache_dir);
+        let retained_diagnostics = retain_attempt_diagnostics(rejected_diagnostics);
+        if !retained_diagnostics.is_empty() {
+            append_run_log(
+                &output_path,
+                &retained_diagnostics
+                    .iter()
+                    .map(|path| {
+                        format!("fallback: rejected attempt retained at {}", path.display())
+                    })
+                    .collect::<Vec<_>>(),
+            );
+        }
         return Ok(());
     }
-    let _ = std::fs::remove_dir_all(&cache_dir);
     let ran = attempts.len();
     record_fallback_provenance(&output_path, None, &attempts, ran, &outcome_of);
+    let retained_diagnostics = retain_attempt_diagnostics(rejected_diagnostics);
     append_run_log(
         &output_path,
-        &["fallback: no attempt approved playback; leaving last diagnostic.".to_string()],
+        &std::iter::once(
+            "fallback: no attempt approved playback; canonical output was preserved.".to_string(),
+        )
+        .chain(
+            retained_diagnostics
+                .iter()
+                .map(|path| format!("fallback: rejected attempt retained at {}", path.display())),
+        )
+        .collect::<Vec<_>>(),
     );
     Err(anyhow!(
-        "Fallback exhausted ({} attempts, outcomes: {outcomes:?}); no approved playback result",
-        attempts.len()
+        "Fallback exhausted ({} attempts, outcomes: {outcomes:?}); no approved playback result. Retained diagnostics: {retained_diagnostics:?}",
+        attempts.len(),
     ))
 }
 
+fn retain_attempt_diagnostics(attempts: Vec<(tempfile::TempDir, PathBuf)>) -> Vec<PathBuf> {
+    attempts
+        .into_iter()
+        .map(|(directory, output)| {
+            let _ = directory.keep();
+            output
+        })
+        .collect()
+}
+
 /// Pipeline observer that logs to stderr.
-fn create_progress_observer() -> Box<dyn PipelineObserver> {
-    Box::new(|event: &PipelineEvent| {
+fn create_progress_observer(shutdown: Arc<AtomicBool>) -> Box<dyn PipelineObserver> {
+    Box::new(move |event: &PipelineEvent| {
+        if shutdown.load(Ordering::Acquire) {
+            return PipelineControl::Stop;
+        }
         // Status messages (no real iteration data) — log the message directly
         if let Some(msg) = &event.message {
             info!("  {}", msg);
@@ -1245,6 +1353,162 @@ fn finalize_native_output(
     Ok(())
 }
 
+fn publish_attempt_output_bundle(
+    attempt_path: &std::path::Path,
+    output_path: &std::path::Path,
+    staged_export_path: Option<&std::path::Path>,
+    export_destination_path: Option<&std::path::Path>,
+) -> Result<()> {
+    match (staged_export_path, export_destination_path) {
+        (Some(staged), Some(destination)) => {
+            roomeq_workflow::publish_staged_export_package_with_native_bundle(
+                staged,
+                destination,
+                output_path,
+                attempt_path,
+                || {
+                    bundle::publish_output_bundle_from_during_external_transaction_with_source_recovery(
+                        attempt_path,
+                        output_path,
+                    )
+                    .map_err(|error| anyhow!(error.to_string()))
+                },
+            )
+        }
+        (None, None) => bundle::publish_output_bundle_from(attempt_path, output_path)
+            .map_err(|error| anyhow!(error.to_string())),
+        _ => Err(anyhow!(
+            "staged and destination export paths must be provided together"
+        )),
+    }
+}
+
+fn normalize_destination_file(path: &std::path::Path) -> Result<PathBuf> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    std::fs::create_dir_all(parent)
+        .with_context(|| format!("Failed to create destination directory {parent:?}"))?;
+    let canonical_parent = std::fs::canonicalize(parent)
+        .with_context(|| format!("Failed to resolve destination directory {parent:?}"))?;
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| anyhow!("Destination path must include a file name"))?;
+    let normalized = canonical_parent.join(file_name);
+    match std::fs::symlink_metadata(&normalized) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            anyhow::bail!("Destination path cannot be a symbolic link: {normalized:?}");
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error).context("Failed to inspect destination path"),
+    }
+    Ok(normalized)
+}
+
+fn paths_alias(left: &std::path::Path, right: &std::path::Path) -> bool {
+    if left == right {
+        return true;
+    }
+    if let (Ok(left), Ok(right)) = (std::fs::canonicalize(left), std::fs::canonicalize(right))
+        && left == right
+    {
+        return true;
+    }
+    if cfg!(any(target_os = "macos", target_os = "windows"))
+        && left.parent() == right.parent()
+        && left.file_name().is_some_and(|left_name| {
+            right.file_name().is_some_and(|right_name| {
+                left_name
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&right_name.to_string_lossy())
+            })
+        })
+    {
+        return true;
+    }
+    false
+}
+
+fn destination_is_within(path: &std::path::Path, directory: &std::path::Path) -> bool {
+    if path.starts_with(directory) {
+        return true;
+    }
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return false;
+    }
+    let path_components: Vec<_> = path.components().collect();
+    let directory_components: Vec<_> = directory.components().collect();
+    directory_components.len() <= path_components.len()
+        && directory_components
+            .iter()
+            .zip(&path_components)
+            .all(|(expected, actual)| {
+                expected
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&actual.as_os_str().to_string_lossy())
+            })
+}
+
+fn resolve_optimization_destinations(
+    output_path: &std::path::Path,
+    export_format: Option<ExportFormat>,
+    export_path: Option<&std::path::Path>,
+) -> Result<(PathBuf, Option<PathBuf>)> {
+    let output_path = normalize_destination_file(output_path)?;
+    let export_path = export_format
+        .map(|format| {
+            let requested = export_path
+                .map(std::path::Path::to_path_buf)
+                .unwrap_or_else(|| format.default_export_path(&output_path));
+            normalize_destination_file(&requested)
+        })
+        .transpose()?;
+    if let Some(export_path) = &export_path {
+        anyhow::ensure!(
+            !paths_alias(export_path, &output_path),
+            "external export path must differ from the native output path"
+        );
+        let assets_dir = bundle::assets_dir_for(&output_path);
+        let assets_dir = std::fs::canonicalize(&assets_dir).unwrap_or(assets_dir);
+        anyhow::ensure!(
+            !destination_is_within(export_path, &assets_dir),
+            "external export path cannot be inside the native bundle assets directory"
+        );
+    }
+    Ok((output_path, export_path))
+}
+
+fn read_run_manifest_text(path: &std::path::Path) -> std::io::Result<String> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "run manifest is not a regular file",
+        ));
+    }
+    if metadata.len() > MAX_RUN_MANIFEST_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "run manifest exceeds its size limit",
+        ));
+    }
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_RUN_MANIFEST_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > MAX_RUN_MANIFEST_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "run manifest changed size while being read",
+        ));
+    }
+    String::from_utf8(bytes)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn execute_optimization(
     sample_rate: f64,
@@ -1255,6 +1519,144 @@ fn execute_optimization(
     export_format: Option<ExportFormat>,
     export_path: Option<PathBuf>,
     bundle_options: BundleOptions,
+    shutdown: Arc<AtomicBool>,
+) -> Result<()> {
+    let (output_path, final_export_path) =
+        resolve_optimization_destinations(&output_path, export_format, export_path.as_deref())?;
+    let parent = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let file_name = output_path
+        .file_name()
+        .ok_or_else(|| anyhow!("Output path must include a file name"))?;
+    let attempt_dir = tempfile::Builder::new()
+        .prefix(".roomeq-attempt-")
+        .tempdir_in(parent)
+        .with_context(|| format!("Failed to stage RoomEQ attempt beside {output_path:?}"))?;
+    let attempt_output = attempt_dir.path().join(file_name);
+    let staged_export_path = if let Some(destination) = &final_export_path {
+        let export_name = destination
+            .file_name()
+            .ok_or_else(|| anyhow!("External export path must include a file name"))?;
+        let directory = attempt_dir.path().join("external-export");
+        std::fs::create_dir_all(&directory)
+            .with_context(|| format!("Failed to create export staging directory {directory:?}"))?;
+        Some(directory.join(export_name))
+    } else {
+        None
+    };
+    if let Err(error) = execute_optimization_candidate(
+        sample_rate,
+        freq_samples,
+        config_path,
+        attempt_output.clone(),
+        override_config_path,
+        export_format,
+        staged_export_path.clone(),
+        final_export_path.clone(),
+        bundle_options,
+        Arc::clone(&shutdown),
+    ) {
+        if attempt_output.is_file() {
+            let retained_dir = attempt_dir.keep();
+            return Err(error.context(format!(
+                "canonical output was preserved; diagnostic attempt retained at {:?}",
+                retained_dir.join(file_name)
+            )));
+        }
+        return Err(error);
+    }
+    if shutdown.load(Ordering::Acquire) {
+        anyhow::bail!("RoomEQ optimization cancelled before candidate publication");
+    }
+    let publish_result = publish_attempt_output_bundle(
+        &attempt_output,
+        &output_path,
+        staged_export_path.as_deref(),
+        final_export_path.as_deref(),
+    );
+    if let Err(error) = publish_result {
+        let retained_dir = attempt_dir.keep();
+        return Err(error.context(format!(
+            "canonical output was preserved; publish candidate retained at {:?}",
+            retained_dir.join(file_name)
+        )));
+    }
+    relocate_published_run_manifest(
+        &attempt_output,
+        &output_path,
+        final_export_path.as_deref(),
+        staged_export_path.as_deref(),
+    );
+    Ok(())
+}
+
+fn relocate_published_run_manifest(
+    candidate_path: &std::path::Path,
+    output_path: &std::path::Path,
+    export_path: Option<&std::path::Path>,
+    staged_export_path: Option<&std::path::Path>,
+) {
+    let manifest_path = manifest_path_for(candidate_path);
+    let text = match read_run_manifest_text(&manifest_path) {
+        Ok(text) => text,
+        Err(error) => {
+            warn!(
+                "Could not read candidate run manifest {:?}: {error}",
+                manifest_path
+            );
+            return;
+        }
+    };
+    let mut manifest: RunManifest = match serde_json::from_str(&text) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            warn!(
+                "Could not parse candidate run manifest {:?}: {error}",
+                manifest_path
+            );
+            return;
+        }
+    };
+    manifest.native_graph = output_path.to_path_buf();
+    manifest.export_path = export_path.map(std::path::Path::to_path_buf);
+    if manifest.export_path.is_some() {
+        manifest.export_status = Some("saved".to_string());
+    }
+    manifest.assets_owned = owned_assets(output_path, manifest.export_path.as_deref());
+    if let (Some(staged), Some(destination)) = (staged_export_path, manifest.export_path.as_deref())
+    {
+        let staged_dir = staged.parent().unwrap_or_else(|| std::path::Path::new("."));
+        let destination_dir = destination
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        if let Ok(entries) = std::fs::read_dir(staged_dir) {
+            for entry in entries.flatten() {
+                if entry.file_type().is_ok_and(|kind| kind.is_file()) {
+                    let member = destination_dir.join(entry.file_name());
+                    if !manifest.assets_owned.contains(&member) {
+                        manifest.assets_owned.push(member);
+                    }
+                }
+            }
+        }
+    }
+    persist_run_manifest_best_effort(output_path, &manifest);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_optimization_candidate(
+    sample_rate: f64,
+    freq_samples: usize,
+    config_path: PathBuf,
+    output_path: PathBuf,
+    override_config_path: Option<PathBuf>,
+    export_format: Option<ExportFormat>,
+    staged_export_path: Option<PathBuf>,
+    export_destination_path: Option<PathBuf>,
+    bundle_options: BundleOptions,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     let has_override = override_config_path.is_some();
     // Load room configuration
@@ -1268,26 +1670,39 @@ fn execute_optimization(
 
     info!("Found {} speakers", room_config.speakers.len());
 
-    // All generated files (WAV sidecars, curves/CSVs, validation bundle,
-    // manifest, log) go into the sibling `<stem>_files` directory; nothing
-    // is written to the process working directory.
-    let assets_dir = bundle::assets_dir_for(&output_path);
-    std::fs::create_dir_all(&assets_dir)
-        .with_context(|| format!("Failed to create assets directory {:?}", assets_dir))?;
+    // Optimization writes into a unique attempt directory. The canonical
+    // bundle is only touched after the graph, its resources, and requested
+    // validation/export steps succeed.
+    let parent = output_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let artifact_attempt = tempfile::Builder::new()
+        .prefix(".roomeq-artifacts-")
+        .tempdir_in(parent)
+        .with_context(|| format!("Failed to stage RoomEQ artifacts beside {output_path:?}"))?;
+    let generated_assets = artifact_attempt.path().join("assets");
+    std::fs::create_dir_all(&generated_assets).with_context(|| {
+        format!("Failed to create attempt assets directory {generated_assets:?}")
+    })?;
+    let artifact_store = FsArtifactStore::new();
 
     // Run optimization using the library
-    let observer = create_progress_observer();
-    let assets_dir_buf = assets_dir.clone();
+    let observer = create_progress_observer(Arc::clone(&shutdown));
     let result = RoomPipeline::new(RoomPipelineRequest {
         config: &room_config,
         sample_rate,
-        output_dir: Some(&assets_dir_buf),
+        output_dir: Some(&generated_assets),
         probe_arrival_overrides: None,
     })
     .with_frequency_samples(freq_samples)
-    .run(Some(observer))
+    .run_with_store(&artifact_store, Some(observer))
     .map_err(|e| anyhow!("{}", e))
     .with_context(|| "Room optimization failed")?;
+
+    if shutdown.load(Ordering::Acquire) {
+        anyhow::bail!("RoomEQ optimization cancelled before candidate finalization");
+    }
 
     // Log summary: averages plus worst-channel, primary-seat and
     // objective/confidence evidence.
@@ -1296,18 +1711,16 @@ fn execute_optimization(
         info!("{}", line);
     }
 
-    // Save output: extract measurement blobs to the assets directory first
-    // so the ledger binds the exact slim bytes being saved, then persist
-    // the small JSON next to it.
+    // Extract measurements, rebind FIR resources, and finalize the ledger on
+    // the exact candidate graph before the attempt bundle is published.
     info!(
-        "Saving DSP chain to {:?} (assets in {:?})",
-        output_path, assets_dir
+        "Saving candidate DSP chain to {:?} (generated assets in {:?})",
+        output_path, generated_assets
     );
 
     let mut dsp_output = result.to_dsp_chain_output();
-    // Measured room IRs back the R1–R5 acoustic report: attach them (and
-    // the early/late analysis) before measurement extraction and ledger
-    // finalization bind the exact saved bytes.
+    // Measured room IRs back the R1–R5 acoustic report: attach them before
+    // measurement extraction and ledger finalization bind the saved bytes.
     if !room_config.measured_impulse_responses.is_empty() {
         match roomeq_workflow::measured_ir::attach_measured_acoustics(
             &mut dsp_output,
@@ -1324,33 +1737,38 @@ fn execute_optimization(
             }
         }
     }
-    let extracted = bundle::extract_measurements_to_assets(&mut dsp_output, &assets_dir);
-    info!(
-        "Extracted {} measurement files to {:?}",
-        extracted.files.len(),
-        assets_dir
-    );
     // C08: reconcile provisional decision records against the exact bytes
-    // being saved and attach the finalized, graph-bound ledger. A run
-    // with no applicable decisions ships an explicitly empty ledger;
-    // reports explain the absence, never a green fill-in.
-    {
-        let events = roomeq_workflow::final_ledger::ReconciliationEvents {
-            final_acceptance: result.metadata.correction_acceptance.clone(),
-            ..Default::default()
-        };
-        finalize_native_output(
-            &mut dsp_output,
-            &result.metadata.provisional_decisions,
-            &events,
-            has_override.then_some(&room_config),
-        )?;
-    }
-    save_dsp_chain(&dsp_output, &output_path)
-        .map_err(|e| anyhow!("{}", e))
-        .with_context(|| format!("Failed to save DSP chain to {:?}", output_path))?;
+    // being saved and attach the finalized, graph-bound ledger. The bundle
+    // callback runs after measurement extraction and FIR path rebinding.
+    let events = roomeq_workflow::final_ledger::ReconciliationEvents {
+        final_acceptance: result.metadata.correction_acceptance.clone(),
+        ..Default::default()
+    };
+    let extracted_files = bundle::save_output_bundle_with_resources_and_prepare(
+        &mut dsp_output,
+        &output_path,
+        &generated_assets,
+        &mut |candidate, _staged_assets| {
+            finalize_native_output(
+                candidate,
+                &result.metadata.provisional_decisions,
+                &events,
+                has_override.then_some(&room_config),
+            )
+            .map_err(|error| -> Box<dyn std::error::Error> {
+                Box::new(std::io::Error::other(error.to_string()))
+            })
+        },
+    )
+    .map_err(|error| anyhow::Error::msg(error.to_string()))
+    .with_context(|| format!("Failed to publish candidate bundle to {:?}", output_path))?;
+    info!(
+        "Published candidate bundle with {} immutable asset entries",
+        extracted_files.len()
+    );
+    let assets_dir = bundle::assets_dir_for(&output_path);
 
-    // C09: verification bundle for the finalized, saved graph. Operator
+    // C09: verification bundle for the finalized candidate graph. Operator
     // identities were pre-validated before the optimization budget ran.
     if let Some(bundle_dir) = &bundle_options.dest_dir {
         let source_dir = assets_dir.clone();
@@ -1385,13 +1803,7 @@ fn execute_optimization(
             .collect::<Vec<_>>(),
     );
 
-    if let Err(error) = require_playback_outcome(
-        result
-            .metadata
-            .correction_acceptance
-            .as_ref()
-            .map(|report| report.outcome),
-    ) {
+    if let Err(error) = require_output_playback_approval(&dsp_output) {
         append_run_log(&output_path, &[format!("status: rejected: {error:#}")]);
         persist_run_manifest_best_effort(
             &output_path,
@@ -1401,7 +1813,7 @@ fn execute_optimization(
                 sample_rate,
                 native_graph: output_path.clone(),
                 export_format: export_format.map(|format| format!("{format:?}")),
-                export_path,
+                export_path: export_destination_path.clone(),
                 export_status: Some("not_attempted".to_string()),
                 export_error: Some(error.to_string()),
                 assets_owned: owned_assets(&output_path, None),
@@ -1419,19 +1831,28 @@ fn execute_optimization(
     // Export to external format if requested. The native graph above stays
     // valid whatever happens below: it is never deleted on export failure.
     if let Some(format) = export_format {
-        let path = export_path.unwrap_or_else(|| format.default_export_path(&output_path));
+        let destination_path = export_destination_path
+            .clone()
+            .unwrap_or_else(|| format.default_export_path(&output_path));
+        let staged_path = staged_export_path
+            .as_deref()
+            .context("external export staging path was not prepared")?;
         let source_dir = assets_dir.clone();
-        info!("Exporting DSP chain to {:?} ({:?})", path, format);
+        info!(
+            "Staging external DSP export for {:?} ({:?})",
+            destination_path, format
+        );
         // Pre-check support against the realized graph first: the exporter
         // cannot recover support already lost in measurement alignment, so a
         // limitation surfaces here instead of as a mid-write failure.
         let export_outcome = match external_export_supported(&dsp_output, format) {
-            Ok(()) => export_dsp_chain_with_convolution_sidecars(
+            Ok(()) => roomeq_workflow::export_dsp_chain_with_convolution_sidecars_to_staging(
                 &dsp_output,
                 format,
-                &path,
+                staged_path,
                 sample_rate,
                 &source_dir,
+                &destination_path,
             ),
             Err(error) => Err(error.context(format!(
                 "external export format {format:?} is not supported by the realized DSP graph"
@@ -1439,10 +1860,13 @@ fn execute_optimization(
         };
         match export_outcome {
             Ok(()) => {
-                info!("Exported to {:?}", path);
+                info!("Staged export for {:?}", destination_path);
                 append_run_log(
                     &output_path,
-                    &[format!("export: {format:?} saved to {}", path.display())],
+                    &[format!(
+                        "export: {format:?} staged for {}",
+                        destination_path.display()
+                    )],
                 );
                 persist_run_manifest_best_effort(
                     &output_path,
@@ -1452,16 +1876,17 @@ fn execute_optimization(
                         sample_rate,
                         native_graph: output_path.clone(),
                         export_format: Some(format!("{format:?}")),
-                        export_path: Some(path.clone()),
-                        export_status: Some("saved".to_string()),
+                        export_path: Some(destination_path.clone()),
+                        export_status: Some("staged".to_string()),
                         export_error: None,
-                        assets_owned: owned_assets(&output_path, Some(&path)),
+                        assets_owned: owned_assets(&output_path, Some(&destination_path)),
                         fallback: None,
                     },
                 );
             }
             Err(error) => {
-                let diagnostic = partial_export_diagnostic(&output_path, format, &path, &error);
+                let diagnostic =
+                    partial_export_diagnostic(&output_path, format, &destination_path, &error);
                 append_run_log(
                     &output_path,
                     &[format!("export: {format:?} failed: {error:#}")],
@@ -1476,7 +1901,7 @@ fn execute_optimization(
                         sample_rate,
                         native_graph: output_path.clone(),
                         export_format: Some(format!("{format:?}")),
-                        export_path: Some(path),
+                        export_path: Some(destination_path),
                         export_status: Some("failed".to_string()),
                         export_error: Some(format!("{error:#}")),
                         assets_owned: owned_assets(&output_path, None),
@@ -2255,8 +2680,52 @@ fn collect_measurement_paths(speaker_config: &SpeakerConfig) -> Vec<std::path::P
 #[cfg(test)]
 mod tests {
     use clap::{CommandFactory, Parser};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
-    use super::{FallbackAttemptOutcome as Outcome, select_fallback_winner};
+    fn test_graph(version: &str) -> roomeq_model::DspGraph {
+        use roomeq_model::ChannelDspChain;
+
+        let mut graph = roomeq_model::DspGraph::new(version);
+        graph.channels.insert(
+            "left".to_string(),
+            ChannelDspChain {
+                channel: "left".to_string(),
+                plugins: Vec::new(),
+                drivers: None,
+                initial_curve: None,
+                final_curve: None,
+                eq_response: None,
+                target_curve: None,
+                pre_ir: None,
+                post_ir: None,
+                fir_temporal_masking: None,
+                direct_early_late_correction: None,
+                joint_sub: None,
+                early_late_curves: None,
+                early_reflections: None,
+                t60_octaves: None,
+                waterfall: None,
+                resonance_decays: None,
+                wavelet: None,
+            },
+        );
+        graph
+    }
+
+    fn staged_export(attempt_dir: &std::path::Path, file_name: &str) -> PathBuf {
+        let directory = attempt_dir.join("external-export");
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join(file_name), b"staged external config").unwrap();
+        std::fs::write(directory.join("impulse_002.wav"), b"staged impulse bytes").unwrap();
+        directory.join(file_name)
+    }
+
+    fn save_bundle(version: &str, path: &std::path::Path) {
+        let mut graph = test_graph(version);
+        super::bundle::save_output_bundle(&mut graph, path).unwrap();
+    }
 
     #[test]
     fn fallback_selects_first_accepted_else_first_unchanged() {
@@ -2351,11 +2820,13 @@ mod tests {
     }
 
     use super::{
-        Args, RunManifest, acceptance_status_label, duplicate_seats, enabled_phase_controls,
-        exit_code_for_outcome, export_preflight_warnings, final_reason_or_unavailable,
-        format_nominal_level_display, intersect_spans, is_known_algorithm, manifest_path_for,
-        multisub_seat_order_mismatch, partial_export_diagnostic, playback_approved, probe_span,
-        resolve_seat_sources, run_dry_run, strict_input_schema, summarize_final_decision,
+        Args, FallbackAttemptOutcome as Outcome, RunManifest, acceptance_status_label,
+        duplicate_seats, enabled_phase_controls, exit_code_for_outcome, export_preflight_warnings,
+        final_reason_or_unavailable, format_nominal_level_display, intersect_spans,
+        is_known_algorithm, manifest_path_for, multisub_seat_order_mismatch,
+        partial_export_diagnostic, playback_approved, probe_span, publish_attempt_output_bundle,
+        relocate_published_run_manifest, resolve_optimization_destinations, resolve_seat_sources,
+        run_dry_run, select_fallback_winner, strict_input_schema, summarize_final_decision,
         validate_config_file_with_context, validate_optimizer_resources, write_run_manifest,
     };
 
@@ -2420,6 +2891,176 @@ mod tests {
     fn missing_required_config_and_output_fails() {
         let args = Args::try_parse_from(["roomeq"]);
         assert!(args.is_err());
+    }
+
+    #[test]
+    fn native_only_attempt_publication_does_not_require_external_export_intent() {
+        let parent = tempfile::tempdir().unwrap();
+        let output = parent.path().join("dsp.json");
+        save_bundle("previous", &output);
+        let attempt = tempfile::tempdir_in(parent.path()).unwrap();
+        let attempt_output = attempt.path().join("dsp.json");
+        save_bundle("candidate", &attempt_output);
+
+        publish_attempt_output_bundle(&attempt_output, &output, None, None).unwrap();
+
+        let published = super::bundle::load_output_bundle(&output).unwrap();
+        assert_eq!(published.version, "candidate");
+    }
+
+    #[test]
+    fn default_export_survives_attempt_cleanup_and_manifest_uses_final_paths() {
+        let parent = tempfile::tempdir().unwrap();
+        let attempt = tempfile::tempdir_in(parent.path()).unwrap();
+        let attempt_output = attempt.path().join("dsp.json");
+        let output = parent.path().join("dsp.json");
+        let export_path = parent.path().join("dsp_camilladsp.yml");
+        let staged_path = staged_export(attempt.path(), "dsp_camilladsp.yml");
+        save_bundle("candidate", &attempt_output);
+        let staged_manifest = RunManifest {
+            version: super::RUN_MANIFEST_VERSION,
+            status: super::RUN_STATUS_COMPLETE.to_string(),
+            sample_rate: 48_000.0,
+            native_graph: attempt_output.clone(),
+            export_format: Some("CamillaDsp".to_string()),
+            export_path: Some(export_path.clone()),
+            export_status: Some("staged".to_string()),
+            export_error: None,
+            assets_owned: vec![attempt_output.clone(), export_path.clone()],
+            fallback: None,
+        };
+        super::write_run_manifest(&attempt_output, &staged_manifest).unwrap();
+
+        publish_attempt_output_bundle(
+            &attempt_output,
+            &output,
+            Some(&staged_path),
+            Some(&export_path),
+        )
+        .unwrap();
+        relocate_published_run_manifest(
+            &attempt_output,
+            &output,
+            Some(&export_path),
+            Some(&staged_path),
+        );
+        drop(attempt);
+
+        assert!(output.is_file());
+        assert_eq!(
+            std::fs::read(&export_path).unwrap(),
+            b"staged external config"
+        );
+        assert_eq!(
+            std::fs::read(parent.path().join("impulse_002.wav")).unwrap(),
+            b"staged impulse bytes"
+        );
+        let manifest: RunManifest =
+            serde_json::from_slice(&std::fs::read(super::manifest_path_for(&output)).unwrap())
+                .unwrap();
+        assert_eq!(manifest.export_path.as_deref(), Some(export_path.as_path()));
+        assert_eq!(manifest.export_status.as_deref(), Some("saved"));
+        assert!(manifest.assets_owned.contains(&export_path));
+        assert!(
+            manifest
+                .assets_owned
+                .contains(&parent.path().join("impulse_002.wav"))
+        );
+    }
+
+    #[test]
+    fn export_destination_conflict_preserves_previous_native_and_external_results() {
+        let parent = tempfile::tempdir().unwrap();
+        let output = parent.path().join("dsp.json");
+        save_bundle("previous", &output);
+        let previous_native = std::fs::read(&output).unwrap();
+        let attempt = tempfile::tempdir_in(parent.path()).unwrap();
+        let attempt_output = attempt.path().join("dsp.json");
+        save_bundle("candidate", &attempt_output);
+        let staged_path = staged_export(attempt.path(), "room.yml");
+        let export_path = parent.path().join("room.yml");
+        std::fs::write(&export_path, b"previous external config").unwrap();
+        std::fs::write(
+            parent.path().join("impulse_002.wav"),
+            b"unrelated prior bytes",
+        )
+        .unwrap();
+
+        let error = publish_attempt_output_bundle(
+            &attempt_output,
+            &output,
+            Some(&staged_path),
+            Some(&export_path),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("different bytes"), "{error:#}");
+        assert_eq!(std::fs::read(&output).unwrap(), previous_native);
+        assert_eq!(
+            std::fs::read(&export_path).unwrap(),
+            b"previous external config"
+        );
+        assert_eq!(
+            std::fs::read(parent.path().join("impulse_002.wav")).unwrap(),
+            b"unrelated prior bytes"
+        );
+    }
+
+    #[test]
+    fn aliased_external_path_is_rejected_before_touching_native_output() {
+        let parent = tempfile::tempdir().unwrap();
+        let nested = parent.path().join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        let output = parent.path().join("dsp.json");
+        std::fs::write(&output, b"prior native output").unwrap();
+        let aliased_export = nested.join("..").join("dsp.json");
+
+        let error = resolve_optimization_destinations(
+            &output,
+            Some(roomeq_workflow::ExportFormat::CamillaDsp),
+            Some(&aliased_export),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("must differ"), "{error:#}");
+        assert_eq!(std::fs::read(output).unwrap(), b"prior native output");
+    }
+
+    #[test]
+    fn external_export_inside_native_assets_is_rejected_after_normalization() {
+        let parent = tempfile::tempdir().unwrap();
+        let output = parent.path().join("dsp.json");
+        let assets_alias = parent
+            .path()
+            .join("dsp_files")
+            .join("nested")
+            .join("..")
+            .join("room.yml");
+        let error = resolve_optimization_destinations(
+            &output,
+            Some(roomeq_workflow::ExportFormat::CamillaDsp),
+            Some(&assets_alias),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("inside the native bundle assets"),
+            "{error:#}"
+        );
+        assert!(!output.exists());
+    }
+
+    #[test]
+    fn oversized_run_manifest_is_refused_before_reading_contents() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("manifest.json");
+        let file = std::fs::File::create(&path).unwrap();
+        file.set_len(super::MAX_RUN_MANIFEST_BYTES + 1).unwrap();
+
+        let error = super::read_run_manifest_text(&path).unwrap_err();
+
+        assert!(error.to_string().contains("exceeds its size limit"));
     }
 
     #[test]
@@ -2726,6 +3367,100 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_pipeline_does_not_publish_or_replace_candidate_bundle() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        let config_path = write_dry_run_config(&dir, &config);
+        let output_path = dir.path().join("room-output.json");
+        let previous_bytes = b"previous approved bundle";
+        std::fs::write(&output_path, previous_bytes).expect("write prior bundle");
+        // The observer sees this latched flag on its first pipeline event and
+        // returns PipelineControl::Stop while the optimization wrapper is
+        // still operating on its private attempt directory.
+        let shutdown = Arc::new(AtomicBool::new(true));
+
+        let error = super::execute_optimization(
+            48_000.0,
+            64,
+            config_path,
+            output_path.clone(),
+            None,
+            None,
+            None,
+            super::BundleOptions {
+                prediction_manifest: None,
+                dest_dir: None,
+                baseline_graph: None,
+                calibration_id: None,
+                stimulus_hash: None,
+                seats: None,
+            },
+            shutdown,
+        )
+        .expect_err("observer stop should cancel RoomEQ before publication");
+
+        assert!(format!("{error:#}").to_ascii_lowercase().contains("stop"));
+        assert_eq!(
+            std::fs::read(&output_path).expect("prior bundle remains"),
+            previous_bytes
+        );
+        let entries = std::fs::read_dir(dir.path())
+            .expect("list attempt parent")
+            .map(|entry| entry.expect("read entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            entries.len(),
+            2,
+            "temporary candidate artifacts are removed"
+        );
+    }
+
+    #[test]
+    fn fallback_cancellation_at_publication_keeps_prior_bundle() {
+        let dir = tempfile::TempDir::new().expect("temp dir");
+        let config = two_speaker_config((20.0, 20000.0), (30.0, 18000.0));
+        let config_path = write_dry_run_config(&dir, &config);
+        let output_path = dir.path().join("room-output.json");
+        let previous_bytes = b"previous approved bundle";
+        std::fs::write(&output_path, previous_bytes).expect("write prior bundle");
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let candidate_shutdown = Arc::clone(&shutdown);
+
+        let error = super::execute_with_fallback(
+            48_000.0,
+            64,
+            config_path,
+            output_path.clone(),
+            None,
+            Vec::new(),
+            shutdown,
+            move |request| {
+                std::fs::write(
+                    &request.output_path,
+                    br#"{"metadata":{"correction_acceptance":{"outcome":"accepted"}}}"#,
+                )?;
+                candidate_shutdown.store(true, std::sync::atomic::Ordering::Release);
+                Ok(())
+            },
+        )
+        .expect_err("stop at accepted-candidate publication boundary");
+
+        assert!(
+            format!("{error:#}").contains("before fallback publication"),
+            "unexpected refusal: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read(&output_path).expect("prior bundle remains"),
+            previous_bytes
+        );
+        let entries = std::fs::read_dir(dir.path())
+            .expect("list attempt parent")
+            .map(|entry| entry.expect("read entry").file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 2, "cancelled fallback staging is removed");
+    }
+
+    #[test]
     fn seat_mapping_exposes_named_seats_in_order() {
         use roomeq_model::{MeasurementMultiple, MeasurementRef, MeasurementSource, SpeakerConfig};
         let source = MeasurementSource::Multiple(MeasurementMultiple {
@@ -2915,6 +3650,8 @@ mod tests {
     fn known_algorithms_resolve_and_unknown_ones_do_not() {
         assert!(is_known_algorithm("autoeq:cmaes"));
         assert!(is_known_algorithm("autoeq:de"));
+        assert!(is_known_algorithm("autoeq:cobra"));
+        assert!(is_known_algorithm("cobra"));
         assert!(!is_known_algorithm("bogus-algorithm"));
     }
 
@@ -2942,6 +3679,10 @@ mod tests {
         assert!(
             text.contains("num_resamples"),
             "bootstrap resamples in schema"
+        );
+        assert!(
+            text.contains("max_output_safety_attenuation_db"),
+            "optional per-output attenuation budget in schema"
         );
         let defaults = roomeq_model::RoomConfig::default();
         assert_eq!(defaults.optimizer.strategy, "lshade");

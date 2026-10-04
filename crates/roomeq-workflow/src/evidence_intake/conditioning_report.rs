@@ -134,64 +134,6 @@ fn prepared_identity_issues(
     issues
 }
 
-#[cfg(test)]
-mod attribution_tests {
-    use super::prepared_identity_issues;
-
-    #[test]
-    fn dense_preparation_preserves_final_source_positions() {
-        let curves = [80.0, 82.0]
-            .into_iter()
-            .map(|level| autoeq_core::Curve {
-                freq: ndarray::Array1::from_iter((1..=1000).map(|index| f64::from(index) * 10.0)),
-                spl: ndarray::Array1::from_elem(1000, level),
-                ..Default::default()
-            })
-            .collect();
-        let prepared =
-            crate::channel_measurements::prepare_channel_measurements_with_frequency_samples(
-                &autoeq_core::MeasurementSource::InMemoryMultiple(curves),
-                64,
-            )
-            .unwrap();
-        let receipt = prepared.conditioning_receipt().unwrap();
-        assert!(prepared_identity_issues(&receipt).is_empty());
-        let index = receipt
-            .entries
-            .iter()
-            .position(|entry| {
-                entry.operation == "roomeq_dense_grid_conditioning"
-                    && entry.parameters["role"] == "representative"
-            })
-            .expect("fixture must execute representative dense conditioning");
-        for mutation in 0..4 {
-            let mut invalid = receipt.clone();
-            let entry = &mut invalid.entries[index];
-            match mutation {
-                0 => entry.version = 2,
-                1 => entry.input_hashes[0] = invalid.native_identities[0].clone(),
-                2 => {
-                    entry
-                        .parameters
-                        .insert("role".into(), serde_json::json!("unknown"));
-                }
-                _ => {
-                    entry
-                        .parameters
-                        .insert("source_index".into(), serde_json::json!(0));
-                }
-            }
-            assert!(
-                !prepared_identity_issues(&invalid).is_empty(),
-                "mutation {mutation}"
-            );
-        }
-        let mut swapped = receipt;
-        swapped.individual_identities.swap(0, 1);
-        assert!(!prepared_identity_issues(&swapped).is_empty());
-    }
-}
-
 pub(crate) fn attach_measurement_conditioning(
     result: &mut RoomOptimizationResult,
     snapshot: &roomeq_model::RoomConfig,
@@ -372,4 +314,62 @@ pub(crate) fn attach_optimizer_conditioning(
         ],
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod attribution_tests {
+    use super::prepared_identity_issues;
+
+    #[test]
+    fn dense_preparation_preserves_final_source_positions() {
+        let curves = [80.0, 82.0]
+            .into_iter()
+            .map(|level| autoeq_core::Curve {
+                freq: ndarray::Array1::from_iter((1..=1000).map(|index| f64::from(index) * 10.0)),
+                spl: ndarray::Array1::from_elem(1000, level),
+                ..Default::default()
+            })
+            .collect();
+        let prepared =
+            crate::channel_measurements::prepare_channel_measurements_with_frequency_samples(
+                &autoeq_core::MeasurementSource::InMemoryMultiple(curves),
+                64,
+            )
+            .unwrap();
+        let receipt = prepared.conditioning_receipt().unwrap();
+        assert!(prepared_identity_issues(&receipt).is_empty());
+        let index = receipt
+            .entries
+            .iter()
+            .position(|entry| {
+                entry.operation == "roomeq_dense_grid_conditioning"
+                    && entry.parameters["role"] == "representative"
+            })
+            .expect("fixture must execute representative dense conditioning");
+        for mutation in 0..4 {
+            let mut invalid = receipt.clone();
+            let entry = &mut invalid.entries[index];
+            match mutation {
+                0 => entry.version = 2,
+                1 => entry.input_hashes[0] = invalid.native_identities[0].clone(),
+                2 => {
+                    entry
+                        .parameters
+                        .insert("role".into(), serde_json::json!("unknown"));
+                }
+                _ => {
+                    entry
+                        .parameters
+                        .insert("source_index".into(), serde_json::json!(0));
+                }
+            }
+            assert!(
+                !prepared_identity_issues(&invalid).is_empty(),
+                "mutation {mutation}"
+            );
+        }
+        let mut swapped = receipt;
+        swapped.individual_identities.swap(0, 1);
+        assert!(!prepared_identity_issues(&swapped).is_empty());
+    }
 }

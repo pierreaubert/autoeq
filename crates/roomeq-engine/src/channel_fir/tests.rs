@@ -127,7 +127,7 @@ fn spatial_fir_native_stop_does_not_return_coefficients() {
         EqResources::default(),
     );
     for phase in ["linear", "minimum"] {
-        for algorithm in ["autoeq:de", "autoeq:cmaes"] {
+        for algorithm in ["autoeq:de", "autoeq:cmaes", "cobra"] {
             let mut room_config = config();
             room_config.optimizer.algorithm = algorithm.into();
             room_config.optimizer.strategy = "rand1bin".into();
@@ -1555,8 +1555,13 @@ fn mixed_phase_with_phase_data_returns_optional_sidecar() {
 #[test]
 fn mixed_phase_adapts_depth_to_preserve_phase_only_magnitude() {
     let curve = curve(true);
+    #[expect(
+        clippy::approx_constant,
+        reason = "Retain the rounded phase step of this deterministic regression fixture"
+    )]
+    const PHASE_STEP: f64 = 1.618_033_988_75;
     let residual_phase_deg = Array1::from_iter(
-        (0..curve.freq.len()).map(|index| 170.0 * ((index as f64) * 1.618_033_988_75).sin()),
+        (0..curve.freq.len()).map(|index| 170.0 * ((index as f64) * PHASE_STEP).sin()),
     );
     let config = crate::mixed_phase::MixedPhaseConfig {
         max_fir_length_ms: 10.0,
@@ -1645,18 +1650,20 @@ fn realized_fir_ceiling_catches_overshoot() {
     let grid = ceiling_grid();
     let optimizer = ceiling_optimizer(4.0);
     // Unity tap: 0 dB everywhere, within the 4 dB ceiling.
-    let flat = check_realized_fir_ceiling(&[1.0], &[grid.clone()], 48_000.0, &optimizer);
+    let flat =
+        check_realized_fir_ceiling(&[1.0], std::slice::from_ref(&grid), 48_000.0, &optimizer);
     assert!(flat.within_ceiling, "identity FIR must pass: {flat:?}");
     assert!(flat.peak_db.abs() < 1e-9, "{}", flat.peak_db);
     // x2 gain: +6.02 dB everywhere, over the 4 dB ceiling.
-    let hot = check_realized_fir_ceiling(&[2.0], &[grid.clone()], 48_000.0, &optimizer);
+    let hot = check_realized_fir_ceiling(&[2.0], std::slice::from_ref(&grid), 48_000.0, &optimizer);
     assert!(!hot.within_ceiling, "overshooting FIR must breach");
     assert!((hot.peak_db - 6.0206).abs() < 1e-3, "{}", hot.peak_db);
     assert_eq!(hot.bound_db, 4.0);
     // A configured envelope overrides the flat ceiling.
     let mut enveloped = ceiling_optimizer(12.0);
     enveloped.max_boost_envelope = Some(vec![(20.0, 1.0), (20_000.0, 1.0)]);
-    let breach = check_realized_fir_ceiling(&[1.5], &[grid.clone()], 48_000.0, &enveloped);
+    let breach =
+        check_realized_fir_ceiling(&[1.5], std::slice::from_ref(&grid), 48_000.0, &enveloped);
     assert!(!breach.within_ceiling, "+3.5 dB over a 1 dB envelope");
     assert!((breach.bound_db - 1.0).abs() < 1e-9, "{}", breach.bound_db);
     // Fail closed on non-finite taps.
@@ -1672,7 +1679,7 @@ fn realized_fir_ceiling_reverts_to_neutral_with_reason() {
         "test",
         vec![2.0],
         vec![1.0],
-        &[grid.clone()],
+        std::slice::from_ref(&grid),
         48_000.0,
         &optimizer,
     )
@@ -1686,7 +1693,7 @@ fn realized_fir_ceiling_reverts_to_neutral_with_reason() {
         "test",
         vec![1.0],
         vec![1.0],
-        &[grid.clone()],
+        std::slice::from_ref(&grid),
         48_000.0,
         &optimizer,
     )
@@ -1754,7 +1761,7 @@ fn hybrid_linear_fir_emission_respects_ceiling() {
             .expect("bank search succeeds");
     let check = check_realized_fir_ceiling(
         &coefficients,
-        &[dip.freq.clone()],
+        std::slice::from_ref(&dip.freq),
         48_000.0,
         &room_config.optimizer,
     );

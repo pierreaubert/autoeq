@@ -13,17 +13,17 @@
 use anyhow::Result;
 use math_audio_iir_fir::{Biquad, BiquadFilterType};
 use roomeq_model::{Curve, ProcessingMode};
+use roomeq_synthetic::{
+    generate_flat_curve, generate_harman_tilt_curve, generate_multisub_scenario, generate_scenario,
+    generate_speaker_rolloff_curve,
+};
+use std::fmt::Write as _;
 use std::sync::{
     Arc,
     atomic::{AtomicBool, AtomicUsize, Ordering},
     mpsc::channel,
 };
 use std::thread;
-use roomeq_synthetic::{
-    generate_flat_curve, generate_harman_tilt_curve, generate_multisub_scenario, generate_scenario,
-    generate_speaker_rolloff_curve,
-};
-use std::fmt::Write as _;
 use std::time::Instant;
 
 mod build;
@@ -599,30 +599,47 @@ mod outcome_tests {
         assert!(first.is_dir() && second.is_dir());
         let rows = super::generate_pr_matrix();
         let curve = super::generate_flat_curve(20.0, 20_000.0, 100);
-        let config = super::build::build_parameter_config(
-            &curve,
-            &rows[0],
-            roomeq_model::ProcessingMode::Hybrid,
-            96_000.0,
-        );
-        let path = first.join("request.json");
-        write_parameter_matrix_artifact(&path, &super::parameter_matrix_request(&config).unwrap())
+        for (index, row) in rows.iter().enumerate() {
+            let config = super::build::build_parameter_config(
+                &curve,
+                row,
+                roomeq_model::ProcessingMode::Hybrid,
+                96_000.0,
+            );
+            let path = first.join(format!("request-{index}.json"));
+            write_parameter_matrix_artifact(
+                &path,
+                &super::parameter_matrix_request(&config).unwrap(),
+            )
             .unwrap();
-        let saved: serde_json::Value =
-            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
-        let mut recovered: roomeq_model::RoomConfig =
-            serde_json::from_value(saved["configuration_without_speakers"].clone()).unwrap();
-        let measurements: std::collections::BTreeMap<String, roomeq_model::Curve> =
-            serde_json::from_value(saved["single_speaker_measurements"].clone()).unwrap();
-        for (name, curve) in measurements {
-            recovered.speakers.insert(
-                name,
-                roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(
-                    curve,
-                )),
+            let saved: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            let mut recovered: roomeq_model::RoomConfig =
+                serde_json::from_value(saved["configuration_without_speakers"].clone()).unwrap();
+            let measurements: std::collections::BTreeMap<String, roomeq_model::Curve> =
+                serde_json::from_value(saved["single_speaker_measurements"].clone()).unwrap();
+            let mut declared_sources: std::collections::BTreeMap<
+                String,
+                roomeq_model::MeasurementSource,
+            > = serde_json::from_value(saved["declared_measurement_sources"].clone()).unwrap();
+            for (name, curve) in measurements {
+                let source = declared_sources
+                    .remove(&name)
+                    .unwrap_or(roomeq_model::MeasurementSource::InMemory(curve));
+                recovered
+                    .speakers
+                    .insert(name, roomeq_model::SpeakerConfig::Single(source));
+            }
+            assert!(
+                declared_sources.is_empty(),
+                "row {index}: orphan declarations"
+            );
+            assert_eq!(
+                super::parameter_matrix_request(&recovered).unwrap(),
+                saved,
+                "row {index}"
             );
         }
-        assert_eq!(super::parameter_matrix_request(&recovered).unwrap(), saved);
         assert!(!second.join("request.json").exists());
     }
 
@@ -630,9 +647,13 @@ mod outcome_tests {
     fn phase_bearing_matrix_request_replays_declared_timing_reference() {
         let rows = super::generate_pr_matrix();
         let curve = super::generate_flat_curve(20.0, 20_000.0, 100);
+        let phase_row = rows
+            .iter()
+            .find(|row| row.phase == 1)
+            .expect("phase-bearing row");
         let config = super::build::build_parameter_config(
             &curve,
-            &rows[1],
+            phase_row,
             roomeq_model::ProcessingMode::PhaseLinear,
             48_000.0,
         );
@@ -805,7 +826,7 @@ mod outcome_tests {
         assert_eq!(saved, failure);
         let later = serde_json::json!({"row": 1, "post_score": 1.25});
         assert!(
-            super::finish_parameter_matrix(&path, 2, &[later.clone()], &failures)
+            super::finish_parameter_matrix(&path, 2, std::slice::from_ref(&later), &failures)
                 .unwrap()
                 .has_failures()
         );
@@ -828,7 +849,7 @@ mod outcome_tests {
                 .has_failures()
         );
         assert!(
-            super::finish_parameter_matrix(&path, 2, &[row.clone()], &[])
+            super::finish_parameter_matrix(&path, 2, std::slice::from_ref(&row), &[])
                 .unwrap()
                 .has_failures()
         );
@@ -836,14 +857,14 @@ mod outcome_tests {
             super::finish_parameter_matrix(
                 &path,
                 1,
-                &[row.clone()],
+                std::slice::from_ref(&row),
                 &[serde_json::json!({"row": 1})]
             )
             .unwrap()
             .has_failures()
         );
         assert!(
-            !super::finish_parameter_matrix(&path, 1, &[row.clone()], &[])
+            !super::finish_parameter_matrix(&path, 1, std::slice::from_ref(&row), &[])
                 .unwrap()
                 .has_failures()
         );
@@ -1132,20 +1153,22 @@ where
         let stop = Arc::clone(&stop);
         let tx = tx.clone();
         let execute = Arc::clone(&execute);
-        handles.push(thread::spawn(move || loop {
-            if fail_fast && stop.load(Ordering::Relaxed) {
-                break;
-            }
-            let index = next.fetch_add(1, Ordering::Relaxed);
-            let Some(item) = items.get(index) else {
-                break;
-            };
-            let (output, failed) = execute(item);
-            if fail_fast && failed {
-                stop.store(true, Ordering::Relaxed);
-            }
-            if tx.send((index, output)).is_err() {
-                break;
+        handles.push(thread::spawn(move || {
+            loop {
+                if fail_fast && stop.load(Ordering::Relaxed) {
+                    break;
+                }
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(item) = items.get(index) else {
+                    break;
+                };
+                let (output, failed) = execute(item);
+                if fail_fast && failed {
+                    stop.store(true, Ordering::Relaxed);
+                }
+                if tx.send((index, output)).is_err() {
+                    break;
+                }
             }
         }));
     }

@@ -267,6 +267,16 @@ pub fn generate_fir_correction_prepared(
     }
 }
 
+fn checked_coefficients(
+    coefficients: Vec<f64>,
+    requested_taps: usize,
+) -> Result<Vec<f64>, Box<dyn Error>> {
+    if coefficients.len() != requested_taps || coefficients.iter().any(|tap| !tap.is_finite()) {
+        return Err("FIR design produced an invalid tap count or nonfinite coefficients".into());
+    }
+    Ok(coefficients)
+}
+
 fn generate_fir_correction_prepared_raw(
     measurement: &Curve,
     config: &OptimizerConfig,
@@ -276,6 +286,50 @@ fn generate_fir_correction_prepared_raw(
     let [active_min_freq, active_max_freq] = config.active_correction_band();
     let fir_config = config.fir.as_ref().ok_or("FIR configuration missing")?;
     let n_taps = fir_config.taps;
+
+    // Library entry points also accept programmatically constructed configs;
+    // validate before allocations or unchecked numerical design kernels.
+    if !sample_rate.is_finite()
+        || sample_rate <= 0.0
+        || sample_rate > autoeq_fir::MAX_CHECKED_SAMPLE_RATE
+    {
+        return Err(autoeq_fir::FirDesignError::InvalidSampleRate { value: sample_rate }.into());
+    }
+    if !(autoeq_fir::MIN_CHECKED_TAPS..=autoeq_fir::MAX_CHECKED_TAPS).contains(&n_taps) {
+        return Err(autoeq_fir::FirDesignError::InvalidTapCount { n_taps }.into());
+    }
+    if measurement.freq.len() < 2 {
+        return Err("Prepared FIR measurement needs at least two frequency bins".into());
+    }
+    if !active_min_freq.is_finite()
+        || !active_max_freq.is_finite()
+        || active_min_freq <= 0.0
+        || active_max_freq <= active_min_freq
+        || active_max_freq > sample_rate / 2.0
+    {
+        return Err(autoeq_fir::FirDesignError::UnsupportedFrequencySpan {
+            min_freq: active_min_freq,
+            max_freq: active_max_freq,
+            nyquist: sample_rate / 2.0,
+        }
+        .into());
+    }
+    if fir_config
+        .max_boost_db
+        .is_some_and(|boost| !boost.is_finite() || boost < 0.0)
+    {
+        return Err("FIR maximum boost must be finite and nonnegative".into());
+    }
+    if !fir_config.phase_smoothing.is_finite() || fir_config.phase_smoothing < 0.0 {
+        return Err("FIR phase smoothing must be finite and nonnegative".into());
+    }
+    if fir_config.pre_ringing.as_ref().is_some_and(|policy| {
+        !policy.threshold_db.is_finite()
+            || !policy.max_time_s.is_finite()
+            || policy.max_time_s < 0.0
+    }) {
+        return Err("FIR pre-ringing policy must have finite values and nonnegative time".into());
+    }
 
     // Prepared targets must already share the measurement grid. In particular,
     // boost capping below is pointwise, not an interpolation operation.
@@ -287,6 +341,9 @@ fn generate_fir_correction_prepared_raw(
             "Prepared FIR target and levels must match the measurement frequency grid".into(),
         );
     }
+
+    measurement.validate("prepared FIR measurement")?;
+    target_curve.validate("prepared FIR target")?;
 
     // Optional boost cap: clamp the target-vs-measurement delta to at most
     // `max_boost_db` of positive correction per frequency before designing
@@ -318,17 +375,18 @@ fn generate_fir_correction_prepared_raw(
                     threshold_db: pr.threshold_db,
                     max_time_s: pr.max_time_s,
                 });
-        let coeffs = autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing(
-            measurement,
-            target_curve,
-            sample_rate,
-            n_taps,
-            active_min_freq,
-            active_max_freq,
-            fir_config.correct_excess_phase,
-            fir_config.phase_smoothing,
-            pre_ringing,
-        );
+        let coeffs =
+            autoeq_fir::generate_kirkeby_correction_with_smoothing_and_pre_ringing_checked(
+                measurement,
+                target_curve,
+                sample_rate,
+                n_taps,
+                active_min_freq,
+                active_max_freq,
+                fir_config.correct_excess_phase,
+                fir_config.phase_smoothing,
+                pre_ringing,
+            )?;
         let correction_rms =
             correction_rms_db(measurement, target_curve, active_min_freq, active_max_freq);
         let coeffs = recover_excess_phase_identity(
@@ -354,7 +412,7 @@ fn generate_fir_correction_prepared_raw(
                 )
             },
         );
-        Ok(coeffs)
+        checked_coefficients(coeffs, n_taps)
     } else {
         // Standard magnitude-based generation
         // Generic FIR generation has no native correction-band parameter.
@@ -421,7 +479,7 @@ fn generate_fir_correction_prepared_raw(
             &magnitude_db,
             &fir_design_config,
         );
-        Ok(coeffs)
+        checked_coefficients(coeffs, n_taps)
     }
 }
 

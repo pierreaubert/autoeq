@@ -9,6 +9,7 @@ pub use math_audio_iir_fir as iir;
 pub mod alignment;
 pub mod auditory_frequency;
 pub mod capture_arrival;
+pub mod capture_handoff;
 pub mod capture_provenance;
 pub mod constraint_envelope;
 pub mod curve;

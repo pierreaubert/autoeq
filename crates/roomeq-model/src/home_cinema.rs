@@ -539,6 +539,9 @@ pub struct BassManagementRoutingGraph {
     /// Final down-only calibration trims per logical input channel.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub input_trim_db: HashMap<String, f64>,
+    /// Original measured-curve band used for post-DSP main-level alignment.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_dsp_main_alignment_band_hz: Option<[f64; 2]>,
     /// Stereo-only topology diagnostics. Home cinema always leaves this unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stereo_routing: Option<StereoBassRoutingReport>,
@@ -561,10 +564,19 @@ impl<'de> Deserialize<'de> for BassManagementRoutingGraph {
             #[serde(default)]
             input_trim_db: HashMap<String, f64>,
             #[serde(default)]
+            post_dsp_main_alignment_band_hz: Option<[f64; 2]>,
+            #[serde(default)]
             stereo_routing: Option<StereoBassRoutingReport>,
             advisories: Vec<String>,
         }
         let fields = Fields::deserialize(deserializer)?;
+        if let Some([low_hz, high_hz]) = fields.post_dsp_main_alignment_band_hz
+            && (!low_hz.is_finite() || !high_hz.is_finite() || low_hz <= 0.0 || low_hz >= high_hz)
+        {
+            return Err(serde::de::Error::custom(
+                "post-DSP main alignment band must contain finite positive ordered frequencies",
+            ));
+        }
         Ok(Self {
             physical_sub_output: fields
                 .physical_sub_outputs
@@ -577,6 +589,7 @@ impl<'de> Deserialize<'de> for BassManagementRoutingGraph {
             routes: fields.routes,
             matrix: fields.matrix,
             input_trim_db: fields.input_trim_db,
+            post_dsp_main_alignment_band_hz: fields.post_dsp_main_alignment_band_hz,
             stereo_routing: fields.stereo_routing,
             advisories: fields.advisories,
         })
@@ -665,6 +678,38 @@ mod tests {
         );
         let restored: super::BassManagementRoutingGraph = serde_json::from_value(saved).unwrap();
         assert_eq!(restored.physical_sub_output, "Sub2");
+    }
+
+    #[test]
+    fn routing_graph_accepts_only_a_finite_ordered_calibration_band() {
+        let wire = serde_json::json!({
+            "physical_sub_outputs": ["Sub1"],
+            "input_channels": ["L", "R", "LFE"],
+            "output_channels": ["L", "R", "Sub1"],
+            "routes": [],
+            "post_dsp_main_alignment_band_hz": [250.0, 2000.0],
+            "advisories": []
+        });
+        let graph: super::BassManagementRoutingGraph =
+            serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(graph.post_dsp_main_alignment_band_hz, Some([250.0, 2000.0]));
+
+        for band in [[0.0, 100.0], [100.0, 100.0], [200.0, 100.0]] {
+            let mut invalid = wire.clone();
+            invalid["post_dsp_main_alignment_band_hz"] = serde_json::json!(band);
+            assert!(
+                serde_json::from_value::<super::BassManagementRoutingGraph>(invalid).is_err(),
+                "invalid alignment band should be rejected: {band:?}"
+            );
+        }
+
+        let mut legacy = wire;
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("post_dsp_main_alignment_band_hz");
+        let graph: super::BassManagementRoutingGraph = serde_json::from_value(legacy).unwrap();
+        assert_eq!(graph.post_dsp_main_alignment_band_hz, None);
     }
 
     #[test]

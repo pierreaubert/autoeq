@@ -91,8 +91,8 @@ impl ExportPackage {
         for member in &self.members {
             validate_member_path(&member.relative_path)?;
             anyhow::ensure!(
-                paths.insert(&member.relative_path),
-                "duplicate export package member"
+                paths.insert(portable_member_key(&member.relative_path)?),
+                "duplicate or case-insensitive export package member collision"
             );
             anyhow::ensure!(
                 sha256_hex(&member.bytes) == member.sha256,
@@ -131,13 +131,14 @@ impl ExportPackage {
 
     pub fn new(mut members: Vec<ExportPackageMember>) -> anyhow::Result<Self> {
         members.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
-        for pair in members.windows(2) {
-            if pair[0].relative_path == pair[1].relative_path {
-                anyhow::bail!(
-                    "export package contains duplicate member '{}'",
-                    pair[0].relative_path.display()
-                );
-            }
+        let mut paths = BTreeSet::new();
+        for member in &members {
+            validate_member_path(&member.relative_path)?;
+            anyhow::ensure!(
+                paths.insert(portable_member_key(&member.relative_path)?),
+                "export package contains duplicate or case-insensitive member '{}'",
+                member.relative_path.display()
+            );
         }
         Ok(Self { members })
     }
@@ -248,7 +249,8 @@ pub fn package_convolution_sidecars(
             .min()
             .cloned();
         let packaged_name = if let Some(existing) = reusable {
-            if !assigned.contains(&existing) {
+            validate_member_path(Path::new(&existing))?;
+            if !contains_member_name(&assigned, &existing) {
                 anyhow::bail!(
                     "reusable convolution member '{existing}' is not an occupied destination"
                 );
@@ -480,16 +482,43 @@ fn collect_references(plugins: &[PluginConfigWrapper], references: &mut BTreeSet
 }
 
 fn unique_member_name(preferred: &str, assigned: &BTreeSet<String>) -> String {
-    if !assigned.contains(preferred) {
-        return preferred.to_string();
+    // Package members travel across operating systems, so keep generated
+    // filenames portable even when the source IR basename is valid only on
+    // the host filesystem (for example, a colon on Unix).
+    let portable_name = preferred
+        .chars()
+        .map(|character| {
+            if character.is_control()
+                || matches!(
+                    character,
+                    '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                )
+            {
+                '_'
+            } else {
+                character
+            }
+        })
+        .collect::<String>();
+    let preferred = portable_name.trim_end_matches([' ', '.']);
+    let mut preferred = if preferred.is_empty() || matches!(preferred, "." | "..") {
+        String::from("room_eq_ir.wav")
+    } else {
+        preferred.to_string()
+    };
+    if is_reserved_windows_device_name(&preferred) {
+        preferred.insert(0, '_');
     }
-    let preferred = Path::new(preferred);
-    let stem = preferred
+    if !contains_member_name(assigned, &preferred) {
+        return preferred;
+    }
+    let preferred_path = Path::new(&preferred);
+    let stem = preferred_path
         .file_stem()
         .and_then(|stem| stem.to_str())
         .filter(|stem| !stem.is_empty())
         .unwrap_or("room_eq_ir");
-    let extension = preferred
+    let extension = preferred_path
         .extension()
         .and_then(|extension| extension.to_str())
         .filter(|extension| !extension.is_empty())
@@ -497,22 +526,69 @@ fn unique_member_name(preferred: &str, assigned: &BTreeSet<String>) -> String {
         .unwrap_or_default();
     for suffix in 2_u64..=u64::MAX {
         let candidate = format!("{stem}_{suffix:03}{extension}");
-        if !assigned.contains(&candidate) {
+        if !contains_member_name(assigned, &candidate) {
             return candidate;
         }
     }
     unreachable!("u64 package-member namespace exhausted")
 }
 
+fn contains_member_name(assigned: &BTreeSet<String>, candidate: &str) -> bool {
+    let candidate = candidate.to_lowercase();
+    assigned.iter().any(|name| name.to_lowercase() == candidate)
+}
+
+fn portable_member_key(path: &Path) -> anyhow::Result<String> {
+    let text = path
+        .to_str()
+        .context("export package member path is not valid UTF-8")?;
+    Ok(text.to_lowercase())
+}
+
+fn is_reserved_windows_device_name(component: &str) -> bool {
+    let stem = component
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches([' ', '.'])
+        .to_lowercase();
+    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || ["com", "lpt"].iter().any(|prefix| {
+            matches!(
+                stem.strip_prefix(prefix).unwrap_or_default(),
+                "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+            )
+        })
+}
+
 fn validate_member_path(path: &Path) -> anyhow::Result<()> {
-    if path.as_os_str().is_empty()
+    let path_text = path
+        .to_str()
+        .context("export package member path is not valid UTF-8")?;
+    let portable_components = path_text.split('/').all(|component| {
+        !component.is_empty()
+            && component != "."
+            && component != ".."
+            && !component.ends_with([' ', '.'])
+            && !component.chars().any(|character| {
+                character.is_control()
+                    || matches!(
+                        character,
+                        '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'
+                    )
+            })
+            && !is_reserved_windows_device_name(component)
+    });
+    if path_text.is_empty()
+        || path_text.starts_with('/')
+        || !portable_components
         || path.is_absolute()
         || path
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
     {
         anyhow::bail!(
-            "export package member '{}' must be a safe relative path",
+            "export package member '{}' must be a safe portable relative path",
             path.display()
         );
     }
@@ -554,6 +630,139 @@ mod tests {
     }
 
     #[test]
+    fn member_paths_reject_windows_traversal_and_reserved_names_on_unix() {
+        for path in [
+            r"..\\escape.wav",
+            r"C:\\escape.wav",
+            "nested/name?.wav",
+            "nested/name*.wav",
+            "nested/name<.wav",
+            "nested/name>.wav",
+            "nested/name|.wav",
+            "nested/name\".wav",
+            "nested/trailing-dot.",
+            "nested/trailing-space ",
+            "nested//empty.wav",
+            "CON.wav",
+            "aux",
+            "nested/COM1.wav",
+            "nested/LPT9.wav",
+            "nested/COM¹.wav",
+        ] {
+            assert!(
+                validate_member_path(Path::new(path)).is_err(),
+                "accepted non-portable member {path:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn package_member_names_sanitize_device_names_and_preserve_resource_bytes() {
+        let graph = DspGraph {
+            version: "1.3.0".into(),
+            artifact_bundle_schema_version: None,
+            global_plugins: Vec::new(),
+            channels: HashMap::from([
+                convolution_chain("left", "source/CON.wav"),
+                convolution_chain("right", "source/COM1.WAV"),
+            ]),
+            metadata: None,
+            correction_decisions: None,
+            deployed_source_curves: Default::default(),
+        };
+        let resources = vec![
+            ConvolutionResource {
+                reference: "source/CON.wav".into(),
+                bytes: Arc::from(b"convolution bytes one".as_slice()),
+            },
+            ConvolutionResource {
+                reference: "source/COM1.WAV".into(),
+                bytes: Arc::from(b"convolution bytes two".as_slice()),
+            },
+        ];
+
+        let (packaged, members) =
+            package_convolution_sidecars(&graph, &resources, &BTreeSet::new(), &HashMap::new())
+                .unwrap();
+        let left_name = packaged.channels["left"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .unwrap();
+        let right_name = packaged.channels["right"].plugins[0].parameters["ir_file"]
+            .as_str()
+            .unwrap();
+
+        assert_eq!(left_name, "_CON.wav");
+        assert_eq!(right_name, "_COM1.WAV");
+        assert_eq!(members.len(), 2);
+        for (name, expected) in [
+            (left_name, resources[0].bytes.as_ref()),
+            (right_name, resources[1].bytes.as_ref()),
+        ] {
+            let member = members
+                .iter()
+                .find(|member| member.relative_path == Path::new(name))
+                .unwrap();
+            assert_eq!(member.bytes.as_ref(), expected);
+        }
+    }
+
+    #[test]
+    fn package_member_names_avoid_case_insensitive_collisions() {
+        let graph = DspGraph {
+            version: "1.3.0".into(),
+            artifact_bundle_schema_version: None,
+            global_plugins: Vec::new(),
+            channels: HashMap::from([
+                convolution_chain("left", "source/fir.wav"),
+                convolution_chain("right", "source/FIR.WAV"),
+            ]),
+            metadata: None,
+            correction_decisions: None,
+            deployed_source_curves: Default::default(),
+        };
+        let resources = vec![
+            ConvolutionResource {
+                reference: "source/fir.wav".into(),
+                bytes: Arc::from(b"first impulse".as_slice()),
+            },
+            ConvolutionResource {
+                reference: "source/FIR.WAV".into(),
+                bytes: Arc::from(b"second impulse".as_slice()),
+            },
+        ];
+        let occupied = BTreeSet::from(["FIR.WAV".to_string()]);
+
+        let (packaged, members) =
+            package_convolution_sidecars(&graph, &resources, &occupied, &HashMap::new()).unwrap();
+        let names = members
+            .iter()
+            .map(|member| member.relative_path.to_string_lossy().to_lowercase())
+            .collect::<BTreeSet<_>>();
+        assert_eq!(members.len(), 2);
+        assert_eq!(names.len(), 2);
+        assert!(!names.contains("fir.wav"));
+        for (channel, expected) in [
+            ("left", resources[0].bytes.as_ref()),
+            ("right", resources[1].bytes.as_ref()),
+        ] {
+            let name = packaged.channels[channel].plugins[0].parameters["ir_file"]
+                .as_str()
+                .unwrap();
+            let member = members
+                .iter()
+                .find(|member| member.relative_path == Path::new(name))
+                .unwrap();
+            assert_eq!(member.bytes.as_ref(), expected);
+        }
+
+        let variants = ExportPackage::new(vec![
+            ExportPackageMember::new("Sound.wav", b"one".to_vec()).unwrap(),
+            ExportPackageMember::new("sound.WAV", b"two".to_vec()).unwrap(),
+        ]);
+        assert!(variants.is_err(), "case variants must collide on Windows");
+    }
+
+    #[test]
     fn malformed_convolution_stages_cannot_disappear_from_resource_inventory() {
         for scope in ["global", "channel", "driver"] {
             for parameters in [
@@ -572,6 +781,7 @@ mod tests {
                 chain.plugins.clear();
                 let mut graph = DspGraph {
                     version: "1.3.0".into(),
+                    artifact_bundle_schema_version: None,
                     global_plugins: Vec::new(),
                     channels: HashMap::new(),
                     metadata: None,
@@ -611,6 +821,7 @@ mod tests {
         let graph = DspGraph {
             deployed_source_curves: Default::default(),
             version: "1.3.0".to_string(),
+            artifact_bundle_schema_version: None,
             global_plugins: Vec::new(),
             channels: HashMap::from([
                 convolution_chain("left", "a.wav"),
@@ -670,6 +881,7 @@ mod tests {
         let mut graph = DspGraph {
             deployed_source_curves: Default::default(),
             version: "1.3.0".to_string(),
+            artifact_bundle_schema_version: None,
             global_plugins: Vec::new(),
             channels: HashMap::from([convolution_chain("left", "a.wav")]),
             metadata: None,
@@ -822,6 +1034,10 @@ mod tests {
             .as_str()
             .unwrap();
         assert_ne!(filename, "source/a:phase.wav");
+        assert!(
+            !filename.contains(':'),
+            "package names stay portable across Windows"
+        );
         assert_eq!(members[0].relative_path, Path::new(filename));
         assert_eq!(members[0].bytes.as_ref(), resources[0].bytes.as_ref());
         let ledger = packaged.correction_decisions.as_ref().unwrap();

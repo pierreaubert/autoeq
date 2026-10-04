@@ -4,6 +4,7 @@ use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
 use super::callback::{ProgressTracker, format_param_summary};
 use super::constraints_install::install_constraints;
 use super::params::OptimParams;
+use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref};
 use ndarray::Array1;
 
@@ -71,6 +72,28 @@ impl FilterOptimizer for MhBackend {
             iteration_callback: true,
             fallback_penalty_mode: self.fallback_mode,
         }
+    }
+
+    fn evaluation_budget_profile(
+        &self,
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        params: &OptimParams,
+    ) -> Option<OptimizerBudgetProfile> {
+        if lower_bounds.len() != upper_bounds.len() {
+            return None;
+        }
+        let population_size = params.population.max(1);
+        let generation_limit = params.maxeval.max(population_size).div_ceil(population_size);
+        Some(OptimizerBudgetProfile::new(
+            params.maxeval,
+            None,
+            population_size,
+            population_size,
+            Some(population_size),
+            Some(population_size),
+            Some(generation_limit),
+        ))
     }
     fn optimize(
         &self,

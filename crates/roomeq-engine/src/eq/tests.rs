@@ -364,6 +364,24 @@ fn prepare_single_channel_eq_flat_loss_type() {
 }
 
 #[test]
+fn prepare_single_channel_eq_headphone_flat_loss_type() {
+    let curve = make_simple_test_curve();
+    let config = OptimizerConfig {
+        loss_type: "headphone_flat".to_string(),
+        num_filters: 3,
+        max_iter: 1000,
+        seed: Some(42),
+        ..OptimizerConfig::default()
+    };
+    let prep = prepare_single_channel_eq(&curve, &config, None, 48_000.0)
+        .expect("headphone flat loss prepare should succeed");
+    assert_eq!(
+        prep.objective_data.loss_type,
+        autoeq_optim::loss::LossType::HeadphoneFlat
+    );
+}
+
+#[test]
 fn prepare_single_channel_eq_score_loss_type_requires_spin_data() {
     let curve = make_simple_test_curve();
     let config = OptimizerConfig {

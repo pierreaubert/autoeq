@@ -12,12 +12,37 @@ import signal
 import subprocess
 import uuid
 
+from check_parameter_matrix import validate_manifest
+
 ROOT = Path(__file__).resolve().parents[1]
 TEST = "tests::realized_transfer::parameter_matrix_backend_complex_transfer"
 
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def expected_matrix_axes():
+    manifest = json.loads((ROOT / "qa/registry/parameter-matrix-pr.json").read_text())
+    errors = validate_manifest(manifest)
+    if errors:
+        raise ValueError("invalid parameter registry: " + "; ".join(errors))
+    names = ["topology", "mode", "sample_rate", "filter_count", "grid_size",
+             "measurement_shape", "phase", "crossover", "fir_duration"]
+    if list(manifest["dimensions"]) != names[:-1] + ["fir_duration_ms"]:
+        raise ValueError("parameter registry axes differ from the replay contract")
+    return [dict(zip(names, row)) for row in manifest["rows"]]
+
+
+def validate_matrix_inventory(rows, expected_axes):
+    if (not isinstance(rows, list) or len(rows) != len(expected_axes)
+            or any(not isinstance(row, dict) or type(row.get("row")) is not int
+                   or row["row"] != index
+                   or not isinstance(row.get("requested_axes"), dict)
+                   or any(type(value) is not int for value in row["requested_axes"].values())
+                   or row["requested_axes"] != axes
+                   for index, (row, axes) in enumerate(zip(rows, expected_axes)))):
+        raise ValueError("completed ordered matrix matching the parameter registry required")
 
 
 def validate_row(row, run_id):
@@ -100,8 +125,10 @@ def main(argv=None):
     try:
         matrix = ROOT / "target/qa/roomeq-parameter-matrix.json"
         rows = json.loads(matrix.read_text())
-        if not isinstance(rows, list) or [r["row"] for r in rows] != list(range(16)):
-            raise ValueError("completed ordered 16-row matrix required")
+        expected_axes = expected_matrix_axes()
+        validate_matrix_inventory(rows, expected_axes)
+        expected_indices = list(range(len(expected_axes)))
+        record["parameter_registry_sha256"] = digest(ROOT / "qa/registry/parameter-matrix-pr.json")
         record["matrix_sha256"] = digest(matrix)
         binary = shutil.which(os.environ.get("ROOMEQ_CAMILLADSP_BIN", "camilladsp"))
         if not binary:
@@ -127,8 +154,10 @@ def main(argv=None):
                 or "skipping optional" in output):
             raise RuntimeError("required backend test failed or did not execute")
         executed = [int(x) for x in re.findall(r"matrix backend row (\d+):", output)]
-        if executed != list(range(16)) or digest(matrix) != record["matrix_sha256"]:
+        if executed != expected_indices or digest(matrix) != record["matrix_sha256"]:
             raise RuntimeError("matrix changed or exact row execution inventory is missing")
+        if digest(ROOT / "qa/registry/parameter-matrix-pr.json") != record["parameter_registry_sha256"]:
+            raise RuntimeError("parameter registry changed during backend execution")
         record["rows"] = [validate_row(row, run_id) for row in rows]
         record["status"] = "passed"
     except Exception as error:

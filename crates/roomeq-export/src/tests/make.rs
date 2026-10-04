@@ -110,6 +110,7 @@ pub(super) fn make_test_output() -> DspGraph {
     DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels,
         metadata: Some(OptimizationMetadata {
@@ -209,6 +210,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspGraph {
     DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels,
         metadata: None,
@@ -372,12 +374,14 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
             route_count: 3,
         }),
         input_trim_db: Default::default(),
+        post_dsp_main_alignment_band_hz: None,
         advisories: vec!["ok".to_string()],
     };
 
     DspGraph {
         deployed_source_curves: Default::default(),
         version: "1.3.0".to_string(),
+        artifact_bundle_schema_version: None,
         global_plugins: Vec::new(),
         channels,
         metadata: Some(OptimizationMetadata {

@@ -7,6 +7,13 @@ use roomeq_model::OptimizerConfig;
 use crate::PreparedChannelInput;
 use crate::eq::{self, EqResources};
 
+type IirOptimizationResult = (
+    Vec<Biquad>,
+    Vec<OptimizerRunEvidence>,
+    Vec<roomeq_model::FilterVetoVerdict>,
+    Option<roomeq_model::VetoAdjudicationReport>,
+);
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn optimize_iir_eq(
     channel_name: &str,
@@ -17,12 +24,7 @@ pub(super) fn optimize_iir_eq(
     sample_rate: f64,
     callback: Option<OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
-) -> Result<(
-    Vec<Biquad>,
-    Vec<OptimizerRunEvidence>,
-    Vec<roomeq_model::FilterVetoVerdict>,
-    Option<roomeq_model::VetoAdjudicationReport>,
-)> {
+) -> Result<IirOptimizationResult> {
     if optimizer_config.num_filters == 0 {
         info!("  Skipping PEQ optimization because num_filters is 0");
         return Ok((Vec::new(), Vec::new(), Vec::new(), None));

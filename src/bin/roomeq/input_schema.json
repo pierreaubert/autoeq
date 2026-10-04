@@ -2197,6 +2197,14 @@
           "format": "double",
           "type": "number"
         },
+        "max_output_safety_attenuation_db": {
+          "additionalProperties": {
+            "format": "double",
+            "type": "number"
+          },
+          "description": "Optional cumulative additional static safety attenuation limits by physical output, in dB.\nOnly serial `room_eq_safety_gain` gains count; common pre-route cuts count for every\naffected output. Baseline calibration and untagged trims remain separate. This is an\noperator-declared output-loss budget, not calibrated SPL or hardware-capacity evidence.\nRuntime limiting is never credited toward physical-drive attenuation. Unknown output IDs\nare refused before search; omitted outputs keep the existing behavior.",
+          "type": "object"
+        },
         "max_useful_output_loss_db": {
           "default": 3.0,
           "description": "Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.\nSubwoofers are exempt. This is not input attenuation or PEQ boost.",
@@ -2435,7 +2443,7 @@
           "type": "integer"
         },
         "tol": {
-          "default": 1e-8,
+          "default": 1e-08,
           "description": "DE convergence tolerance.",
           "format": "double",
           "type": "number"
@@ -3396,7 +3404,7 @@
           "description": "Asymmetric loss weights. `None` preserves the built-in default."
         },
         "atolerance": {
-          "default": 0.00001,
+          "default": 1e-05,
           "description": "Optimization convergence tolerance (absolute)",
           "format": "double",
           "type": "number"
@@ -3634,7 +3642,7 @@
         },
         "loss_type": {
           "default": "flat",
-          "description": "Loss function type. Supported values:\n- `\"flat\"` — minimize deviation from target (default)\n- `\"score\"` — maximize Harman/Olive preference score\n- `\"epa\"` — EPA (Evaluation/Potency/Activity) psychoacoustic\n  loss combining spectral flatness with sharpness, roughness,\n  and loudness-balance penalties derived from Zwicker metrics.\n  When selected, the EPA penalty weights can be customized via\n  the [`epa_config`](Self::epa_config) field; otherwise the\n  defaults from [`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default)\n  are used.",
+          "description": "Loss function type. Supported values:\n- `\"flat\"` — minimize deviation from target (default)\n- `\"headphone_flat\"` — minimize headphone response deviation from target\n- `\"score\"` — maximize Harman/Olive preference score\n- `\"epa\"` — EPA (Evaluation/Potency/Activity) psychoacoustic\n  loss combining spectral flatness with sharpness, roughness,\n  and loudness-balance penalties derived from Zwicker metrics.\n  When selected, the EPA penalty weights can be customized via\n  the [`epa_config`](Self::epa_config) field; otherwise the\n  defaults from [`EpaConfig::default`](crate::loss::epa::score::EpaConfig::default)\n  are used.",
           "type": "string"
         },
         "max_boost_envelope": {
@@ -3963,7 +3971,7 @@
           "description": "Trailing LS plus HS tilt pair appended after the main filters."
         },
         "tolerance": {
-          "default": 0.00001,
+          "default": 1e-05,
           "description": "Optimization convergence tolerance (relative)",
           "format": "double",
           "type": "number"
@@ -4698,6 +4706,13 @@
           "format": "float",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "capture_handoff_file": {
+          "description": "Required acquisition inventory for newly exported capture configurations.\nThe canonical filename is `capture-handoff.json`; missing or changed\ninventories are refused before correction. Absent on legacy imports.",
+          "type": [
+            "string",
             "null"
           ]
         },
@@ -6270,7 +6285,7 @@
       "default": {
         "algorithm": "autoeq:cmaes",
         "asymmetric_loss": true,
-        "atolerance": 0.00001,
+        "atolerance": 1e-05,
         "elimination_threshold": 0.005,
         "finalization": {
           "default_input_peak": 1.0,
@@ -6302,7 +6317,7 @@
         "refine": true,
         "smooth_n": 2,
         "strategy": "lshade",
-        "tolerance": 0.00001
+        "tolerance": 1e-05
       },
       "description": "Optimizer configuration"
     },

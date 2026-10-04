@@ -205,8 +205,13 @@ pub struct OptimizerRunEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation_count: Option<usize>,
     /// Fitness calls counted by the backend objective before finalization.
+    /// `maxeval` bounds this search stage; selected-candidate validation and
+    /// rescoring are separate and are not included in this count.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_evaluation_count: Option<usize>,
+    /// Fitness attempts the backend refused before computing the objective.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_denied_evaluation_count: Option<usize>,
     /// Solver task stop cause, distinct from the run-control verdict.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backend_stop_cause: Option<super::backend::BackendSearchStopCause>,
@@ -316,6 +321,7 @@ impl OptimizerRunEvidence {
             best_effort: false,
             evaluation_count: parse_evaluation_count(&status),
             backend_evaluation_count: None,
+            backend_denied_evaluation_count: None,
             backend_stop_cause: None,
             generation_count: None,
             generation_limit: None,
@@ -1082,6 +1088,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     );
     if let Some(search) = search_evidence {
         evidence.backend_evaluation_count = Some(search.evaluations);
+        evidence.backend_denied_evaluation_count = Some(search.denied_evaluations);
         evidence.backend_stop_cause = Some(search.stop_cause);
         evidence.generation_count = Some(search.generations);
         evidence.generation_limit = Some(search.generation_limit);

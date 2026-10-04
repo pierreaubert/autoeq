@@ -22,6 +22,8 @@ pub enum BackendSearchStopCause {
     GenerationLimit,
     /// The progress callback requested an early stop.
     ProgressCallbackStop,
+    /// The objective accepted its configured maximum number of fitness calls.
+    ObjectiveBudgetLimit,
 }
 
 /// Search statistics captured by the backend that performed this invocation.
@@ -33,6 +35,8 @@ pub struct BackendSearchEvidence {
     pub stop_cause: BackendSearchStopCause,
     /// Fitness calls observed by the backend objective.
     pub evaluations: usize,
+    /// Solver fitness attempts refused before objective evaluation at the budget.
+    pub denied_evaluations: usize,
     /// Completed solver generations (the upstream context's zero-based `gen`).
     pub generations: usize,
     /// Configured maximum number of task callbacks.

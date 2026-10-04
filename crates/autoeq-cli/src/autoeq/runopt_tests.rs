@@ -39,6 +39,7 @@ mod tests {
                  completion: OptimizerBackendCompletion::EvaluationLimit,
                  stop_cause: BackendSearchStopCause::GenerationLimit,
                  evaluations: 72,
+                 denied_evaluations: 0,
                  generations: 9,
                  generation_limit: 10,
                  task_callbacks: 10,

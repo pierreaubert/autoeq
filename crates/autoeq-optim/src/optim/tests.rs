@@ -747,7 +747,9 @@ mod backend_tests {
         params.maxeval = 60;
         params.seed = Some(7);
         let root_control = OptimizerRunControl::new(NonZeroUsize::new(120).unwrap());
-        let control = root_control.with_stage_budget(NonZeroUsize::new(60).unwrap());
+        // Reserve room for selected-candidate validation after the 60-call
+        // backend search budget. The backend and run-control counts differ.
+        let control = root_control.with_stage_budget(NonZeroUsize::new(120).unwrap());
         let run = optimize_filters_with_run_control_detailed(
             &mut x, &lower, &upper, objective, &params, &control,
         );
@@ -760,18 +762,17 @@ mod backend_tests {
         assert_eq!(run.evidence.termination, OptimizerTermination::EvaluationLimit);
         assert_eq!(
             run.evidence.backend_stop_cause,
-            Some(BackendSearchStopCause::GenerationLimit),
+            Some(BackendSearchStopCause::ObjectiveBudgetLimit),
         );
         assert!(!run.evidence.converged);
         assert!(run.evidence.backend_evaluation_count.unwrap() >= params.population);
         assert!(run.evidence.generation_count.unwrap() > 0);
-        assert_eq!(
-            run.evidence.task_callback_count,
-            run.evidence.generation_limit,
-        );
+        assert!(run.evidence.task_callback_count.unwrap() < run.evidence.generation_limit.unwrap());
+        assert_eq!(run.evidence.backend_evaluation_count, Some(params.maxeval));
+        assert!(run.evidence.backend_denied_evaluation_count.unwrap() > 0);
         let stage = run.stage_snapshot.expect("RGA stage search counts");
-        assert!(stage.evaluations_started <= 60);
-        assert!(run.evidence.backend_evaluation_count.unwrap() >= stage.evaluations_started);
+        assert!(stage.evaluations_started <= 120);
+        assert!(stage.evaluations_started >= run.evidence.backend_evaluation_count.unwrap());
         assert!(root_control.snapshot().evaluations_started <= 120);
         assert_eq!(
             run.evidence.task_callback_count,
@@ -780,6 +781,73 @@ mod backend_tests {
         assert!(run.evidence.population_fitness_mean.is_some()
             == run.evidence.population_fitness_stddev.is_some());
         assert!(run.evidence.population_fitness_stddev.is_none_or(f64::is_finite));
+    }
+
+    #[test]
+    fn registered_rga_stage_budget_refusal_keeps_run_control_priority() {
+        use super::super::optimize::{
+            OptimizerDispatchOutcome, OptimizerTermination,
+            optimize_filters_with_run_control_detailed,
+        };
+        use super::super::run_control::OptimizerRunControl;
+        use std::num::NonZeroUsize;
+
+        let (objective, mut params, lower, upper, mut x) = scalar_objective();
+        params.algo = "mh:rga".into();
+        params.maxeval = 60;
+        params.seed = Some(7);
+        let root_control = OptimizerRunControl::new(NonZeroUsize::new(120).unwrap());
+        let control = root_control.with_stage_budget(NonZeroUsize::new(60).unwrap());
+        let run = optimize_filters_with_run_control_detailed(
+            &mut x, &lower, &upper, objective, &params, &control,
+        );
+        assert_eq!(run.dispatch, OptimizerDispatchOutcome::BackendInvoked);
+        assert_eq!(run.evidence.termination, OptimizerTermination::EvaluationLimit);
+        assert!(!run.evidence.converged);
+        assert!(run.stage_snapshot.expect("RGA stage budget").evaluations_started <= 60);
+        assert!(root_control.snapshot().evaluations_started <= 120);
+    }
+
+    #[test]
+    fn parallel_mh_objective_reservations_never_score_denied_attempts() {
+        use super::super::mh::{CallbackState, MHObjective};
+        use metaheuristics_nature::ObjFunc;
+        use std::sync::{Arc, Mutex};
+
+        let (data, _, lower, upper, x) = scalar_objective();
+        let state = Arc::new(Mutex::new(CallbackState {
+            best_fitness: f64::INFINITY,
+            best_params: Vec::new(),
+            eval_count: 0,
+            denied_evaluations: 0,
+            last_report_eval: 0,
+            iterations: 0,
+            generations: 0,
+            population_mean: None,
+            population_stddev: None,
+            callback_stopped: false,
+        }));
+        let objective = MHObjective {
+            data,
+            bounds: lower.into_iter().zip(upper).map(|(lo, hi)| [lo, hi]).collect(),
+            callback_state: Some(Arc::clone(&state)),
+            max_evaluations: 10,
+        };
+        let results = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8).map(|_| {
+                let objective = objective.clone();
+                let x = x.clone();
+                scope.spawn(move || (0..32).map(|_| objective.fitness(&x)).collect::<Vec<_>>())
+            }).collect();
+            handles.into_iter().flat_map(|handle| handle.join().expect("MH worker")).collect::<Vec<_>>()
+        });
+        let state = state.lock().expect("MH objective state");
+        assert_eq!(state.eval_count, 10);
+        assert_eq!(state.denied_evaluations, 246);
+        assert_eq!(results.iter().filter(|loss| loss.is_finite()).count(), 10);
+        assert_eq!(results.iter().filter(|loss| **loss == f64::INFINITY).count(), 246);
+        assert!(state.best_fitness.is_finite());
+        assert_eq!(state.best_params.len(), x.len());
     }
 
     #[test]
@@ -805,7 +873,10 @@ mod backend_tests {
         assert_eq!(evidence_x, legacy_x);
         assert!(legacy_de.is_none());
         assert!(evidence_de.is_none());
-        assert!(search.expect("registered RGA search evidence").evaluations > 0);
+        let search = search.expect("registered RGA search evidence");
+        assert_eq!(search.evaluations, params.maxeval);
+        assert!(search.denied_evaluations > 0);
+        assert_eq!(search.stop_cause, super::super::backend::BackendSearchStopCause::ObjectiveBudgetLimit);
     }
 
     #[test]

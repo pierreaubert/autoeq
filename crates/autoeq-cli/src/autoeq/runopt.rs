@@ -75,6 +75,7 @@ fn attach_search_diagnostics(
     search: &autoeq::optim::backend::BackendSearchEvidence,
 ) {
     evidence.backend_evaluation_count = Some(search.evaluations);
+    evidence.backend_denied_evaluation_count = Some(search.denied_evaluations);
     evidence.backend_stop_cause = Some(search.stop_cause);
     evidence.generation_count = Some(search.generations);
     evidence.generation_limit = Some(search.generation_limit);

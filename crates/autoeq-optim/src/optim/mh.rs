@@ -202,6 +202,8 @@ pub struct MHObjective {
     pub bounds: Vec<[f64; 2]>,
     /// Optional callback state for tracking progress.
     pub callback_state: Option<Arc<Mutex<CallbackState>>>,
+    /// Maximum real objective computations; rejected attempts return infinity.
+    pub max_evaluations: usize,
 }
 
 /// State tracked across fitness evaluations for callback reporting.
@@ -212,6 +214,8 @@ pub struct CallbackState {
     pub best_params: Vec<f64>,
     /// Total number of fitness evaluations.
     pub eval_count: usize,
+    /// Fitness attempts refused before computing the objective.
+    pub denied_evaluations: usize,
     /// Evaluation count at last callback report.
     pub last_report_eval: usize,
     /// Number of task callbacks observed by the solver.
@@ -235,14 +239,24 @@ impl MhBounded for MHObjective {
 impl MhObjFunc for MHObjective {
     type Ys = f64;
     fn fitness(&self, xs: &[f64]) -> Self::Ys {
+        if let Some(ref state_arc) = self.callback_state {
+            let Ok(mut state) = state_arc.lock() else {
+                return f64::INFINITY;
+            };
+            if state.eval_count >= self.max_evaluations {
+                state.denied_evaluations = state.denied_evaluations.saturating_add(1);
+                return f64::INFINITY;
+            }
+            // Reserve before computation so parallel RGA crossover workers
+            // cannot jointly exceed the requested objective budget.
+            state.eval_count += 1;
+        }
         let fitness_val = compute_fitness_penalties_ref(xs, &self.data);
 
         // Update callback state if present
         if let Some(ref state_arc) = self.callback_state
             && let Ok(mut state) = state_arc.lock()
         {
-            state.eval_count += 1;
-
             // Track best solution
             if fitness_val < state.best_fitness {
                 state.best_fitness = fitness_val;
@@ -437,6 +451,7 @@ fn optimize_filters_mh_with_callback_seeded_report(
         best_fitness: f64::INFINITY,
         best_params: vec![],
         eval_count: 0,
+        denied_evaluations: 0,
         last_report_eval: 0,
         iterations: 0,
         generations: 0,
@@ -453,6 +468,7 @@ fn optimize_filters_mh_with_callback_seeded_report(
         data: penalty_data,
         bounds,
         callback_state: Some(Arc::clone(&callback_state)),
+        max_evaluations: maxeval,
     };
 
     // Choose algorithm configuration
@@ -544,7 +560,10 @@ fn optimize_filters_mh_with_callback_seeded_report(
             }
 
             // Continue until max generations
-            current_iter >= gens
+            match callback_state_task.lock() {
+                Ok(state) => state.eval_count >= maxeval || current_iter >= gens,
+                Err(_) => true,
+            }
         })
         .solve();
 
@@ -553,7 +572,7 @@ fn optimize_filters_mh_with_callback_seeded_report(
     if best_xs.len() == x.len() {
         x.copy_from_slice(best_xs);
     }
-    let best_val = *solver.as_best_fit();
+    let mut best_val = *solver.as_best_fit();
     let state = match callback_state.lock() {
         Ok(state) => state,
         Err(_) => {
@@ -566,6 +585,18 @@ fn optimize_filters_mh_with_callback_seeded_report(
             );
         }
     };
+    if state.denied_evaluations > 0 {
+        // A refused call returned infinity to the solver. Select only a
+        // candidate whose real objective value was actually computed.
+        if state.best_params.len() != x.len() || !state.best_fitness.is_finite() {
+            return (
+                Err((format!("Metaheuristics({mh_name}) exhausted its objective budget without a finite candidate"), f64::INFINITY)),
+                None,
+            );
+        }
+        x.copy_from_slice(&state.best_params);
+        best_val = state.best_fitness;
+    }
     let search = BackendSearchEvidence {
         completion: if state.callback_stopped {
             OptimizerBackendCompletion::NonConverged
@@ -574,10 +605,13 @@ fn optimize_filters_mh_with_callback_seeded_report(
         },
         stop_cause: if state.callback_stopped {
             BackendSearchStopCause::ProgressCallbackStop
+        } else if state.eval_count >= maxeval {
+            BackendSearchStopCause::ObjectiveBudgetLimit
         } else {
             BackendSearchStopCause::GenerationLimit
         },
         evaluations: state.eval_count,
+        denied_evaluations: state.denied_evaluations,
         generations: state.generations,
         generation_limit: gens,
         task_callbacks: state.iterations,

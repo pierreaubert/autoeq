@@ -316,7 +316,7 @@ pub(super) fn load_hrtf_spectrum(
             ),
         })?;
     if let Some(sofa_sr) = sofa.data_sample_rate
-        && (sofa_sr - sample_rate as f32).abs() > 1.0
+        && (sofa_sr - f64::from(sample_rate)).abs() > 1.0
     {
         return Err(AutoeqError::InvalidConfiguration {
             message: format!(

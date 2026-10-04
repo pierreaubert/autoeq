@@ -7,6 +7,7 @@ use super::option::isolate_schroeder_split_from_multi_measurement;
 use super::option_override::OptionOverride;
 use super::parse_maxeval;
 use super::parse_seed_runs;
+use super::program_version_requested;
 use super::run::{compare_cross_mode_band, deployed_final_curve, expected_parity_main_channels};
 use super::types::TestResult;
 use super::validate::{
@@ -18,6 +19,39 @@ use roomeq_model::{
     StageStatus,
 };
 use std::collections::HashMap;
+
+#[test]
+fn program_version_flag_does_not_consume_option_values_or_post_terminator_text() {
+    let argv = |items: &[&str]| {
+        items
+            .iter()
+            .map(|item| (*item).to_owned())
+            .collect::<Vec<_>>()
+    };
+
+    assert!(program_version_requested(&argv(&[
+        "roomeq-qa-quality",
+        "--program-version"
+    ])));
+    assert!(program_version_requested(&argv(&[
+        "roomeq-qa-quality",
+        "-V"
+    ])));
+    assert!(!program_version_requested(&argv(&[
+        "roomeq-qa-quality",
+        "--case",
+        "--program-version",
+    ])));
+    assert!(!program_version_requested(&argv(&[
+        "roomeq-qa-quality",
+        "--",
+        "--program-version",
+    ])));
+    assert!(!program_version_requested(&argv(&[
+        "roomeq-qa-quality",
+        "--case=--program-version",
+    ])));
+}
 
 fn diagnostic_workspace_root() -> anyhow::Result<std::path::PathBuf> {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))

@@ -33,6 +33,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -92,6 +98,11 @@ jobs:
         package: ${{ fromJSON(needs.check-and-test.outputs.crate-test-packages) }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -115,6 +126,11 @@ jobs:
     needs: crate-unit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -167,6 +183,11 @@ jobs:
       ROOMEQ_QA_DIR: target/qa
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -234,6 +255,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
@@ -243,6 +269,8 @@ jobs:
       - uses: taiki-e/install-action@cargo-mutants
       - name: Verify ownership and mutation-runner failure contracts
         run: python3 -m unittest scripts.test_escaped_defect_ownership scripts.test_run_escaped_defect_mutations
+      - name: Fetch locked Cargo dependencies for offline mutation discovery
+        run: cargo fetch --locked
       - name: Registered escaped-defect mutations
         run: just qa-roomeq-escaped-defect-mutants
       - name: Upload mutation execution evidence
@@ -258,6 +286,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
@@ -291,6 +324,11 @@ jobs:
     needs: crate-unit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -321,6 +359,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -343,6 +383,11 @@ jobs:
     needs: crate-unit-tests
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

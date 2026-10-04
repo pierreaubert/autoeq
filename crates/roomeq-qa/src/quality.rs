@@ -165,6 +165,36 @@ fn parse_seed_runs(args: &[String]) -> Result<usize> {
     Ok(seed_runs)
 }
 
+/// Print the root-package executable version when `-V` or
+/// `--program-version` is present before the argument terminator.
+///
+/// The library package version is labeled separately so it cannot be mistaken
+/// for the installed executable's version.
+pub fn print_program_version_if_requested(program_version: &str) -> bool {
+    let args: Vec<String> = std::env::args().collect();
+    if !program_version_requested(&args) {
+        return false;
+    }
+    println!(
+        "roomeq-qa-quality {program_version} (roomeq-qa library {})",
+        env!("CARGO_PKG_VERSION")
+    );
+    true
+}
+
+fn program_version_requested(args: &[String]) -> bool {
+    let mut index = 1;
+    while let Some(argument) = args.get(index).map(String::as_str) {
+        match argument {
+            "--" => return false,
+            "--program-version" | "-V" => return true,
+            "--jobs" | "--maxeval" | "--seed-runs" | "--case" => index += 2,
+            _ => index += 1,
+        }
+    }
+    false
+}
+
 /// Run the quality QA command and report whether failed cases should produce
 /// a non-zero process exit.
 pub fn run() -> Result<bool> {
@@ -198,6 +228,7 @@ pub fn run() -> Result<bool> {
                --seed-runs N     1 for contracts, 5 for convergence (default: 5)\n\
                --list            List available test cases and exit\n\
                --case TEXT       Run cases whose name contains TEXT, case-insensitive\n\
+               --program-version, -V  Print installed program and QA library versions\n\
                --help, -h        Print this help"
         );
         return Ok(false);

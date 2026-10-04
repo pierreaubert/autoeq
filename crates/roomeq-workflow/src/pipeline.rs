@@ -64,6 +64,7 @@ pub struct RoomPipeline<'a> {
         FinalizationDiagnosticTrial,
         &'a dyn FinalizationDiagnosticSink,
     )>,
+    recovery_session: Option<crate::room_recovery::RoomRecoverySession>,
 }
 
 impl<'a> RoomPipeline<'a> {
@@ -74,6 +75,7 @@ impl<'a> RoomPipeline<'a> {
             validation_measurements: HashMap::new(),
             frequency_samples: DEFAULT_FREQUENCY_SAMPLES,
             finalization_diagnostic: None,
+            recovery_session: None,
         }
     }
 
@@ -104,6 +106,18 @@ impl<'a> RoomPipeline<'a> {
         validation_measurements: HashMap<String, Vec<Curve>>,
     ) -> Self {
         self.validation_measurements = validation_measurements;
+        self
+    }
+
+    /// Attach a single-channel exact-DE crash-recovery session.
+    ///
+    /// The session rejects configurations outside its explicitly supported
+    /// lane before the optimizer dispatches any search work.
+    pub fn with_recovery_session(
+        mut self,
+        recovery_session: crate::room_recovery::RoomRecoverySession,
+    ) -> Self {
+        self.recovery_session = Some(recovery_session);
         self
     }
 
@@ -142,16 +156,33 @@ impl<'a> RoomPipeline<'a> {
         };
         let finalization_diagnostic = self.finalization_diagnostic;
         let frequency_samples = self.frequency_samples;
+        let recovery_session = self.recovery_session;
 
-        RoomEngine.run(engine_request, observer, move |request, observer| {
-            crate::room_optimization::optimize_room_pipeline_impl_with_frequency_samples(
-                request,
-                &context,
-                observer,
-                frequency_samples,
-                finalization_diagnostic,
-            )
-        })
+        RoomEngine.run(
+            engine_request,
+            observer,
+            move |request, observer| match recovery_session.as_ref() {
+                Some(recovery) => {
+                    crate::room_optimization::optimize_room_pipeline_impl_with_recovery(
+                        request,
+                        &context,
+                        observer,
+                        frequency_samples,
+                        recovery,
+                        finalization_diagnostic,
+                    )
+                }
+                None => {
+                    crate::room_optimization::optimize_room_pipeline_impl_with_frequency_samples(
+                        request,
+                        &context,
+                        observer,
+                        frequency_samples,
+                        finalization_diagnostic,
+                    )
+                }
+            },
+        )
     }
 }
 

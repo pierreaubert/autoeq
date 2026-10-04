@@ -11,6 +11,10 @@ use std::process;
 #[derive(Parser, Debug, Clone)]
 #[command(author, about, long_about = None)]
 pub struct Args {
+    /// Print the installed program's package version and exit.
+    #[arg(short = 'V', long, default_value_t = false)]
+    pub program_version: bool,
+
     /// Number of IIR filters to use for optimization.
     #[arg(short = 'n', long, default_value_t = 7)]
     pub num_filters: usize,
@@ -331,6 +335,7 @@ impl Args {
             target: None,
             product_config: None,
             product_renderer_capabilities: false,
+            program_version: false,
             output: None,
             resume_state: None,
             checkpoint_state: None,
@@ -470,7 +475,7 @@ mod tests {
     use super::super::peq_model::PeqModel;
     use super::Args;
     use crate::LossType;
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     fn parsed_base() -> Args {
         Args::try_parse_from::<&[&str], _>(&["prog"]).unwrap()
@@ -558,6 +563,27 @@ mod tests {
     #[test]
     fn parsed_cli_uses_canonical_cobyla_default() {
         assert_eq!(parsed_base().algo, "autoeq:cobyla");
+    }
+
+    #[test]
+    fn program_version_flag_preserves_api_data_version_argument() {
+        let program = Args::try_parse_from(["autoeq", "--program-version"])
+            .expect("program version flag should parse");
+        assert!(program.program_version);
+        assert_eq!(program.version, None);
+
+        let short = Args::try_parse_from(["autoeq", "-V"])
+            .expect("short program version flag should parse");
+        assert!(short.program_version);
+
+        let api = Args::try_parse_from(["autoeq", "--version", "spinorama-v1"])
+            .expect("existing API data version argument should remain unchanged");
+        assert!(!api.program_version);
+        assert_eq!(api.version.as_deref(), Some("spinorama-v1"));
+
+        let help = Args::command().render_help().to_string();
+        assert!(help.contains("-V, --program-version"));
+        assert!(help.contains("--version <VERSION>"));
     }
 
     #[test]

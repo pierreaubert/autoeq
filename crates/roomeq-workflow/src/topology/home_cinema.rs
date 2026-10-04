@@ -5326,6 +5326,30 @@ mod post_dsp_level_tests {
         }
     }
 
+    fn final_electrical_headroom_cuts(
+        result: &roomeq_engine::room_result::RoomOptimizationResult,
+    ) -> HashMap<String, f64> {
+        result
+            .channels
+            .iter()
+            .filter_map(|(output, chain)| {
+                let cut_db = chain
+                    .plugins
+                    .iter()
+                    .filter(|plugin| {
+                        plugin
+                            .parameters
+                            .get("label")
+                            .and_then(serde_json::Value::as_str)
+                            == Some("final_electrical_headroom")
+                    })
+                    .map(|plugin| -plugin.parameters["gain_db"].as_f64().unwrap())
+                    .sum::<f64>();
+                (cut_db > 0.0).then(|| (output.clone(), cut_db))
+            })
+            .collect()
+    }
+
     #[test]
     fn deployed_array_applies_driver_controls_exactly_once() {
         use roomeq_model::{
@@ -7232,6 +7256,307 @@ mod post_dsp_level_tests {
             generated_gain_signature(&result),
             "recalibration after rollback must replace, not stack, generated gains"
         );
+    }
+
+    #[test]
+    fn later_output_attenuation_keeps_per_output_cuts_current() {
+        use math_audio_iir_fir::{Biquad, BiquadFilterType};
+
+        let (mut original, mut config) = recalibration_fixture(0.0);
+        let frequencies =
+            ndarray::Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 256);
+        let peak = Biquad::new(BiquadFilterType::Peak, 100.0, 48_000.0, 0.8, 9.0);
+        let filters = [peak];
+        let transfer =
+            roomeq_engine::response::compute_peq_complex_response(&filters, &frequencies, 48_000.0);
+        let correction_db =
+            ndarray::Array1::from_iter(transfer.iter().map(|value| 20.0 * value.norm().log10()));
+        for (role, measurement_name, level) in [
+            ("L", "left", 80.0),
+            ("R", "right", 80.0),
+            ("Sub1", "sub", 70.0),
+        ] {
+            let spl = if role == "Sub1" {
+                ndarray::Array1::from_elem(frequencies.len(), level)
+            } else {
+                correction_db.mapv(|response| level - response)
+            };
+            let curve = Curve {
+                freq: frequencies.clone(),
+                spl,
+                phase: Some(ndarray::Array1::zeros(frequencies.len())),
+                ..Curve::default()
+            };
+            let channel = original.channel_results.get_mut(role).unwrap();
+            channel.initial_curve = curve.clone();
+            channel.final_curve = curve.clone();
+            let chain = original.channels.get_mut(role).unwrap();
+            chain.initial_curve = Some((&curve).into());
+            chain.final_curve = Some((&curve).into());
+            chain.target_curve = Some((&curve).into());
+            config.speakers.insert(
+                measurement_name.to_string(),
+                roomeq_model::SpeakerConfig::Single(roomeq_model::MeasurementSource::InMemory(
+                    curve,
+                )),
+            );
+        }
+
+        // A matched +9 dB PEQ fills the synthetic measured notch, so the
+        // first audibility gate accepts the correction against the flat
+        // measured-level target. Electrically, however, the PEQ still
+        // requires a substantial output cut; the later gate rechecks the
+        // correction after per-output attenuation is installed.
+        for role in ["L", "R"] {
+            let mut target = original.channel_results[role].initial_curve.clone();
+            target.spl.fill(80.0);
+            original.channels.get_mut(role).unwrap().target_curve = Some((&target).into());
+            let mut plugin = mark_plugin_stage(
+                roomeq_engine::output::create_eq_plugin(&filters),
+                "post_route",
+            );
+            plugin.parameters["label"] = serde_json::json!("fixture_room_eq_gain");
+            original
+                .channels
+                .get_mut(role)
+                .unwrap()
+                .plugins
+                .push(plugin);
+            original.channel_results.get_mut(role).unwrap().biquads = filters.to_vec();
+        }
+        seed_post_dsp_calibration(&mut original, &config);
+
+        let speaker_calibration_parameters = original.channels["L"]
+            .plugins
+            .iter()
+            .find(|plugin| {
+                plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("speaker_calibration")
+            })
+            .unwrap()
+            .parameters
+            .clone();
+        let configured_sub_gain_parameters = original.channels["Sub1"]
+            .plugins
+            .iter()
+            .find(|plugin| {
+                plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("configured_sub_gain")
+            })
+            .unwrap()
+            .parameters
+            .clone();
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut before_attenuation = original.clone();
+        crate::room_optimization::rebuild_routed_pruning_test_candidate(
+            &mut before_attenuation,
+            &config,
+            &HashMap::new(),
+            48_000.0,
+            directory.path(),
+        )
+        .expect("the unattenuated target-matching correction should pass the first gate");
+        assert!(
+            before_attenuation.channels["L"]
+                .plugins
+                .iter()
+                .any(|plugin| {
+                    plugin
+                        .parameters
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("fixture_room_eq_gain")
+                }),
+            "the first correction safety pass unexpectedly changed the candidate: {:#?}",
+            before_attenuation.metadata.stage_outcomes
+        );
+        let pre_attenuation_peaks = crate::electrical_headroom::assess_final_graph(
+            &before_attenuation.to_dsp_chain_output(),
+            48_000.0,
+            directory.path(),
+            &config.optimizer.finalization,
+        )
+        .unwrap();
+        assert!(
+            pre_attenuation_peaks
+                .iter()
+                .any(|output| { output.output == "Sub1" && output.inputs.len() >= 2 }),
+            "fixture must retain a correlated multi-input sub output: {pre_attenuation_peaks:?}"
+        );
+        assert!(
+            pre_attenuation_peaks.iter().any(|output| {
+                output.output == "L"
+                    && output.peak_dbfs.is_some_and(|peak| {
+                        peak > config.optimizer.finalization.output_ceiling_dbfs + 5.0
+                    })
+            }),
+            "the unattenuated correction must exceed the configured L output ceiling: {pre_attenuation_peaks:?}"
+        );
+        let (candidate, initial_required) =
+            crate::room_optimization::run_full_strength_output_attenuation_trial_for_test(
+                &original,
+                &config,
+                48_000.0,
+                directory.path(),
+            )
+            .expect("the production output-attenuation trial path should complete");
+
+        assert!(
+            initial_required.get("L").is_some_and(|cut| *cut > 5.0),
+            "fixture must enter the later output-attenuation route with a substantial L cut: {initial_required:?}"
+        );
+        assert!(
+            initial_required
+                .get("Sub1")
+                .zip(initial_required.get("L"))
+                .is_some_and(|(sub, main)| *sub > *main + 5.0),
+            "the routed sub output must exercise a distinct per-output cut: {initial_required:?}"
+        );
+        assert!(
+            candidate.channels["L"].plugins.iter().any(|plugin| {
+                plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    == Some("fixture_room_eq_gain")
+            }),
+            "the post-attenuation safety gate must preserve this accepted correction; cuts={initial_required:?}, outcomes={:#?}",
+            candidate.metadata.stage_outcomes
+        );
+        assert!(!candidate.metadata.stage_outcomes.iter().any(|stage| {
+            stage
+                .advisories
+                .iter()
+                .any(|advisory| advisory == "audibility_regression_reverted_L:peq")
+        }));
+
+        let graph = candidate
+            .metadata
+            .bass_management
+            .as_ref()
+            .unwrap()
+            .routing_graph
+            .as_ref()
+            .unwrap();
+        assert_eq!(graph.post_dsp_main_alignment_band_hz, Some([100.0, 400.0]));
+        assert!(graph.input_trim_db.values().all(|trim| trim.is_finite()));
+        assert!(candidate.channels["L"].plugins.iter().any(|plugin| {
+            plugin
+                .parameters
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                == Some("speaker_calibration")
+        }));
+        assert!(candidate.channels["Sub1"].plugins.iter().any(|plugin| {
+            plugin
+                .parameters
+                .get("label")
+                .and_then(serde_json::Value::as_str)
+                == Some("configured_sub_gain")
+        }));
+
+        assert_eq!(
+            candidate.channels["L"]
+                .plugins
+                .iter()
+                .find(|plugin| {
+                    plugin
+                        .parameters
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("speaker_calibration")
+                })
+                .unwrap()
+                .parameters,
+            speaker_calibration_parameters,
+            "the output trial must preserve the user's speaker calibration gain"
+        );
+        assert_eq!(
+            candidate.channels["Sub1"]
+                .plugins
+                .iter()
+                .find(|plugin| {
+                    plugin
+                        .parameters
+                        .get("label")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("configured_sub_gain")
+                })
+                .unwrap()
+                .parameters,
+            configured_sub_gain_parameters,
+            "the output trial must preserve the user's configured sub gain"
+        );
+
+        let delivered_peaks = crate::electrical_headroom::assess_final_graph(
+            &candidate.to_dsp_chain_output(),
+            48_000.0,
+            directory.path(),
+            &config.optimizer.finalization,
+        )
+        .unwrap();
+        let output_ceiling = config.optimizer.finalization.output_ceiling_dbfs;
+        for output_name in ["L", "R", "Sub1"] {
+            let output = delivered_peaks
+                .iter()
+                .find(|output| output.output == output_name)
+                .unwrap_or_else(|| panic!("missing electrical assessment for {output_name}"));
+            let peak = output
+                .peak_dbfs
+                .unwrap_or_else(|| panic!("missing delivered peak for {output_name}: {output:?}"));
+            assert!(
+                peak.is_finite() && peak <= output_ceiling + 1e-5,
+                "delivered output {output_name} exceeds the configured electrical ceiling: peak={peak:.9} dBFS, ceiling={output_ceiling:.9} dBFS"
+            );
+            assert!(
+                output.required_attenuation_db <= 1e-5,
+                "delivered output {output_name} still requires attenuation: {output:?}"
+            );
+        }
+
+        let final_cuts = final_electrical_headroom_cuts(&candidate);
+        assert!(
+            final_cuts.get("L").is_some_and(|cut| *cut > 5.0),
+            "the test must observe the full-strength cut after the later gate: {final_cuts:?}"
+        );
+        let mut without_trial_cuts = candidate.clone();
+        for chain in without_trial_cuts.channels.values_mut() {
+            chain.plugins.retain(|plugin| {
+                plugin
+                    .parameters
+                    .get("label")
+                    .and_then(serde_json::Value::as_str)
+                    != Some("final_electrical_headroom")
+            });
+        }
+        let required_without_trial_cuts = crate::electrical_headroom::assess_final_graph(
+            &without_trial_cuts.to_dsp_chain_output(),
+            48_000.0,
+            directory.path(),
+            &config.optimizer.finalization,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|output| (output.output, output.required_attenuation_db))
+        .collect::<HashMap<_, _>>();
+        for output in final_cuts.keys().chain(required_without_trial_cuts.keys()) {
+            let retained = final_cuts.get(output).copied().unwrap_or(0.0);
+            let required = required_without_trial_cuts
+                .get(output)
+                .copied()
+                .unwrap_or(0.0);
+            assert!(
+                (retained - required).abs() <= 2e-5,
+                "final output cut for {output} differs from independently recomputed current-chain requirement: retained={retained:.6} dB, required={required:.6} dB; all cuts={final_cuts:?}, recalculated={required_without_trial_cuts:?}"
+            );
+        }
     }
 }
 

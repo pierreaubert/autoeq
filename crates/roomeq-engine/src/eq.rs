@@ -4,6 +4,7 @@
 
 pub mod audibility_veto;
 mod consts;
+pub mod exact_recovery;
 mod misc;
 mod multi_eq_auto_optimizer_context;
 mod optimize;

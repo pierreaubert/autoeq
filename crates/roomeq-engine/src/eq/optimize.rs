@@ -5,9 +5,11 @@ use super::multi_eq_auto_optimizer_context::MultiEqAutoOptimizerContext;
 use super::multi_eq_auto_optimizer_context::resolve_multi_measurement_auto_optimizer_config;
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_normalization;
 use super::prepared_single_channel_eq::prepare_single_channel_eq_with_spin;
-use super::prepared_single_channel_eq::run_optimization_pass;
 use super::prepared_single_channel_eq::run_optimization_pass_with_context;
 use super::prepared_single_channel_eq::{OptimizationPassContext, OptimizationPassNormalization};
+use super::prepared_single_channel_eq::{
+    run_optimization_pass, run_optimization_pass_with_exact_checkpoint,
+};
 use super::resources::{self, EqResources};
 use super::run_control::{
     ControlledEqError, ControlledEqOptimizationResult, EqBudgetRefusal, EqRunControl,
@@ -1474,6 +1476,7 @@ fn optimize_channel_eq_inner(
         callback,
         backend,
         None,
+        None,
     )
 }
 
@@ -1509,9 +1512,74 @@ pub fn optimize_channel_eq_controlled_detailed(
             callback,
             &RealOptimizerBackend::new(),
             Some(&control),
+            None,
         )
     });
     control.finish(result)
+}
+
+/// Run one supported single-channel AutoEQ DE optimization with safe-barrier
+/// checkpoint persistence or exact continuation.
+///
+/// This additive entry point refuses adaptive passes, local refinement, and
+/// unseeded runs before starting the solver. The caller must bind the saved
+/// checkpoint identity to its complete source/configuration identity.
+///
+/// # Errors
+/// Returns an error when the request is not one seeded AutoEQ DE pass, when
+/// adaptive/local refinement is enabled, or when checkpoint validation or
+/// durable persistence fails.
+pub fn optimize_channel_eq_with_exact_de_checkpoint_detailed(
+    curve: &Curve,
+    config: &OptimizerConfig,
+    resources: Option<&EqResources>,
+    sample_rate: f64,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    exact: super::exact_recovery::ExactDERecoveryOptions,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    if exact
+        .checkpoint()
+        .as_ref()
+        .and_then(|state| state.checkpoint().terminal.as_ref())
+        .is_some_and(|terminal| terminal.message == "Optimization stopped by callback")
+    {
+        return Err(
+            "exact DE recovery refuses a checkpoint terminated by observer cancellation".into(),
+        );
+    }
+    if config.refine {
+        return Err("exact DE recovery does not support local refinement".into());
+    }
+    if config.min_filter_improvement > 0.0 && config.num_filters > 1 {
+        return Err("exact DE recovery does not support adaptive filter selection".into());
+    }
+    if config.num_filters == 0 {
+        return Err("exact DE recovery requires at least one PEQ filter".into());
+    }
+    let backend = autoeq_optim::optim::backend::resolve(&config.algorithm)
+        .ok_or_else(|| format!("unknown optimizer backend: {}", config.algorithm))?;
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return Err(format!(
+            "exact DE recovery supports only AutoEQ DE; resolved {}",
+            backend.name()
+        )
+        .into());
+    }
+    if config.seed.is_none() {
+        return Err("exact DE recovery requires an explicit optimizer seed".into());
+    }
+    optimize_channel_eq_inner_with_control(
+        curve,
+        config,
+        resources,
+        sample_rate,
+        None,
+        None,
+        callback,
+        &RealOptimizerBackend::new(),
+        None,
+        Some(exact),
+    )
 }
 
 #[expect(
@@ -1528,7 +1596,11 @@ fn optimize_channel_eq_inner_with_control(
     callback: Option<autoeq_optim::optim::OptimProgressCallback>,
     backend: &dyn OptimizerBackend,
     control: Option<&EqRunControl<'_>>,
+    exact: Option<super::exact_recovery::ExactDERecoveryOptions>,
 ) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    if exact.is_some() && config.refine {
+        return Err("exact DE recovery does not support local refinement".into());
+    }
     let measurement_quality = autoeq_optim::measurements::assess_measurement_quality(curve);
     let uncertainty_scaled_config =
         uncertainty_scaled_optimizer_config(config, &measurement_quality);
@@ -1536,6 +1608,9 @@ fn optimize_channel_eq_inner_with_control(
 
     // A progress observer must not disable the requested adaptive selection.
     if config.min_filter_improvement > 0.0 && config.num_filters > 1 {
+        if exact.is_some() {
+            return Err("exact DE recovery does not support adaptive filter selection".into());
+        }
         return optimize_channel_eq_adaptive(
             curve,
             config,
@@ -1569,15 +1644,27 @@ fn optimize_channel_eq_inner_with_control(
         )?
     };
     prep.objective_data = validation_objective(&prep.objective_data, control);
-    let (filters, loss, _x, optimizer_evidence) = run_optimization_pass(
-        &prep,
-        config.num_filters,
-        config.max_iter,
-        config,
-        callback,
-        backend,
-        control,
-    )?;
+    let (filters, loss, _x, optimizer_evidence) = match exact {
+        Some(exact) => run_optimization_pass_with_exact_checkpoint(
+            &prep,
+            config.num_filters,
+            config.max_iter,
+            config,
+            callback,
+            backend,
+            control,
+            Some(exact),
+        )?,
+        None => run_optimization_pass(
+            &prep,
+            config.num_filters,
+            config.max_iter,
+            config,
+            callback,
+            backend,
+            control,
+        )?,
+    };
 
     // Same Stage 1 veto as the adaptive path: the legacy single-pass path
     // never ran elimination, so without this its micro filters ship
@@ -4403,6 +4490,10 @@ mod multi_eq_tests {
 mod controlled_pipeline_tests {
     use super::*;
     use autoeq_optim::optim::OptimizerDispatchOutcome;
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     fn curve() -> Curve {
         let frequencies: Vec<f64> = (0..96)
@@ -4445,6 +4536,211 @@ mod controlled_pipeline_tests {
         assert_eq!(snapshot.validation_evaluations_in_flight, 0);
         assert_eq!(snapshot.evaluations_started, snapshot.evaluations_completed);
         assert!(snapshot.evaluations_started <= snapshot.evaluation_budget);
+    }
+
+    fn exact_options(
+        checkpoint: Option<crate::eq::exact_recovery::ExactDERecoveryState>,
+        saved: Arc<Mutex<Option<crate::eq::exact_recovery::ExactDERecoveryState>>>,
+        save_calls: Arc<AtomicUsize>,
+    ) -> crate::eq::exact_recovery::ExactDERecoveryOptions {
+        crate::eq::exact_recovery::ExactDERecoveryOptions::new(
+            "room-recovery/channel:front-left/objective-v1",
+            checkpoint,
+            Box::new(move |checkpoint| {
+                save_calls.fetch_add(1, Ordering::Relaxed);
+                *saved
+                    .lock()
+                    .map_err(|_| "test checkpoint mutex poisoned".to_owned())? =
+                    Some(checkpoint.clone());
+                Ok(())
+            }),
+        )
+        .expect("valid engine-owned exact recovery options")
+    }
+
+    #[test]
+    fn exact_terminal_checkpoint_replay_preserves_filters_and_logical_count() {
+        let mut config = config();
+        config.algorithm = "autoeq:de".into();
+        config.strategy = "rand1bin".into();
+        config.num_filters = 1;
+        config.max_iter = 48;
+        config.population = 4;
+        config.seed = Some(42);
+        config.refine = false;
+        config.min_filter_improvement = 0.0;
+
+        let saved = Arc::new(Mutex::new(None));
+        let first_save_calls = Arc::new(AtomicUsize::new(0));
+        let first_progress_calls = Arc::new(AtomicUsize::new(0));
+        let progress_counter = Arc::clone(&first_progress_calls);
+        let first = optimize_channel_eq_with_exact_de_checkpoint_detailed(
+            &curve(),
+            &config,
+            None,
+            48_000.0,
+            Some(Box::new(move |_, _, _| {
+                progress_counter.fetch_add(1, Ordering::Relaxed);
+                autoeq_optim::de::CallbackAction::Continue
+            })),
+            exact_options(None, Arc::clone(&saved), Arc::clone(&first_save_calls)),
+        )
+        .expect("fresh exact DE should finish");
+        let checkpoint = saved
+            .lock()
+            .expect("test checkpoint mutex")
+            .clone()
+            .expect("fresh exact run persisted checkpoints");
+        let terminal = checkpoint
+            .checkpoint()
+            .terminal
+            .as_ref()
+            .expect("terminal state was persisted");
+        assert!(terminal.finalized);
+        assert!(checkpoint.checkpoint().generation > 0);
+        assert!(first_progress_calls.load(Ordering::Relaxed) > 0);
+        assert!(first_save_calls.load(Ordering::Relaxed) > 1);
+
+        let resumed_save_calls = Arc::new(AtomicUsize::new(0));
+        let resumed_progress_calls = Arc::new(AtomicUsize::new(0));
+        let progress_counter = Arc::clone(&resumed_progress_calls);
+        let resumed_saved = Arc::new(Mutex::new(None));
+        let resumed = optimize_channel_eq_with_exact_de_checkpoint_detailed(
+            &curve(),
+            &config,
+            None,
+            48_000.0,
+            Some(Box::new(move |_, _, _| {
+                progress_counter.fetch_add(1, Ordering::Relaxed);
+                autoeq_optim::de::CallbackAction::Continue
+            })),
+            exact_options(
+                Some(checkpoint),
+                resumed_saved,
+                Arc::clone(&resumed_save_calls),
+            ),
+        )
+        .expect("finalized exact checkpoint should reconstruct without search");
+
+        assert_eq!(first.loss.to_bits(), resumed.loss.to_bits());
+        assert_eq!(first.filters.len(), resumed.filters.len());
+        for (first_filter, resumed_filter) in first.filters.iter().zip(&resumed.filters) {
+            assert_eq!(
+                format!("{:?}", first_filter.filter_type),
+                format!("{:?}", resumed_filter.filter_type)
+            );
+            assert_eq!(first_filter.freq.to_bits(), resumed_filter.freq.to_bits());
+            assert_eq!(first_filter.srate.to_bits(), resumed_filter.srate.to_bits());
+            assert_eq!(first_filter.q.to_bits(), resumed_filter.q.to_bits());
+            assert_eq!(
+                first_filter.db_gain.to_bits(),
+                resumed_filter.db_gain.to_bits()
+            );
+        }
+        assert_eq!(
+            first.optimizer_evidence[0].evaluation_count,
+            resumed.optimizer_evidence[0].evaluation_count,
+            "logical cumulative DE count must survive terminal replay"
+        );
+        assert_eq!(resumed_progress_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(resumed_save_calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn exact_mode_refuses_refinement_and_identity_filter_before_dispatch() {
+        for (refine, num_filters) in [(true, 1), (false, 0)] {
+            let mut config = config();
+            config.algorithm = "autoeq:de".into();
+            config.seed = Some(42);
+            config.refine = refine;
+            config.num_filters = num_filters;
+            let save_calls = Arc::new(AtomicUsize::new(0));
+            let save_counter = Arc::clone(&save_calls);
+            let result = optimize_channel_eq_with_exact_de_checkpoint_detailed(
+                &curve(),
+                &config,
+                None,
+                48_000.0,
+                None,
+                crate::eq::exact_recovery::ExactDERecoveryOptions::new(
+                    "room-recovery/refusal",
+                    None,
+                    Box::new(move |_| {
+                        save_counter.fetch_add(1, Ordering::Relaxed);
+                        Ok(())
+                    }),
+                )
+                .expect("valid refusal options"),
+            );
+            assert!(result.is_err());
+            assert_eq!(save_calls.load(Ordering::Relaxed), 0);
+        }
+    }
+
+    #[test]
+    fn exact_callback_stop_cannot_replay_as_success() {
+        let mut config = config();
+        config.algorithm = "autoeq:de".into();
+        config.strategy = "rand1bin".into();
+        config.num_filters = 1;
+        config.max_iter = 48;
+        config.population = 4;
+        config.seed = Some(42);
+        config.refine = false;
+        config.min_filter_improvement = 0.0;
+
+        let saved = Arc::new(Mutex::new(None));
+        let first_save_calls = Arc::new(AtomicUsize::new(0));
+        let stop_result = optimize_channel_eq_with_exact_de_checkpoint_detailed(
+            &curve(),
+            &config,
+            None,
+            48_000.0,
+            Some(Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop)),
+            exact_options(None, Arc::clone(&saved), Arc::clone(&first_save_calls)),
+        );
+        assert!(
+            stop_result.is_err(),
+            "observer Stop must not produce a candidate"
+        );
+        assert!(first_save_calls.load(Ordering::Relaxed) >= 1);
+        let cancelled_checkpoint = saved
+            .lock()
+            .expect("test checkpoint mutex")
+            .clone()
+            .expect("the checkpoint save callback observed the cancellation state");
+        let terminal = cancelled_checkpoint
+            .checkpoint()
+            .terminal
+            .as_ref()
+            .expect("callback stop is represented as a terminal checkpoint");
+        assert!(terminal.finalized);
+        assert_eq!(terminal.message, "Optimization stopped by callback");
+
+        let replay_save_calls = Arc::new(AtomicUsize::new(0));
+        let replay_progress_calls = Arc::new(AtomicUsize::new(0));
+        let progress_counter = Arc::clone(&replay_progress_calls);
+        let replay = optimize_channel_eq_with_exact_de_checkpoint_detailed(
+            &curve(),
+            &config,
+            None,
+            48_000.0,
+            Some(Box::new(move |_, _, _| {
+                progress_counter.fetch_add(1, Ordering::Relaxed);
+                autoeq_optim::de::CallbackAction::Continue
+            })),
+            exact_options(
+                Some(cancelled_checkpoint),
+                Arc::new(Mutex::new(None)),
+                Arc::clone(&replay_save_calls),
+            ),
+        );
+        assert!(
+            replay.is_err(),
+            "a saved cancellation cannot replay as success"
+        );
+        assert_eq!(replay_progress_calls.load(Ordering::Relaxed), 0);
+        assert_eq!(replay_save_calls.load(Ordering::Relaxed), 0);
     }
 
     #[test]
@@ -4934,6 +5230,7 @@ mod controlled_pipeline_tests {
             None,
             &backend,
             Some(&context),
+            None,
         );
         let error = context.finish(result).unwrap_err();
         assert!(error.reason.contains("does not support controlled runs"));

@@ -169,6 +169,62 @@ pub fn execute_prepared_channel(
     sidecar_reference: Option<ConvolutionSidecarReference>,
     callback: Option<OptimProgressCallback>,
 ) -> Result<ChannelProcessingResult> {
+    execute_prepared_channel_with_optional_exact_checkpoint(
+        channel_name,
+        prepared,
+        room_config,
+        sample_rate,
+        execution,
+        eq_resources,
+        sidecar_reference,
+        callback,
+        None,
+    )
+}
+
+/// Execute one prepared channel with an optional exact-DE recovery state.
+#[allow(clippy::too_many_arguments)]
+pub fn execute_prepared_channel_with_exact_checkpoint(
+    channel_name: &str,
+    prepared: &PreparedChannelInput,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    execution: &PreparedChannelExecution,
+    eq_resources: &EqResources,
+    sidecar_reference: Option<ConvolutionSidecarReference>,
+    callback: Option<OptimProgressCallback>,
+    exact: crate::eq::exact_recovery::ExactDERecoveryOptions,
+) -> Result<ChannelProcessingResult> {
+    execute_prepared_channel_with_optional_exact_checkpoint(
+        channel_name,
+        prepared,
+        room_config,
+        sample_rate,
+        execution,
+        eq_resources,
+        sidecar_reference,
+        callback,
+        Some(exact),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn execute_prepared_channel_with_optional_exact_checkpoint(
+    channel_name: &str,
+    prepared: &PreparedChannelInput,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    execution: &PreparedChannelExecution,
+    eq_resources: &EqResources,
+    sidecar_reference: Option<ConvolutionSidecarReference>,
+    callback: Option<OptimProgressCallback>,
+    mut exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+) -> Result<ChannelProcessingResult> {
+    if exact.is_some() && room_config.optimizer.processing_mode != ProcessingMode::LowLatency {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "exact DE recovery requires LowLatency processing mode".into(),
+        });
+    }
     // Multi-segment authorization runs once per channel, after every
     // processing mode assembles its realized result.
     let mut result = match room_config.optimizer.processing_mode {
@@ -250,6 +306,7 @@ pub fn execute_prepared_channel(
             execution,
             eq_resources,
             callback,
+            exact.take(),
         ),
         ProcessingMode::WarpedIir => process_iir(
             IirChannelMode::WarpedIir,
@@ -260,6 +317,7 @@ pub fn execute_prepared_channel(
             execution,
             eq_resources,
             callback,
+            None,
         ),
         ProcessingMode::KautzModal => process_iir(
             IirChannelMode::KautzModal,
@@ -270,6 +328,7 @@ pub fn execute_prepared_channel(
             execution,
             eq_resources,
             callback,
+            None,
         ),
     }?;
     result.segment_support = crate::segment_support::assess_segment_support(
@@ -320,8 +379,9 @@ fn process_iir(
     execution: &PreparedChannelExecution,
     eq_resources: &EqResources,
     callback: Option<OptimProgressCallback>,
+    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
 ) -> Result<ChannelProcessingResult> {
-    process_iir_channel(IirChannelRequest {
+    let request = IirChannelRequest {
         mode,
         channel_name,
         prepared,
@@ -332,7 +392,13 @@ fn process_iir(
         optimizer: &execution.optimizer,
         eq_resources,
         callback,
-    })
+    };
+    match exact {
+        Some(exact) => {
+            crate::channel_iir::process_iir_channel_with_exact_checkpoint(request, exact)
+        }
+        None => process_iir_channel(request),
+    }
 }
 
 fn required_sidecar(

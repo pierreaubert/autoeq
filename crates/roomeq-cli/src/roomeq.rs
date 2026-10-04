@@ -631,6 +631,26 @@ struct Args {
     #[arg(long, default_value_t = DEFAULT_FREQUENCY_SAMPLES, value_parser = parse_frequency_samples)]
     freq_samples: usize,
 
+    /// Enable exact single-channel DE crash recovery in DIR.
+    #[arg(
+        long,
+        value_name = "DIR",
+        conflicts_with_all = [
+            "fallback_overrides",
+            "export_format",
+            "export_path",
+            "verification_bundle",
+            "verification_prediction_inputs",
+            "verification_graph",
+            "dry_run"
+        ]
+    )]
+    recovery_dir: Option<PathBuf>,
+
+    /// Resume an existing exact RoomEQ recovery journal.
+    #[arg(long, requires = "recovery_dir")]
+    resume_recovery: bool,
+
     /// Verbose output (deprecated, use RUST_LOG env var)
     #[arg(short, long)]
     verbose: bool,
@@ -914,6 +934,8 @@ pub fn run_command_with_shutdown(shutdown: Arc<AtomicBool>) -> Result<()> {
                 seats: args.verification_seats,
             },
             shutdown,
+            args.recovery_dir,
+            args.resume_recovery,
         );
     }
     if args.export_format.is_some() || args.verification_bundle.is_some() {
@@ -969,6 +991,7 @@ fn execute_fallback_candidate(request: FallbackCandidateRequest) -> Result<()> {
             seats: None,
         },
         request.shutdown,
+        None,
     )
 }
 
@@ -1520,67 +1543,170 @@ fn execute_optimization(
     export_path: Option<PathBuf>,
     bundle_options: BundleOptions,
     shutdown: Arc<AtomicBool>,
+    recovery_dir: Option<PathBuf>,
+    resume_recovery: bool,
 ) -> Result<()> {
     let (output_path, final_export_path) =
         resolve_optimization_destinations(&output_path, export_format, export_path.as_deref())?;
-    let parent = output_path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| std::path::Path::new("."));
+    let recovery = if let Some(directory) = recovery_dir.as_deref() {
+        anyhow::ensure!(
+            final_export_path.is_none() && bundle_options.dest_dir.is_none(),
+            "exact RoomEQ recovery does not support external exports or verification bundles"
+        );
+        let (room_config, _, _) = load_config_with_frequency_samples(
+            &config_path,
+            override_config_path.as_deref(),
+            freq_samples,
+        )?;
+        let session = roomeq_workflow::room_recovery::RoomRecoverySession::open(
+            roomeq_workflow::room_recovery::RoomRecoveryOpen {
+                directory,
+                output_path: &output_path,
+                room_config: &room_config,
+                sample_rate_hz: sample_rate,
+                frequency_samples: freq_samples,
+                resume: resume_recovery,
+            },
+        )
+        .map_err(|message| anyhow!(message))?;
+        if session.already_committed() {
+            let bytes = std::fs::read(&output_path).with_context(|| {
+                format!("Failed to read committed RoomEQ output {output_path:?}")
+            })?;
+            let output: DspChainOutput = serde_json::from_slice(&bytes).with_context(|| {
+                format!("Committed RoomEQ output is invalid JSON: {output_path:?}")
+            })?;
+            require_output_playback_approval(&output)?;
+            return Ok(());
+        }
+        Some(session)
+    } else {
+        anyhow::ensure!(
+            !resume_recovery,
+            "--resume-recovery requires --recovery-dir"
+        );
+        None
+    };
     let file_name = output_path
         .file_name()
         .ok_or_else(|| anyhow!("Output path must include a file name"))?;
-    let attempt_dir = tempfile::Builder::new()
-        .prefix(".roomeq-attempt-")
-        .tempdir_in(parent)
-        .with_context(|| format!("Failed to stage RoomEQ attempt beside {output_path:?}"))?;
-    let attempt_output = attempt_dir.path().join(file_name);
+    let stage_complete = recovery
+        .as_ref()
+        .is_some_and(|session| session.has_completed_stage());
+    let (attempt_output, attempt_dir) = match recovery.as_ref() {
+        Some(session) if stage_complete => (
+            session
+                .completed_stage_output()
+                .map_err(|message| anyhow!(message))?,
+            None,
+        ),
+        Some(session) => (
+            session
+                .prepare_stage_output()
+                .map_err(|message| anyhow!(message))?,
+            None,
+        ),
+        None => {
+            let parent = output_path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .unwrap_or_else(|| std::path::Path::new("."));
+            let attempt_dir = tempfile::Builder::new()
+                .prefix(".roomeq-attempt-")
+                .tempdir_in(parent)
+                .with_context(|| {
+                    format!("Failed to stage RoomEQ attempt beside {output_path:?}")
+                })?;
+            (attempt_dir.path().join(file_name), Some(attempt_dir))
+        }
+    };
     let staged_export_path = if let Some(destination) = &final_export_path {
         let export_name = destination
             .file_name()
             .ok_or_else(|| anyhow!("External export path must include a file name"))?;
-        let directory = attempt_dir.path().join("external-export");
+        let attempt_parent = attempt_output
+            .parent()
+            .ok_or_else(|| anyhow!("candidate output has no parent directory"))?;
+        let directory = attempt_parent.join("external-export");
         std::fs::create_dir_all(&directory)
             .with_context(|| format!("Failed to create export staging directory {directory:?}"))?;
         Some(directory.join(export_name))
     } else {
         None
     };
-    if let Err(error) = execute_optimization_candidate(
-        sample_rate,
-        freq_samples,
-        config_path,
-        attempt_output.clone(),
-        override_config_path,
-        export_format,
-        staged_export_path.clone(),
-        final_export_path.clone(),
-        bundle_options,
-        Arc::clone(&shutdown),
-    ) {
+    let candidate_result = if stage_complete {
+        Ok(())
+    } else {
+        execute_optimization_candidate(
+            sample_rate,
+            freq_samples,
+            config_path,
+            attempt_output.clone(),
+            override_config_path,
+            export_format,
+            staged_export_path.clone(),
+            final_export_path.clone(),
+            bundle_options,
+            Arc::clone(&shutdown),
+            recovery.clone(),
+        )
+    };
+    if let Err(error) = candidate_result {
+        if let Some(session) = recovery.as_ref() {
+            if shutdown.load(Ordering::Acquire) {
+                let _ = session.mark_cancelled("shutdown observed during RoomEQ optimization");
+            } else {
+                let _ = session.mark_failed(&format!("{error:#}"));
+            }
+        }
         if attempt_output.is_file() {
-            let retained_dir = attempt_dir.keep();
-            return Err(error.context(format!(
-                "canonical output was preserved; diagnostic attempt retained at {:?}",
-                retained_dir.join(file_name)
-            )));
+            if let Some(attempt_dir) = attempt_dir {
+                let retained_dir = attempt_dir.keep();
+                return Err(error.context(format!(
+                    "canonical output was preserved; diagnostic attempt retained at {:?}",
+                    retained_dir.join(file_name)
+                )));
+            }
         }
         return Err(error);
     }
+    if !stage_complete {
+        if let Some(session) = recovery.as_ref() {
+            session
+                .mark_stage_complete(&attempt_output)
+                .map_err(|message| anyhow!(message))?;
+        }
+    }
     if shutdown.load(Ordering::Acquire) {
+        if let Some(session) = recovery.as_ref() {
+            session
+                .mark_cancelled("shutdown observed before RoomEQ bundle publication")
+                .map_err(|message| anyhow!(message))?;
+        }
         anyhow::bail!("RoomEQ optimization cancelled before candidate publication");
     }
-    let publish_result = publish_attempt_output_bundle(
-        &attempt_output,
-        &output_path,
-        staged_export_path.as_deref(),
-        final_export_path.as_deref(),
-    );
+    let publish_result = match recovery.as_ref() {
+        Some(session) => session
+            .publish_candidate_output(&attempt_output)
+            .map_err(|message| anyhow!(message)),
+        None => publish_attempt_output_bundle(
+            &attempt_output,
+            &output_path,
+            staged_export_path.as_deref(),
+            final_export_path.as_deref(),
+        ),
+    };
     if let Err(error) = publish_result {
-        let retained_dir = attempt_dir.keep();
+        if let Some(attempt_dir) = attempt_dir {
+            let retained_dir = attempt_dir.keep();
+            return Err(error.context(format!(
+                "canonical output was preserved; publish candidate retained at {:?}",
+                retained_dir.join(file_name)
+            )));
+        }
         return Err(error.context(format!(
-            "canonical output was preserved; publish candidate retained at {:?}",
-            retained_dir.join(file_name)
+            "canonical output was preserved; durable recovery candidate remains at {:?}",
+            attempt_output
         )));
     }
     relocate_published_run_manifest(
@@ -1589,6 +1715,11 @@ fn execute_optimization(
         final_export_path.as_deref(),
         staged_export_path.as_deref(),
     );
+    if let Some(session) = recovery.as_ref() {
+        session
+            .mark_committed()
+            .map_err(|message| anyhow!(message))?;
+    }
     Ok(())
 }
 
@@ -1657,6 +1788,7 @@ fn execute_optimization_candidate(
     export_destination_path: Option<PathBuf>,
     bundle_options: BundleOptions,
     shutdown: Arc<AtomicBool>,
+    recovery: Option<roomeq_workflow::room_recovery::RoomRecoverySession>,
 ) -> Result<()> {
     let has_override = override_config_path.is_some();
     // Load room configuration
@@ -1667,6 +1799,11 @@ fn execute_optimization_candidate(
         override_config_path.as_deref(),
         freq_samples,
     )?;
+    if let Some(session) = recovery.as_ref() {
+        session
+            .verify_configuration(&room_config, sample_rate, freq_samples)
+            .map_err(|message| anyhow!(message))?;
+    }
 
     info!("Found {} speakers", room_config.speakers.len());
 
@@ -1689,16 +1826,21 @@ fn execute_optimization_candidate(
 
     // Run optimization using the library
     let observer = create_progress_observer(Arc::clone(&shutdown));
-    let result = RoomPipeline::new(RoomPipelineRequest {
+    let pipeline = RoomPipeline::new(RoomPipelineRequest {
         config: &room_config,
         sample_rate,
         output_dir: Some(&generated_assets),
         probe_arrival_overrides: None,
     })
-    .with_frequency_samples(freq_samples)
-    .run_with_store(&artifact_store, Some(observer))
-    .map_err(|e| anyhow!("{}", e))
-    .with_context(|| "Room optimization failed")?;
+    .with_frequency_samples(freq_samples);
+    let pipeline = match recovery.as_ref() {
+        Some(session) => pipeline.with_recovery_session(session.clone()),
+        None => pipeline,
+    };
+    let result = pipeline
+        .run_with_store(&artifact_store, Some(observer))
+        .map_err(|e| anyhow!("{}", e))
+        .with_context(|| "Room optimization failed")?;
 
     if shutdown.load(Ordering::Acquire) {
         anyhow::bail!("RoomEQ optimization cancelled before candidate finalization");
@@ -3396,6 +3538,8 @@ mod tests {
                 seats: None,
             },
             shutdown,
+            None,
+            false,
         )
         .expect_err("observer stop should cancel RoomEQ before publication");
 

@@ -21,6 +21,7 @@ use roomeq_analysis::impulse_analysis;
 use roomeq_model::OptimizerConfig;
 use std::collections::HashMap;
 use std::error::Error;
+use std::sync::{Arc, Mutex};
 
 #[cfg(test)]
 mod level_reference_tests {
@@ -785,6 +786,38 @@ pub(in super::super) fn run_optimization_pass(
     ),
     Box<dyn Error>,
 > {
+    run_optimization_pass_with_exact_checkpoint(
+        prep,
+        num_filters,
+        max_iter,
+        config,
+        callback,
+        backend,
+        control,
+        None,
+    )
+}
+
+/// Run one prepared pass with optional exact-DE recovery state.
+#[allow(clippy::type_complexity)]
+pub(in super::super) fn run_optimization_pass_with_exact_checkpoint(
+    prep: &PreparedSingleChannelEq,
+    num_filters: usize,
+    max_iter: usize,
+    config: &OptimizerConfig,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+) -> Result<
+    (
+        Vec<Biquad>,
+        f64,
+        Vec<f64>,
+        Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+    ),
+    Box<dyn Error>,
+> {
     let context = OptimizationPassContext {
         objective_data: &prep.objective_data,
         args_template: &prep.args_template,
@@ -792,7 +825,7 @@ pub(in super::super) fn run_optimization_pass(
         sample_rate: prep.sample_rate,
         normalization: OptimizationPassNormalization::Single(&prep.input_normalization),
     };
-    run_optimization_pass_with_context(
+    run_optimization_pass_with_context_and_exact_checkpoint(
         &context,
         num_filters,
         max_iter,
@@ -800,6 +833,7 @@ pub(in super::super) fn run_optimization_pass(
         callback,
         backend,
         control,
+        exact,
     )
 }
 
@@ -822,6 +856,42 @@ pub(in super::super) fn run_optimization_pass_with_context(
     ),
     Box<dyn Error>,
 > {
+    run_optimization_pass_with_context_and_exact_checkpoint(
+        context,
+        num_filters,
+        max_iter,
+        config,
+        callback,
+        backend,
+        control,
+        None,
+    )
+}
+
+/// Run one prepared pass with optional exact-DE recovery state.
+#[allow(clippy::type_complexity)]
+pub(in super::super) fn run_optimization_pass_with_context_and_exact_checkpoint(
+    context: &OptimizationPassContext<'_>,
+    num_filters: usize,
+    max_iter: usize,
+    config: &OptimizerConfig,
+    callback: Option<autoeq_optim::optim::OptimProgressCallback>,
+    backend: &dyn OptimizerBackend,
+    control: Option<&EqRunControl<'_>>,
+    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+) -> Result<
+    (
+        Vec<Biquad>,
+        f64,
+        Vec<f64>,
+        Vec<autoeq_optim::optim::OptimizerRunEvidence>,
+    ),
+    Box<dyn Error>,
+> {
+    let has_exact_checkpoint = exact.is_some();
+    if has_exact_checkpoint && config.refine {
+        return Err("exact DE continuation cannot admit a local-refinement stage".into());
+    }
     let mut optim_params = context.args_template.clone();
     // The pass count is the BASE count; a tilt-mapped template (marked by
     // resolved hinge bands) optimizes the pair on top of every pass.
@@ -867,17 +937,37 @@ pub(in super::super) fn run_optimization_pass_with_context(
     // Global optimization
     let (callback, observer_stopped) = latch_observer_stop(callback);
     let stage_index = control.map(EqRunControl::stage_count);
-    let global_result = run_optimizer(
-        backend,
-        &mut x,
-        &lower_bounds,
-        &upper_bounds,
-        context.objective_data.clone(),
-        &optim_params,
-        None,
-        callback,
-        control,
-    );
+    let global_result = match exact {
+        Some(exact) => {
+            if control.is_some() {
+                Err(
+                    "exact DE continuation cannot be combined with a controlled stage budget"
+                        .into(),
+                )
+            } else {
+                run_exact_de_optimizer(
+                    &mut x,
+                    &lower_bounds,
+                    &upper_bounds,
+                    context.objective_data.clone(),
+                    &optim_params,
+                    callback,
+                    exact,
+                )
+            }
+        }
+        None => run_optimizer(
+            backend,
+            &mut x,
+            &lower_bounds,
+            &upper_bounds,
+            context.objective_data.clone(),
+            &optim_params,
+            None,
+            callback,
+            control,
+        ),
+    };
     if let (Some(control), Some(index)) = (control, stage_index)
         && control.stage_count() > index
     {
@@ -926,6 +1016,9 @@ pub(in super::super) fn run_optimization_pass_with_context(
 
     // Local refinement (COBYLA)
     let _optimizer_loss = if config.refine && !no_search_remaining(control) {
+        if has_exact_checkpoint {
+            return Err("exact DE continuation cannot admit a local-refinement stage".into());
+        }
         log::info!(
             "  Running local refinement ({}) from global loss={:.6}",
             config.local_algo,
@@ -1051,6 +1144,265 @@ pub(in super::super) fn run_optimization_pass_with_context(
         .collect();
 
     Ok((filters, final_loss, x_final, optimizer_evidence))
+}
+
+fn run_exact_de_optimizer(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective: autoeq_optim::optim::ObjectiveData,
+    params: &autoeq_optim::OptimParams,
+    mut progress: Option<autoeq_optim::optim::OptimProgressCallback>,
+    exact: crate::eq::exact_recovery::ExactDERecoveryOptions,
+) -> Result<autoeq_optim::optim::OptimizerRunEvidence, Box<dyn Error>> {
+    let (source_run_identity, resume_state, mut persist) = exact.into_parts();
+    let prepared_run_identity =
+        bind_prepared_objective_identity(&source_run_identity, &objective, params)?;
+    if let Some(state) = &resume_state {
+        state
+            .check_compatible(&prepared_run_identity)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    }
+    // A finalized checkpoint replay does not invoke the math save callback,
+    // so seed the observer with the checkpoint supplied by the caller.
+    let latest_checkpoint = Arc::new(Mutex::new(resume_state.clone()));
+    let saved_checkpoint = Arc::clone(&latest_checkpoint);
+    let save_identity = prepared_run_identity.clone();
+    let save_callback = Box::new(move |checkpoint: &autoeq_optim::de::DECheckpoint| {
+        let state = crate::eq::exact_recovery::ExactDERecoveryState::from_checkpoint(
+            checkpoint.clone(),
+            &save_identity,
+        )?;
+        persist(&state)?;
+        let mut saved = saved_checkpoint
+            .lock()
+            .map_err(|_| "exact DE checkpoint observer was poisoned".to_owned())?;
+        *saved = Some(state);
+        Ok(())
+    });
+    let math_options = autoeq_optim::optim::setup::ExactDECheckpointOptions {
+        checkpoint: resume_state.map(|state| state.checkpoint().clone()),
+        run_identity: prepared_run_identity,
+        save_callback,
+    };
+    let progress_callback: Box<
+        dyn FnMut(&autoeq_optim::de::DEIntermediate) -> autoeq_optim::de::CallbackAction + Send,
+    > = Box::new(move |intermediate| {
+        progress
+            .as_mut()
+            .map_or(autoeq_optim::de::CallbackAction::Continue, |progress| {
+                progress(intermediate.iter, intermediate.fun, None)
+            })
+    });
+    let result =
+        autoeq_optim::optim::setup::perform_optimization_with_run_descriptor_and_exact_checkpoint(
+            params,
+            &objective,
+            math_options,
+            progress_callback,
+        )?;
+    let exact_state = latest_checkpoint
+        .lock()
+        .map_err(|_| "exact DE checkpoint observer was poisoned".to_owned())?
+        .clone()
+        .ok_or("exact DE solver returned without a durable terminal checkpoint")?;
+    let checkpoint = exact_state.checkpoint();
+    let terminal = checkpoint
+        .terminal
+        .as_ref()
+        .filter(|terminal| terminal.finalized)
+        .ok_or("exact DE solver returned without a finalized terminal checkpoint")?;
+    // The pinned public math checkpoint format marks callback cancellation
+    // with this terminal message, but has no typed terminal-reason field.
+    // Treat that version-specific state as cancellation, never as completion.
+    if terminal.message == "Optimization stopped by callback" {
+        return Err("exact DE observer cancellation cannot be emitted as completion".into());
+    }
+    if result.parameters.len() != x.len() {
+        return Err(format!(
+            "exact DE returned {} parameters for a {}-parameter pass",
+            result.parameters.len(),
+            x.len()
+        )
+        .into());
+    }
+    x.copy_from_slice(&result.parameters);
+    let mut evidence = autoeq_optim::optim::OptimizerRunEvidence::from_backend_result(
+        &result.descriptor.backend,
+        Ok((result.descriptor.stopping_reason, result.objective_value)),
+        x,
+        lower_bounds,
+        upper_bounds,
+        params.maxeval,
+        params.seed,
+    );
+    // The checkpoint count is cumulative across fresh-process recovery. The
+    // journal separately records calls made by this process.
+    evidence.evaluation_count = Some(
+        checkpoint
+            .evaluations
+            .saturating_add(terminal.polish_evaluations),
+    );
+    Ok(evidence)
+}
+
+fn bind_prepared_objective_identity(
+    run_identity: &str,
+    objective: &autoeq_optim::optim::ObjectiveData,
+    params: &autoeq_optim::OptimParams,
+) -> Result<String, Box<dyn Error>> {
+    if objective.multi_objective.is_some() {
+        return Err("exact RoomEQ DE recovery does not support multi-objective data".into());
+    }
+    let f64_bits = |values: Vec<f64>| {
+        values
+            .into_iter()
+            .map(|value| format!("{:016x}", value.to_bits()))
+            .collect::<Vec<_>>()
+    };
+    let identity = serde_json::json!({
+        "schema": "roomeq-prepared-de-objective-v1",
+        "source_run_identity": run_identity,
+        "frequency_bits": f64_bits(objective.freqs.iter().copied().collect()),
+        "target_bits": f64_bits(objective.target.iter().copied().collect()),
+        "deviation_bits": f64_bits(objective.deviation.iter().copied().collect()),
+        "sample_rate_bits": format!("{:016x}", objective.srate.to_bits()),
+        "min_frequency_bits": format!("{:016x}", objective.min_freq.to_bits()),
+        "max_frequency_bits": format!("{:016x}", objective.max_freq.to_bits()),
+        "objective_options": {
+            // The production builder derives the strategy from these options;
+            // this identity deliberately binds the declared loss separately.
+            "strategy": format!("{:?}", objective.loss_type),
+            "min_spacing_oct_bits": format!("{:016x}", objective.min_spacing_oct.to_bits()),
+            "spacing_weight_bits": format!("{:016x}", objective.spacing_weight.to_bits()),
+            "max_db_bits": format!("{:016x}", objective.max_db.to_bits()),
+            "min_db_bits": format!("{:016x}", objective.min_db.to_bits()),
+            "loss_type": format!("{:?}", objective.loss_type),
+            "peq_model": format!("{:?}", objective.peq_model),
+            "speaker_score_data": format!("{:?}", objective.speaker_score_data),
+            "headphone_score_data": format!("{:?}", objective.headphone_score_data),
+            "input_curve": format!("{:?}", objective.input_curve),
+            "drivers_data": format!("{:?}", objective.drivers_data),
+            "fixed_crossover_freqs": format!("{:?}", objective.fixed_crossover_freqs),
+            "penalty_w_ceiling_bits": format!("{:016x}", objective.penalty_w_ceiling.to_bits()),
+            "penalty_w_spacing_bits": format!("{:016x}", objective.penalty_w_spacing.to_bits()),
+            "penalty_w_mingain_bits": format!("{:016x}", objective.penalty_w_mingain.to_bits()),
+            "integrality": format!("{:?}", objective.integrality),
+            "smooth": objective.smooth,
+            "smooth_n": objective.smooth_n,
+            "max_boost_envelope": format!("{:?}", objective.max_boost_envelope),
+            "min_cut_envelope": format!("{:?}", objective.min_cut_envelope),
+            "epa_config": format!("{:?}", objective.epa_config),
+            "temporal_masking_modes": format!("{:?}", objective.temporal_masking_modes),
+            "detected_problems": format!("{:?}", objective.detected_problems),
+            "mode_proximity_evidence": format!("{:?}", objective.mode_proximity_evidence),
+            "null_suppression_bits": objective.null_suppression.as_ref().map(|mask| {
+                f64_bits(mask.iter().copied().collect())
+            }),
+            "asymmetric_loss_config": format!("{:?}", objective.asymmetric_loss_config),
+            "smoothness_penalty": format!("{:?}", objective.smoothness_penalty),
+            "audibility_deadband": format!("{:?}", objective.audibility_deadband),
+        },
+        "optimizer_params": format!("{params:?}"),
+    });
+    let fingerprint =
+        roomeq_model::decision_ledger::canonical_value_identity(&identity).fingerprint;
+    Ok(format!("{run_identity}:prepared-objective:{fingerprint}"))
+}
+
+#[cfg(test)]
+mod prepared_objective_identity_tests {
+    use super::bind_prepared_objective_identity;
+    use autoeq_optim::optim::ObjectiveDataBuilder;
+    use autoeq_optim::{OptimParams, PeqModel};
+    use ndarray::array;
+
+    fn objective(
+        target_offset: f64,
+        deviation_offset: f64,
+        envelope_max: f64,
+    ) -> autoeq_optim::ObjectiveData {
+        ObjectiveDataBuilder::speaker_flat(
+            array![40.0, 80.0, 160.0, 320.0],
+            array![
+                target_offset,
+                target_offset + 1.0,
+                target_offset + 2.0,
+                target_offset + 3.0
+            ],
+            array![
+                deviation_offset,
+                deviation_offset + 1.0,
+                deviation_offset + 2.0,
+                deviation_offset + 3.0
+            ],
+            48_000.0,
+            PeqModel::Pk,
+        )
+        .freq_range(40.0, 320.0)
+        .min_db(-12.0)
+        .max_db(9.0)
+        .max_boost_envelope(vec![(40.0, envelope_max), (320.0, envelope_max)])
+        .build()
+        .expect("valid flat objective")
+    }
+
+    fn params() -> OptimParams {
+        super::super::super::misc::build_optim_params(
+            &roomeq_model::OptimizerConfig::default(),
+            40.0,
+            320.0,
+            48_000.0,
+            autoeq_optim::loss::LossType::SpeakerFlat,
+            PeqModel::Pk,
+        )
+    }
+
+    fn identity(data: &autoeq_optim::ObjectiveData, params: &OptimParams) -> String {
+        bind_prepared_objective_identity("room-run-identity", data, params).unwrap()
+    }
+
+    #[test]
+    fn prepared_identity_is_stable_and_binds_samples_options_and_bounds() {
+        let baseline_objective = objective(0.0, 2.0, 6.0);
+        let baseline_params = params();
+        let baseline = identity(&baseline_objective, &baseline_params);
+        assert_eq!(baseline, identity(&baseline_objective, &baseline_params));
+
+        assert_ne!(
+            baseline,
+            identity(&objective(0.125, 2.0, 6.0), &baseline_params)
+        );
+        assert_ne!(
+            baseline,
+            identity(&objective(0.0, 2.125, 6.0), &baseline_params)
+        );
+        assert_ne!(
+            baseline,
+            identity(&objective(0.0, 2.0, 5.5), &baseline_params)
+        );
+
+        let mut changed_bounds = baseline_params.clone();
+        changed_bounds.max_q += 0.25;
+        assert_ne!(baseline, identity(&baseline_objective, &changed_bounds));
+    }
+
+    #[test]
+    fn prepared_identity_refuses_unbound_multi_objective_data() {
+        let base = objective(0.0, 2.0, 6.0);
+        let mut multi = base.clone();
+        // Multi-objective scoring has a separate list of per-measurement
+        // objectives. This exact single-channel lane refuses it rather than
+        // hashing only the top-level display arrays.
+        multi.multi_objective = Some(autoeq_optim::MultiObjectiveData {
+            objectives: vec![base],
+            strategy: autoeq_optim::roomeq::MultiMeasurementStrategy::Average,
+            weights: vec![1.0],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        assert!(bind_prepared_objective_identity("room-run-identity", &multi, &params()).is_err());
+    }
 }
 
 fn clamp_combined_boost(

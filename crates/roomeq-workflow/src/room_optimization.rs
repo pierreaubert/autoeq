@@ -206,6 +206,48 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         &dyn crate::pipeline::FinalizationDiagnosticSink,
     )>,
 ) -> Result<RoomOptimizationResult> {
+    optimize_room_pipeline_impl_with_optional_recovery(
+        request,
+        context,
+        observer,
+        frequency_samples,
+        None,
+        finalization_diagnostic,
+    )
+}
+
+pub(super) fn optimize_room_pipeline_impl_with_recovery(
+    request: roomeq_engine::EngineRequest<'_>,
+    context: &crate::WorkflowContext<'_>,
+    observer: Option<Box<dyn PipelineObserver>>,
+    frequency_samples: usize,
+    recovery: &crate::room_recovery::RoomRecoverySession,
+    finalization_diagnostic: Option<(
+        crate::pipeline::FinalizationDiagnosticTrial,
+        &dyn crate::pipeline::FinalizationDiagnosticSink,
+    )>,
+) -> Result<RoomOptimizationResult> {
+    optimize_room_pipeline_impl_with_optional_recovery(
+        request,
+        context,
+        observer,
+        frequency_samples,
+        Some(recovery),
+        finalization_diagnostic,
+    )
+}
+
+fn optimize_room_pipeline_impl_with_optional_recovery(
+    request: roomeq_engine::EngineRequest<'_>,
+    context: &crate::WorkflowContext<'_>,
+    observer: Option<Box<dyn PipelineObserver>>,
+    frequency_samples: usize,
+    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
+    finalization_diagnostic: Option<(
+        crate::pipeline::FinalizationDiagnosticTrial,
+        &dyn crate::pipeline::FinalizationDiagnosticSink,
+    )>,
+) -> Result<RoomOptimizationResult> {
     let snapshot = input_snapshot::freeze(request.config)?;
     let request = roomeq_engine::EngineRequest {
         config: &snapshot,
@@ -223,7 +265,7 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
             veto.report_only = true;
         }
     }
-    let mut result = optimize_room_impl_with_frequency_samples(
+    let mut result = optimize_room_impl_with_recovery_and_frequency_samples(
         &local_config,
         request.sample_rate,
         context.output_dir,
@@ -231,6 +273,7 @@ pub(super) fn optimize_room_pipeline_impl_with_frequency_samples(
         observer,
         context.artifact_store,
         frequency_samples,
+        recovery,
     )?;
     // F4 graph boundary: compile relative advances to causal delays before
     // downstream replay, selection, and save. Amendment 4 enforces the
@@ -767,6 +810,7 @@ fn execute_topology_workflow_on_pool(
     }
 }
 
+#[cfg(test)]
 fn execute_generic_channels_with_frequency_samples(
     config: &RoomConfig,
     sample_rate: f64,
@@ -774,6 +818,26 @@ fn execute_generic_channels_with_frequency_samples(
     probe_arrival_overrides: Option<&HashMap<String, f64>>,
     observer_shared: &SharedPipelineObserver,
     frequency_samples: usize,
+) -> Result<(GenericChannelCollection, usize)> {
+    execute_generic_channels_with_recovery_and_frequency_samples(
+        config,
+        sample_rate,
+        output_dir,
+        probe_arrival_overrides,
+        observer_shared,
+        frequency_samples,
+        None,
+    )
+}
+
+fn execute_generic_channels_with_recovery_and_frequency_samples(
+    config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    observer_shared: &SharedPipelineObserver,
+    frequency_samples: usize,
+    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
 ) -> Result<(GenericChannelCollection, usize)> {
     let channels_to_process = channels_for_generic_optimization(config);
     let total_speakers = channels_to_process.len();
@@ -793,6 +857,7 @@ fn execute_generic_channels_with_frequency_samples(
         probe_arrival_overrides,
         observer_shared,
         frequency_samples,
+        recovery,
     )?;
 
     let collection = collect_generic_channel_results(
@@ -807,6 +872,7 @@ fn execute_generic_channels_with_frequency_samples(
     Ok((collection, total_speakers))
 }
 
+#[cfg(test)]
 fn optimize_room_impl_with_frequency_samples(
     config: &RoomConfig,
     sample_rate: f64,
@@ -816,6 +882,28 @@ fn optimize_room_impl_with_frequency_samples(
     store: &dyn autoeq_artifacts::ArtifactStore,
     frequency_samples: usize,
 ) -> Result<RoomOptimizationResult> {
+    optimize_room_impl_with_recovery_and_frequency_samples(
+        config,
+        sample_rate,
+        output_dir,
+        probe_arrival_overrides,
+        observer,
+        store,
+        frequency_samples,
+        None,
+    )
+}
+
+fn optimize_room_impl_with_recovery_and_frequency_samples(
+    config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: Option<&Path>,
+    probe_arrival_overrides: Option<&HashMap<String, f64>>,
+    observer: Option<Box<dyn PipelineObserver>>,
+    store: &dyn autoeq_artifacts::ArtifactStore,
+    frequency_samples: usize,
+    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
+) -> Result<RoomOptimizationResult> {
     let (observer_shared, config) =
         prepare_room_optimization_with_frequency_samples(config, observer, frequency_samples)?;
     validate_room_optimization_with_frequency_samples(
@@ -824,6 +912,11 @@ fn optimize_room_impl_with_frequency_samples(
         frequency_samples,
     )?;
     let route = select_topology_route(&config, &observer_shared)?;
+    if recovery.is_some() && route != TopologyRoute::Generic {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "exact recovery is available only for generic single-channel rooms".into(),
+        });
+    }
     let config = &config;
 
     let mut result = match route {
@@ -864,14 +957,16 @@ fn optimize_room_impl_with_frequency_samples(
                     "Selected generic channel optimization",
                 ),
             )?;
-            let (generic, total_speakers) = execute_generic_channels_with_frequency_samples(
-                config,
-                sample_rate,
-                output_dir,
-                probe_arrival_overrides,
-                &observer_shared,
-                frequency_samples,
-            )?;
+            let (generic, total_speakers) =
+                execute_generic_channels_with_recovery_and_frequency_samples(
+                    config,
+                    sample_rate,
+                    output_dir,
+                    probe_arrival_overrides,
+                    &observer_shared,
+                    frequency_samples,
+                    recovery,
+                )?;
             assemble_generic_result_with_frequency_samples(
                 generic,
                 total_speakers,
@@ -4515,6 +4610,7 @@ pub fn optimize_speaker(
         None, // no shared mean for standalone single-channel optimization
         None, // no probe_arrival_overrides on the standalone path
         crate::DEFAULT_FREQUENCY_SAMPLES,
+        None,
     )?;
 
     Ok(SpeakerOptimizationResult {

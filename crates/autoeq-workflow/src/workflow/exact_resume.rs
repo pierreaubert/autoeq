@@ -519,4 +519,84 @@ mod production_split_resume_tests {
             "configuration mismatch must fail before objective scoring"
         );
     }
+
+    #[test]
+    fn production_terminal_checkpoint_replay_returns_without_new_objective_scoring() {
+        let params = params();
+        let identity = run_identity(0.0);
+        let baseline_objective = analytic_objective(0.0);
+        let captured_terminal = Arc::new(Mutex::new(None));
+        let terminal_for_callback = Arc::clone(&captured_terminal);
+        let terminal_save_callback: DECheckpointSaveCallback = Box::new(move |checkpoint| {
+            if checkpoint
+                .terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.finalized)
+            {
+                *terminal_for_callback
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(checkpoint.clone());
+            }
+            Ok(())
+        });
+        let uninterrupted = run_exact(
+            &params,
+            &baseline_objective,
+            None,
+            identity.clone(),
+            terminal_save_callback,
+        )
+        .expect("complete production exact-DE run");
+
+        let terminal_checkpoint = captured_terminal
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .expect("production callback captured terminal checkpoint");
+        assert!(terminal_checkpoint
+            .terminal
+            .as_ref()
+            .is_some_and(|terminal| terminal.finalized));
+
+        let temporary = tempfile::tempdir().expect("terminal checkpoint directory");
+        let checkpoint_path = temporary.path().join("terminal-state.json");
+        let state = ExactOptimizerState::from_checkpoint(terminal_checkpoint, &identity)
+            .expect("finalized checkpoint has consistent production identity");
+        save_exact_optimizer_state(&state, &checkpoint_path)
+            .expect("persist terminal checkpoint before simulated process restart");
+        let loaded = load_exact_optimizer_state(&checkpoint_path)
+            .expect("read terminal checkpoint after restart")
+            .expect("terminal checkpoint exists");
+        assert_eq!(loaded.schema_version, state.schema_version);
+        assert_eq!(loaded.run_identity, state.run_identity);
+        assert_eq!(loaded.checkpoint, state.checkpoint);
+        assert_eq!(loaded.timestamp, state.timestamp);
+
+        let replay_objective = analytic_objective(0.0);
+        let replay_callback_called = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let callback_called = Arc::clone(&replay_callback_called);
+        let replay_save_callback: DECheckpointSaveCallback = Box::new(move |_| {
+            callback_called.store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        });
+        let replay = run_exact(
+            &params,
+            &replay_objective,
+            Some(loaded.checkpoint),
+            identity,
+            replay_save_callback,
+        )
+        .expect("terminal checkpoint reconstructs the production report");
+
+        assert_eq!(replay.0, uninterrupted.0, "terminal replay filters match");
+        assert_eq!(replay.1, uninterrupted.1, "terminal replay loss matches");
+        assert!(
+            replay_objective.prepared.get().is_none(),
+            "a finalized terminal replay must not prepare or score the objective again"
+        );
+        assert!(
+            !replay_callback_called.load(std::sync::atomic::Ordering::SeqCst),
+            "terminal replay must not emit another checkpoint callback"
+        );
+    }
 }

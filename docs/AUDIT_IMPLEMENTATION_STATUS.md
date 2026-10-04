@@ -3628,3 +3628,36 @@ Root source receipt: `/Users/pierre/a12-assets-combined-source-root-rehash-20261
 SHA-256 `1289a91207c03a8ee360cc1f6e78d94f7be41bae31c04b02cbfb6833068451ae`.
 Root metadata receipt: `/Users/pierre/a12-assets-metadata-root-review-20261004.json`,
 SHA-256 `dd18fb625ad1fc1d85697e29af8ae86f9bdb9d410ff4c058d2d43d293cd34014`.
+
+
+### A11 cleanup reproduction and current playback profile protection (2026-10-04)
+
+A separate isolated beta132 no-audio cleanup diagnostic reproduces the failed
+five-second raw-bind gate. All **125 GET requests** return empty measurement maps;
+owner-verified Shutdown returns HTTP 202; the owned process exits zero and leaves
+no descendants. All **20 scored bind observations** fail with Darwin errno 48
+(`EADDRINUSE`), with no LISTEN socket in those observations. TCP samples show
+server-port `TIME_WAIT` entries after the listener disappears. The source, runtime
+and user-path identities remain unchanged. This is evidence for this reproduction;
+the original run06 did not collect TCP state or errno, so its cause remains
+unproven and its overall failure remains retained. The initial diagnostic attempt
+refused before launching REW because of a command-record guard error; it remains
+recorded separately.
+
+Root result review:
+`/Users/pierre/rew-a11-cleanup-diagnostic-root-result-review-20261004.json`,
+SHA-256 `016930154950394b9ae353decdae064ea8fb3ca97df8aa870e9586f998537ab0`.
+A separate HTTP connection-lifecycle experiment is being prepared; the original
+five-second gate and frozen helper remain unchanged.
+
+Playback reconciliation uses private copies of the current extracted graph API.
+Root verifies **173 original working paths and their snapshot copies**, plus
+**162 indexed paths**, unchanged in DAW/SOTF. Status hashes match when queried
+with the snapshot's `--untracked-files=all` convention. An initial duplicate-math
+crate resolver failure remains diagnostic; source types were not changed to hide
+it. Current-profile playback acceptance remains pending a matched source freeze
+and focused backend gates.
+
+Root preservation review:
+`/Users/pierre/a12-current-profile-original-root-preservation-review-v2-20261004.json`,
+SHA-256 `2dd6e4f2201cae584f227a8025f48d3ef3f516609003502f4df548d097791c88`.

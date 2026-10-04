@@ -123,13 +123,12 @@ proptest = { version = "1.9", default-features = false, features = ["std"] }
 serial_test = "4"
 wide = "0.6.1"
 
-# Shared report primitives from the GitHub tree (never Gitea: releases
-# must resolve from public sources; local checkouts only via [patch]).
-math-iir-fir = { git = "https://github.com/pierreaubert/math-audio", rev = "bc3afa204820bb8783fd75e4b8592248cd7500b6", version = "0.5" }
-math-dsp = { git = "https://github.com/pierreaubert/math-audio", rev = "bc3afa204820bb8783fd75e4b8592248cd7500b6", version = "0.5" }
-math-optimisation = { git = "https://github.com/pierreaubert/math-audio", rev = "acdea21f853629a13b7f88f8baef51eb0394754c", version = "0.5" }
-math-rir = { git = "https://github.com/pierreaubert/math-audio", rev = "bc3afa204820bb8783fd75e4b8592248cd7500b6", version = "0.5" }
-sofa-reader = "0.2"
+# Shared report primitives from the sibling math-audio workspace.
+math-iir-fir = { version = "0.5", path = "../math-audio/crates/math-iir-fir" }
+math-dsp = { version = "0.5", path = "../math-audio/crates/math-dsp" }
+math-optimisation = { version = "0.5", path = "../math-audio/crates/math-optimisation" }
+math-rir = { version = "0.5", path = "../math-audio/crates/math-rir" }
+sofa-reader = { version = "0.2", path = "../sofa-reader" }
 
 # Core numerical computing
 ndarray = { version = "0.17", default-features = false, features = ["rayon", "serde"] }
@@ -304,8 +303,14 @@ incremental = false
 # Vello's registry dependencies must resolve to the same pinned Zed fork as
 # gpui-toolkit. Patches in a sibling workspace are not inherited here.
 [patch.crates-io]
+block = { path = "../gpui-toolkit/crates/3rdparties/block" }
+objc = { path = "../gpui-toolkit/crates/3rdparties/objc" }
+async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
 wgpu = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
 wgpu-core = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
 wgpu-hal = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
 wgpu-types = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
 naga = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+
+[patch."https://github.com/zed-industries/font-kit"]
+zed-font-kit = { path = "../gpui-toolkit/crates/3rdparties/zed-font-kit" }

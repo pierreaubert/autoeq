@@ -34,6 +34,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Check out pinned sibling workspaces
+        run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install pinned Just
@@ -42,6 +47,14 @@ jobs:
           just --version
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: taiki-e/install-action@cargo-mutants
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.14"
+
+      - name: Install pinned MDAT Python dependencies
+        run: python3 -m pip install --requirement scripts/requirements.txt
+
       - name: REW MDAT converter contracts
         run: just qa-roomeq-mdat
       - name: PR acoustic gates and reports

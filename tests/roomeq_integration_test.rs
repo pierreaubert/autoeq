@@ -172,6 +172,10 @@ const ROOM_CONFIGURATION_TIMEOUT: Duration = Duration::from_secs(90);
 const ROOM_OPTIMIZATION_READINESS_TIMEOUT: Duration = Duration::from_secs(30);
 #[cfg(unix)]
 const ROOM_CANCELLATION_TIMEOUT: Duration = Duration::from_secs(20);
+#[cfg(unix)]
+const ROOM_RECOVERY_EVALUATION_BUDGET: usize = 8_192;
+#[cfg(unix)]
+const ROOM_RECOVERY_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[cfg(unix)]
 #[derive(Default)]
@@ -193,7 +197,7 @@ struct SpawnedRoomEq {
 #[cfg(unix)]
 impl SpawnedRoomEq {
     fn spawn(config_path: &Path, output_path: &Path, frequency_samples: usize) -> io::Result<Self> {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_roomeq"))
+        let child = Command::new(env!("CARGO_BIN_EXE_roomeq"))
             .args([
                 "--config",
                 config_path.to_str().expect("UTF-8 config path"),
@@ -209,6 +213,43 @@ impl SpawnedRoomEq {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
+        Self::from_child(child)
+    }
+
+    fn spawn_recovery(
+        config_path: &Path,
+        output_path: &Path,
+        recovery_dir: &Path,
+        frequency_samples: usize,
+        resume: bool,
+    ) -> io::Result<Self> {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_roomeq"));
+        command
+            .args([
+                "--config",
+                config_path.to_str().expect("UTF-8 config path"),
+                "--output",
+                output_path.to_str().expect("UTF-8 output path"),
+                "--sample-rate",
+                "48000",
+                "--freq-samples",
+            ])
+            .arg(frequency_samples.to_string())
+            .arg("--recovery-dir")
+            .arg(recovery_dir);
+        if resume {
+            command.arg("--resume-recovery");
+        }
+        let child = command
+            .env("RUST_LOG", "info")
+            .env("RAYON_NUM_THREADS", "2")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()?;
+        Self::from_child(child)
+    }
+
+    fn from_child(mut child: Child) -> io::Result<Self> {
         let stdout = child.stdout.take().expect("piped stdout");
         let stderr = child.stderr.take().expect("piped stderr");
         let output = Arc::new(Mutex::new(CapturedChildOutput::default()));
@@ -258,6 +299,25 @@ impl SpawnedRoomEq {
         if !status.success() {
             return Err(io::Error::other(format!(
                 "kill -INT {process_id} exited with {status}"
+            )));
+        }
+        Ok(())
+    }
+
+    fn send_kill(&mut self) -> io::Result<()> {
+        if self.try_wait()?.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "RoomEQ exited before the test could send SIGKILL",
+            ));
+        }
+        let process_id = self.child.as_ref().expect("running child is retained").id();
+        let status = Command::new("kill")
+            .args(["-KILL", &process_id.to_string()])
+            .status()?;
+        if !status.success() {
+            return Err(io::Error::other(format!(
+                "kill -KILL {process_id} exited with {status}"
             )));
         }
         Ok(())
@@ -483,6 +543,130 @@ fn write_signal_test_config(directory: &Path, max_iterations: usize) -> PathBuf 
 }
 
 #[cfg(unix)]
+fn write_recovery_test_config(directory: &Path, max_evaluations: usize) -> PathBuf {
+    let fixture_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data/roomeq/test_speaker_left.csv");
+    let config = serde_json::json!({
+        "version": "3.0.0",
+        "speakers": { "left": fixture_path },
+        "optimizer": {
+            "algorithm": "autoeq:de",
+            "processing_mode": "low_latency",
+            "num_filters": 1,
+            "population": 12,
+            "max_iter": max_evaluations,
+            "seed": 42,
+            "strategy": "best1bin",
+            "tolerance": 0.0,
+            "atolerance": 0.0,
+            "min_freq": 40.0,
+            "max_freq": 12000.0,
+            "min_q": 0.5,
+            "max_q": 10.0,
+            "min_db": -12.0,
+            "max_db": 12.0,
+            "loss_type": "flat",
+            "refine": false,
+            "min_filter_improvement": 0.0,
+            "psychoacoustic": false
+        }
+    });
+    let config_path = directory.join("recovery-room.json");
+    fs::write(
+        &config_path,
+        serde_json::to_vec_pretty(&config).expect("serialize exact-recovery config"),
+    )
+    .expect("write exact-recovery config");
+    config_path
+}
+
+#[cfg(unix)]
+fn write_prior_room_bundle(output_path: &Path) {
+    let mut graph = autoeq::roomeq_model::DspGraph::new("1");
+    graph.add_channel("left", Vec::new());
+    graph.channels.get_mut("left").unwrap().initial_curve = Some(
+        autoeq_core::Curve {
+            freq: vec![40.0, 80.0, 160.0].into(),
+            spl: vec![74.0, 75.0, 73.0].into(),
+            ..Default::default()
+        }
+        .into(),
+    );
+    roomeq_workflow::save_output_bundle(&mut graph, output_path)
+        .expect("write prior sentinel bundle");
+}
+
+#[cfg(unix)]
+fn wait_for_nonterminal_recovery_checkpoint(
+    child: &mut SpawnedRoomEq,
+    journal_path: &Path,
+    timeout: Duration,
+) -> Result<(u64, u64), String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
+            return Err(format!(
+                "recovery child exited before a nonterminal generation barrier ({status}); {}",
+                child.output_text()
+            ));
+        }
+        if let Ok(bytes) = fs::read(journal_path)
+            && let Ok(journal) = serde_json::from_slice::<serde_json::Value>(&bytes)
+        {
+            let checkpoint = &journal["checkpoint"]["checkpoint"];
+            let generation = checkpoint["generation"].as_u64().unwrap_or_default();
+            let evaluations = checkpoint["evaluations"].as_u64().unwrap_or_default();
+            let terminal = checkpoint.get("terminal");
+            if generation >= 1 && evaluations > 0 && terminal.is_none_or(serde_json::Value::is_null)
+            {
+                return Ok((generation, evaluations));
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "recovery child did not persist a nonterminal generation checkpoint; {}",
+                child.output_text()
+            ));
+        }
+        thread::sleep(Duration::from_millis(2));
+    }
+}
+
+#[cfg(unix)]
+fn exact_room_signature(output_path: &Path) -> (Vec<serde_json::Value>, f64, f64, Option<usize>) {
+    let graph =
+        roomeq_workflow::load_output_bundle(output_path).expect("load final exact-recovery graph");
+    let plugins = serde_json::to_value(&graph.channels["left"].plugins)
+        .expect("serialize realized PEQ plugins");
+    let metadata = graph.metadata.as_ref().expect("optimization metadata");
+    let evaluations = metadata
+        .optimizer_evidence
+        .as_ref()
+        .and_then(|evidence| evidence.runs_by_channel.get("left"))
+        .and_then(|runs| runs.first())
+        .and_then(|run| run.evaluation_count);
+    (
+        plugins.as_array().unwrap().clone(),
+        metadata.pre_score,
+        metadata.post_score,
+        evaluations,
+    )
+}
+
+#[cfg(unix)]
+fn read_recovery_journal(directory: &Path) -> serde_json::Value {
+    serde_json::from_slice(
+        &fs::read(directory.join("room-recovery.json")).expect("read RoomEQ recovery journal"),
+    )
+    .expect("parse RoomEQ recovery journal")
+}
+
+#[cfg(unix)]
+fn read_exact_checkpoint(directory: &Path) -> serde_json::Value {
+    read_recovery_journal(directory)["checkpoint"]["checkpoint"].clone()
+}
+
+#[cfg(unix)]
 fn collect_asset_files(
     root: &Path,
     current: &Path,
@@ -651,6 +835,198 @@ fn room_cli_sigint_drains_stereo_optimization_and_preserves_prior_bundle() {
             retained_path.join("signal-room-100000.json").display(),
             retained_path.join("room-output.json").display(),
             retained_path.join("room-output_files").display()
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn room_cli_recovers_exact_de_after_sigkill_and_rejects_changed_config() {
+    let directory = tempfile::TempDir::new().expect("create RoomEQ recovery test directory");
+    let retain_artifacts = std::env::var_os("ROOMEQ_KEEP_RECOVERY_TEST_ARTIFACTS").is_some();
+    let directory_path = if retain_artifacts {
+        let path = directory.keep();
+        eprintln!(
+            "Retaining RoomEQ recovery test artifacts at {}",
+            path.display()
+        );
+        path
+    } else {
+        directory.path().to_path_buf()
+    };
+    let baseline_output = directory_path.join("baseline-room.json");
+    let baseline_recovery = directory_path.join("baseline-recovery");
+    let output_path = directory_path.join("room-output.json");
+    let recovery_dir = directory_path.join("recovery");
+    let config_path = write_recovery_test_config(&directory_path, ROOM_RECOVERY_EVALUATION_BUDGET);
+    let original_config = fs::read(&config_path).expect("read exact-recovery config");
+
+    let mut baseline =
+        SpawnedRoomEq::spawn_recovery(&config_path, &output_path, &baseline_recovery, 64, false)
+            .expect("spawn uninterrupted exact-DE baseline");
+    let baseline_status = baseline
+        .wait_until_exit(ROOM_CONFIGURATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            let _ = baseline.save_output(&directory_path, "baseline");
+            panic!(
+                "uninterrupted exact-DE baseline did not finish: {error}; {}",
+                baseline.output_text()
+            )
+        });
+    baseline
+        .save_output(&directory_path, "baseline")
+        .expect("save baseline process output");
+    assert!(
+        baseline_status.success(),
+        "uninterrupted exact-DE baseline failed: {}",
+        baseline.output_text()
+    );
+    roomeq_workflow::load_output_bundle(&output_path).expect("baseline exact-DE bundle is valid");
+    let baseline_journal = read_recovery_journal(&baseline_recovery);
+    assert_eq!(baseline_journal["status"], "committed");
+    let baseline_checkpoint = read_exact_checkpoint(&baseline_recovery);
+    let baseline_signature = exact_room_signature(&output_path);
+    roomeq_workflow::publish_output_bundle_from(&output_path, &baseline_output)
+        .expect("retain an independent copy of the uninterrupted baseline bundle");
+
+    write_prior_room_bundle(&output_path);
+    let prior_bundle = snapshot_room_bundle(&output_path).expect("snapshot prior native bundle");
+    let mut interrupted =
+        SpawnedRoomEq::spawn_recovery(&config_path, &output_path, &recovery_dir, 64, false)
+            .expect("spawn recoverable RoomEQ process");
+    let (generation, evaluations) = wait_for_nonterminal_recovery_checkpoint(
+        &mut interrupted,
+        &recovery_dir.join("room-recovery.json"),
+        ROOM_RECOVERY_CHECKPOINT_TIMEOUT,
+    )
+    .unwrap_or_else(|error| {
+        let _ = interrupted.save_output(&directory_path, "interrupted");
+        panic!("RoomEQ did not reach a durable generation barrier: {error}");
+    });
+    assert!(generation >= 1 && evaluations > 0);
+    assert_eq!(read_recovery_journal(&recovery_dir)["status"], "running");
+
+    interrupted
+        .send_kill()
+        .expect("send SIGKILL to the owned RoomEQ process");
+    let killed_status = interrupted
+        .wait_until_exit(ROOM_CANCELLATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            let _ = interrupted.save_output(&directory_path, "interrupted");
+            panic!(
+                "SIGKILL did not reap the RoomEQ process within the bounded wait: {error}; {}",
+                interrupted.output_text()
+            )
+        });
+    interrupted
+        .save_output(&directory_path, "interrupted")
+        .expect("save interrupted process output");
+    assert!(
+        !killed_status.success(),
+        "SIGKILL must not be reported as success"
+    );
+    assert_eq!(
+        snapshot_room_bundle(&output_path).expect("snapshot after process death"),
+        prior_bundle,
+        "process death during optimization must preserve the prior canonical bundle"
+    );
+
+    let interrupted_journal_bytes =
+        fs::read(recovery_dir.join("room-recovery.json")).expect("read interrupted journal");
+    let interrupted_journal: serde_json::Value =
+        serde_json::from_slice(&interrupted_journal_bytes).expect("parse interrupted journal");
+    assert_eq!(interrupted_journal["status"], "running");
+    assert!(interrupted_journal["checkpoint"]["checkpoint"]["terminal"].is_null());
+
+    let mut changed_config: serde_json::Value =
+        serde_json::from_slice(&original_config).expect("parse original recovery config");
+    changed_config["optimizer"]["max_iter"] =
+        serde_json::json!(ROOM_RECOVERY_EVALUATION_BUDGET + 1);
+    let changed_config =
+        serde_json::to_vec_pretty(&changed_config).expect("serialize changed recovery config");
+    fs::write(directory_path.join("changed-config.json"), &changed_config)
+        .expect("retain changed recovery config");
+    fs::write(&config_path, &changed_config).expect("write intentionally changed config");
+    let mut incompatible =
+        SpawnedRoomEq::spawn_recovery(&config_path, &output_path, &recovery_dir, 64, true)
+            .expect("spawn changed-identity refusal process");
+    let incompatible_status = incompatible
+        .wait_until_exit(ROOM_CANCELLATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            let _ = incompatible.save_output(&directory_path, "incompatible");
+            panic!(
+                "changed-input refusal did not finish promptly: {error}; {}",
+                incompatible.output_text()
+            )
+        });
+    incompatible
+        .save_output(&directory_path, "incompatible")
+        .expect("save identity-refusal process output");
+    assert!(!incompatible_status.success());
+    assert!(
+        incompatible.output_text().contains("identity mismatch"),
+        "changed budget must be refused as a run-identity mismatch: {}",
+        incompatible.output_text()
+    );
+    assert_eq!(
+        fs::read(recovery_dir.join("room-recovery.json")).expect("re-read refusal journal"),
+        interrupted_journal_bytes,
+        "identity refusal must leave the prior journal bytes untouched"
+    );
+    assert_eq!(
+        snapshot_room_bundle(&output_path).expect("snapshot after identity refusal"),
+        prior_bundle,
+        "identity refusal must preserve the prior canonical bundle"
+    );
+
+    fs::write(&config_path, &original_config).expect("restore exact original config bytes");
+    let mut resumed =
+        SpawnedRoomEq::spawn_recovery(&config_path, &output_path, &recovery_dir, 64, true)
+            .expect("spawn exact fresh-process resume");
+    let resumed_status = resumed
+        .wait_until_exit(ROOM_CONFIGURATION_TIMEOUT)
+        .unwrap_or_else(|error| {
+            let _ = resumed.save_output(&directory_path, "resumed");
+            panic!(
+                "exact fresh-process resume did not finish: {error}; {}",
+                resumed.output_text()
+            )
+        });
+    resumed
+        .save_output(&directory_path, "resumed")
+        .expect("save resumed process output");
+    assert!(
+        resumed_status.success(),
+        "exact fresh-process resume failed: {}",
+        resumed.output_text()
+    );
+    roomeq_workflow::load_output_bundle(&output_path).expect("resumed exact-DE bundle is valid");
+    let final_journal = read_recovery_journal(&recovery_dir);
+    assert_eq!(final_journal["status"], "committed");
+    assert!(final_journal["attempt"].as_u64().unwrap() >= 2);
+    assert_eq!(final_journal["recovery_count"], 1);
+    assert!(
+        read_exact_checkpoint(&recovery_dir) == baseline_checkpoint,
+        "resumed solver must reproduce the complete terminal DE checkpoint"
+    );
+    let resumed_signature = exact_room_signature(&output_path);
+    assert_eq!(resumed_signature, baseline_signature);
+    assert_eq!(
+        resumed_signature.3,
+        final_journal["logical_search_evaluations"]
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok()),
+        "published optimizer evidence must retain cumulative logical evaluations"
+    );
+
+    if retain_artifacts {
+        eprintln!(
+            "Retained RoomEQ recovery evidence: directory={}, config={}, baseline_output={}, resumed_output={}, interrupted_journal={}",
+            directory_path.display(),
+            directory_path.join("recovery-room.json").display(),
+            directory_path.join("baseline-room.json").display(),
+            directory_path.join("room-output.json").display(),
+            directory_path.join("recovery/room-recovery.json").display()
         );
     }
 }

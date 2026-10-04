@@ -28,6 +28,31 @@ pub(crate) fn optimize_maybe_multi(
     callback: Option<OptimProgressCallback>,
     target_tilt_curve: Option<&Curve>,
 ) -> Result<EqOptimizationResult> {
+    optimize_maybe_multi_with_exact_checkpoint(
+        channel_name,
+        prepared,
+        optimization_curve,
+        optimizer_config,
+        eq_resources,
+        sample_rate,
+        callback,
+        target_tilt_curve,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn optimize_maybe_multi_with_exact_checkpoint(
+    channel_name: &str,
+    prepared: &PreparedChannelInput,
+    optimization_curve: &Curve,
+    optimizer_config: &OptimizerConfig,
+    eq_resources: &EqResources,
+    sample_rate: f64,
+    callback: Option<OptimProgressCallback>,
+    target_tilt_curve: Option<&Curve>,
+    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+) -> Result<EqOptimizationResult> {
     // Backends may return their best-so-far candidate after Stop. At the
     // channel boundary that is cancellation, not permission for later FIR
     // generation or post-processing to produce a completed artifact.
@@ -47,6 +72,11 @@ pub(crate) fn optimize_maybe_multi(
         measurements.is_multi_measurement_source(),
         optimizer_config,
     );
+    if exact.is_some() && use_multi {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "exact DE recovery supports only a single measurement objective".into(),
+        });
+    }
 
     let result = if use_multi {
         let multi_config = optimizer_config
@@ -98,21 +128,38 @@ pub(crate) fn optimize_maybe_multi(
             ),
         })
     } else {
-        if let Some(callback) = callback {
-            eq::optimize_channel_eq_with_callback_detailed(
+        match (callback, exact) {
+            (Some(callback), Some(exact)) => {
+                eq::optimize_channel_eq_with_exact_de_checkpoint_detailed(
+                    optimization_curve,
+                    optimizer_config,
+                    Some(eq_resources),
+                    sample_rate,
+                    Some(callback),
+                    exact,
+                )
+            }
+            (None, Some(exact)) => eq::optimize_channel_eq_with_exact_de_checkpoint_detailed(
+                optimization_curve,
+                optimizer_config,
+                Some(eq_resources),
+                sample_rate,
+                None,
+                exact,
+            ),
+            (Some(callback), None) => eq::optimize_channel_eq_with_callback_detailed(
                 optimization_curve,
                 optimizer_config,
                 Some(eq_resources),
                 sample_rate,
                 callback,
-            )
-        } else {
-            eq::optimize_channel_eq_detailed(
+            ),
+            (None, None) => eq::optimize_channel_eq_detailed(
                 optimization_curve,
                 optimizer_config,
                 Some(eq_resources),
                 sample_rate,
-            )
+            ),
         }
         .map_err(|error| AutoeqError::OptimizationFailed {
             message: format!("EQ optimization failed for channel {channel_name}: {error}"),

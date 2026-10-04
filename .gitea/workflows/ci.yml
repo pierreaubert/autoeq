@@ -36,6 +36,9 @@ jobs:
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
 
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -98,6 +101,9 @@ jobs:
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
 
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -122,6 +128,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -176,6 +185,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -245,6 +257,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
@@ -271,6 +286,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
@@ -306,6 +324,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -362,6 +383,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
         run: bash scripts/checkout_ci_siblings.sh
+
+      - name: Install Linux mold linker
+        run: sudo apt-get update && sudo apt-get install -y mold
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

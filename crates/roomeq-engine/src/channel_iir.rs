@@ -72,6 +72,26 @@ impl IirOptimizerOutput {
 /// I/O. All source-backed resources must already be present in the prepared
 /// channel input.
 pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChannelResult> {
+    process_iir_channel_inner(&mut request, None)
+}
+
+/// Execute one LowLatency channel using exact seeded AutoEQ DE recovery.
+pub fn process_iir_channel_with_exact_checkpoint(
+    mut request: IirChannelRequest<'_>,
+    exact: crate::eq::exact_recovery::ExactDERecoveryOptions,
+) -> Result<IirChannelResult> {
+    process_iir_channel_inner(&mut request, Some(exact))
+}
+
+fn process_iir_channel_inner(
+    request: &mut IirChannelRequest<'_>,
+    exact: Option<crate::eq::exact_recovery::ExactDERecoveryOptions>,
+) -> Result<IirChannelResult> {
+    if exact.is_some() && request.mode != IirChannelMode::LowLatency {
+        return Err(AutoeqError::InvalidConfiguration {
+            message: "exact DE recovery supports LowLatency IIR only".into(),
+        });
+    }
     let usable_curve = request
         .prepared
         .usable_curve(&request.preprocessed.curve_for_optim)?;
@@ -80,8 +100,8 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
 
     match request.mode {
         IirChannelMode::LowLatency | IirChannelMode::WarpedIir => {
-            let (eq_filters, optimizer_evidence, audibility_veto, veto_adjudication) =
-                optimize::optimize_iir_eq(
+            let (eq_filters, optimizer_evidence, audibility_veto, veto_adjudication) = match exact {
+                Some(exact) => optimize::optimize_iir_eq_with_exact_checkpoint(
                     request.channel_name,
                     request.prepared,
                     &optimization_curve,
@@ -90,7 +110,19 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
                     request.sample_rate,
                     request.callback.take(),
                     request.target.target_tilt_curve.as_ref(),
-                )?;
+                    Some(exact),
+                )?,
+                None => optimize::optimize_iir_eq(
+                    request.channel_name,
+                    request.prepared,
+                    &optimization_curve,
+                    request.optimizer,
+                    request.eq_resources,
+                    request.sample_rate,
+                    request.callback.take(),
+                    request.target.target_tilt_curve.as_ref(),
+                )?,
+            };
             info!("  Optimized {} EQ filters", eq_filters.len());
 
             let preference_filters = preference_filters(
@@ -112,7 +144,7 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
                 IirChannelMode::KautzModal => unreachable!(),
             };
             assemble::assemble_iir_result(
-                &request,
+                request,
                 output,
                 with_preprocessing_evidence(request.preprocessed, optimizer_evidence),
                 audibility_veto,
@@ -120,9 +152,9 @@ pub fn process_iir_channel(mut request: IirChannelRequest<'_>) -> Result<IirChan
             )
         }
         IirChannelMode::KautzModal => {
-            let output = optimize_kautz_modal(&request, &optimization_curve)?;
+            let output = optimize_kautz_modal(request, &optimization_curve)?;
             assemble::assemble_iir_result(
-                &request,
+                request,
                 output,
                 request.preprocessed.optimizer_evidence.clone(),
                 Vec::new(),

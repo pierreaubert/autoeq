@@ -14,15 +14,15 @@ cannot replace them.
 
 | Package | Current state | Remaining acceptance work |
 | --- | --- | --- |
-| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; isolated source installation passes; Linux ARM build/help and Windows ARM cross-build verified; registry, Windows runtime and Linux x86 evidence remain |
+| A00 QA/build coverage | Partial | Fresh detached run passes all 124 numerical records, 140 Rust targets and 22 package library suites; four CLI binaries have version/help checks; Linux ARM build/help, Windows ARM cross-build, and Linux x86 debug cross-build plus QEMU smoke verified; registry installation, native Linux runtime and Windows runtime remain |
 | A01 native UI actions | Deferred | Begin after backend work |
 | A02 canonical UI result loading | Deferred | Begin after backend work; backend bundle loading belongs to A11 |
 | A03 capture/backend handoff | Partial | Producer/consumer, lossless legacy import and explicit repeated/partial selection committed; hardware cancellation evidence remains |
-| A04 measurement/live analysis | Partial | Live calibration and the bounded synthetic ESS diagnostic pass; an isolated guarded-operator increment is verified, while the production estimator, conditioning, capture integration, physical support and hardware evidence remain open |
+| A04 measurement/live analysis | Partial | Input-only preparation and reusable Rust fitting are merged into local math main; independent original-fixture checks pass for four synthetic 4 kHz cases. Production-rate long-tail scalability, conditioning certification, capture integration, physical harmonic support and hardware evidence remain open |
 | A05 configuration/review UI | Deferred | Begin after backend work |
 | A06 speaker/headphone workflows | Partial | Explicit source/rig/target/device contracts, checked APO export and renderer capabilities committed; reference comparisons and verified RME/AU consumer profiles remain; UI deferred |
 | A07 optimizer quality | Partial | All 841 production-pipeline cells recorded and accounting verified; sampled PEQ transfer verified independently and reusable strict analysis gate committed; public BO dependency integration and justified presets remain |
-| A08 recoverable jobs | Partial | Exact DE continuation pinned and CLI interruption verified; NSGA checkpoint prototype passes locally; dependency publication, broader integration/recovery and hardware checks remain |
+| A08 recoverable jobs | Partial | Opt-in schema-3 crash recovery is integrated and SIGKILL/fresh-process DE resume is verified for one seeded single-channel LowLatency path; multi-channel/NSGA and broader workflow recovery, Windows runtime and power-loss checks remain open |
 | A09 realized correction | Partial | Kautz multirate witnesses and optional output attenuation budgets verified; a later output-attenuation regression checks per-output cuts against the current serialized chain; Genelec still fails electrical-gain and bass-parity budgets, and full mode/rate/time-domain acceptance remains |
 | A10 calibrated joint bass | Partial | Existing calibrated complete-graph gain/delay search verified; wider demand/seat/rate/routing and matched MSO evidence remain |
 | A11 bundles/export | Partial | Transaction/restart recovery and immutable playback contracts committed; 15 typed REW DSP cases pass with failed cleanup gate retained; text-import and broader deployed-consumer evidence remain |
@@ -3057,18 +3057,53 @@ exit zero for `--help` inside the same isolated Ubuntu image. The existing
 explicitly. Network access was disabled and source/dependency mounts were
 read-only. Generic CPU flags avoid inheriting this Mac host CPU identity.
 
-Separate Mac-host cross-checks for Linux x86 and Windows MSVC x86 stopped
-before our code could be checked: Linux lacks `x86_64-linux-gnu-gcc`, and
-Windows lacks C runtime/SDK headers needed by `aws-lc-sys`. They remain
-unavailable evidence. Initial container attempts selected an absent stable
-toolchain and failed offline; those logs remain alongside the successful
-pinned-toolchain check. No physical audio device was opened, and this is
-not a release-package or Windows runtime verification.
+The initial Mac-host cross-checks for Linux x86 and Windows MSVC x86 stopped
+before our code could be checked: Linux lacked `x86_64-linux-gnu-gcc`, and
+Windows lacked the C runtime/SDK headers needed by `aws-lc-sys`. Those host
+failures remain historical. Linux x86 was later cross-built and smoke-tested
+under a separate pinned runtime below; Windows MSVC x86 remains unverified.
+Initial container attempts selected an absent stable toolchain and failed
+offline; those logs remain alongside the successful pinned-toolchain check.
+No physical audio device was opened, and this is not release-package or
+Windows runtime verification.
 
 Raw logs use the `autoeq-a00-linux-arm-*` prefix under the task evidence
 root. `/Users/pierre/a00-cross-platform-cli-verification.json` binds the
-source/image/toolchain, raw logs and four binary hashes. Registry packaging
-and the remaining platform requirements are still open.
+source/image/toolchain, raw logs and four binary hashes. Registry packaging,
+native Linux execution and Windows runtime remain open.
+
+### A00 Linux x86 debug cross-build and QEMU smoke (2026-10-04)
+
+Four CLI binaries (`autoeq`, `roomeq`, `benchmark-autoeq-speaker` and
+`roomeq-qa-quality`) compiled and linked for `x86_64-unknown-linux-gnu` in the
+pinned Rust 1.95 debug build. The source was
+`a454c74a0e2e2bc4b5a9c7b5ac235ab4bae001a7`; 3,824 tracked files were
+unchanged. The cross-build used image
+`sha256:8a9f1c9dad4e7e073bf6c70824998b110f8481a785fac7d92016fd2b8a988eb6`.
+
+The same four binaries, identified by their recorded hashes, passed ten
+bounded smoke commands under QEMU 10.0.13 in a separate Debian trixie runtime
+image built from authenticated Debian packages
+(`sha256:f1259ea3ea1512d7de29ee008025f9a12c6b10685e20cae250c558e2c31503c1`).
+The checks covered each CLI's version and help output, `autoeq --algo-list`,
+and `roomeq-qa-quality --list` (38 listed entries, including Stereo 2.0 and
+Genelec). They test Linux x86 user-mode execution of debug binaries; they do
+not establish native Linux execution, release installation, DSP quality,
+playback or long-running stability. Earlier QEMU 8.2 emulator crashes remain
+retained as failed diagnostic attempts and are not counted as application
+results. The QEMU 8 failure summary is
+`/Volumes/home_tmp/tmp/autoeq-a00-linux-x86-evidence/qemu8-failure-diagnostic-receipt.json`
+(SHA-256 `f0a68cfcd7a4028fecc6dadc585e3cf38cbb60bc0955c5bc6dcd52ce773816d0`).
+
+The cross-build receipt is
+`/Volumes/home_tmp/tmp/autoeq-a00-linux-x86-evidence/build-attempt02-result.json`
+(SHA-256 `b27300bd1b18ae9ec9d35586fe0574161d6be6e45446c2e450dd2487327a76d7`);
+the successful runtime receipt is
+`/Volumes/home_tmp/tmp/autoeq-a00-linux-x86-evidence/qemu10-runtime-result.json`
+(SHA-256 `d660830710686f2c570d1d73e2dcf4036bdb3018ccefe3c3b5eb7b817851fc83`).
+Root independently reviewed the runtime evidence in
+`/Users/pierre/a00-linux-x86-root-review-20261004.json` (SHA-256
+`b0273fd4207a81e33933ecea04f4b430ff233321a7a61cbaab79c5feca515bb3`).
 
 ### A00 dependency partition repairs (2026-10-03)
 
@@ -3272,6 +3307,360 @@ focused test passes 1/1 and strict workflow Clippy passes. The final receipt is
 This synthetic regression verifies the serialized artifact path, not physical
 playback or listening behavior. Full A09 mode/rate/time-domain and measured
 acceptance remain open.
+
+### A08 exact RoomEQ crash-recovery lane (2026-10-04)
+
+Local main `650fc66d1a3b33dfacc95df70b9d3b2735098369` integrates an opt-in,
+crash-recovery path for one generic single-measurement channel using seeded
+AutoEQ differential evolution in LowLatency mode. The CLI options are
+`--recovery-dir DIR` and `--resume-recovery`. They are incompatible with
+fallback overrides, external exports, verification bundles/inputs/graphs and
+dry-run. Recovery refuses unsupported topology/backend, unseeded runs,
+refinement/adaptive or multi-measurement modes, and zero-filter requests before
+optimization scoring. Ordinary runs keep their existing path.
+
+The journal schema is version 3 with algorithm identity
+`autoeq-room-recovery-exact-de-v1`. Its run identity binds the resolved config,
+declared input files and parsed measurement samples, sample rate, frequency
+grid, output destination, and build identity. The build identity is a streamed
+SHA-256 of the current executable file, captured once when opening the session;
+it does not attest loaded code, dynamic libraries or runtime state. The math
+checkpoint binds the exact DE state, seed, budget/configuration, RNG and solver
+identities. Older schema, changed inputs/configuration/build, corrupted state
+and unsupported modes fail closed. A generation-barrier checkpoint survives a
+killed process; a fresh process resumes it, runs normal finalization and
+publishes through the existing output-bundle transaction/recovery boundary.
+This is crash recovery, not a graceful pause protocol. Cancellation remains
+terminal. NSGA continuation and other RoomEQ modes are not claimed.
+
+The actual-binary SIGKILL test runs a seeded synthetic RoomEQ job to a durable
+nonterminal barrier, kills the owned process, and resumes in a fresh process.
+The resumed terminal DE checkpoint, channel output and correction decisions
+match the uninterrupted run; the journal records 8,185 logical evaluations
+and one resume. A changed-config attempt refuses without replacing the prior
+canonical bundle. Root independently checked the retained child artifacts and
+confirmed the recorded build hash matches the tested binary.
+
+On the integrated source, strict scoped engine/workflow/CLI Clippy passes;
+recovery tests pass 11/11, engine exact-continuation tests 8/8, the CLI
+SIGKILL/resume test 1/1 and the current FIR all-rates regression 1/1. Full
+workflow and engine suites passed on the same A08 source before the latest
+main-only FIR test/documentation delta: 1,062 passed/7 ignored and
+892 passed/1 ignored, respectively. Locked metadata resolved 671 packages;
+the partition check passes 22 packages, 90 internal edges, zero cycles and
+zero exceptions. The recovery-enabled RoomEQ CLI and integration test also
+compile for `aarch64-pc-windows-gnullvm`; this is compile-only evidence. No
+Windows runtime, filesystem power-loss, physical playback or hardware behavior
+was tested.
+
+Receipt: `/Users/pierre/a08-room-recovery-main-integration.json`, SHA-256
+`ea645a9cb3c9a5bd3a68f88107af9bdba46e46abdb813c37ee6f5c435f902520`.
+It records source head/base and the independent retained-artifact review, and
+pins the detailed source/gate receipt by SHA-256; it does not duplicate that
+receipt's per-file hashes. The detailed receipt binds the source and lock
+hashes, Cargo metadata, gate logs, child artifacts, binary identity and
+limitations. Detailed logs and receipt:
+`/Volumes/home_tmp/tmp/autoeq-a08-room-recovery-final-fd17-evidence/` and
+`/Volumes/home_tmp/tmp/autoeq-a08-room-recovery-final-fd17-evidence/final-receipt.json`
+(SHA-256 `f9b846ae00d031de63dabbabf6545bcec3054dd16cf34d4b1c0179d8a582aa05`).
+
+### A00 current integrated source-install proof (2026-10-04)
+
+A locked offline source install from clean commit
+`650fc66d1a3b33dfacc95df70b9d3b2735098369` built package `autoeq 0.5.74`
+with `cli,qa` features into a new private prefix; it did not modify the user's
+installed binaries or PATH. Cargo's default install profile is release. The
+four actual manifest targets are `autoeq`, `roomeq`,
+`benchmark-autoeq-speaker` and `roomeq-qa-quality` (the QA-quality binary
+requires `qa`, which includes `cli`). All four installed `--help` checks pass.
+The RoomEQ recovery flags `--recovery-dir` and `--resume-recovery` parse
+successfully, and the installed CLI help documents the single-channel exact-DE
+recovery scope. The AutoEQ renderer-capabilities query exits successfully and
+reports schema version 3. Both AutoEQ algorithm lists include `autoeq:cobra`;
+the QA-quality binary's list-only mode also exits successfully.
+
+One bounded installed-binary smoke used an eight-point local analytic curve,
+one PK filter, seed 42 and a 32-evaluation cap at 48 kHz. The `autoeq:cobra`
+command exits zero and logs `nfev=32`, but reports a best-effort result because
+the budget was reached. It also warns that APO integer-Hz serialization drifts
+the objective by `9e-6`, above its `1e-6` limit. This confirms CLI dispatch
+and the bounded optimizer path only; it is not an accepted quality or acoustic
+result. The CSV, logs and generated files are retained.
+
+At the time of this source-install proof, version reporting was not uniform:
+`roomeq --version` printed `roomeq-cli 0.5.8`, while AutoEQ and the speaker
+benchmark reserved `--version` for the API measurement version and rejected
+`-V`; QA-quality also lacked a program-version flag. A follow-up adds an
+additive `-V, --program-version` surface without changing AutoEQ's API-data
+`--version` argument; its build and process checks are recorded below.
+Registry installation, cross-platform runtime, physical playback and hardware
+behavior were not tested.
+
+The exact installation command, lock/toolchain metadata, source-before/after
+hashes, 17 CLI probes and four executable identities are bound in:
+`/Volumes/home_tmp/tmp/autoeq-a00-installed-650fc66-evidence/receipt.json`
+(SHA-256 `d001c1cf4f8ac09b80310bb25473476bc8b86d18d20544a469b00d2d8b9ba524`).
+The integrity review passed 15/15 checks:
+`integrity-review.json` (SHA-256
+`439ddb62b8a409ebefb3ec6f6cc77e5463fbf5adc19878aa797eb0148c57d2b4`). Root
+independently rehashed 49 retained artifacts; review:
+`/Users/pierre/a00-current-install-root-review.json` (SHA-256
+`42d7b52be467192320de28e0e05a1370a13dfabfbedcd63797c8dae51dbc63f4`).
+
+### A00 installed CLI program-version surface (2026-10-04)
+
+The shared AutoEQ argument parser accepts `-V, --program-version` while
+preserving `--version <VERSION>` for API measurement data. The `autoeq` and
+`benchmark-autoeq-speaker` launchers report the installed root package version
+(`0.5.74`). `roomeq-qa-quality` reports that executable version and labels its
+library package version separately (`roomeq-qa 0.5.67`). The existing
+`roomeq --version` output remains `roomeq-cli 0.5.8`.
+
+The three changed manifest binaries were rebuilt in release mode from final
+integrated source commit `9d14aa69dc5ceeadb19a9c11cf7ed79dbc547139`. Four
+focused parser tests and strict scoped Clippy over the library and test targets
+passed on source commit `c50e40a1da2793795ef0ee83a6745fff00825d67`. A follow-up
+removed one launcher-detail sentence from generated help; the final release
+rebuild and process checks below use the updated source commit
+`097bd0aca9192c0f035ae6bb641536a01e06a77c` (integrated as `9d14aa69...`).
+Ten process checks passed from `/private/tmp`, outside the repository. They
+cover both version flags, help output (including absence of launcher internals),
+the unchanged API-data `--version` value, and the rule that text after `--` is
+not treated as a program-version flag. The QA version command returned its
+version line without needing registry or workspace files. No second `cargo
+install` was run, so this verifies the rebuilt release binaries rather than
+replacing the earlier private-prefix installation.
+
+The final eight source files in the isolated and integration worktrees match
+byte-for-byte; `Cargo.toml`, `Cargo.lock`, and `.cargo/config.toml` are
+unchanged. Locked offline Cargo metadata resolved all 22 workspace packages.
+The final source and manifest comparison is in
+`/Volumes/home_tmp/tmp/autoeq-a00-cli-program-version-evidence/integration-source-identity-final.json`;
+formatting, metadata and commit checks are in `integration-gates-final.json`.
+The final release-build log is `final-release-build.log`; final process logs,
+checks and executable hashes are in `process-check-final.json` and
+`short-alias-check-final.json`, under the same evidence directory. Focused
+test and strict Clippy logs from the implementation commit remain in
+`gate-receipt.json`. These checks do not establish registry publication or
+cross-platform runtime behavior.
+
+### A04 run06: independent evaluation of a synthetic Rust fit (2026-10-04)
+
+The Rust run06 fit from math commit
+`b51af8405eaa3a4a887c4e19f0158c4fcf51bcd6` passes an independent evaluator on
+four synthetic 4 kHz additive parallel-Hammerstein cases with five 320-tap
+orders. All 20 training records, four derived holdouts and 24 tone comparisons
+pass their predeclared numerical checks. Maximum normalized RMSE is
+`5.03e-16` on training and `4.95e-16` on heldout samples; maximum tone
+amplitude, phase and THD errors are `2.46e-9 dB`, `2.98e-8 degrees` and
+`9.24e-14` percentage points.
+
+The run uses an imported dense QR factor to fit the model; it does not
+construct a scalable factor. The five original forward/Q and adjoint/Q
+probes pass unchanged `1e-8` limits; the maximum discrepancies are `1.05e-10`
+and `1.10e-10`, respectively. All ten norm-scaled adjoint probes pass the
+unchanged `1e-10` limit; the worst discrepancy is `4.57e-13`. It reuses the finite design
+certificate from run05 and claims no new rank or Rust FFT condition
+certificate. The child exits zero;
+recorded peak RSS is 48,480,256 bytes against the 1,610,612,736-byte cap and
+elapsed time is 0.256 seconds against the 600-second cap. The runtime receipt
+also retains one external RSS sample; the exact child peak is based on the
+owner-recorded wait4 result.
+
+This is a synthetic numerical-fit result only. It does not demonstrate a
+production ESS estimator, scalable QR/preconditioner construction, capture
+integration, physical harmonic support, room acoustics or calibrated hardware.
+A04 remains partial.
+
+Independent evaluator receipt: `/Users/pierre/a04-rust-fit-independent-evaluation-originalprobes-v2-20261004.json`,
+SHA-256 `d385826fd67fa4b357d5a99ddbeba660c75cb3006c2636f55ef0ba6c546a6091`.
+Runtime receipt: `/Users/pierre/a04-rust-fit-runtime-receiptoriginalprobes.json`,
+SHA-256 `9d98e09a1130d99c12bc42c78a5cc9a5f7747847e55179bf259a3e6a20ed45b1`.
+The evaluator binds the fixture/probe manifests, source/binary hashes, math and
+harness commits, Python environment and criteria. The harness commit is
+`33ae081d93a29f79a4297edf7a1f463e073a4200`.
+
+### A04 math primitives integrated on current math main (2026-10-04)
+
+Math main `3d5edf55d7f54afc1d3c57b42ccac30114d94a33` contains only the seven
+polynomial-convolution, bounded LSQR and triangular right-map commits
+rebased onto `bc3afa204820bb8783fd75e4b8592248cd7500b6`. The integration
+changes four analysis files; it does not import the older branch's DE,
+wavelet or CSV changes. The clean integration profile passes all 114 analysis
+tests, strict library/test Clippy, scoped rustfmt and diff checks. The
+original four dirty math files remain byte-identical. That user-modified
+Cargo/crossover profile was preserved, not claimed tested.
+
+Receipt: `/Users/pierre/a04-current-math-main-integration.json`, SHA-256
+`2ea8d09a8e40898aa0c23233998bc42d41560af740a9ea4ad9573d39ee7cb86f`.
+The retained test output starts after initial compilation and contains a
+truncated intermediate listing; its complete terminal summary records
+114 passed, zero failed. The Clippy log is retained separately. These
+primitives do not yet constitute a production ESS estimator.
+
+### A03/A12 capture compatibility fix integrated (2026-10-04)
+
+Capture main `0513842a325e743dfc2387405da0389072291b8d` initializes the
+optional `RecordingConfiguration.capture_handoff_file` field to `None`.
+This one-line compatibility change is based on `248d1f7`; it adds no UI
+feature. The clean isolated capture profile with AutoEQ `650fc66d` and math
+`bc3afa2` passes a locked offline library check and all 215 library tests.
+Its private lock was refreshed; capture explicitly ignores Cargo.lock, so
+no lock was committed. The original six dirty source files and ignored lock
+remain byte-identical. This does not establish that the user's dirty profile
+builds with its preserved lock.
+
+Receipt: `/Users/pierre/a12-capture-compatibility-main-integration.json`,
+SHA-256 `8620aa85e9f9b70986bd9ad9c0645afa62a14b49b1037d9df9e5b5c835b2b39d`.
+
+### A12 callback attribution prepared, external assets still open (2026-10-04)
+
+The isolated DAW feature commit
+`f94d167ddee0dcef04e687b54b5c05aa5a9322f7` follows a separate prerequisite
+commit containing six user-staged LabNull files. It has not been merged
+into the original dirty DAW checkout. The current private dependency profile
+passes graph-attribution tests 2/2, LabNull callback tests 8/8, decoder
+flush/ack 1/1, strict engine Clippy and scoped formatting. Root independently
+rehashed 27 source/log artifacts and verified the clean committed branch.
+
+The attribution identifies the acknowledged graph descriptor and host
+generation, checks audio format/latency, marks crossfades as transitions and
+invalidates binding after live mutation. It does not identify loaded external
+asset/plugin bytes, attest CPAL/device delivery or prove measured playback.
+Those A12 requirements remain open. No current-profile full suite pass is
+claimed; earlier absent-fixture failures remain recorded.
+
+Root review: `/Users/pierre/a12-root-integration-review-20261004.json`,
+SHA-256 `b3828c9ef1cce8444046560aff399ada6b636f55e91f275ca62b9ca3b033761a`.
+
+### A04 identical-repeat input-design diagnostic (2026-10-04)
+
+A separate input-only synthetic diagnostic compares the original five distinct
+run05 sweeps with five copies of the first sweep. Both finite designs have
+14,795 rows and 1,600 columns, use the original order scaling and convolution
+formula, and load no capture targets. The numerical SVD-of-R condition
+estimates are `3.92e7` for the original design and `1.70e16` for identical
+repeats. This supports a repeated-input rejection case; repeated takes must
+not inherit the distinct-sweep fixture's identification evidence. These are
+floating-point diagnostic estimates, not certified rank/condition bounds or
+a result for the actual production/hardware stimulus.
+
+The owned child exits zero in 9.38 seconds, with exact peak RSS 675,545,088
+bytes, below the original 600-second and 1.5 GiB caps. Eight frozen source/input
+hashes match before and after. The initial attempt stopped at a mistaken
+whole-file hash pin before matrix construction; its failure is retained.
+
+Report: `/Users/pierre/a04-repeat-design-diagnostic-result-attempt02-20261004.json`,
+SHA-256 `7eeecf5613c7a9f7e28717497ca6d6648496c319f0dda1fae53f9a8bfd4d6d3c`.
+Receipt: `/Users/pierre/a04-repeat-design-diagnostic-receipt-attempt02-20261004.json`,
+SHA-256 `0c7a695c3f0447dd7b6213e194b44e58d01e9e6657c21f087f4ca7df581e6328`.
+
+
+### A04 composed input-only estimator merged locally (2026-10-04)
+
+Math commit **77cd896** adds bounded input-only QR/SVD preparation and a borrowed
+prepared design reusable across capture fits. The composed API constructs its
+own factor; it does not import the old probe factor. The clean candidate passes
+**122 analysis tests**, focused reuse/validation gates, strict Clippy and formatting.
+
+The original frozen synthetic 4 kHz fixture independently passes four fits,
+20 training records, four held-outs and 24 tone comparisons. Maximum direct
+normalized RMS error is **4.875e-16**. The externally supervised end-to-end run
+takes **8.30 seconds**, with fit-process peak RSS **216,809,472 bytes**, below
+the retained 600-second/1.5 GiB limits. Source and input inventories match
+before/after; the root review verifies 942 current source/input/protocol files.
+Earlier compile and evaluator-schema failures remain retained.
+
+This establishes a bounded numerical-only estimator. Rank and condition remain
+numerical estimates; physical support, calibration and hardware qualification
+are unavailable. The dense builder cannot cover long room tails at production
+rates. A separate structured prototype is in progress and has no accepted
+original-fixture or long-support result yet.
+
+### A07/A08 math checkpoint and stop foundations merged locally (2026-10-04)
+
+Math main **9b9fbd3** integrates the reviewed DE checkpoint prerequisite, NSGA-II/III
+checkpoint continuation and cooperative multi-objective BO stopping on the current
+math base. The original source changes are retained; crate dependency declarations
+were reconciled without changing the root manifest.
+
+The isolated macOS aarch64/Rust 1.92.0 candidate passes **265 optimization library
+tests, one ignored**, strict library/test Clippy and workspace formatting. Root
+verifies 908 source-file hashes, matching pre/post locked dependency metadata, and
+19 imported source files equal to their reviewed commits. The initial missing
+dependency and missing DE-prerequisite builds remain recorded as failures.
+
+The local fast-forward preserves the four existing user edits byte-for-byte.
+No public push occurred. Public BO/NSGA publication and AutoEQ public dependency
+pins remain pending. These library gates do not establish recovery of an entire
+multi-stage RoomEQ job, a passing full optimizer matrix, or Windows runtime.
+
+
+### A04 structured estimator review and A12 frozen source verification (2026-10-04)
+
+The separate structured estimator remains an example-only numerical candidate.
+Root review found and corrected four boundary issues before the original fixture
+trial: checked visible-vector sizing now precedes FFT planning, the composed
+operator retains a 256 MiB reserve, zero spectral floors are refused, and scaling
+stops after the supported fifth power. The revised candidate passes **five tiny
+tests** against dense/direct-convolution/DFT oracles and strict Clippy. Root
+verifies the source and log hashes. One original-fixture trial is authorized with
+unchanged numerical thresholds, a 600-second deadline and a 1.5 GiB RSS limit;
+no original-fixture or long-support result is accepted at this checkpoint.
+
+The diagonal-by-order map preserves the exact least-squares objective through
+`B = A D^-1 M`, with physical taps `D^-1 M z`. It does not certify finite-design
+rank/condition, noise/support bounds or hardware measurement validity.
+Root review: `/Users/pierre/a04-structured-prototype-root-reviewed-v2-20261004.json`,
+SHA-256 `adedbb4dc7a53c1137dfcd2b6db396c38830957dc2193b33e66d2996a22fb107`.
+
+The private frozen playback candidate passes **eight DAW frozen-identity tests**,
+the public SOTF bundle integration test, and strict production Clippy in both
+workspaces. Root independently rehashes **94,721 source/dependency entries** with
+zero mismatches. Git source trees, external package trees and combined package
+arrays match before/after. Raw Cargo metadata in each workspace is byte-identical;
+the combined catalog difference consists only of recorded before/after metadata
+filenames. Integration into the original checkouts remains pending because it
+must preserve staged DAW prerequisites and the user's existing SOTF graph changes.
+These tests do not establish hardware playback or listening qualification.
+
+Root source receipt: `/Users/pierre/a12-assets-combined-source-root-rehash-20261004.json`,
+SHA-256 `1289a91207c03a8ee360cc1f6e78d94f7be41bae31c04b02cbfb6833068451ae`.
+Root metadata receipt: `/Users/pierre/a12-assets-metadata-root-review-20261004.json`,
+SHA-256 `dd18fb625ad1fc1d85697e29af8ae86f9bdb9d410ff4c058d2d43d293cd34014`.
+
+
+### A11 cleanup reproduction and current playback profile protection (2026-10-04)
+
+A separate isolated beta132 no-audio cleanup diagnostic reproduces the failed
+five-second raw-bind gate. All **125 GET requests** return empty measurement maps;
+owner-verified Shutdown returns HTTP 202; the owned process exits zero and leaves
+no descendants. All **20 scored bind observations** fail with Darwin errno 48
+(`EADDRINUSE`), with no LISTEN socket in those observations. TCP samples show
+server-port `TIME_WAIT` entries after the listener disappears. The source, runtime
+and user-path identities remain unchanged. This is evidence for this reproduction;
+the original run06 did not collect TCP state or errno, so its cause remains
+unproven and its overall failure remains retained. The initial diagnostic attempt
+refused before launching REW because of a command-record guard error; it remains
+recorded separately.
+
+Root result review:
+`/Users/pierre/rew-a11-cleanup-diagnostic-root-result-review-20261004.json`,
+SHA-256 `016930154950394b9ae353decdae064ea8fb3ca97df8aa870e9586f998537ab0`.
+A separate HTTP connection-lifecycle experiment is being prepared; the original
+five-second gate and frozen helper remain unchanged.
+
+Playback reconciliation uses private copies of the current extracted graph API.
+Root verifies **173 original working paths and their snapshot copies**, plus
+**162 indexed paths**, unchanged in DAW/SOTF. Status hashes match when queried
+with the snapshot's `--untracked-files=all` convention. An initial duplicate-math
+crate resolver failure remains diagnostic; source types were not changed to hide
+it. Current-profile playback acceptance remains pending a matched source freeze
+and focused backend gates.
+
+Root preservation review:
+`/Users/pierre/a12-current-profile-original-root-preservation-review-v2-20261004.json`,
+SHA-256 `2dd6e4f2201cae584f227a8025f48d3ef3f516609003502f4df548d097791c88`.
 
 
 ### A04 structured trial failure; A11 persistent readiness; A12 matched profile (2026-10-04)

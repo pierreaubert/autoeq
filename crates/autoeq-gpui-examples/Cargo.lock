@@ -588,7 +588,7 @@ version = "0.5.0"
 dependencies = [
  "autoeq",
  "gpui-builder",
- "gpui-d3rs 0.9.19",
+ "gpui-d3rs",
  "gpui-design",
  "gpui-miniapp",
  "gpui-px",
@@ -605,7 +605,7 @@ version = "0.5.4"
 dependencies = [
  "async-trait",
  "autoeq-core",
- "base64 0.23.1",
+ "base64",
  "directories",
  "log",
  "ndarray",
@@ -662,8 +662,8 @@ dependencies = [
 name = "autoeq-report-wasm"
 version = "0.5.0"
 dependencies = [
- "base64 0.23.1",
- "gpui-d3rs 0.9.19 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
+ "base64",
+ "gpui-d3rs",
  "serde",
  "serde_json",
 ]
@@ -725,12 +725,6 @@ dependencies = [
  "rustc-demangle",
  "windows-link 0.2.1",
 ]
-
-[[package]]
-name = "base64"
-version = "0.22.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "base64"
@@ -2515,14 +2509,14 @@ dependencies = [
  "fontique",
  "glam 0.33.12",
  "gpui-design",
- "gpui-profiler 0.9.3",
+ "gpui-profiler",
  "gpui-toolkit-gpui",
  "gpui-toolkit-gpui-macos",
  "gpui-toolkit-gpui-wgpu",
  "image",
  "kurbo",
  "log",
- "math-delaunay 0.5.4",
+ "math-delaunay",
  "metal",
  "parley",
  "peniko",
@@ -2538,22 +2532,6 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-time",
  "wgpu",
-]
-
-[[package]]
-name = "gpui-d3rs"
-version = "0.9.19"
-source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
-dependencies = [
- "delaunator",
- "gpui-profiler 0.9.3 (git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d)",
- "math-delaunay 0.5.4 (registry+https://github.com/rust-lang/crates.io-index)",
- "regex",
- "serde",
- "serde_json",
- "smallvec",
- "thiserror 2.0.21",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -2623,17 +2601,12 @@ name = "gpui-profiler"
 version = "0.9.3"
 
 [[package]]
-name = "gpui-profiler"
-version = "0.9.3"
-source = "git+https://github.com/pierreaubert/gpui-toolkit?rev=d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d#d52e2bc9bb5f6dfd8d66ae865cd72fa6cd1ef05d"
-
-[[package]]
 name = "gpui-px"
 version = "0.9.14"
 dependencies = [
  "glam 0.33.12",
  "gpui-builder",
- "gpui-d3rs 0.9.19",
+ "gpui-d3rs",
  "gpui-design",
  "gpui-miniapp",
  "gpui-toolkit-gpui",
@@ -3038,7 +3011,7 @@ name = "gpui-ui-kit"
 version = "0.9.42"
 dependencies = [
  "gpui-builder",
- "gpui-d3rs 0.9.19",
+ "gpui-d3rs",
  "gpui-design",
  "gpui-toolkit-gpui",
  "gpui-ui-kit-macros",
@@ -3354,7 +3327,7 @@ version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddc03d96684f9226b8a787cdb71488417b53ab5ea8fdb1dac946cb9431cc8bff"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "bytes",
  "futures-channel",
  "futures-util",
@@ -4002,18 +3975,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "math-delaunay"
-version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "421cbec083aba3ac68e8f2713673ce501302e932fa71f6b3738f828243621f7b"
-dependencies = [
- "delaunator",
-]
-
-[[package]]
 name = "math-dsp"
 version = "0.5.32"
-source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "clap",
  "hound",
@@ -4033,9 +3996,8 @@ dependencies = [
 [[package]]
 name = "math-iir-fir"
 version = "0.5.24"
-source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
- "base64 0.22.1",
+ "base64",
  "byteorder",
  "hound",
  "ndarray",
@@ -4050,7 +4012,6 @@ dependencies = [
 [[package]]
 name = "math-optimisation"
 version = "0.5.15"
-source = "git+https://github.com/pierreaubert/math-audio?rev=acdea21f853629a13b7f88f8baef51eb0394754c#acdea21f853629a13b7f88f8baef51eb0394754c"
 dependencies = [
  "chacha20",
  "clap",
@@ -4062,14 +4023,13 @@ dependencies = [
  "rand 0.10.3",
  "rayon",
  "serde",
- "sha2 0.10.9",
+ "sha2 0.11.0",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "math-rir"
 version = "0.5.11"
-source = "git+https://github.com/pierreaubert/math-audio?rev=bc3afa204820bb8783fd75e4b8592248cd7500b6#bc3afa204820bb8783fd75e4b8592248cd7500b6"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -4078,7 +4038,6 @@ dependencies = [
 [[package]]
 name = "math-test-functions"
 version = "0.5.4"
-source = "git+https://github.com/pierreaubert/math-audio?rev=acdea21f853629a13b7f88f8baef51eb0394754c#acdea21f853629a13b7f88f8baef51eb0394754c"
 dependencies = [
  "clap",
  "directories",
@@ -5614,7 +5573,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "16a1cfa75cc186dd73d5818e510e042e40927bccc9c236b061cea97e1eb08029"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "bytes",
  "encoding_rs",
  "futures-core",
@@ -6503,8 +6462,6 @@ dependencies = [
 [[package]]
 name = "sofa-reader"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a8b8cfa8b0017575adc7989abbc7299f2228cbd734a75242390e1505a7619d"
 dependencies = [
  "bincode",
  "flate2",
@@ -7354,7 +7311,7 @@ version = "0.48.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "977d0a4abdef933f424a99fe09f95576e089b90aebc6f016a3bc813762493e91"
 dependencies = [
- "base64 0.23.1",
+ "base64",
  "data-url",
  "fontdb 0.24.0",
  "harfrust 0.12.0",

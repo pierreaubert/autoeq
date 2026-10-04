@@ -303,6 +303,7 @@ incremental = false
 # Vello's registry dependencies must resolve to the same pinned Zed fork as
 # gpui-toolkit. Patches in a sibling workspace are not inherited here.
 [patch.crates-io]
+psm = { git = "https://github.com/pierreaubert/stacker.git", rev = "48bf8e3abfb350de9387a675275a629e4daf9717" }
 nalgebra = { git = "https://github.com/pierreaubert/nalgebra.git", rev = "a42573dbc9649af62fb07b469c98c852e62720fd" }
 block = { path = "../gpui-toolkit/crates/3rdparties/block" }
 objc = { path = "../gpui-toolkit/crates/3rdparties/objc" }

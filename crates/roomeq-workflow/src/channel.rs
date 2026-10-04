@@ -4,7 +4,10 @@ use std::path::Path;
 
 use log::{info, warn};
 use math_audio_iir_fir::Biquad;
-use roomeq_engine::channel_execution::{execute_prepared_channel, prepare_channel_execution};
+use roomeq_engine::channel_execution::{
+    execute_prepared_channel, execute_prepared_channel_with_exact_checkpoint,
+    prepare_channel_execution,
+};
 use roomeq_engine::channel_result::ChannelProcessingResult;
 use roomeq_engine::error::{AutoeqError, Result};
 use roomeq_engine::{Curve, OptimProgressCallback, OptimizerRunEvidence};
@@ -72,6 +75,74 @@ pub fn process_single_channel_with_frequency_samples(
     shared_mean_spl: Option<f64>,
     frequency_samples: usize,
 ) -> Result<ChannelWorkflowResult> {
+    process_single_channel_with_optional_recovery(
+        channel_name,
+        source,
+        room_config,
+        sample_rate,
+        output_dir,
+        callback,
+        probe_arrival_ms,
+        shared_mean_spl,
+        frequency_samples,
+        None,
+    )
+}
+
+/// Process one supported exact-recovery channel after validating its inputs.
+#[allow(clippy::too_many_arguments)]
+pub fn process_single_channel_with_recovery(
+    channel_name: &str,
+    source: &MeasurementSource,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: &Path,
+    callback: Option<OptimProgressCallback>,
+    probe_arrival_ms: Option<f64>,
+    shared_mean_spl: Option<f64>,
+    frequency_samples: usize,
+    recovery: &crate::room_recovery::RoomRecoverySession,
+) -> Result<ChannelWorkflowResult> {
+    process_single_channel_with_optional_recovery(
+        channel_name,
+        source,
+        room_config,
+        sample_rate,
+        output_dir,
+        callback,
+        probe_arrival_ms,
+        shared_mean_spl,
+        frequency_samples,
+        Some(recovery),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn process_single_channel_with_optional_recovery(
+    channel_name: &str,
+    source: &MeasurementSource,
+    room_config: &RoomConfig,
+    sample_rate: f64,
+    output_dir: &Path,
+    callback: Option<OptimProgressCallback>,
+    probe_arrival_ms: Option<f64>,
+    shared_mean_spl: Option<f64>,
+    frequency_samples: usize,
+    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
+) -> Result<ChannelWorkflowResult> {
+    let recovery_source = if let Some(recovery) = recovery {
+        recovery
+            .verify_configuration(room_config, sample_rate, frequency_samples)
+            .map_err(|message| AutoeqError::InvalidConfiguration { message })?;
+        Some(
+            recovery
+                .freeze_and_verify_measurement_source(source)
+                .map_err(|message| AutoeqError::InvalidConfiguration { message })?,
+        )
+    } else {
+        None
+    };
+    let source = recovery_source.as_ref().unwrap_or(source);
     let prepared = prepare_channel_input_with_frequency_samples(
         channel_name,
         source,
@@ -83,6 +154,13 @@ pub fn process_single_channel_with_frequency_samples(
     .map_err(|error| AutoeqError::InvalidMeasurement {
         message: format!("Failed to load measurement for channel {channel_name}: {error}"),
     })?;
+    let exact = recovery
+        .map(|recovery| {
+            recovery
+                .exact_de_options()
+                .map_err(|message| AutoeqError::InvalidConfiguration { message })
+        })
+        .transpose()?;
     let execution = prepare_channel_execution(
         channel_name,
         &prepared,
@@ -131,16 +209,30 @@ pub fn process_single_channel_with_frequency_samples(
         .as_ref()
         .map(|reservation| reservation.reference().clone());
 
-    let mut result = execute_prepared_channel(
-        channel_name,
-        &prepared,
-        room_config,
-        sample_rate,
-        &execution,
-        &eq_resources,
-        sidecar_reference,
-        if phase_linear { None } else { callback.take() },
-    )?;
+    let execution_callback = if phase_linear { None } else { callback.take() };
+    let mut result = match exact {
+        Some(exact) => execute_prepared_channel_with_exact_checkpoint(
+            channel_name,
+            &prepared,
+            room_config,
+            sample_rate,
+            &execution,
+            &eq_resources,
+            sidecar_reference,
+            execution_callback,
+            exact,
+        )?,
+        None => execute_prepared_channel(
+            channel_name,
+            &prepared,
+            room_config,
+            sample_rate,
+            &execution,
+            &eq_resources,
+            sidecar_reference,
+            execution_callback,
+        )?,
+    };
     // Measured-room acoustics ride with the delivered chain: a declared
     // optimization-time IR yields third-octave early/late energies, while
     // channels without one keep the viewer "pending" state.

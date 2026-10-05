@@ -91,6 +91,28 @@ fn finalize_dispatch_winner(
                 || min_gain > 0.0
                 || !finalized.loss.is_finite()
             {
+                // Capture the exact rejected winner for a bounded joint-feasibility regression.
+                // This runs only after an existing refusal and does not change acceptance.
+                let raw_ceiling = if is_peq && data.max_db > 0.0 {
+                    super::compute::compute_ceiling_violation_into(
+                        &data.freqs, x, data.srate, data.peq_model, data.max_db,
+                    )
+                } else {
+                    0.0
+                };
+                let projected_ceiling = if is_peq && data.max_db > 0.0 {
+                    super::compute::compute_ceiling_violation_into(
+                        &data.freqs, &repaired, data.srate, data.peq_model, data.max_db,
+                    )
+                } else {
+                    0.0
+                };
+                log::error!(
+                    "rejected PEQ candidate {candidate_id}: model={:?} max_db={} min_db={} required_spacing={} raw_ceiling={} projected_ceiling={} final_ceiling={} final_spacing={} final_min_gain={} final_loss={} raw={:?} projected={:?} finalized={:?} lower={:?} upper={:?}",
+                    data.peq_model, data.max_db, data.min_db, required_spacing,
+                    raw_ceiling, projected_ceiling, ceiling, spacing, min_gain, finalized.loss,
+                    x, repaired, finalized.params, lower_bounds, upper_bounds,
+                );
                 return failed(format!(
                     "spacing repair refused: within_bounds={within_bounds}, spacing={spacing}, ceiling={ceiling}, min_gain={min_gain}"
                 ));

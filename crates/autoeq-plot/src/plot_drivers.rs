@@ -1,6 +1,4 @@
-use autoeq_report_wasm::{
-    Annotation, AxisSpec, DashOption, Figure, LineMark, Series, XScale,
-};
+use autoeq_report_wasm::{Annotation, AxisSpec, DashOption, Figure, LineMark, Series, XScale};
 
 use crate::loss::{DriversLossData, compute_drivers_combined_response};
 

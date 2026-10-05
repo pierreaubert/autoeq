@@ -1,6 +1,6 @@
 use super::create::{
-    create_cea2034_combined_series, create_cea2034_series,
-    create_cea2034_with_eq_combined_series, create_cea2034_with_eq_series,
+    create_cea2034_combined_series, create_cea2034_series, create_cea2034_with_eq_combined_series,
+    create_cea2034_with_eq_series,
 };
 use super::misc::shorten_curve_name;
 use crate::ref_lines::make_ref_series;

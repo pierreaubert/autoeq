@@ -147,12 +147,7 @@ fn psycho_fast_a06_spatial_averages_carry_no_phase() {
 #[test]
 fn psycho_fast_a06_rejected_takes_excluded_from_average() {
     let grid = grid();
-    let mut bad = take(
-        "t-bad",
-        "seat-2",
-        magnitude_curve(&grid, 40.0, 0.0),
-        None,
-    );
+    let mut bad = take("t-bad", "seat-2", magnitude_curve(&grid, 40.0, 0.0), None);
     bad.decision = TakeDecision::Rejected {
         reason: "clipped".to_string(),
     };
@@ -166,6 +161,9 @@ fn psycho_fast_a06_rejected_takes_excluded_from_average() {
     assert_eq!(matrix.averaging_set().len(), 1);
     let average = matrix.average(None).expect("accepted-only average");
     for level in &average.spl {
-        assert!((*level - 70.0).abs() <= 1e-9, "rejected take leaked: {level}");
+        assert!(
+            (*level - 70.0).abs() <= 1e-9,
+            "rejected take leaked: {level}"
+        );
     }
 }

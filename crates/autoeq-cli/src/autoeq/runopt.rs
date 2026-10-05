@@ -460,8 +460,9 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         Some(optim::compute_fitness_penalties_ref(&x, objective_data))
     };
 
-    let (global_result, global_de_completion, global_search_evidence) =
-        if let Some(continuation) = exact_checkpoint {
+    let (global_result, global_de_completion, global_search_evidence) = if let Some(continuation) =
+        exact_checkpoint
+    {
         if initial_candidate.is_some() {
             return Err(std::io::Error::other(
                 "exact continuation cannot be combined with a warm-start candidate",
@@ -478,10 +479,14 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
                 Box::new(|_| autoeq::de::CallbackAction::Continue),
             )?;
         x.clone_from_slice(&output.parameters);
-        (Ok((
-            output.descriptor.stopping_reason,
-            optim::compute_fitness_penalties_ref(&x, objective_data),
-        )), None, None)
+        (
+            Ok((
+                output.descriptor.stopping_reason,
+                optim::compute_fitness_penalties_ref(&x, objective_data),
+            )),
+            None,
+            None,
+        )
     } else if let Some(mut progress_callback) = progress_callback {
         use std::sync::{Arc, Mutex};
 
@@ -532,10 +537,14 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         }
         let output = output_result?;
         x.clone_from_slice(&output.params);
-        (Ok((
-            output.optimization_run.stopping_reason,
-            optim::compute_fitness_penalties_ref(&x, objective_data),
-        )), None, None)
+        (
+            Ok((
+                output.optimization_run.stopping_reason,
+                optim::compute_fitness_penalties_ref(&x, objective_data),
+            )),
+            None,
+            None,
+        )
     } else if direct_de_warm_start
         && resolved_backend.name().eq_ignore_ascii_case("autoeq:de")
         && let Some(candidate) = initial_candidate
@@ -549,10 +558,14 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
             Box::new(|_| autoeq::de::CallbackAction::Continue),
         )?;
         x.clone_from_slice(&output.parameters);
-        (Ok((
-            output.descriptor.stopping_reason,
-            optim::compute_fitness_penalties_ref(&x, objective_data),
-        )), None, None)
+        (
+            Ok((
+                output.descriptor.stopping_reason,
+                optim::compute_fitness_penalties_ref(&x, objective_data),
+            )),
+            None,
+            None,
+        )
     } else {
         backend.optimize_filters_with_completion_evidence(
             &mut x,
@@ -757,9 +770,24 @@ mod de_completion_tests {
     #[test]
     fn solver_report_controls_termination_and_actual_evaluation_count() {
         let cases = [
-            (true, "Converged: population spread", 12, OptimizerTermination::Converged),
-            (false, "Maximum iterations reached: 12", 12, OptimizerTermination::EvaluationLimit),
-            (false, "Optimization stopped by callback", 3, OptimizerTermination::NonConverged),
+            (
+                true,
+                "Converged: population spread",
+                12,
+                OptimizerTermination::Converged,
+            ),
+            (
+                false,
+                "Maximum iterations reached: 12",
+                12,
+                OptimizerTermination::EvaluationLimit,
+            ),
+            (
+                false,
+                "Optimization stopped by callback",
+                3,
+                OptimizerTermination::NonConverged,
+            ),
         ];
         for (success, message, generations, expected) in cases {
             let mut run = evidence();
@@ -783,25 +811,30 @@ mod de_completion_tests {
     #[test]
     fn solver_report_rejects_an_exceeded_evaluation_cap() {
         let mut run = evidence();
-        assert!(apply_de_completion(
-            &mut run,
-            &autoeq::optim::de::DECompletion {
-                success: true,
-                message: "Converged".to_string(),
-                generations: 12,
-                generation_limit: 12,
-                evaluations: 101,
-            },
-            100,
-        )
-        .is_err());
+        assert!(
+            apply_de_completion(
+                &mut run,
+                &autoeq::optim::de::DECompletion {
+                    success: true,
+                    message: "Converged".to_string(),
+                    generations: 12,
+                    generation_limit: 12,
+                    evaluations: 101,
+                },
+                100,
+            )
+            .is_err()
+        );
     }
 
     #[test]
     fn typed_success_cannot_override_a_failed_final_candidate() {
         let mut run = OptimizerRunEvidence::from_backend_result(
             "autoeq:de",
-            Err(("final candidate violates spacing".to_string(), f64::INFINITY)),
+            Err((
+                "final candidate violates spacing".to_string(),
+                f64::INFINITY,
+            )),
             &[0.5],
             &[0.0],
             &[1.0],

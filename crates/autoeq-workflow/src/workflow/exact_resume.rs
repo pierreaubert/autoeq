@@ -553,10 +553,12 @@ mod production_split_resume_tests {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .expect("production callback captured terminal checkpoint");
-        assert!(terminal_checkpoint
-            .terminal
-            .as_ref()
-            .is_some_and(|terminal| terminal.finalized));
+        assert!(
+            terminal_checkpoint
+                .terminal
+                .as_ref()
+                .is_some_and(|terminal| terminal.finalized)
+        );
 
         let temporary = tempfile::tempdir().expect("terminal checkpoint directory");
         let checkpoint_path = temporary.path().join("terminal-state.json");

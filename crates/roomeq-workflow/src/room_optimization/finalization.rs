@@ -2326,7 +2326,10 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
                 dir,
             )?;
     } else if result.deployed_source_curves.is_empty()
-        && result.channels.values().any(|chain| chain.drivers.is_some())
+        && result
+            .channels
+            .values()
+            .any(|chain| chain.drivers.is_some())
     {
         // Generic driver groups use an empty deployed map to signal that their
         // reported aggregate owns final level validation (see
@@ -4276,9 +4279,8 @@ mod tests {
             "stale deployed cache survived refresh: {spread}"
         );
 
-        let error =
-            verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path())
-                .expect_err("a stale matched cache must not authorize an imbalanced graph");
+        let error = verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path())
+            .expect_err("a stale matched cache must not authorize an imbalanced graph");
         assert!(error.to_string().contains("2.000 dB"), "{error}");
 
         let outcome =

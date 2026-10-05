@@ -62,10 +62,7 @@ pub fn project_min_spacing(
         ));
     }
     let width = param_utils::params_per_filter(model);
-    if !x.len().is_multiple_of(width)
-        || !min_spacing_oct.is_finite()
-        || min_spacing_oct < 0.0
-    {
+    if !x.len().is_multiple_of(width) || !min_spacing_oct.is_finite() || min_spacing_oct < 0.0 {
         return Err(String::from(
             "spacing projection: invalid vector or spacing",
         ));

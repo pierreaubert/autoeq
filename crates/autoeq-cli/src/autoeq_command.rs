@@ -883,6 +883,54 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             spacing::print_freq_spacing(&opt_result.params, &optim_params, "qa-final");
         }
         qa::display_qa_analysis(&qa_result);
+        if let Some(path) = std::env::var_os("AUTOEQ_QA_EVIDENCE_PATH") {
+            let evidence = serde_json::json!({
+                "schema": 1,
+                "selected_x": &opt_result.params,
+                "optimizer_evidence": &opt_result.optimizer_evidence,
+                "global_de_completion": opt_result.global_de_completion.as_ref().map(|completion| serde_json::json!({
+                    "success": completion.success,
+                    "message": &completion.message,
+                    "generations": completion.generations,
+                    "generation_limit": completion.generation_limit,
+                    "evaluations": completion.evaluations,
+                })),
+                "selected_de_completion": opt_result.optimizer_evidence.first()
+                    .filter(|evidence| evidence.selected_for_output
+                        && evidence.confidence != autoeq::optim::OptimizerConfidence::Unusable)
+                    .and_then(|_| opt_result.global_de_completion.as_ref())
+                    .map(|completion| serde_json::json!({
+                        "success": completion.success,
+                        "message": &completion.message,
+                        "generations": completion.generations,
+                        "generation_limit": completion.generation_limit,
+                        "evaluations": completion.evaluations,
+                    })),
+                "model": opt_result.effective_envelope.peq_model.to_string(),
+                "loss": format!("{:?}", opt_result.effective_envelope.loss_type),
+                "sample_rate_hz": opt_result.effective_envelope.sample_rate_hz,
+                "lower_bounds": &opt_result.effective_envelope.lower_bounds,
+                "upper_bounds": &opt_result.effective_envelope.upper_bounds,
+                "min_spacing_oct": optim_params.min_spacing_oct,
+                "selected_spacing_violation_oct": autoeq::constraints::viol_spacing_from_xs(
+                    &opt_result.params,
+                    opt_result.effective_envelope.peq_model,
+                    optim_params.min_spacing_oct,
+                ),
+                "maxeval": optim_params.maxeval,
+                "seed": optim_params.seed,
+                "converged": opt_result.converged,
+                "spacing_ok": spacing_ok,
+                "pre_score": pre_score,
+                "post_score": post_score,
+                "qa_threshold": qa_threshold,
+                "qa_improvement_ok": qa_result.improvement_ok,
+                "qa_spacing_ok": qa_result.spacing_ok,
+                "qa_converge_ok": qa_result.converge_ok,
+            });
+            std::fs::write(&path, serde_json::to_vec_pretty(&evidence)?)
+                .with_context(|| format!("failed to write AutoEQ QA evidence to {}", PathBuf::from(path).display()))?;
+        }
         qa::require_qa_pass(&qa_result)?;
 
         return Ok(());

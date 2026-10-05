@@ -23,6 +23,16 @@ use ndarray::Array1;
 pub type DECheckpointSaveCallback =
     Box<dyn FnMut(&DECheckpoint) -> std::result::Result<(), String> + Send>;
 
+/// Completion facts from the same DE report that produced the selected vector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DECompletion {
+    pub success: bool,
+    pub message: String,
+    pub generations: usize,
+    pub generation_limit: usize,
+    pub evaluations: usize,
+}
+
 /// Exact continuation inputs and generation-barrier persistence callback.
 pub struct DEExactContinuation {
     /// Previously saved DE state; None starts a new exact-checkpointed run.
@@ -66,6 +76,33 @@ pub fn optimize_filters_autoeq(
         params,
         callback,
     )
+}
+
+/// Run the ordinary AutoEQ DE path while retaining the solver's typed stop
+/// and actual evaluation counters for production evidence.
+pub fn optimize_filters_autoeq_with_completion(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    autoeq_name: &str,
+    params: &crate::OptimParams,
+) -> (Result<(String, f64), (String, f64)>, Option<DECompletion>) {
+    let callback = create_de_callback("autoeq::DE", params.quiet);
+    let mut completion = None;
+    let result = optimize_filters_autoeq_with_callback_and_initial_and_exact(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        autoeq_name,
+        params,
+        None,
+        callback,
+        None,
+        Some(&mut completion),
+    );
+    (result, completion)
 }
 
 /// AutoEQ DE optimization with external progress callback
@@ -116,6 +153,7 @@ pub fn optimize_filters_autoeq_with_callback_and_initial(
         initial_candidate,
         callback,
         None,
+        None,
     )
 }
 
@@ -154,6 +192,7 @@ pub fn optimize_filters_autoeq_with_exact_checkpoint(
         None,
         callback,
         Some(continuation),
+        None,
     )
 }
 
@@ -171,6 +210,7 @@ fn optimize_filters_autoeq_with_callback_and_initial_and_exact(
     initial_candidate: Option<&[f64]>,
     mut callback: Box<dyn FnMut(&DEIntermediate) -> CallbackAction + Send>,
     mut exact: Option<DEExactContinuation>,
+    report_summary: Option<&mut Option<DECompletion>>,
 ) -> Result<(String, f64), (String, f64)> {
     let explicit_initial_candidate = if let Some(candidate) = initial_candidate {
         if candidate.is_empty()
@@ -407,6 +447,14 @@ fn optimize_filters_autoeq_with_callback_and_initial_and_exact(
     // Use constraint helpers for nonlinear constraints
     let mut config_builder = DEConfigBuilder::new()
         .maxiter(setup.max_iter)
+        // Speaker-score searches can have a narrow population-fitness spread
+        // before the scored preference has improved. Use the existing
+        // generation/evaluation cap before accepting population convergence.
+        .min_convergence_iter(if setup.penalty_data.loss_type == crate::LossType::SpeakerScore {
+            setup.max_iter
+        } else {
+            0
+        })
         .popsize(setup.pop_multiplier)
         .tol(tolerance)
         .atol(atolerance)
@@ -515,6 +563,15 @@ fn optimize_filters_autoeq_with_callback_and_initial_and_exact(
         differential_evolution(&base_objective_fn, &setup.bounds, config)
     }
     .map_err(|error| (format!("DE optimization failed: {error:?}"), f64::INFINITY))?;
+    if let Some(summary) = report_summary {
+        *summary = Some(DECompletion {
+            success: result.success,
+            message: result.message.clone(),
+            generations: result.nit,
+            generation_limit: setup.max_iter,
+            evaluations: result.nfev,
+        });
+    }
     process_de_results(x, result, "AutoDE")
 }
 

@@ -1,8 +1,12 @@
 // Metaheuristics-specific optimization code
 
-use super::backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer};
+use super::backend::{
+    AlgorithmType, BackendSearchEvidence, BackendSearchStopCause, ConstraintCapabilities, FilterOptimizer,
+    FilterOptimizerOutput,
+};
 use super::callback::{ProgressTracker, format_param_summary};
 use super::constraints_install::install_constraints;
+use super::optimize::OptimizerBackendCompletion;
 use super::params::OptimParams;
 use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref};
@@ -104,20 +108,33 @@ impl FilterOptimizer for MhBackend {
         params: &OptimParams,
         callback: Option<OptimProgressCallback>,
     ) -> Result<(String, f64), (String, f64)> {
+        self.optimize_with_report(x, lower, upper, objective, params, callback)
+            .into_legacy_result()
+    }
+
+    fn optimize_with_report(
+        &self,
+        x: &mut [f64],
+        lower: &[f64],
+        upper: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+        callback: Option<OptimProgressCallback>,
+    ) -> FilterOptimizerOutput {
         let mut objective = objective;
         let seed = params.seed.unwrap_or(0);
         // MH has no native nonlinear constraints — install_constraints will
         // configure penalty weights matching `self.fallback_mode`.
         let _ = install_constraints(self.capabilities(), &mut objective);
 
-        match callback {
+        let (result, search) = match callback {
             Some(mut user_cb) => {
                 // Adapt the unified `OptimProgressCallback` to MH's
                 // intermediate type. EPA progress is `None` here (only the
                 // AutoEQ DE path computes EPA mid-run).
                 let mh_cb: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send> =
                     Box::new(move |im| user_cb(im.iter, im.fun, None));
-                optimize_filters_mh_with_callback_seeded(
+                optimize_filters_mh_with_callback_seeded_report(
                     x,
                     lower,
                     upper,
@@ -129,7 +146,7 @@ impl FilterOptimizer for MhBackend {
                     seed,
                 )
             }
-            None => optimize_filters_mh_seeded(
+            None => optimize_filters_mh_with_callback_seeded_report(
                 x,
                 lower,
                 upper,
@@ -137,8 +154,16 @@ impl FilterOptimizer for MhBackend {
                 self.algo_suffix,
                 params.population,
                 params.maxeval,
+                create_mh_callback(&format!("mh::{}", self.algo_suffix)),
                 seed,
             ),
+        };
+        match search {
+            Some(search) => FilterOptimizerOutput::CompletedWithSearchEvidence { result, search },
+            None => FilterOptimizerOutput::Completed {
+                result,
+                pareto_report: None,
+            },
         }
     }
 }
@@ -177,6 +202,8 @@ pub struct MHObjective {
     pub bounds: Vec<[f64; 2]>,
     /// Optional callback state for tracking progress.
     pub callback_state: Option<Arc<Mutex<CallbackState>>>,
+    /// Maximum real objective computations; rejected attempts return infinity.
+    pub max_evaluations: usize,
 }
 
 /// State tracked across fitness evaluations for callback reporting.
@@ -187,8 +214,20 @@ pub struct CallbackState {
     pub best_params: Vec<f64>,
     /// Total number of fitness evaluations.
     pub eval_count: usize,
+    /// Fitness attempts refused before computing the objective.
+    pub denied_evaluations: usize,
     /// Evaluation count at last callback report.
     pub last_report_eval: usize,
+    /// Number of task callbacks observed by the solver.
+    pub iterations: usize,
+    /// Completed solver generations reported by the upstream context.
+    pub generations: usize,
+    /// Final finite population mean, if all fitness values are finite.
+    pub population_mean: Option<f64>,
+    /// Final finite population standard deviation.
+    pub population_stddev: Option<f64>,
+    /// Whether the progress callback stopped the solver before its generation cap.
+    pub callback_stopped: bool,
 }
 
 impl MhBounded for MHObjective {
@@ -200,14 +239,24 @@ impl MhBounded for MHObjective {
 impl MhObjFunc for MHObjective {
     type Ys = f64;
     fn fitness(&self, xs: &[f64]) -> Self::Ys {
+        if let Some(ref state_arc) = self.callback_state {
+            let Ok(mut state) = state_arc.lock() else {
+                return f64::INFINITY;
+            };
+            if state.eval_count >= self.max_evaluations {
+                state.denied_evaluations = state.denied_evaluations.saturating_add(1);
+                return f64::INFINITY;
+            }
+            // Reserve before computation so parallel RGA crossover workers
+            // cannot jointly exceed the requested objective budget.
+            state.eval_count += 1;
+        }
         let fitness_val = compute_fitness_penalties_ref(xs, &self.data);
 
         // Update callback state if present
         if let Some(ref state_arc) = self.callback_state
             && let Ok(mut state) = state_arc.lock()
         {
-            state.eval_count += 1;
-
             // Track best solution
             if fitness_val < state.best_fitness {
                 state.best_fitness = fitness_val;
@@ -337,22 +386,51 @@ fn optimize_filters_mh_with_callback_seeded(
     mh_name: &str,
     population: usize,
     maxeval: usize,
-    mut callback: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send>,
+    callback: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send>,
     seed: u64,
 ) -> Result<(String, f64), (String, f64)> {
+    optimize_filters_mh_with_callback_seeded_report(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        mh_name,
+        population,
+        maxeval,
+        callback,
+        seed,
+    )
+    .0
+}
+
+#[allow(clippy::too_many_arguments)]
+fn optimize_filters_mh_with_callback_seeded_report(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    mh_name: &str,
+    population: usize,
+    maxeval: usize,
+    mut callback: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send>,
+    seed: u64,
+) -> (Result<(String, f64), (String, f64)>, Option<BackendSearchEvidence>) {
     let num_params = x.len();
 
     // Build bounds for metaheuristics (as pairs)
     if lower_bounds.len() != num_params || upper_bounds.len() != num_params {
-        return Err((
-            format!(
-                "Metaheuristics dimension mismatch: x={}, lower={}, upper={}",
-                num_params,
-                lower_bounds.len(),
-                upper_bounds.len()
-            ),
-            f64::INFINITY,
-        ));
+        return (
+            Err((
+                format!(
+                    "Metaheuristics dimension mismatch: x={}, lower={}, upper={}",
+                    num_params,
+                    lower_bounds.len(),
+                    upper_bounds.len()
+                ),
+                f64::INFINITY,
+            )),
+            None,
+        );
     }
     let mut bounds: Vec<[f64; 2]> = Vec::with_capacity(num_params);
     for i in 0..num_params {
@@ -373,7 +451,13 @@ fn optimize_filters_mh_with_callback_seeded(
         best_fitness: f64::INFINITY,
         best_params: vec![],
         eval_count: 0,
+        denied_evaluations: 0,
         last_report_eval: 0,
+        iterations: 0,
+        generations: 0,
+        population_mean: None,
+        population_stddev: None,
+        callback_stopped: false,
     }));
 
     // Clone for the task closure
@@ -384,6 +468,7 @@ fn optimize_filters_mh_with_callback_seeded(
         data: penalty_data,
         bounds,
         callback_state: Some(Arc::clone(&callback_state)),
+        max_evaluations: maxeval,
     };
 
     // Choose algorithm configuration
@@ -432,11 +517,25 @@ fn optimize_filters_mh_with_callback_seeded(
     let solver = builder
         .seed(seed)
         .pop_num(pop)
-        .task(move |_ctx| {
+        .task(move |ctx| {
             current_iter += 1;
 
             // Report progress periodically
             if let Ok(mut state) = callback_state_task.lock() {
+                state.iterations = current_iter;
+                state.generations = ctx.r#gen as usize;
+                let fitness = &ctx.pool_y;
+                state.population_mean = None;
+                state.population_stddev = None;
+                if !fitness.is_empty() && fitness.iter().all(|value| value.is_finite()) {
+                    let mean = fitness.iter().sum::<f64>() / fitness.len() as f64;
+                    let variance = fitness.iter().map(|value| (value - mean).powi(2)).sum::<f64>()
+                        / fitness.len() as f64;
+                    if mean.is_finite() && variance.is_finite() {
+                        state.population_mean = Some(mean);
+                        state.population_stddev = Some(variance.sqrt());
+                    }
+                }
                 let evals_since_last = state.eval_count.saturating_sub(state.last_report_eval);
 
                 if evals_since_last >= report_interval {
@@ -454,13 +553,17 @@ fn optimize_filters_mh_with_callback_seeded(
 
                     // Check if user wants to stop
                     if matches!(action, CallbackAction::Stop) {
+                        state.callback_stopped = true;
                         return true; // Signal to stop optimization
                     }
                 }
             }
 
             // Continue until max generations
-            current_iter >= gens
+            match callback_state_task.lock() {
+                Ok(state) => state.eval_count >= maxeval || current_iter >= gens,
+                Err(_) => true,
+            }
         })
         .solve();
 
@@ -469,6 +572,54 @@ fn optimize_filters_mh_with_callback_seeded(
     if best_xs.len() == x.len() {
         x.copy_from_slice(best_xs);
     }
-    let best_val = *solver.as_best_fit();
-    Ok((format!("Metaheuristics({})", mh_name), best_val))
+    let mut best_val = *solver.as_best_fit();
+    let state = match callback_state.lock() {
+        Ok(state) => state,
+        Err(_) => {
+            return (
+                Err((
+                    format!("Metaheuristics({mh_name}) could not inspect search counters"),
+                    best_val,
+                )),
+                None,
+            );
+        }
+    };
+    if state.denied_evaluations > 0 {
+        // A refused call returned infinity to the solver. Select only a
+        // candidate whose real objective value was actually computed.
+        if state.best_params.len() != x.len() || !state.best_fitness.is_finite() {
+            return (
+                Err((format!("Metaheuristics({mh_name}) exhausted its objective budget without a finite candidate"), f64::INFINITY)),
+                None,
+            );
+        }
+        x.copy_from_slice(&state.best_params);
+        best_val = state.best_fitness;
+    }
+    let search = BackendSearchEvidence {
+        completion: if state.callback_stopped {
+            OptimizerBackendCompletion::NonConverged
+        } else {
+            OptimizerBackendCompletion::EvaluationLimit
+        },
+        stop_cause: if state.callback_stopped {
+            BackendSearchStopCause::ProgressCallbackStop
+        } else if state.eval_count >= maxeval {
+            BackendSearchStopCause::ObjectiveBudgetLimit
+        } else {
+            BackendSearchStopCause::GenerationLimit
+        },
+        evaluations: state.eval_count,
+        denied_evaluations: state.denied_evaluations,
+        generations: state.generations,
+        generation_limit: gens,
+        task_callbacks: state.iterations,
+        population_mean: state.population_mean,
+        population_stddev: state.population_stddev,
+    };
+    (
+        Ok((format!("Metaheuristics({})", mh_name), best_val)),
+        Some(search),
+    )
 }

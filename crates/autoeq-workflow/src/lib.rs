@@ -40,6 +40,9 @@ pub mod loss {
 pub mod optim {
     pub use autoeq_optim::optim::*;
 }
+pub mod constraints {
+    pub use autoeq_optim::constraints::*;
+}
 pub mod cli {
     pub use autoeq_optim::cli::*;
 }

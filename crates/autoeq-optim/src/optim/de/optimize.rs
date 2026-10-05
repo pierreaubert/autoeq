@@ -19,6 +19,9 @@ use crate::de::{
 use crate::initial_guess::{SmartInitConfig, create_smart_initial_guesses};
 use ndarray::Array1;
 
+/// AutoEQ DE result together with same-invocation completion counters.
+pub type AutoeqDeCompletionResult = (Result<(String, f64), (String, f64)>, Option<DECompletion>);
+
 /// Persistence callback used by exact DE continuation.
 pub type DECheckpointSaveCallback =
     Box<dyn FnMut(&DECheckpoint) -> std::result::Result<(), String> + Send>;
@@ -87,7 +90,7 @@ pub fn optimize_filters_autoeq_with_completion(
     objective_data: ObjectiveData,
     autoeq_name: &str,
     params: &crate::OptimParams,
-) -> (Result<(String, f64), (String, f64)>, Option<DECompletion>) {
+) -> AutoeqDeCompletionResult {
     let callback = create_de_callback("autoeq::DE", params.quiet);
     let mut completion = None;
     let result = optimize_filters_autoeq_with_callback_and_initial_and_exact(

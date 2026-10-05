@@ -62,7 +62,10 @@ pub fn project_min_spacing(
         ));
     }
     let width = param_utils::params_per_filter(model);
-    if x.len() % width != 0 || !min_spacing_oct.is_finite() || min_spacing_oct < 0.0 {
+    if !x.len().is_multiple_of(width)
+        || !min_spacing_oct.is_finite()
+        || min_spacing_oct < 0.0
+    {
         return Err(String::from(
             "spacing projection: invalid vector or spacing",
         ));
@@ -164,8 +167,7 @@ fn project_in_order(
     }
     let mut repaired = x.to_vec();
     for block in blocks {
-        for rank in block.start..block.end {
-            let index = indices[rank];
+        for (rank, &index) in indices.iter().enumerate().take(block.end).skip(block.start) {
             // Subtracting and adding the rank shift can move a fixed center
             // by one ULP. Restore the exact per-filter box before checking
             // decoded spacing, so fixed filters remain bit-identical.
@@ -329,8 +331,9 @@ fn feasible_order(
         frontier = next_frontier;
     }
     let mut full = vec![u64::MAX; words];
-    if count % 64 != 0 {
-        full[words - 1] = (1_u64 << (count % 64)) - 1;
+    let remainder = count % 64;
+    if !count.is_multiple_of(64) {
+        full[words - 1] = (1_u64 << remainder) - 1;
     }
     if !states.contains_key(&full) {
         return Err(String::from(

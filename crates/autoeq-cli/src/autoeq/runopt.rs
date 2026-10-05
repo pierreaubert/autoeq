@@ -460,121 +460,125 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
         Some(optim::compute_fitness_penalties_ref(&x, objective_data))
     };
 
-    let (global_result, global_de_completion, global_search_evidence) = if let Some(continuation) =
-        exact_checkpoint
-    {
-        if initial_candidate.is_some() {
-            return Err(std::io::Error::other(
-                "exact continuation cannot be combined with a warm-start candidate",
-            )
-            .into());
-        }
-        let mut global_params = params.clone();
-        global_params.refine = false;
-        let output =
+    let (global_result, global_de_completion, global_search_evidence, backend_completion) =
+        if let Some(continuation) = exact_checkpoint {
+            if initial_candidate.is_some() {
+                return Err(std::io::Error::other(
+                    "exact continuation cannot be combined with a warm-start candidate",
+                )
+                .into());
+            }
+            let mut global_params = params.clone();
+            global_params.refine = false;
+            let output =
             autoeq::optim::setup::perform_optimization_with_run_descriptor_and_exact_checkpoint(
                 &global_params,
                 objective_data,
                 continuation,
                 Box::new(|_| autoeq::de::CallbackAction::Continue),
             )?;
-        x.clone_from_slice(&output.parameters);
-        (
-            Ok((
-                output.descriptor.stopping_reason,
-                optim::compute_fitness_penalties_ref(&x, objective_data),
-            )),
-            None,
-            None,
-        )
-    } else if let Some(mut progress_callback) = progress_callback {
-        use std::sync::{Arc, Mutex};
+            x.clone_from_slice(&output.parameters);
+            (
+                Ok((
+                    output.descriptor.stopping_reason,
+                    optim::compute_fitness_penalties_ref(&x, objective_data),
+                )),
+                None,
+                None,
+                None,
+            )
+        } else if let Some(mut progress_callback) = progress_callback {
+            use std::sync::{Arc, Mutex};
 
-        let callback_error = Arc::new(Mutex::new(None));
-        let callback_error_for_de = Arc::clone(&callback_error);
-        let de_callback =
-            move |update: &autoeq::optim::setup::ProgressUpdate| match progress_callback(update) {
-                Ok(()) => autoeq::de::CallbackAction::Continue,
-                Err(error) => {
-                    *callback_error_for_de
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
-                    autoeq::de::CallbackAction::Stop
+            let callback_error = Arc::new(Mutex::new(None));
+            let callback_error_for_de = Arc::clone(&callback_error);
+            let de_callback = move |update: &autoeq::optim::setup::ProgressUpdate| {
+                match progress_callback(update) {
+                    Ok(()) => autoeq::de::CallbackAction::Continue,
+                    Err(error) => {
+                        *callback_error_for_de
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error);
+                        autoeq::de::CallbackAction::Stop
+                    }
                 }
             };
-        let mut global_params = params.clone();
-        // Keep the CLI's existing local-refinement path and its per-pass
-        // evidence contract. The candidate callback records the global pass.
-        global_params.refine = false;
-        let callback_config = autoeq::optim::setup::ProgressCallbackConfig {
-            interval: 1,
-            include_biquads: false,
-            include_filter_response: false,
-            frequencies: Vec::new(),
-        };
-        let output_result = if let Some(candidate) = initial_candidate {
-            autoeq::optim::setup::perform_optimization_with_progress_and_candidate(
-                &global_params,
-                objective_data,
-                callback_config,
-                candidate,
-                de_callback,
+            let mut global_params = params.clone();
+            // Keep the CLI's existing local-refinement path and its per-pass
+            // evidence contract. The candidate callback records the global pass.
+            global_params.refine = false;
+            let callback_config = autoeq::optim::setup::ProgressCallbackConfig {
+                interval: 1,
+                include_biquads: false,
+                include_filter_response: false,
+                frequencies: Vec::new(),
+            };
+            let output_result = if let Some(candidate) = initial_candidate {
+                autoeq::optim::setup::perform_optimization_with_progress_and_candidate(
+                    &global_params,
+                    objective_data,
+                    callback_config,
+                    candidate,
+                    de_callback,
+                )
+            } else {
+                autoeq::optim::setup::perform_optimization_with_progress(
+                    &global_params,
+                    objective_data,
+                    callback_config,
+                    de_callback,
+                )
+            };
+            if let Some(error) = callback_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                return Err(std::io::Error::other(error).into());
+            }
+            let output = output_result?;
+            x.clone_from_slice(&output.params);
+            (
+                Ok((
+                    output.optimization_run.stopping_reason,
+                    optim::compute_fitness_penalties_ref(&x, objective_data),
+                )),
+                None,
+                None,
+                None,
+            )
+        } else if direct_de_warm_start
+            && resolved_backend.name().eq_ignore_ascii_case("autoeq:de")
+            && let Some(candidate) = initial_candidate
+        {
+            let mut global_params = params.clone();
+            global_params.refine = false;
+            let output =
+                autoeq::optim::setup::perform_optimization_with_run_descriptor_and_candidate(
+                    &global_params,
+                    objective_data,
+                    candidate,
+                    Box::new(|_| autoeq::de::CallbackAction::Continue),
+                )?;
+            x.clone_from_slice(&output.parameters);
+            (
+                Ok((
+                    output.descriptor.stopping_reason,
+                    optim::compute_fitness_penalties_ref(&x, objective_data),
+                )),
+                None,
+                None,
+                None,
             )
         } else {
-            autoeq::optim::setup::perform_optimization_with_progress(
-                &global_params,
-                objective_data,
-                callback_config,
-                de_callback,
+            backend.optimize_filters_with_typed_completion_evidence(
+                &mut x,
+                &lower_bounds,
+                &upper_bounds,
+                objective_data.clone(),
+                params,
             )
         };
-        if let Some(error) = callback_error
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take()
-        {
-            return Err(std::io::Error::other(error).into());
-        }
-        let output = output_result?;
-        x.clone_from_slice(&output.params);
-        (
-            Ok((
-                output.optimization_run.stopping_reason,
-                optim::compute_fitness_penalties_ref(&x, objective_data),
-            )),
-            None,
-            None,
-        )
-    } else if direct_de_warm_start
-        && resolved_backend.name().eq_ignore_ascii_case("autoeq:de")
-        && let Some(candidate) = initial_candidate
-    {
-        let mut global_params = params.clone();
-        global_params.refine = false;
-        let output = autoeq::optim::setup::perform_optimization_with_run_descriptor_and_candidate(
-            &global_params,
-            objective_data,
-            candidate,
-            Box::new(|_| autoeq::de::CallbackAction::Continue),
-        )?;
-        x.clone_from_slice(&output.parameters);
-        (
-            Ok((
-                output.descriptor.stopping_reason,
-                optim::compute_fitness_penalties_ref(&x, objective_data),
-            )),
-            None,
-            None,
-        )
-    } else {
-        backend.optimize_filters_with_completion_evidence(
-            &mut x,
-            &lower_bounds,
-            &upper_bounds,
-            objective_data.clone(),
-            params,
-        )
-    };
     let mut global_evidence = OptimizerRunEvidence::from_backend_result(
         &params.algo,
         global_result.clone(),
@@ -589,6 +593,9 @@ fn perform_optimization_with_backend_and_candidate_and_progress_callback(
     }
     if let Some(search) = &global_search_evidence {
         attach_search_diagnostics(&mut global_evidence, search);
+    }
+    if let Some(completion) = backend_completion {
+        global_evidence.apply_backend_completion(completion);
     }
 
     match &global_result {

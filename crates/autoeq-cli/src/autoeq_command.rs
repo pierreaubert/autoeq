@@ -897,7 +897,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
                 "selected_de_completion": opt_result.optimizer_evidence.first()
                     .filter(|evidence| evidence.selected_for_output
                         && evidence.confidence != autoeq::optim::OptimizerConfidence::Unusable)
-                    .and_then(|_| opt_result.global_de_completion.as_ref())
+                    .and(opt_result.global_de_completion.as_ref())
                     .map(|completion| serde_json::json!({
                         "success": completion.success,
                         "message": &completion.message,

@@ -303,7 +303,7 @@ impl OptimizerRunEvidence {
             || (lower_status.contains("not converged")
                 && (lower_status.contains("maximum")
                     || lower_status.contains("maxeval")
-                    || lower_status.contains("limit")
+                    || contains_status_word(&lower_status, "limit")
                     || lower_status.contains("budget")))
         {
             OptimizerTermination::EvaluationLimit
@@ -492,6 +492,12 @@ fn parse_evaluation_count(status: &str) -> Option<usize> {
     (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
 }
 
+fn contains_status_word(status: &str, word: &str) -> bool {
+    status
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|part| part == word)
+}
+
 fn max_bound_violation(parameters: &[f64], lower_bounds: &[f64], upper_bounds: &[f64]) -> f64 {
     if parameters.len() != lower_bounds.len() || parameters.len() != upper_bounds.len() {
         return f64::INFINITY;
@@ -580,10 +586,7 @@ pub fn optimize_filters_with_de_completion(
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
     params: &crate::OptimParams,
-) -> (
-    Result<(String, f64), (String, f64)>,
-    Option<super::de::DECompletion>,
-) {
+) -> super::optimizer_backend::OptimizerBackendDeCompletion {
     let Some(backend) = super::registry::resolve(&params.algo) else {
         return (
             optimize_filters(x, lower_bounds, upper_bounds, objective_data, params),
@@ -619,27 +622,42 @@ pub fn optimize_filters_with_de_completion(
     )
 }
 
-/// Preserve same-invocation search diagnostics on the ordinary MH route.
-///
-/// This dispatch performs the same solver call and candidate finalization as
-/// [`optimize_filters_with_de_completion`]. The extra value is observational:
-/// it does not classify a generation-limit result as converged.
+/// Preserve DE and search diagnostics from one ordinary dispatch.
 pub fn optimize_filters_with_completion_evidence(
     x: &mut [f64],
     lower_bounds: &[f64],
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
     params: &crate::OptimParams,
-) -> (
-    Result<(String, f64), (String, f64)>,
-    Option<super::de::DECompletion>,
-    Option<super::backend::BackendSearchEvidence>,
-) {
+) -> super::optimizer_backend::OptimizerBackendCompletionEvidence {
+    let (result, de_completion, search_evidence, _) =
+        optimize_filters_with_typed_completion_evidence(
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective_data,
+            params,
+        );
+    (result, de_completion, search_evidence)
+}
+
+/// Preserve typed completion and search diagnostics from one ordinary dispatch.
+///
+/// Completion is taken directly from the backend's typed report and is never
+/// inferred from status text. Search diagnostics cannot override a budget stop.
+pub fn optimize_filters_with_typed_completion_evidence(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+) -> super::optimizer_backend::OptimizerBackendTypedCompletionEvidence {
     if let Some(backend) = super::registry::resolve(&params.algo)
-        && backend.name().starts_with("mh:")
+        && (backend.name().starts_with("mh:")
+            || backend.name().eq_ignore_ascii_case("autoeq:cobyla"))
     {
         let snapshot = objective_data.clone();
-        let output = backend.optimize_with_report(
+        let (output, backend_completion) = backend.optimize_with_typed_completion(
             x,
             lower_bounds,
             upper_bounds,
@@ -647,24 +665,23 @@ pub fn optimize_filters_with_completion_evidence(
             params,
             None,
         );
-        let normalized = normalize_backend_output(output, backend.name(), x);
-        return (
-            finalize_dispatch_winner(
-                &params.algo,
-                x,
-                lower_bounds,
-                upper_bounds,
-                &snapshot,
-                params,
-                normalized.result,
-            ),
-            None,
-            normalized.search_evidence,
+        let normalized =
+            normalize_backend_output_with_completion(output, backend_completion, backend.name(), x);
+        let result = finalize_dispatch_winner(
+            &params.algo,
+            x,
+            lower_bounds,
+            upper_bounds,
+            &snapshot,
+            params,
+            normalized.result,
         );
+        let completion = normalized.backend_completion.filter(|_| result.is_ok());
+        return (result, None, normalized.search_evidence, completion);
     }
     let (result, de_completion) =
         optimize_filters_with_de_completion(x, lower_bounds, upper_bounds, objective_data, params);
-    (result, de_completion, None)
+    (result, de_completion, None, None)
 }
 
 /// Optimize filters and return structured termination/convergence evidence.
@@ -729,6 +746,7 @@ struct ControlledOptimizationDispatch {
     validation_stop_refusal: bool,
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     search_evidence: Option<super::backend::BackendSearchEvidence>,
+    backend_completion: Option<OptimizerBackendCompletion>,
 }
 
 struct NormalizedBackendOutput {
@@ -736,6 +754,18 @@ struct NormalizedBackendOutput {
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     validation_stop_refusal: bool,
     search_evidence: Option<super::backend::BackendSearchEvidence>,
+    backend_completion: Option<OptimizerBackendCompletion>,
+}
+
+fn normalize_backend_output_with_completion(
+    output: FilterOptimizerOutput,
+    completion: Option<OptimizerBackendCompletion>,
+    expected_backend: &str,
+    parameters: &[f64],
+) -> NormalizedBackendOutput {
+    let mut normalized = normalize_backend_output(output, expected_backend, parameters);
+    normalized.backend_completion = completion;
+    normalized
 }
 
 fn normalize_backend_output(
@@ -749,6 +779,7 @@ fn normalize_backend_output(
             pareto_report: None,
             validation_stop_refusal: true,
             search_evidence: None,
+            backend_completion: None,
         },
         FilterOptimizerOutput::CompletedWithSearchEvidence { result, search } => {
             NormalizedBackendOutput {
@@ -756,6 +787,7 @@ fn normalize_backend_output(
                 pareto_report: None,
                 validation_stop_refusal: false,
                 search_evidence: Some(search),
+                backend_completion: None,
             }
         }
         FilterOptimizerOutput::Completed {
@@ -771,6 +803,7 @@ fn normalize_backend_output(
                     pareto_report: None,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 };
             }
             let Some(report) = pareto_report.as_ref() else {
@@ -779,6 +812,7 @@ fn normalize_backend_output(
                     pareto_report: None,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 };
             };
             let invalid = report.validate().err().or_else(|| {
@@ -809,12 +843,14 @@ fn normalize_backend_output(
                     pareto_report: None,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 },
                 None => NormalizedBackendOutput {
                     result,
                     pareto_report,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 },
             }
         }
@@ -848,6 +884,7 @@ fn optimize_filters_with_run_control_dispatch(
         validation_stop_refusal: false,
         pareto_report: None,
         search_evidence: None,
+        backend_completion: None,
     };
     let algorithm = algo_override.unwrap_or(&params.algo);
     let Some(backend) = super::registry::resolve(algorithm) else {
@@ -921,6 +958,7 @@ fn optimize_filters_with_run_control_dispatch(
             validation_stop_refusal: false,
             pareto_report: None,
             search_evidence: None,
+            backend_completion: None,
         };
     }
 
@@ -951,7 +989,7 @@ fn optimize_filters_with_run_control_dispatch(
     } else {
         None
     };
-    let backend_output = backend.optimize_with_report(
+    let (backend_output, backend_completion) = backend.optimize_with_typed_completion(
         x,
         lower_bounds,
         upper_bounds,
@@ -964,7 +1002,13 @@ fn optimize_filters_with_run_control_dispatch(
         pareto_report,
         validation_stop_refusal: typed_validation_stop,
         search_evidence,
-    } = normalize_backend_output(backend_output, backend.name(), x);
+        backend_completion,
+    } = normalize_backend_output_with_completion(
+        backend_output,
+        backend_completion,
+        backend.name(),
+        x,
+    );
     let snapshot = run_control.snapshot();
     let stage_snapshot_before_finalization = run_control.stage_snapshot();
     let stop_before_finalization = snapshot.cancellation_requested
@@ -1006,6 +1050,11 @@ fn optimize_filters_with_run_control_dispatch(
             && !snapshot.deadline_reached
             && report.returned_parameters == x
     });
+    let backend_completion = if finalized.is_ok() {
+        backend_completion
+    } else {
+        None
+    };
     ControlledOptimizationDispatch {
         result: finalized,
         dispatch: OptimizerDispatchOutcome::BackendInvoked,
@@ -1013,6 +1062,7 @@ fn optimize_filters_with_run_control_dispatch(
         validation_stop_refusal,
         pareto_report,
         search_evidence,
+        backend_completion,
     }
 }
 
@@ -1087,6 +1137,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     let validation_stop_refusal = dispatch_result.validation_stop_refusal;
     let pareto_report = dispatch_result.pareto_report;
     let search_evidence = dispatch_result.search_evidence;
+    let backend_completion = dispatch_result.backend_completion;
     let snapshot = run_control.snapshot();
     let stage_snapshot = run_control.stage_snapshot();
     let algorithm = algo_override.unwrap_or(&params.algo);
@@ -1116,6 +1167,11 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
         if result.is_ok() {
             evidence.apply_backend_completion(search.completion);
         }
+    }
+    if result.is_ok()
+        && let Some(completion) = backend_completion
+    {
+        evidence.apply_backend_completion(completion);
     }
     if matches!(
         dispatch,

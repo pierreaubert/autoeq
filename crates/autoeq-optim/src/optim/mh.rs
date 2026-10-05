@@ -12,6 +12,11 @@ use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode, compute_fitness_penalties_ref};
 use ndarray::Array1;
 
+type MhSearchResult = (
+    Result<(String, f64), (String, f64)>,
+    Option<BackendSearchEvidence>,
+);
+
 /// Metaheuristics-backed `FilterOptimizer` (one instance per algorithm
 /// variant: de, pso, rga, tlbo, firefly).
 pub struct MhBackend {
@@ -417,10 +422,7 @@ fn optimize_filters_mh_with_callback_seeded_report(
     maxeval: usize,
     mut callback: Box<dyn FnMut(&MHIntermediate) -> CallbackAction + Send>,
     seed: u64,
-) -> (
-    Result<(String, f64), (String, f64)>,
-    Option<BackendSearchEvidence>,
-) {
+) -> MhSearchResult {
     let num_params = x.len();
 
     // Build bounds for metaheuristics (as pairs)

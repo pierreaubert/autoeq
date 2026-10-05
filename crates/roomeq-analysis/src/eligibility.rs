@@ -158,7 +158,10 @@ pub fn evaluate_operation_eligibility(input: &EligibilityInput<'_>) -> Eligibili
             // F07: spatial magnitude supports tonal magnitude analysis.
             match envelope.capture {
                 CaptureKind::Unknown => {
-                    observe(&mut record, "capture kind unknown: magnitude support unassessed");
+                    observe(
+                        &mut record,
+                        "capture kind unknown: magnitude support unassessed",
+                    );
                 }
                 _ => {
                     record.verdict = EligibilityVerdict::Eligible;
@@ -301,20 +304,13 @@ pub fn evaluate_operation_eligibility(input: &EligibilityInput<'_>) -> Eligibili
                                 value: budgets.min_decay_noise_range_db,
                                 unit: "db".to_string(),
                             });
-                            if range_db.is_finite()
-                                && range_db >= budgets.min_decay_noise_range_db
+                            if range_db.is_finite() && range_db >= budgets.min_decay_noise_range_db
                             {
                                 record.verdict = EligibilityVerdict::Eligible;
-                                observe(
-                                    &mut record,
-                                    "decay noise range meets explicit budgets",
-                                );
+                                observe(&mut record, "decay noise range meets explicit budgets");
                             } else {
                                 record.verdict = EligibilityVerdict::Limited;
-                                observe(
-                                    &mut record,
-                                    "decay noise range below explicit budgets",
-                                );
+                                observe(&mut record, "decay noise range below explicit budgets");
                             }
                             observe(
                                 &mut record,
@@ -408,7 +404,11 @@ mod tests {
                 Some(&budgets),
                 band_context("mmm-other"),
             ));
-            assert_eq!(verdict.verdict, EligibilityVerdict::Unsupported, "{operation:?}");
+            assert_eq!(
+                verdict.verdict,
+                EligibilityVerdict::Unsupported,
+                "{operation:?}"
+            );
         }
         assert_eq!(magnitude.measurement_id, "meas-1");
         assert_eq!(magnitude.evidence_refs, vec!["ev-1"]);

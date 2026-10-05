@@ -183,7 +183,10 @@ mod tests {
     #[test]
     fn synthetic_catalog_covers_lane_fixtures() {
         let catalog = fixture_catalog();
-        assert!(catalog.len() >= 20, "catalog must list every lane constructor");
+        assert!(
+            catalog.len() >= 20,
+            "catalog must list every lane constructor"
+        );
         for record in &catalog {
             assert!(!record.constructor.is_empty());
             assert!(!record.fixture_id.is_empty());

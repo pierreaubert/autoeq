@@ -13,14 +13,14 @@ pub mod eligibility;
 pub mod excess_phase;
 pub mod quasi_anechoic;
 
-#[cfg(test)]
-mod psycho_fast;
 pub mod evidence;
 pub mod frequency_grid;
 pub mod impulse_analysis;
 pub mod ir_waveform;
 pub mod listening_area;
 pub mod observations;
+#[cfg(test)]
+mod psycho_fast;
 pub mod reflection_cancel;
 pub mod response_metrics;
 pub mod rir_prototype;

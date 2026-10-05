@@ -63,9 +63,7 @@ pub fn observe_repeatable_peak(
         return None;
     }
     if !occurrences.iter().all(|feature| {
-        feature.frequency_hz.is_finite()
-            && feature.level_db.is_finite()
-            && feature.level_db > 0.0
+        feature.frequency_hz.is_finite() && feature.level_db.is_finite() && feature.level_db > 0.0
     }) {
         return None;
     }
@@ -80,10 +78,16 @@ pub fn observe_repeatable_peak(
     if max_freq - min_freq > freq_tolerance_hz {
         return None;
     }
-    let mean_freq =
-        occurrences.iter().map(|feature| feature.frequency_hz).sum::<f64>() / occurrences.len() as f64;
-    let mean_level =
-        occurrences.iter().map(|feature| feature.level_db).sum::<f64>() / occurrences.len() as f64;
+    let mean_freq = occurrences
+        .iter()
+        .map(|feature| feature.frequency_hz)
+        .sum::<f64>()
+        / occurrences.len() as f64;
+    let mean_level = occurrences
+        .iter()
+        .map(|feature| feature.level_db)
+        .sum::<f64>()
+        / occurrences.len() as f64;
     Some(Observation {
         kind: ObservationKind::RepeatablePeak,
         frequency_hz: mean_freq,
@@ -125,8 +129,7 @@ pub fn observe_seat_dips(
             frequency_hz: dip.frequency_hz,
             level_db: dip.level_db,
             evidence_refs: vec![evidence_ref.to_string()],
-            note: "dip center moves across seats: position-dependent, not a fixed mode"
-                .to_string(),
+            note: "dip center moves across seats: position-dependent, not a fixed mode".to_string(),
         })
         .collect::<Vec<_>>();
     let diagnosis = Diagnosis {
@@ -327,15 +330,7 @@ mod tests {
     #[test]
     fn analysis_display_smoothing_does_not_erase_evidence() {
         // A narrow mode invisible after display smoothing keeps its raw report.
-        let report = report_narrow_mode(
-            55.0,
-            12.0,
-            9.0,
-            Some(0.4),
-            Some(0.85),
-            0.5,
-            "mode-ev",
-        );
+        let report = report_narrow_mode(55.0, 12.0, 9.0, Some(0.4), Some(0.85), 0.5, "mode-ev");
         assert_eq!(report.frequency_hz, 55.0);
         assert_eq!(report.q, 12.0);
         assert_eq!(report.prominence_db, 9.0);

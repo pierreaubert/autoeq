@@ -1,7 +1,7 @@
 use super::consts::CEA2034_CURVE_NAMES;
 use super::create::{
-    create_cea2034_combined_series, create_cea2034_series,
-    create_cea2034_with_eq_combined_series, create_cea2034_with_eq_series,
+    create_cea2034_combined_series, create_cea2034_series, create_cea2034_with_eq_combined_series,
+    create_cea2034_with_eq_series,
 };
 use super::misc::shorten_curve_name;
 use crate::filter_color::filter_color;

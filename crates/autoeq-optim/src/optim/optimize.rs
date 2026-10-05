@@ -580,12 +580,21 @@ pub fn optimize_filters_with_de_completion(
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
     params: &crate::OptimParams,
-) -> (Result<(String, f64), (String, f64)>, Option<super::de::DECompletion>) {
+) -> (
+    Result<(String, f64), (String, f64)>,
+    Option<super::de::DECompletion>,
+) {
     let Some(backend) = super::registry::resolve(&params.algo) else {
-        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+        return (
+            optimize_filters(x, lower_bounds, upper_bounds, objective_data, params),
+            None,
+        );
     };
     if !backend.name().eq_ignore_ascii_case("autoeq:de") {
-        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+        return (
+            optimize_filters(x, lower_bounds, upper_bounds, objective_data, params),
+            None,
+        );
     }
     let snapshot = objective_data.clone();
     let (result, completion) = super::de::optimize_filters_autoeq_with_completion(
@@ -631,21 +640,30 @@ pub fn optimize_filters_with_completion_evidence(
     {
         let snapshot = objective_data.clone();
         let output = backend.optimize_with_report(
-            x, lower_bounds, upper_bounds, objective_data, params, None,
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective_data,
+            params,
+            None,
         );
         let normalized = normalize_backend_output(output, backend.name(), x);
         return (
             finalize_dispatch_winner(
-                &params.algo, x, lower_bounds, upper_bounds, &snapshot, params,
+                &params.algo,
+                x,
+                lower_bounds,
+                upper_bounds,
+                &snapshot,
+                params,
                 normalized.result,
             ),
             None,
             normalized.search_evidence,
         );
     }
-    let (result, de_completion) = optimize_filters_with_de_completion(
-        x, lower_bounds, upper_bounds, objective_data, params,
-    );
+    let (result, de_completion) =
+        optimize_filters_with_de_completion(x, lower_bounds, upper_bounds, objective_data, params);
     (result, de_completion, None)
 }
 
@@ -1153,7 +1171,15 @@ pub fn optimize_filters_with_algo_override(
         .ok_or_else(|| (format!("Unknown algorithm: {}", algo), f64::INFINITY))?;
     let snapshot = objective_data.clone();
     let result = backend.optimize(x, lower_bounds, upper_bounds, objective_data, params, None);
-    finalize_dispatch_winner(algo, x, lower_bounds, upper_bounds, &snapshot, params, result)
+    finalize_dispatch_winner(
+        algo,
+        x,
+        lower_bounds,
+        upper_bounds,
+        &snapshot,
+        params,
+        result,
+    )
 }
 
 /// Optimize filter parameters with a progress callback for per-iteration updates.
@@ -1194,7 +1220,13 @@ pub fn optimize_filters_with_callback(
             callback,
         );
         return finalize_dispatch_winner(
-            backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+            backend.name(),
+            x,
+            lower_bounds,
+            upper_bounds,
+            &snapshot,
+            params,
+            result,
         );
     }
 
@@ -1228,7 +1260,13 @@ pub fn optimize_filters_with_callback(
         cb_for_backend,
     );
     finalize_dispatch_winner(
-        backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+        backend.name(),
+        x,
+        lower_bounds,
+        upper_bounds,
+        &snapshot,
+        params,
+        result,
     )
 }
 

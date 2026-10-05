@@ -186,9 +186,7 @@ fn check_aligned(curves: &[Curve], context: &str) -> Result<()> {
         {
             // F05: grids that cannot be aligned are rejected outright.
             return Err(AutoeqError::InvalidMeasurement {
-                message: format!(
-                    "{context} curve {index} cannot be aligned to the reference grid"
-                ),
+                message: format!("{context} curve {index} cannot be aligned to the reference grid"),
             });
         }
     }
@@ -439,8 +437,7 @@ pub fn assess_band_support(
             });
             continue;
         }
-        let restricted =
-            min_coherence < policy.min_coherence || min_snr < policy.min_snr_db;
+        let restricted = min_coherence < policy.min_coherence || min_snr < policy.min_snr_db;
         out.push(BandSupportReport {
             band_lo_hz,
             band_hi_hz,
@@ -503,15 +500,12 @@ mod tests {
         curve.coherence = Some(coherence);
         curve.noise_floor_db = Some(noise);
         let bands = vec![(20.0, 100.0), (100.0, 300.0), (300.0, 12000.0)];
-        let reports = assess_band_support(&curve, &bands, &ConfidencePolicy::v1())
-            .expect("band support");
+        let reports =
+            assess_band_support(&curve, &bands, &ConfidencePolicy::v1()).expect("band support");
         assert_eq!(reports[0].support, BandSupport::Supported);
         assert_eq!(reports[1].support, BandSupport::Restricted);
         assert_eq!(reports[2].support, BandSupport::Supported);
-        assert_eq!(
-            reports[1].policy_version,
-            ConfidencePolicy::v1().version
-        );
+        assert_eq!(reports[1].policy_version, ConfidencePolicy::v1().version);
     }
 
     #[test]
@@ -523,8 +517,7 @@ mod tests {
         let bands = vec![(20.0, 12000.0)];
         let repeatability =
             compute_band_repeatability(&repeats, &bands, "repeat-ev").expect("repeatability");
-        let seat_spread =
-            compute_band_seat_spread(&seats, &bands, "seat-ev").expect("seat spread");
+        let seat_spread = compute_band_seat_spread(&seats, &bands, "seat-ev").expect("seat spread");
         let repeat_spread = repeatability[0].spread_db.expect("repeat spread");
         let seat_value = seat_spread[0].spread_db.expect("seat spread");
         assert!((repeat_spread - 0.2).abs() < 1e-9, "{repeat_spread}");
@@ -557,8 +550,7 @@ mod tests {
     fn analysis_repeatability_bridges_to_core_evidence_bands() {
         let repeats = vec![flat_curve(0.0), flat_curve(0.2)];
         let bands = vec![(20.0, 100.0), (30000.0, 40000.0)];
-        let reports =
-            compute_band_repeatability(&repeats, &bands, "ev").expect("repeatability");
+        let reports = compute_band_repeatability(&repeats, &bands, "ev").expect("repeatability");
         let evidence = repeatability_to_evidence_bands(&reports);
         assert_eq!(evidence.len(), 2);
         let known = &evidence[0];
@@ -586,13 +578,15 @@ mod tests {
         // A coverage gap is preserved as unknown, not interpolated.
         let repeats = vec![flat_curve(0.0), flat_curve(0.2)];
         let gapped = vec![(20.0, 100.0), (30000.0, 40000.0)];
-        let reports =
-            compute_band_repeatability(&repeats, &gapped, "ev").expect("gap report");
+        let reports = compute_band_repeatability(&repeats, &gapped, "ev").expect("gap report");
         assert!(reports[0].spread_db.is_some());
         assert_eq!(reports[1].spread_db, None);
         assert_eq!(reports[1].repeat_count, 0);
         assert_eq!(reports[1].estimator, EstimatorKind::Unknown);
         assert_eq!(reports[1].reason.as_deref(), Some("coverage_gap"));
-        assert_eq!((reports[1].band_lo_hz, reports[1].band_hi_hz), (30000.0, 40000.0));
+        assert_eq!(
+            (reports[1].band_lo_hz, reports[1].band_hi_hz),
+            (30000.0, 40000.0)
+        );
     }
 }

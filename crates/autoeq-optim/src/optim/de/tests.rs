@@ -145,7 +145,11 @@ fn registered_de_route_returns_report_for_the_final_selected_vector() {
     assert!(report.generations <= report.generation_limit);
     assert!(report.evaluations > 0 && report.evaluations <= params.maxeval);
     assert!(selected.iter().all(|value| value.is_finite()));
-    assert!(selected.iter().zip(lower).zip(upper).all(|((&value, low), high)| {
-        value >= low && value <= high
-    }));
+    assert!(
+        selected
+            .iter()
+            .zip(lower)
+            .zip(upper)
+            .all(|((&value, low), high)| { value >= low && value <= high })
+    );
 }

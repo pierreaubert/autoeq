@@ -98,7 +98,11 @@ pub trait OptimizerBackend: Send + Sync {
         Option<super::backend::BackendSearchEvidence>,
     ) {
         let (result, de_completion) = self.optimize_filters_with_de_completion(
-            x, lower_bounds, upper_bounds, objective, params,
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective,
+            params,
         );
         (result, de_completion, None)
     }
@@ -179,7 +183,11 @@ impl OptimizerBackend for RealOptimizerBackend {
         Option<super::backend::BackendSearchEvidence>,
     ) {
         super::optimize_filters_with_completion_evidence(
-            x, lower_bounds, upper_bounds, objective, params,
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective,
+            params,
         )
     }
 
@@ -229,13 +237,7 @@ impl OptimizerBackend for RealOptimizerBackend {
         Result<(String, f64), (String, f64)>,
         Option<super::de::DECompletion>,
     ) {
-        super::optimize_filters_with_de_completion(
-            x,
-            lower_bounds,
-            upper_bounds,
-            objective,
-            params,
-        )
+        super::optimize_filters_with_de_completion(x, lower_bounds, upper_bounds, objective, params)
     }
 
     fn optimize_filters_with_callback(

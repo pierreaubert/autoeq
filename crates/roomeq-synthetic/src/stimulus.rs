@@ -107,10 +107,7 @@ fn check_rate_duration(sample_rate_hz: f64, duration_s: f64) -> Result<usize> {
 /// every control inside the declared amplitude bound without changing the
 /// relative spectrum. Fully deterministic.
 fn normalize_peak(samples: Vec<f64>, amplitudes: &mut [f64], target: f64) -> Vec<f64> {
-    let peak = samples
-        .iter()
-        .map(|v| v.abs())
-        .fold(0.0_f64, f64::max);
+    let peak = samples.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
     if peak > 0.0 {
         let gain = target / peak;
         for a in amplitudes.iter_mut() {
@@ -144,8 +141,7 @@ pub fn equal_energy_signal_a(
     let n = check_rate_duration(sample_rate_hz, duration_s)?;
     let components = vec![(110.0, 0.5), (165.0, 0.3), (220.0, 0.2)];
     let samples = tone_bank(n, sample_rate_hz, &components);
-    let (frequencies_hz, amplitudes): (Vec<f64>, Vec<f64>) =
-        components.iter().cloned().unzip();
+    let (frequencies_hz, amplitudes): (Vec<f64>, Vec<f64>) = components.iter().cloned().unzip();
     Ok(finish(
         StimulusKind::EqualEnergyA,
         sample_rate_hz,
@@ -175,11 +171,9 @@ pub fn equal_energy_signal_b(
         .sum();
     let energy_base: f64 = base.iter().map(|(_, a)| a * a).sum();
     let scale = (energy_a_like / energy_base).sqrt();
-    let components: Vec<(f64, f64)> =
-        base.iter().map(|(f, a)| (*f, a * scale)).collect();
+    let components: Vec<(f64, f64)> = base.iter().map(|(f, a)| (*f, a * scale)).collect();
     let samples = tone_bank(n, sample_rate_hz, &components);
-    let (frequencies_hz, amplitudes): (Vec<f64>, Vec<f64>) =
-        components.iter().cloned().unzip();
+    let (frequencies_hz, amplitudes): (Vec<f64>, Vec<f64>) = components.iter().cloned().unzip();
     Ok(finish(
         StimulusKind::EqualEnergyB,
         sample_rate_hz,
@@ -194,11 +188,13 @@ pub fn equal_energy_signal_b(
 /// Spectral tilt: harmonic complex on 55 Hz with 1/n amplitude falloff.
 pub fn tilt_signal(sample_rate_hz: f64, duration_s: f64, seed: u64) -> Result<StimulusSignal> {
     let n = check_rate_duration(sample_rate_hz, duration_s)?;
-    let components: Vec<(f64, f64)> =
-        (1..=8).map(|k| (55.0 * k as f64, 0.8 / k as f64)).collect();
-    let (frequencies_hz, mut amplitudes): (Vec<f64>, Vec<f64>) =
-        components.iter().cloned().unzip();
-    let samples = normalize_peak(tone_bank(n, sample_rate_hz, &components), &mut amplitudes, 0.9);
+    let components: Vec<(f64, f64)> = (1..=8).map(|k| (55.0 * k as f64, 0.8 / k as f64)).collect();
+    let (frequencies_hz, mut amplitudes): (Vec<f64>, Vec<f64>) = components.iter().cloned().unzip();
+    let samples = normalize_peak(
+        tone_bank(n, sample_rate_hz, &components),
+        &mut amplitudes,
+        0.9,
+    );
     Ok(finish(
         StimulusKind::Tilt,
         sample_rate_hz,
@@ -211,11 +207,7 @@ pub fn tilt_signal(sample_rate_hz: f64, duration_s: f64, seed: u64) -> Result<St
 }
 
 /// Sustained resonance excitation: long 75 Hz tone with raised-cosine edges.
-pub fn resonance_signal(
-    sample_rate_hz: f64,
-    duration_s: f64,
-    seed: u64,
-) -> Result<StimulusSignal> {
+pub fn resonance_signal(sample_rate_hz: f64, duration_s: f64, seed: u64) -> Result<StimulusSignal> {
     let n = check_rate_duration(sample_rate_hz, duration_s)?;
     let edge = (0.1 * sample_rate_hz) as usize;
     let mut samples = tone_bank(n, sample_rate_hz, &[(75.0, 0.8)]);
@@ -241,11 +233,7 @@ pub fn resonance_signal(
 }
 
 /// Transient: unit impulse plus a short decaying 2 kHz burst.
-pub fn transient_signal(
-    sample_rate_hz: f64,
-    duration_s: f64,
-    seed: u64,
-) -> Result<StimulusSignal> {
+pub fn transient_signal(sample_rate_hz: f64, duration_s: f64, seed: u64) -> Result<StimulusSignal> {
     let n = check_rate_duration(sample_rate_hz, duration_s)?;
     let mut samples = vec![0.0; n];
     let at = (0.01 * sample_rate_hz) as usize;
@@ -258,8 +246,7 @@ pub fn transient_signal(
     let burst_end = n.min(at + (0.05 * sample_rate_hz) as usize);
     for (i, sample) in samples.iter_mut().enumerate().take(burst_end).skip(at + 1) {
         let t = (i - at) as f64 / sample_rate_hz;
-        *sample =
-            (-t / 0.008).exp() * (2.0 * std::f64::consts::PI * 2000.0 * t).sin() * 0.5;
+        *sample = (-t / 0.008).exp() * (2.0 * std::f64::consts::PI * 2000.0 * t).sin() * 0.5;
     }
     Ok(finish(
         StimulusKind::Transient,
@@ -273,11 +260,7 @@ pub fn transient_signal(
 }
 
 /// AM-rate sweep: 440 Hz carrier, modulation rate sweeping 2 → 20 Hz.
-pub fn am_sweep_signal(
-    sample_rate_hz: f64,
-    duration_s: f64,
-    seed: u64,
-) -> Result<StimulusSignal> {
+pub fn am_sweep_signal(sample_rate_hz: f64, duration_s: f64, seed: u64) -> Result<StimulusSignal> {
     let n = check_rate_duration(sample_rate_hz, duration_s)?;
     let mut samples = Vec::with_capacity(n);
     for i in 0..n {
@@ -288,9 +271,7 @@ pub fn am_sweep_signal(
         let am_phase = 2.0 * std::f64::consts::PI * (2.0 * t + 9.0 * t * t / duration_s);
         let _ = rate;
         let modulator = 1.0 - 0.8 * (0.5 - 0.5 * am_phase.cos());
-        samples.push(
-            0.7 * modulator * (2.0 * std::f64::consts::PI * 440.0 * t).cos(),
-        );
+        samples.push(0.7 * modulator * (2.0 * std::f64::consts::PI * 440.0 * t).cos());
     }
     Ok(finish(
         StimulusKind::AmSweep,
@@ -325,15 +306,13 @@ pub fn missing_fundamental_signal(
     seed: u64,
 ) -> Result<StimulusSignal> {
     let n = check_rate_duration(sample_rate_hz, duration_s)?;
-    let components: Vec<(f64, f64)> = vec![
-        (200.0, 0.5),
-        (300.0, 0.4),
-        (400.0, 0.3),
-        (500.0, 0.2),
-    ];
-    let (frequencies_hz, mut amplitudes): (Vec<f64>, Vec<f64>) =
-        components.iter().cloned().unzip();
-    let samples = normalize_peak(tone_bank(n, sample_rate_hz, &components), &mut amplitudes, 0.9);
+    let components: Vec<(f64, f64)> = vec![(200.0, 0.5), (300.0, 0.4), (400.0, 0.3), (500.0, 0.2)];
+    let (frequencies_hz, mut amplitudes): (Vec<f64>, Vec<f64>) = components.iter().cloned().unzip();
+    let samples = normalize_peak(
+        tone_bank(n, sample_rate_hz, &components),
+        &mut amplitudes,
+        0.9,
+    );
     Ok(finish(
         StimulusKind::MissingFundamental,
         sample_rate_hz,
@@ -429,7 +408,11 @@ mod tests {
                 signal.id,
                 signal.peak
             );
-            assert!(signal.peak > 0.1, "signal {} must be non-trivial", signal.id);
+            assert!(
+                signal.peak > 0.1,
+                "signal {} must be non-trivial",
+                signal.id
+            );
             // Stored energy matches a plain recomputation from the samples.
             let recomputed: f64 = signal.samples.iter().map(|v| v * v).sum();
             assert!(
@@ -467,7 +450,9 @@ mod tests {
             "the pair must differ in spectral envelope"
         );
         assert!(
-            a.frequencies_hz.iter().all(|f| !b.frequencies_hz.contains(f)),
+            a.frequencies_hz
+                .iter()
+                .all(|f| !b.frequencies_hz.contains(f)),
             "the pair must use disjoint component sets"
         );
     }
@@ -503,9 +488,7 @@ mod tests {
                 .samples
                 .iter()
                 .enumerate()
-                .map(|(i, v)| {
-                    v * (2.0 * std::f64::consts::PI * freq * i as f64 / RATE).cos()
-                })
+                .map(|(i, v)| v * (2.0 * std::f64::consts::PI * freq * i as f64 / RATE).cos())
                 .sum::<f64>()
                 / missing.samples.len() as f64
         };

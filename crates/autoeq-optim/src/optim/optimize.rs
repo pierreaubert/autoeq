@@ -17,6 +17,8 @@ use serde::{Deserialize, Serialize};
 fn finalize_dispatch_winner(
     candidate_id: &str,
     x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
     data: &ObjectiveData,
     params: &crate::OptimParams,
     result: Result<(String, f64), (String, f64)>,
@@ -28,10 +30,78 @@ fn finalize_dispatch_winner(
         Ok(owned) => owned,
         Err(reason) => return failed(reason),
     };
-    match finalize_candidate(candidate_id, x, data, &owned.as_spec()) {
+    let required_spacing = params.min_spacing_oct.max(data.min_spacing_oct);
+    let repaired = if super::constraint_envelope::is_peq_layout_loss(data.loss_type) {
+        match crate::constraints::project_min_spacing(
+            x,
+            lower_bounds,
+            upper_bounds,
+            data.peq_model,
+            required_spacing,
+        ) {
+            Ok(repaired) => repaired,
+            Err(reason) => return failed(reason),
+        }
+    } else {
+        x.to_vec()
+    };
+    let adjusted = repaired != x;
+    match finalize_candidate(candidate_id, &repaired, data, &owned.as_spec()) {
         Ok(finalized) => {
+            let is_peq = super::constraint_envelope::is_peq_layout_loss(data.loss_type);
+            let spacing = if is_peq {
+                crate::constraints::viol_spacing_from_xs(
+                    &finalized.params,
+                    data.peq_model,
+                    required_spacing,
+                )
+            } else {
+                0.0
+            };
+            let ceiling = if is_peq && data.max_db > 0.0 {
+                super::compute::compute_ceiling_violation_into(
+                    &data.freqs,
+                    &finalized.params,
+                    data.srate,
+                    data.peq_model,
+                    data.max_db,
+                )
+            } else {
+                0.0
+            };
+            let min_gain = if is_peq && data.min_db > 0.0 {
+                crate::constraints::viol_min_gain_from_xs(
+                    &finalized.params,
+                    data.peq_model,
+                    data.min_db,
+                )
+            } else {
+                0.0
+            };
+            let within_bounds = finalized
+                .params
+                .iter()
+                .zip(lower_bounds.iter().zip(upper_bounds))
+                .all(|(&value, (&lower, &upper))| {
+                    value.is_finite() && value >= lower && value <= upper
+                });
+            if !within_bounds
+                || spacing > 0.0
+                || ceiling > 0.0
+                || min_gain > 0.0
+                || !finalized.loss.is_finite()
+            {
+                return failed(format!(
+                    "spacing repair refused: within_bounds={within_bounds}, spacing={spacing}, ceiling={ceiling}, min_gain={min_gain}"
+                ));
+            }
             x.copy_from_slice(&finalized.params);
-            Ok((algo, finalized.loss))
+            let status = if adjusted {
+                format!("{algo}; minimum-spacing projection applied")
+            } else {
+                algo
+            };
+            Ok((status, finalized.loss))
         }
         Err(reason) => failed(reason),
     }
@@ -41,6 +111,8 @@ fn finalize_dispatch_winner(
 #[serde(rename_all = "snake_case")]
 pub enum OptimizerTermination {
     Converged,
+    /// The backend reached its configured evaluation or generation limit.
+    /// Actual evaluation and generation counts are reported separately.
     EvaluationLimit,
     NonConverged,
     UserStopped,
@@ -132,6 +204,31 @@ pub struct OptimizerRunEvidence {
     /// counter; validation/finalization scores remain in the run snapshot.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub evaluation_count: Option<usize>,
+    /// Fitness calls counted by the backend objective before finalization.
+    /// `maxeval` bounds this search stage; selected-candidate validation and
+    /// rescoring are separate and are not included in this count.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_evaluation_count: Option<usize>,
+    /// Fitness attempts the backend refused before computing the objective.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_denied_evaluation_count: Option<usize>,
+    /// Solver task stop cause, distinct from the run-control verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_stop_cause: Option<super::backend::BackendSearchStopCause>,
+    /// Completed solver generations reported by the backend.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_count: Option<usize>,
+    /// Configured solver task-callback limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub generation_limit: Option<usize>,
+    /// Solver task callbacks, including the initial population callback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_callback_count: Option<usize>,
+    /// Final finite population fitness mean and standard deviation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub population_fitness_mean: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub population_fitness_stddev: Option<f64>,
     pub evaluation_limit: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
@@ -223,6 +320,14 @@ impl OptimizerRunEvidence {
             converged: false,
             best_effort: false,
             evaluation_count: parse_evaluation_count(&status),
+            backend_evaluation_count: None,
+            backend_denied_evaluation_count: None,
+            backend_stop_cause: None,
+            generation_count: None,
+            generation_limit: None,
+            task_callback_count: None,
+            population_fitness_mean: None,
+            population_fitness_stddev: None,
             evaluation_limit,
             seed,
             status,
@@ -467,6 +572,83 @@ pub fn optimize_filters(
     optimize_filters_with_algo_override(x, lower_bounds, upper_bounds, objective_data, params, None)
 }
 
+/// Preserve the actual DE completion counters when the ordinary production
+/// path selects AutoEQ DE. Other backends retain their legacy result.
+pub fn optimize_filters_with_de_completion(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+) -> (Result<(String, f64), (String, f64)>, Option<super::de::DECompletion>) {
+    let Some(backend) = super::registry::resolve(&params.algo) else {
+        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+    };
+    if !backend.name().eq_ignore_ascii_case("autoeq:de") {
+        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+    }
+    let snapshot = objective_data.clone();
+    let (result, completion) = super::de::optimize_filters_autoeq_with_completion(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        backend.name(),
+        params,
+    );
+    (
+        finalize_dispatch_winner(
+            backend.name(),
+            x,
+            lower_bounds,
+            upper_bounds,
+            &snapshot,
+            params,
+            result,
+        ),
+        completion,
+    )
+}
+
+/// Preserve same-invocation search diagnostics on the ordinary MH route.
+///
+/// This dispatch performs the same solver call and candidate finalization as
+/// [`optimize_filters_with_de_completion`]. The extra value is observational:
+/// it does not classify a generation-limit result as converged.
+pub fn optimize_filters_with_completion_evidence(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+) -> (
+    Result<(String, f64), (String, f64)>,
+    Option<super::de::DECompletion>,
+    Option<super::backend::BackendSearchEvidence>,
+) {
+    if let Some(backend) = super::registry::resolve(&params.algo)
+        && backend.name().starts_with("mh:")
+    {
+        let snapshot = objective_data.clone();
+        let output = backend.optimize_with_report(
+            x, lower_bounds, upper_bounds, objective_data, params, None,
+        );
+        let normalized = normalize_backend_output(output, backend.name(), x);
+        return (
+            finalize_dispatch_winner(
+                &params.algo, x, lower_bounds, upper_bounds, &snapshot, params,
+                normalized.result,
+            ),
+            None,
+            normalized.search_evidence,
+        );
+    }
+    let (result, de_completion) = optimize_filters_with_de_completion(
+        x, lower_bounds, upper_bounds, objective_data, params,
+    );
+    (result, de_completion, None)
+}
+
 /// Optimize filters and return structured termination/convergence evidence.
 pub fn optimize_filters_detailed(
     x: &mut [f64],
@@ -528,12 +710,14 @@ struct ControlledOptimizationDispatch {
     evaluation_limit: usize,
     validation_stop_refusal: bool,
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    search_evidence: Option<super::backend::BackendSearchEvidence>,
 }
 
 struct NormalizedBackendOutput {
     result: Result<(String, f64), (String, f64)>,
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     validation_stop_refusal: bool,
+    search_evidence: Option<super::backend::BackendSearchEvidence>,
 }
 
 fn normalize_backend_output(
@@ -546,7 +730,16 @@ fn normalize_backend_output(
             result: Err((reason, f64::INFINITY)),
             pareto_report: None,
             validation_stop_refusal: true,
+            search_evidence: None,
         },
+        FilterOptimizerOutput::CompletedWithSearchEvidence { result, search } => {
+            NormalizedBackendOutput {
+                result,
+                pareto_report: None,
+                validation_stop_refusal: false,
+                search_evidence: Some(search),
+            }
+        }
         FilterOptimizerOutput::Completed {
             result,
             pareto_report,
@@ -559,6 +752,7 @@ fn normalize_backend_output(
                     )),
                     pareto_report: None,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 };
             }
             let Some(report) = pareto_report.as_ref() else {
@@ -566,6 +760,7 @@ fn normalize_backend_output(
                     result,
                     pareto_report: None,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 };
             };
             let invalid = report.validate().err().or_else(|| {
@@ -595,11 +790,13 @@ fn normalize_backend_output(
                     )),
                     pareto_report: None,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 },
                 None => NormalizedBackendOutput {
                     result,
                     pareto_report,
                     validation_stop_refusal: false,
+                    search_evidence: None,
                 },
             }
         }
@@ -632,6 +829,7 @@ fn optimize_filters_with_run_control_dispatch(
         evaluation_limit,
         validation_stop_refusal: false,
         pareto_report: None,
+        search_evidence: None,
     };
     let algorithm = algo_override.unwrap_or(&params.algo);
     let Some(backend) = super::registry::resolve(algorithm) else {
@@ -704,6 +902,7 @@ fn optimize_filters_with_run_control_dispatch(
             evaluation_limit,
             validation_stop_refusal: false,
             pareto_report: None,
+            search_evidence: None,
         };
     }
 
@@ -746,6 +945,7 @@ fn optimize_filters_with_run_control_dispatch(
         result: backend_result,
         pareto_report,
         validation_stop_refusal: typed_validation_stop,
+        search_evidence,
     } = normalize_backend_output(backend_output, backend.name(), x);
     let snapshot = run_control.snapshot();
     let stage_snapshot_before_finalization = run_control.stage_snapshot();
@@ -761,6 +961,8 @@ fn optimize_filters_with_run_control_dispatch(
         let finalized = finalize_dispatch_winner(
             backend.name(),
             x,
+            lower_bounds,
+            upper_bounds,
             &validation_snapshot,
             &controlled_params,
             backend_result.clone(),
@@ -792,6 +994,7 @@ fn optimize_filters_with_run_control_dispatch(
         evaluation_limit,
         validation_stop_refusal,
         pareto_report,
+        search_evidence,
     }
 }
 
@@ -865,6 +1068,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     let evaluation_limit = dispatch_result.evaluation_limit;
     let validation_stop_refusal = dispatch_result.validation_stop_refusal;
     let pareto_report = dispatch_result.pareto_report;
+    let search_evidence = dispatch_result.search_evidence;
     let snapshot = run_control.snapshot();
     let stage_snapshot = run_control.stage_snapshot();
     let algorithm = algo_override.unwrap_or(&params.algo);
@@ -882,6 +1086,19 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
             stage.evaluations_started
         }),
     );
+    if let Some(search) = search_evidence {
+        evidence.backend_evaluation_count = Some(search.evaluations);
+        evidence.backend_denied_evaluation_count = Some(search.denied_evaluations);
+        evidence.backend_stop_cause = Some(search.stop_cause);
+        evidence.generation_count = Some(search.generations);
+        evidence.generation_limit = Some(search.generation_limit);
+        evidence.task_callback_count = Some(search.task_callbacks);
+        evidence.population_fitness_mean = search.population_mean;
+        evidence.population_fitness_stddev = search.population_stddev;
+        if result.is_ok() {
+            evidence.apply_backend_completion(search.completion);
+        }
+    }
     if matches!(
         dispatch,
         OptimizerDispatchOutcome::NotStartedBudgetRefusal(_)
@@ -936,7 +1153,7 @@ pub fn optimize_filters_with_algo_override(
         .ok_or_else(|| (format!("Unknown algorithm: {}", algo), f64::INFINITY))?;
     let snapshot = objective_data.clone();
     let result = backend.optimize(x, lower_bounds, upper_bounds, objective_data, params, None);
-    finalize_dispatch_winner(algo, x, &snapshot, params, result)
+    finalize_dispatch_winner(algo, x, lower_bounds, upper_bounds, &snapshot, params, result)
 }
 
 /// Optimize filter parameters with a progress callback for per-iteration updates.
@@ -976,7 +1193,9 @@ pub fn optimize_filters_with_callback(
             backend.name(),
             callback,
         );
-        return finalize_dispatch_winner(backend.name(), x, &snapshot, params, result);
+        return finalize_dispatch_winner(
+            backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+        );
     }
 
     if backend.capabilities().iteration_callback
@@ -1008,7 +1227,9 @@ pub fn optimize_filters_with_callback(
         params,
         cb_for_backend,
     );
-    finalize_dispatch_winner(backend.name(), x, &snapshot, params, result)
+    finalize_dispatch_winner(
+        backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+    )
 }
 
 /// Callback variant of [`optimize_filters_detailed`].

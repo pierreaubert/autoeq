@@ -40,6 +40,7 @@ fn wolfram_re01_dsp_gain_delay() {
     );
 
     let chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: vec![
             plugin("gain", serde_json::json!({"gain_db": gain_db})),

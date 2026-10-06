@@ -1307,6 +1307,114 @@ fn physical_main_quality(
         &main_context,
         Some(&main.destination),
     )?;
+    let owning_target = if let Some(carrier) = result
+        .channels
+        .get(input)
+        .and_then(|chain| chain.physical_correction_target.as_ref())
+    {
+        carrier.validate().map_err(invalid)?;
+        let graph = baseline
+            .metadata
+            .bass_management
+            .as_ref()
+            .and_then(|bass| bass.routing_graph.as_ref())
+            .ok_or_else(|| invalid("owning Main target requires fixed baseline routes"))?;
+        let main_routes: Vec<_> = graph
+            .routes
+            .iter()
+            .filter(|route| {
+                route.source_channel == input
+                    && (route.high_pass_hz.is_some() || route.destination == input)
+            })
+            .collect();
+        if main_routes.len() != 1
+            || graph
+                .routes
+                .iter()
+                .filter(|route| {
+                    route.source_channel == input && route.destination == main.destination
+                })
+                .count()
+                != 1
+        {
+            return Err(invalid(
+                "owning Main target requires one unambiguous isolated route",
+            ));
+        }
+        let supporting = super::room_optimization_result::supporting_source_output_names(baseline);
+        for (owner, stage_name) in [
+            (input, "pre_route"),
+            (main.destination.as_str(), "post_route"),
+        ] {
+            let chain = baseline
+                .channels
+                .get(owner)
+                .ok_or_else(|| invalid("missing owning Main target DSP owner"))?;
+            let mut plugins = stage(chain, stage_name);
+            if stage_name == "post_route"
+                && let Some(driver) = chain.drivers.as_ref().and_then(|drivers| {
+                    drivers
+                        .iter()
+                        .find(|driver| driver.name == main.destination)
+                })
+            {
+                plugins.extend(driver.plugins.clone());
+            }
+            for plugin in &plugins {
+                if correction(plugin) {
+                    if supporting.contains(owner) {
+                        return Err(invalid(
+                            "owning Main target cannot retain supporting-output correction",
+                        ));
+                    }
+                    continue;
+                }
+                if !matches!(plugin.plugin_type.as_str(), "gain" | "delay" | "crossover")
+                    && !(plugin.plugin_type == "eq"
+                        && plugin.parameters["label"] == "excursion_protection")
+                {
+                    return Err(invalid(
+                        "owning Main target has unverified nonstructural baseline transfer",
+                    ));
+                }
+            }
+        }
+        // Target is magnitude evidence, not an acoustic phase observation.
+        // Keep its phase absence and exactly the existing native grid/support.
+        let desired: Curve = carrier.curve.clone().into();
+        if desired.freq[0] > raw.freq[0] || desired.freq.last().unwrap() < raw.freq.last().unwrap()
+        {
+            return Err(invalid(
+                "owning Main target does not cover measured native support",
+            ));
+        }
+        let mut raw_target = autoeq_core::interpolate_log_space(&raw.freq, &desired);
+        raw_target
+            .spl
+            .mapv_inplace(|level| level - carrier.measurement_alignment_gain_db);
+        let mut target_physical = physical.clone();
+        target_physical
+            .get_mut(&main.destination)
+            .ok_or_else(|| invalid("missing owning Main target capture"))?[seat] = raw_target;
+        let (forward_target, target_outputs) = replay_output(
+            baseline,
+            &target_physical,
+            input,
+            seat,
+            true,
+            &main_context,
+            Some(&main.destination),
+        )?;
+        if target_outputs != vec![main.destination.clone()] {
+            return Err(invalid(
+                "owning Main target replay included another physical destination",
+            ));
+        }
+        Some(forward_target.curve)
+    } else {
+        None
+    };
+    let target = owning_target.as_ref().or(target);
     let permitted_gain_db = observation
         .optimizer
         .permitted_output_gain_db
@@ -1530,12 +1638,62 @@ fn validate_final_seats_impl(
     dir: &Path,
     replay_context: FinalSeatReplayContext<'_>,
 ) -> Result<()> {
+    for (channel, chain) in &result.channels {
+        if let Some(target) = &chain.physical_correction_target
+            && let Err(reason) = target.validate()
+        {
+            let message = format!("insufficient physical target evidence for {channel}: {reason}");
+            super::validation_scorecard::defer_native_routed_acceptance(result);
+            return Err(roomeq_model::AutoeqError::InvalidMeasurement { message });
+        }
+    }
+    let routed = super::validation_scorecard::needs_native_routed_acceptance(result)
+        && result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|report| {
+                report
+                    .observations
+                    .iter()
+                    .any(|observation| observation == "native_routed_acceptance_pending")
+            });
+    if routed {
+        super::validation_scorecard::defer_native_routed_acceptance(result);
+        if captures.is_empty() {
+            return Err(invalid(
+                "native routed acceptance requires training captures",
+            ));
+        }
+        super::finalization::refresh_configured_native_acceptance(result, config, fs, dir)?;
+    }
+    let outcome =
+        validate_final_seats_body(result, captures, held_out, config, fs, dir, replay_context);
+    if routed && outcome.is_err() {
+        super::validation_scorecard::defer_native_routed_acceptance(result);
+    }
+    outcome
+}
+
+fn validate_final_seats_body(
+    result: &mut RoomOptimizationResult,
+    captures: &[Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+    replay_context: FinalSeatReplayContext<'_>,
+) -> Result<()> {
     let FinalSeatReplayContext {
         baseline,
         trace: mut replay_trace,
     } = replay_context;
     crate::export::validate_final_routed_stage_ownership(result)?;
-    if baseline.is_none() && !captures.iter().any(|c| c.curves.len() > 1) && held_out.is_empty() {
+    if !super::validation_scorecard::needs_native_routed_acceptance(result)
+        && baseline.is_none()
+        && !captures.iter().any(|c| c.curves.len() > 1)
+        && held_out.is_empty()
+    {
         return Ok(());
     }
     if captures.iter().any(|capture| {
@@ -2193,6 +2351,367 @@ fn concealment_stage(findings: Vec<String>) -> roomeq_model::StageOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_routed_acceptance_recomputes_identity_and_refuses_in_band_damage() {
+        let mut baseline = crate::test_fixtures::single_channel_room_result("left");
+        let initial = baseline.channel_results["left"].initial_curve.clone();
+        let chain = baseline.channels.get_mut("left").unwrap();
+        chain.target_curve = Some((&initial).into());
+        chain
+            .plugins
+            .push(roomeq_engine::topology::mark_route_owned_plugin(
+                roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "high"),
+            ));
+        let routed = super::super::room_optimization_result::apply_logical_channel_chain(
+            chain,
+            &initial,
+            48_000.0,
+            Path::new("."),
+        )
+        .unwrap();
+        baseline
+            .channel_results
+            .get_mut("left")
+            .unwrap()
+            .final_curve = routed;
+        let captures = vec![Capture {
+            channel: "left".into(),
+            driver: None,
+            curves: vec![initial.clone()],
+            seat_labels: None,
+        }];
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 60.0;
+        config.optimizer.max_freq = 500.0;
+        let mut identity = baseline.clone();
+        super::super::room_optimization_result::apply_final_correction_safety_gate(
+            &mut identity,
+            48_000.0,
+            config.optimizer.smooth_n,
+            (60.0, 500.0),
+            Path::new("."),
+            config.optimizer.processing_mode.clone(),
+            None,
+        );
+        identity
+            .metadata
+            .correction_acceptance
+            .as_mut()
+            .unwrap()
+            .violations
+            .push("audibility_regression_reverted".into());
+        super::super::validation_scorecard::attach_validation_scorecard(
+            &mut identity,
+            &HashMap::from([("left".into(), vec![initial])]),
+            48_000.0,
+            None,
+            config.optimizer.processing_mode.clone(),
+        )
+        .unwrap();
+        assert!(
+            !identity
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .unwrap()
+                .accepted
+        );
+        validate_candidate_final_seats(
+            &mut identity,
+            &baseline,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .unwrap();
+        let report = identity.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(report.accepted, "{:?}", report.violations);
+        assert!(report.metrics.improvement_db.abs() < 1e-10);
+        assert!(identity.metadata.stage_outcomes.iter().any(|stage| {
+            stage.stage == "previous_graph_acceptance_history"
+                && stage
+                    .advisories
+                    .iter()
+                    .any(|reason| reason == "audibility_regression_reverted")
+        }));
+        let mut strict = identity.clone();
+        strict
+            .metadata
+            .correction_acceptance
+            .as_mut()
+            .unwrap()
+            .runtime_policy
+            .as_mut()
+            .unwrap()
+            .min_available_headroom_db = 1.0;
+        super::super::validation_scorecard::defer_native_routed_acceptance(&mut strict);
+        super::super::finalization::refresh_configured_native_acceptance(
+            &mut strict,
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .unwrap();
+        let strict_report = strict.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(
+            !strict_report.accepted,
+            "preserved stricter policy must be evaluated"
+        );
+        assert!(
+            strict_report
+                .violations
+                .iter()
+                .any(|reason| reason == "headroom_limit_exceeded")
+        );
+        assert_eq!(
+            strict_report
+                .runtime_policy
+                .as_ref()
+                .unwrap()
+                .min_available_headroom_db,
+            1.0
+        );
+        let mut damaged = identity.clone();
+        damaged.channels.get_mut("left").unwrap().plugins.push(
+            roomeq_engine::output::create_eq_plugin(&[math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Peak,
+                200.0,
+                48_000.0,
+                0.7,
+                -6.0,
+            )]),
+        );
+        super::super::validation_scorecard::defer_native_routed_acceptance(&mut damaged);
+        let error = validate_candidate_final_seats(
+            &mut damaged,
+            &baseline,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("fresh configured acceptance would change the candidate graph"),
+            "{error}"
+        );
+        if let Some(report) = &damaged.metadata.correction_acceptance {
+            assert!(!report.accepted);
+        }
+    }
+
+    #[test]
+    fn physical_and_native_target_consumers_preserve_nonzero_calibration_planes() {
+        use roomeq_engine::topology::{mark_plugin_stage, mark_route_owned_plugin};
+        let fs = 48_000.0;
+        let dir = Path::new(".");
+        let mut desired = crate::test_fixtures::flat_curve();
+        desired.spl = desired
+            .freq
+            .mapv(|frequency| 80.0 - 2.0 * (frequency / 200.0).log2());
+        desired.phase = Some(
+            desired
+                .freq
+                .mapv(|frequency| 17.0 - 360.0 * frequency * 0.0007),
+        );
+        let peak = |gain| {
+            roomeq_engine::output::create_eq_plugin(&[math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Peak,
+                220.0,
+                fs,
+                0.9,
+                gain,
+            )])
+        };
+        let mut measurement_chain =
+            crate::test_fixtures::single_channel_room_result("left").channels["left"].clone();
+        measurement_chain.plugins = vec![peak(4.0)];
+        let measured = super::super::room_optimization_result::apply_logical_channel_chain(
+            &measurement_chain,
+            &desired,
+            fs,
+            dir,
+        )
+        .unwrap();
+        let captures = vec![Capture {
+            channel: "left".into(),
+            driver: None,
+            curves: vec![measured.clone()],
+            seat_labels: None,
+        }];
+        let mut config = RoomConfig::default();
+        config.optimizer.min_freq = 100.0;
+        config.optimizer.max_freq = 500.0;
+        for alignment in [-3.0, 3.0] {
+            let mut baseline = crate::test_fixtures::single_channel_room_result("left");
+            let chain = baseline.channels.get_mut("left").unwrap();
+            chain.plugins = vec![
+                mark_route_owned_plugin(roomeq_engine::output::create_gain_plugin(alignment)),
+                mark_route_owned_plugin(roomeq_engine::output::create_delay_plugin(1.7)),
+                mark_route_owned_plugin(roomeq_engine::output::create_crossover_plugin(
+                    "LR24", 60.0, "high",
+                )),
+            ];
+            let coherent_target =
+                super::super::room_optimization_result::apply_logical_channel_chain(
+                    chain, &desired, fs, dir,
+                )
+                .unwrap();
+            chain.target_curve = Some((&coherent_target).into());
+            let mut calibrated_target = desired.clone();
+            calibrated_target
+                .spl
+                .mapv_inplace(|level| level + alignment);
+            chain.physical_correction_target = Some(roomeq_model::PhysicalCorrectionTarget {
+                curve: (&calibrated_target).into(),
+                measurement_alignment_gain_db: alignment,
+            });
+            let routed = super::super::room_optimization_result::apply_logical_channel_chain(
+                chain, &measured, fs, dir,
+            )
+            .unwrap();
+            chain.initial_curve = Some((&measured).into());
+            chain.final_curve = Some((&routed).into());
+            let channel = baseline.channel_results.get_mut("left").unwrap();
+            channel.initial_curve = measured.clone();
+            channel.final_curve = routed;
+            for (gain, good) in [(-4.0, true), (4.0, false)] {
+                let mut candidate = baseline.clone();
+                let chain = candidate.channels.get_mut("left").unwrap();
+                chain
+                    .plugins
+                    .push(mark_plugin_stage(peak(gain), "post_route"));
+                let realized = super::super::room_optimization_result::apply_logical_channel_chain(
+                    chain, &measured, fs, dir,
+                )
+                .unwrap();
+                chain.final_curve = Some((&realized).into());
+                candidate
+                    .channel_results
+                    .get_mut("left")
+                    .unwrap()
+                    .final_curve = realized;
+                let original_plugins = serde_json::to_value(&chain.plugins).unwrap();
+                super::super::room_optimization_result::apply_final_correction_safety_gate(
+                    &mut candidate,
+                    fs,
+                    config.optimizer.smooth_n,
+                    (100.0, 500.0),
+                    dir,
+                    config.optimizer.processing_mode.clone(),
+                    None,
+                );
+                let physical = candidate.metadata.correction_acceptance.as_ref().unwrap();
+                if good {
+                    assert!(
+                        physical.metrics.post_target_weighted_rms_db
+                            < physical.metrics.pre_target_weighted_rms_db,
+                        "alignment={alignment}, physical={physical:?}"
+                    );
+                    assert_eq!(
+                        serde_json::to_value(&candidate.channels["left"].plugins).unwrap(),
+                        original_plugins
+                    );
+                    // Coherent target remains in its original full-routed plane.
+                    assert_eq!(
+                        serde_json::to_value(&candidate.channels["left"].target_curve).unwrap(),
+                        serde_json::to_value(&baseline.channels["left"].target_curve).unwrap()
+                    );
+                    super::super::validation_scorecard::defer_native_routed_acceptance(
+                        &mut candidate,
+                    );
+                    validate_candidate_final_seats(
+                        &mut candidate,
+                        &baseline,
+                        &captures,
+                        &HashMap::new(),
+                        &config,
+                        fs,
+                        dir,
+                    )
+                    .unwrap();
+                    let native = candidate.metadata.correction_acceptance.as_ref().unwrap();
+                    assert!(native.accepted, "alignment={alignment}, native={native:?}");
+                    assert!(
+                        native.metrics.post_target_weighted_rms_db
+                            < native.metrics.pre_target_weighted_rms_db
+                    );
+                    for invalid_grid in [false, true] {
+                        let mut invalid = candidate.clone();
+                        let carrier = invalid
+                            .channels
+                            .get_mut("left")
+                            .unwrap()
+                            .physical_correction_target
+                            .as_mut()
+                            .unwrap();
+                        if invalid_grid {
+                            carrier.curve.freq[1] = carrier.curve.freq[0];
+                        } else {
+                            carrier.measurement_alignment_gain_db = f64::NAN;
+                        }
+                        let error = validate_candidate_final_seats(
+                            &mut invalid,
+                            &baseline,
+                            &captures,
+                            &HashMap::new(),
+                            &config,
+                            fs,
+                            dir,
+                        )
+                        .unwrap_err();
+                        assert!(
+                            error
+                                .to_string()
+                                .contains("insufficient physical target evidence")
+                        );
+                        assert!(
+                            !invalid
+                                .metadata
+                                .correction_acceptance
+                                .as_ref()
+                                .unwrap()
+                                .accepted
+                        );
+                    }
+                } else {
+                    assert_ne!(
+                        serde_json::to_value(&candidate.channels["left"].plugins).unwrap(),
+                        original_plugins,
+                        "actual physical gate must reject worsening correction at alignment={alignment}"
+                    );
+                    let mut bad_native = baseline.clone();
+                    bad_native
+                        .channels
+                        .get_mut("left")
+                        .unwrap()
+                        .plugins
+                        .push(mark_plugin_stage(peak(gain), "post_route"));
+                    super::super::validation_scorecard::defer_native_routed_acceptance(
+                        &mut bad_native,
+                    );
+                    assert!(
+                        validate_candidate_final_seats(
+                            &mut bad_native,
+                            &baseline,
+                            &captures,
+                            &HashMap::new(),
+                            &config,
+                            fs,
+                            dir
+                        )
+                        .is_err()
+                    );
+                }
+            }
+        }
+    }
 
     fn phased_curve(level_db: f64, phase_deg: f64) -> Curve {
         let mut curve = crate::test_fixtures::flat_curve();
@@ -3308,6 +3827,431 @@ mod tests {
         });
         result.metadata.bass_management = Some(report);
         (result, config, flat)
+    }
+
+    #[test]
+    fn native_main_target_isolated_from_shared_sub_and_preserves_calibration() {
+        use num_complex::Complex64;
+        use roomeq_engine::topology::{mark_plugin_stage, mark_route_owned_plugin};
+        fn refresh_fixture(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) {
+            // Populate the same raw named-chain and full routed response planes
+            // production refresh_responses freezes before native acceptance.
+            for (name, channel) in &mut result.channel_results {
+                let chain = result.channels.get_mut(name).unwrap();
+                channel.final_curve =
+                    super::super::room_optimization_result::apply_logical_channel_chain(
+                        chain,
+                        &channel.initial_curve,
+                        fs,
+                        dir,
+                    )
+                    .unwrap();
+                chain.initial_curve = Some((&channel.initial_curve).into());
+                chain.final_curve = Some((&channel.final_curve).into());
+                chain.eq_response = None;
+            }
+            let bass = result.metadata.bass_management.as_ref().unwrap();
+            result.deployed_source_curves =
+                crate::topology::reconstruct_deployed_source_curves_unenforced(
+                    &result.channels,
+                    &HashMap::new(),
+                    bass.routing_graph.as_ref().unwrap(),
+                    bass.optimization.as_ref(),
+                    fs,
+                    dir,
+                )
+                .unwrap();
+        }
+        let fs = 48_000.0;
+        let dir = Path::new(".");
+        let mut desired = crate::test_fixtures::flat_curve();
+        let mut frequencies = desired.freq.to_vec();
+        frequencies.extend([100.0, 500.0]);
+        frequencies.sort_by(f64::total_cmp);
+        frequencies.dedup();
+        desired.freq = frequencies.into();
+        desired.spl = desired.freq.mapv(|f| 80.0 - 2.0 * (f / 200.0).log2());
+        desired.phase = Some(desired.freq.mapv(|f| 17.0 - 360.0 * f * 0.0007));
+        let mut sub = desired.clone();
+        sub.spl.mapv_inplace(|level| level - 1.0);
+        sub.phase = Some(sub.freq.mapv(|f| -31.0 - 360.0 * f * 0.0011));
+        let peak = |gain| {
+            roomeq_engine::output::create_eq_plugin(&[math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Peak,
+                220.0,
+                fs,
+                0.9,
+                gain,
+            )])
+        };
+        let mut measurement_chain =
+            crate::test_fixtures::single_channel_room_result("left").channels["left"].clone();
+        measurement_chain.plugins = vec![peak(4.0)];
+        let measured = super::super::room_optimization_result::apply_logical_channel_chain(
+            &measurement_chain,
+            &desired,
+            fs,
+            dir,
+        )
+        .unwrap();
+        let delay = |f: f64, ms: f64| {
+            Complex64::from_polar(1.0, -2.0 * std::f64::consts::PI * f * ms / 1_000.0)
+        };
+        // Independent LR24 coefficients: two Butterworth biquads, no route or
+        // production crossover response helper contributes to this target.
+        let crossover = |f: f64, high: bool| {
+            let omega = 2.0 * std::f64::consts::PI * 60.0 / fs;
+            let c = omega.cos();
+            let a = omega.sin() / std::f64::consts::SQRT_2;
+            let b = if high {
+                [(1.0 + c) / 2.0, -(1.0 + c), (1.0 + c) / 2.0]
+            } else {
+                [(1.0 - c) / 2.0, 1.0 - c, (1.0 - c) / 2.0]
+            };
+            let z = Complex64::from_polar(1.0, -2.0 * std::f64::consts::PI * f / fs);
+            let one =
+                (b[0] + b[1] * z + b[2] * z * z) / (1.0 + a - 2.0 * c * z + (1.0 - a) * z * z);
+            one * one
+        };
+        for alignment in [-3.0, 3.0] {
+            let (mut baseline, mut config, _) = routed_fixture();
+            config.optimizer.min_freq = 100.0;
+            config.optimizer.max_freq = 500.0;
+            let graph = baseline
+                .metadata
+                .bass_management
+                .as_mut()
+                .unwrap()
+                .routing_graph
+                .as_mut()
+                .unwrap();
+            graph.routes[0].gain_db = alignment - 6.0;
+            graph.routes[0].gain_linear = 10.0_f64.powf((alignment - 6.0) / 20.0);
+            graph.routes[0].matrix_gain = graph.routes[0].gain_linear;
+            graph.routes[0].delay_ms = 0.65;
+            graph.routes[0].high_pass_hz = Some(60.0);
+            graph.routes[1].gain_db = alignment - 12.0;
+            graph.routes[1].gain_linear = 10.0_f64.powf((alignment - 12.0) / 20.0);
+            graph.routes[1].matrix_gain = graph.routes[1].gain_linear;
+            graph.routes[1].delay_ms = 1.7;
+            graph.routes[1].low_pass_hz = Some(60.0);
+            graph.routes[1].polarity_inverted = true;
+            let mut coherent_target = desired.clone();
+            coherent_target.phase = None;
+            for (i, f) in desired.freq.iter().copied().enumerate() {
+                let main_pressure = Complex64::from_polar(
+                    10.0_f64.powf(desired.spl[i] / 20.0),
+                    desired.phase.as_ref().unwrap()[i].to_radians(),
+                );
+                let sub_pressure = Complex64::from_polar(
+                    10.0_f64.powf(sub.spl[i] / 20.0),
+                    sub.phase.as_ref().unwrap()[i].to_radians(),
+                );
+                let routed = delay(f, 0.9)
+                    * (main_pressure
+                        * crossover(f, true)
+                        * delay(f, 0.65)
+                        * 10.0_f64.powf((alignment - 6.0) / 20.0)
+                        - sub_pressure
+                            * crossover(f, false)
+                            * delay(f, 2.1)
+                            * 10.0_f64.powf((alignment - 12.0) / 20.0));
+                coherent_target.spl[i] = 20.0 * routed.norm().log10();
+            }
+            let main_chain = baseline.channels.get_mut("left").unwrap();
+            main_chain.plugins = vec![
+                mark_plugin_stage(roomeq_engine::output::create_delay_plugin(0.9), "pre_route"),
+                mark_route_owned_plugin(roomeq_engine::output::create_gain_plugin(alignment)),
+                mark_route_owned_plugin(roomeq_engine::output::create_gain_plugin(-6.0)),
+                mark_route_owned_plugin(roomeq_engine::output::create_delay_plugin(0.65)),
+                mark_route_owned_plugin(roomeq_engine::output::create_crossover_plugin(
+                    "LR24", 60.0, "high",
+                )),
+            ];
+            let mut calibrated = desired.clone();
+            calibrated.phase = None;
+            calibrated.spl.mapv_inplace(|level| level + alignment);
+            main_chain.physical_correction_target = Some(roomeq_model::PhysicalCorrectionTarget {
+                curve: (&calibrated).into(),
+                measurement_alignment_gain_db: alignment,
+            });
+            main_chain.target_curve = Some((&coherent_target).into());
+            baseline.channels.get_mut("sub").unwrap().plugins = vec![mark_plugin_stage(
+                roomeq_engine::output::create_delay_plugin(0.4),
+                "post_route",
+            )];
+            for (name, curve) in [("left", measured.clone()), ("sub", sub.clone())] {
+                let channel = baseline.channel_results.get_mut(name).unwrap();
+                channel.initial_curve = curve.clone();
+                channel.final_curve = curve.clone();
+                let chain = baseline.channels.get_mut(name).unwrap();
+                chain.initial_curve = Some((&curve).into());
+                channel.final_curve =
+                    super::super::room_optimization_result::apply_logical_channel_chain(
+                        chain, &curve, fs, dir,
+                    )
+                    .unwrap();
+                chain.final_curve = Some((&channel.final_curve).into());
+            }
+            refresh_fixture(&mut baseline, fs, dir);
+            let physical = BTreeMap::from([
+                ("left".into(), vec![measured.clone()]),
+                ("sub".into(), vec![sub.clone()]),
+            ]);
+            let captures = vec![
+                Capture {
+                    channel: "left".into(),
+                    driver: None,
+                    curves: vec![measured.clone()],
+                    seat_labels: None,
+                },
+                Capture {
+                    channel: "sub".into(),
+                    driver: None,
+                    curves: vec![sub.clone()],
+                    seat_labels: None,
+                },
+            ];
+            let context = ReplayContext {
+                config: &config,
+                partition: "training",
+                fs,
+                dir,
+            };
+            for (gain, good) in [(-4.0, true), (4.0, false)] {
+                let mut candidate = baseline.clone();
+                candidate
+                    .channels
+                    .get_mut("left")
+                    .unwrap()
+                    .plugins
+                    .push(mark_plugin_stage(peak(gain), "post_route"));
+                refresh_fixture(&mut candidate, fs, dir);
+                let mut trace = Vec::new();
+                let score = physical_main_quality(
+                    &candidate,
+                    &baseline,
+                    &physical,
+                    "left",
+                    0,
+                    &context,
+                    PhysicalMainReplayContext {
+                        target: Some(&coherent_target),
+                        trace: Some(&mut trace),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(trace[0].baseline_measurement_contributors.len(), 1);
+                let target = trace[0].target_curve.as_ref().unwrap();
+                assert!(
+                    target.phase.is_none(),
+                    "magnitude target cannot manufacture phase"
+                );
+                for (i, f) in target.freq.iter().copied().enumerate() {
+                    let expected = 80.0 - 2.0 * (f / 200.0).log2() + alignment - 6.0
+                        + 20.0 * crossover(f, true).norm().log10();
+                    assert!(
+                        (target.spl[i] - expected).abs() < 1e-7,
+                        "isolated target includes wrong transfer at {f}: {} vs {expected}",
+                        target.spl[i]
+                    );
+                }
+                assert_eq!(
+                    score.training.post_weighted_rms_median_db
+                        < score.training.pre_weighted_rms_median_db,
+                    good
+                );
+                let mut louder_sub = physical.clone();
+                louder_sub.get_mut("sub").unwrap()[0]
+                    .spl
+                    .mapv_inplace(|level| level + 20.0);
+                let mut isolated_trace = Vec::new();
+                physical_main_quality(
+                    &candidate,
+                    &baseline,
+                    &louder_sub,
+                    "left",
+                    0,
+                    &context,
+                    PhysicalMainReplayContext {
+                        target: Some(&coherent_target),
+                        trace: Some(&mut isolated_trace),
+                    },
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(
+                    serde_json::to_value(&isolated_trace[0].target_curve).unwrap(),
+                    serde_json::to_value(&trace[0].target_curve).unwrap()
+                );
+                let observation =
+                    passband_observation_config(&config, &baseline, &physical, "left", 0).unwrap();
+                let native_context = ReplayContext {
+                    config: &observation,
+                    ..context
+                };
+                let (native_pre, _) =
+                    replay(&baseline, &physical, "left", 0, true, &native_context).unwrap();
+                let (native_post, _) =
+                    replay(&candidate, &physical, "left", 0, false, &native_context).unwrap();
+                let native_score =
+                    roomeq_engine::quality::evaluate_acoustic_quality_with_permitted_gain(
+                        std::slice::from_ref(&native_pre.curve),
+                        std::slice::from_ref(&native_post.curve),
+                        &[],
+                        &[],
+                        Some(&coherent_target),
+                        roomeq_engine::quality::QualityEvaluationConfig {
+                            min_freq_hz: observation
+                                .optimizer
+                                .min_freq
+                                .max(native_pre.curve.freq[0])
+                                .max(native_post.curve.freq[0])
+                                .max(
+                                    excursion_supported_min_frequency(&observation).unwrap_or(0.0),
+                                ),
+                            max_freq_hz: observation
+                                .optimizer
+                                .max_freq
+                                .min(*native_pre.curve.freq.last().unwrap())
+                                .min(*native_post.curve.freq.last().unwrap()),
+                            schroeder_hz: roomeq_model::auto_tune::resolved_schroeder_hz(
+                                &observation.optimizer,
+                            ),
+                            normalize_level: true,
+                        },
+                        Default::default(),
+                        observation
+                            .optimizer
+                            .permitted_output_gain_db
+                            .get("left")
+                            .copied()
+                            .unwrap_or(0.0),
+                    )
+                    .unwrap();
+                assert_eq!(
+                    native_score.training.post_weighted_rms_median_db
+                        < native_score.training.pre_weighted_rms_median_db,
+                    good,
+                    "full native coherent metrics must distinguish restoring/worsening filters at calibration={alignment}"
+                );
+                if good {
+                    // Verify real native coherent replay against the independent
+                    // Main+Sub target before running its unchanged acceptance gates.
+                    let (actual, outputs) =
+                        replay(&candidate, &physical, "left", 0, false, &context).unwrap();
+                    assert_eq!(outputs, vec!["left", "sub"]);
+                    let expected =
+                        autoeq_core::interpolate_log_space(&actual.curve.freq, &coherent_target);
+                    assert!(
+                        actual
+                            .curve
+                            .spl
+                            .iter()
+                            .zip(expected.spl)
+                            .all(|(a, b)| (a - b).abs() < 1e-7)
+                    );
+                    super::super::validation_scorecard::defer_native_routed_acceptance(
+                        &mut candidate,
+                    );
+                    validate_candidate_final_seats(
+                        &mut candidate,
+                        &baseline,
+                        &captures,
+                        &HashMap::new(),
+                        &config,
+                        fs,
+                        dir,
+                    )
+                    .unwrap();
+                    assert!(
+                        candidate
+                            .metadata
+                            .correction_acceptance
+                            .as_ref()
+                            .unwrap()
+                            .accepted
+                    );
+                } else {
+                    super::super::validation_scorecard::defer_native_routed_acceptance(
+                        &mut candidate,
+                    );
+                    assert!(
+                        validate_candidate_final_seats(
+                            &mut candidate,
+                            &baseline,
+                            &captures,
+                            &HashMap::new(),
+                            &config,
+                            fs,
+                            dir
+                        )
+                        .is_err()
+                    );
+                    assert!(
+                        !candidate
+                            .metadata
+                            .correction_acceptance
+                            .as_ref()
+                            .unwrap()
+                            .accepted
+                    );
+                }
+            }
+            let mut ambiguous = baseline.clone();
+            let graph = ambiguous
+                .metadata
+                .bass_management
+                .as_mut()
+                .unwrap()
+                .routing_graph
+                .as_mut()
+                .unwrap();
+            graph.routes.push(graph.routes[0].clone());
+            assert!(
+                physical_main_quality(
+                    &ambiguous,
+                    &ambiguous,
+                    &physical,
+                    "left",
+                    0,
+                    &context,
+                    PhysicalMainReplayContext {
+                        target: Some(&coherent_target),
+                        trace: None
+                    }
+                )
+                .is_err()
+            );
+            let mut truncated = baseline.clone();
+            let target = truncated
+                .channels
+                .get_mut("left")
+                .unwrap()
+                .physical_correction_target
+                .as_mut()
+                .unwrap();
+            target.curve.freq.remove(0);
+            target.curve.spl.remove(0);
+            assert!(
+                physical_main_quality(
+                    &truncated,
+                    &baseline,
+                    &physical,
+                    "left",
+                    0,
+                    &context,
+                    PhysicalMainReplayContext {
+                        target: Some(&coherent_target),
+                        trace: None
+                    }
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("does not cover measured native support")
+            );
+        }
     }
 
     fn lfe_to_sub_fixture(

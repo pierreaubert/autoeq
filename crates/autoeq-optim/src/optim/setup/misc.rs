@@ -1,4 +1,4 @@
-use crate::param_utils::PeqLayout;
+use crate::param_utils::{PeqLayout, freq_to_log10};
 
 /// Legacy blanket sub-Schroeder boost restriction.
 ///
@@ -42,7 +42,7 @@ pub fn restrict_boost_above_schroeder(
     }
     let model = params.peq_model;
     let ppf = crate::param_utils::params_per_filter(model);
-    let log_schroeder = schroeder_hz.log10();
+    let log_schroeder = freq_to_log10(schroeder_hz);
 
     let layout = model.layout();
     for i in 0..params.num_filters {

@@ -502,6 +502,7 @@ fn serial_delay_graph(delay_ms: f64) -> roomeq_model::DspGraph {
         channels: HashMap::from([(
             "left".to_string(),
             roomeq_model::ChannelDspChain {
+                physical_correction_target: None,
                 channel: "left".to_string(),
                 plugins: vec![
                     PluginConfigWrapper {

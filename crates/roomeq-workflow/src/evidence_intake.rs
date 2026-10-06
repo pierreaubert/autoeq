@@ -1132,14 +1132,23 @@ pub(crate) fn crossover_timing_reference(
             ) {
                 return Err(format!("source '{key}' lacks stationary timing evidence"));
             }
-            if let Some(capture) = &provenance.capture {
-                capture.coherent_reference_at_frequency(capture.takes.len(), band_hz[1])?;
-            }
+            let capture_reference = provenance
+                .capture
+                .as_ref()
+                .map(|capture| {
+                    capture.coherent_reference_at_frequency(capture.takes.len(), band_hz[1])
+                })
+                .transpose()?;
             let declared = provenance
                 .timing_reference_id
                 .as_deref()
                 .filter(|id| !id.trim().is_empty())
                 .ok_or_else(|| format!("source '{key}' lacks a timing reference"))?;
+            if capture_reference.is_some_and(|captured| captured != declared) {
+                return Err(format!(
+                    "source '{key}' capture timing reference contradicts its declaration"
+                ));
+            }
             if reference
                 .as_ref()
                 .is_some_and(|expected| expected != declared)

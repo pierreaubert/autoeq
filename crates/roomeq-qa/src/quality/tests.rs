@@ -156,6 +156,7 @@ fn channel_chain_with_slopes(
     target_slope_db_per_octave: f64,
 ) -> ChannelDspChain {
     ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: Vec::new(),
         drivers: None,

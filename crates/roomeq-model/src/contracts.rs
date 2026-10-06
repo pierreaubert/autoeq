@@ -70,6 +70,7 @@ impl DspGraph {
         self.channels.insert(
             name.clone(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: name,
                 plugins: plugins
                     .into_iter()
@@ -116,6 +117,11 @@ impl DspGraph {
                     "DSP graph channel key '{name}' does not match embedded channel name '{}'",
                     chain.channel
                 ));
+            }
+            if let Some(target) = &chain.physical_correction_target {
+                target
+                    .validate()
+                    .map_err(|reason| format!("channel '{name}' physical target: {reason}"))?;
             }
             validate_plugins(&format!("channel '{name}'"), &chain.plugins)?;
             if let Some(drivers) = &chain.drivers {

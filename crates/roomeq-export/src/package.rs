@@ -604,6 +604,7 @@ mod tests {
         (
             name.to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: name.to_string(),
                 plugins: vec![PluginConfigWrapper {
                     plugin_type: "convolution".to_string(),

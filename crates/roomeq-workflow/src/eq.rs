@@ -63,3 +63,33 @@ pub fn optimize_channel_eq_multi_with_auto_optimizer_detailed(
         auto_context,
     )
 }
+
+/// Optimize a shared correction from routed training-seat responses while
+/// preserving the configured target, loss, and regularization controls.
+pub fn optimize_channel_eq_multi_for_routed_training_detailed(
+    curves: &[Curve],
+    config: &OptimizerConfig,
+    multi_config: &MultiMeasurementConfig,
+    target: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+) -> Result<EqOptimizationResult, Box<dyn Error>> {
+    let resources = prepare_resources(config, target)?;
+    match callback {
+        Some(callback) => engine_eq::optimize_channel_eq_multi_with_callback_detailed(
+            curves,
+            config,
+            multi_config,
+            Some(&resources),
+            sample_rate,
+            callback,
+        ),
+        None => engine_eq::optimize_channel_eq_multi_detailed(
+            curves,
+            config,
+            multi_config,
+            Some(&resources),
+            sample_rate,
+        ),
+    }
+}

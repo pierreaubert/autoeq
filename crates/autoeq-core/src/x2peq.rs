@@ -84,7 +84,7 @@ pub fn peq2x(peq: &Peq, peq_model: PeqModel) -> Vec<f64> {
             } else {
                 None
             },
-            freq: filter.freq.log10(),
+            freq: param_utils::freq_to_log10(filter.freq),
             q: filter.q,
             gain: filter.db_gain,
         };

@@ -292,6 +292,12 @@ pub fn freeze_capture_responses(
                 loaded_response: Box::new(curve),
             };
         }
+        source.provenance.verified_fixed_projection = match
+            autoeq_core::capture_handoff::VerifiedFixedCaptureProjection::verify_source_snapshot(root, source, source_id, handoff) {
+                Ok(receipt) => Some(receipt),
+                Err(reason) if reason == "unsupported_fixed_capture_response_format" => None,
+                Err(reason) => return Err(anyhow::Error::msg(reason)),
+            };
     }
     Ok(())
 }
@@ -313,6 +319,7 @@ mod tests {
     fn fixture(root: &Path) -> (PathBuf, CaptureHandoff) {
         let calibration = b"20 0\n20000 0\n";
         let provenance = CaptureTakeProvenance {
+            seat_id: None,
             microphone_id: "mic-1".into(),
             device_id: "declared-usb-device".into(),
             offset_samples: None,
@@ -712,5 +719,308 @@ mod tests {
         std::os::unix::fs::symlink(&external, &asset).unwrap();
         let error = crate::config_loader::load_merged_config_strict(&path, None).unwrap_err();
         assert!(error.to_string().contains("symbolic links"));
+    }
+    #[test]
+    fn runtime_projection_receipt_is_read_only_stale_checked_and_not_serializable() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, _) = fixture(directory.path());
+        let (config, _) = crate::config_loader::load_merged_config_strict(&path, None).unwrap();
+        let SpeakerConfig::Single(MeasurementSource::Multiple(source)) = &config.speakers["L"]
+        else {
+            panic!()
+        };
+        let receipt = source
+            .provenance
+            .verified_fixed_projection
+            .as_ref()
+            .unwrap();
+        assert!(receipt.matches_snapshot(source));
+        assert_eq!(receipt.source_id(), "L");
+        let encoded = serde_json::to_value(source).unwrap();
+        assert!(
+            encoded["provenance"]
+                .get("verified_fixed_projection")
+                .is_none()
+        );
+        let restored: MeasurementMultiple = serde_json::from_value(encoded).unwrap();
+        assert!(restored.provenance.verified_fixed_projection.is_none());
+        let mut stale = source.clone();
+        let MeasurementRef::Loaded {
+            loaded_response, ..
+        } = &mut stale.measurements[0]
+        else {
+            panic!()
+        };
+        loaded_response.spl[0] += 1.0;
+        assert!(!receipt.matches_snapshot(&stale));
+        assert_eq!(
+            crate::group_measurements::validate_source_seat_bindings(&MeasurementSource::Multiple(
+                stale
+            ))
+            .unwrap_err(),
+            "stale_fixed_capture_projection_receipt"
+        );
+        let mut contradictory = source.clone();
+        contradictory.provenance.capture.as_mut().unwrap().takes[0].microphone_id =
+            "different-hardware".into();
+        assert!(!receipt.matches_snapshot(&contradictory));
+    }
+    #[test]
+    fn fixed_projection_factory_binds_parsed_samples_and_complete_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, handoff) = fixture(directory.path());
+        let mut config: RoomConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        freeze_capture_responses(&mut config, &path, &handoff).unwrap();
+        let SpeakerConfig::Single(MeasurementSource::Multiple(source)) = &config.speakers["L"]
+        else {
+            panic!()
+        };
+        let receipt = source
+            .provenance
+            .verified_fixed_projection
+            .as_ref()
+            .unwrap();
+        let mut mutated = source.clone();
+        mutated.provenance.verified_fixed_projection = None;
+        let MeasurementRef::Loaded {
+            loaded_response, ..
+        } = &mut mutated.measurements[0]
+        else {
+            panic!()
+        };
+        loaded_response.spl[0] += 0.5;
+        assert_eq!(
+            autoeq_core::capture_handoff::VerifiedFixedCaptureProjection::verify_source_snapshot(
+                directory.path(),
+                &mutated,
+                "L",
+                &handoff
+            )
+            .unwrap_err(),
+            "retained_samples_do_not_match_verified_response_bytes"
+        );
+        let mut moved = source.clone();
+        moved.measurements[0].resolve_paths(std::path::Path::new("/different/dir"));
+        assert!(
+            !receipt.matches_snapshot(&moved),
+            "same basename cannot hide a changed full path"
+        );
+        let mut resolved = MeasurementSource::Multiple(source.clone());
+        resolved.resolve_paths(directory.path());
+        let MeasurementSource::Multiple(resolved) = resolved else {
+            panic!()
+        };
+        assert!(
+            resolved
+                .provenance
+                .verified_fixed_projection
+                .as_ref()
+                .unwrap()
+                .matches_snapshot(&resolved)
+        );
+        assert!(
+            receipt
+                .rebind_resolved_paths(source, &mutated, directory.path())
+                .is_err()
+        );
+        let mut forged = serde_json::to_value(source).unwrap();
+        forged["provenance"]["verified_fixed_projection"] = serde_json::json!({
+            "source_id": "L", "session_id": "session-1", "projection_sha256": "forged"
+        });
+        let restored: MeasurementMultiple = serde_json::from_value(forged).unwrap();
+        assert!(restored.provenance.verified_fixed_projection.is_none());
+    }
+
+    #[test]
+    fn verified_fixed_projection_reorders_original_refs_and_takes_together() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, mut handoff) = fixture(directory.path());
+        let mut config: RoomConfig =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let SpeakerConfig::Single(MeasurementSource::Multiple(source)) =
+            config.speakers.get_mut("L").unwrap()
+        else {
+            panic!()
+        };
+        let mut first = source.provenance.capture.as_ref().unwrap().takes[0].clone();
+        first.offset_samples = Some(0.0);
+        first.skew_ppm = Some(0.0);
+        first.residual_uncertainty_us = Some(1.0);
+        first.correction_applied = CaptureCorrection::Resampled;
+        first.timing_reference_id = Some("fixed-common-reference".into());
+        first.preserves_acoustic_delay = true;
+        first.quality_passed = true;
+        let mut second = first.clone();
+        second.microphone_id = "mic-2".into();
+        second.position_m = [1.0, 0.0, 0.0];
+        source.provenance.capture_kind = ProvenanceCaptureKind::StationaryIr;
+        source.provenance.timing_reference_id = first.timing_reference_id.clone();
+        source.provenance.capture.as_mut().unwrap().takes = vec![first.clone(), second.clone()];
+        source.measurements.push(MeasurementRef::Named {
+            path: "response-2.csv".into(),
+            name: Some("mic-2".into()),
+        });
+        source
+            .provenance
+            .capture
+            .as_mut()
+            .unwrap()
+            .reflection_report = Some(
+            serde_json::from_value(serde_json::json!({
+                "source_id": "L", "direct_sound": {
+                    "arrival_ms": 1.0, "relative_ms": 0.0, "level_db": 0.0,
+                    "microphone_energy_db": [3.0, -7.0], "direction": null,
+                    "mirror_ambiguous": false, "residual_samples": null, "band_hz": null,
+                    "issues": []
+                }, "early_reflections": [], "issues": []
+            }))
+            .unwrap(),
+        );
+        handoff.takes[0].provenance = first;
+        let mut take = handoff.takes[0].clone();
+        take.take_id = "take-2".into();
+        take.raw_audio_file = "raw-2.wav".into();
+        take.processed_audio_file = "processed-2.wav".into();
+        take.response_file = Some("response-2.csv".into());
+        take.provenance = second;
+        handoff.takes.push(take);
+        handoff.microphone_ids.push("mic-2".into());
+        for (original, copied, role) in [
+            ("raw.wav", "raw-2.wav", CaptureArtifactRole::RawAudio),
+            (
+                "processed.wav",
+                "processed-2.wav",
+                CaptureArtifactRole::ProcessedAudio,
+            ),
+        ] {
+            let bytes = std::fs::read(directory.path().join(original)).unwrap();
+            std::fs::write(directory.path().join(copied), &bytes).unwrap();
+            handoff.artifacts.push(CaptureArtifactIdentity {
+                file: copied.into(),
+                role,
+                bytes: bytes.len() as u64,
+                sha256: digest(&bytes),
+            });
+        }
+        for (file, text) in [
+            (
+                "response.csv",
+                "frequency_hz,spl_db,phase_deg\n100,80,17\n1000,81,-12\n",
+            ),
+            (
+                "response-2.csv",
+                "frequency_hz,spl_db,phase_deg\n100,90,-31\n1000,91,29\n",
+            ),
+        ] {
+            std::fs::write(directory.path().join(file), text).unwrap();
+            let asset = CaptureArtifactIdentity {
+                file: file.into(),
+                role: CaptureArtifactRole::ComplexResponse,
+                bytes: text.len() as u64,
+                sha256: digest(text.as_bytes()),
+            };
+            if let Some(previous) = handoff
+                .artifacts
+                .iter_mut()
+                .find(|asset| asset.file == file)
+            {
+                *previous = asset;
+            } else {
+                handoff.artifacts.push(asset);
+            }
+        }
+        let config_bytes = serde_json::to_vec_pretty(&config).unwrap();
+        std::fs::write(&path, &config_bytes).unwrap();
+        let asset = handoff
+            .artifacts
+            .iter_mut()
+            .find(|asset| asset.role == CaptureArtifactRole::Configuration)
+            .unwrap();
+        asset.bytes = config_bytes.len() as u64;
+        asset.sha256 = digest(&config_bytes);
+        std::fs::write(
+            directory.path().join(CAPTURE_HANDOFF_FILENAME),
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+        let (mut loaded, _) = crate::config_loader::load_merged_config_strict(&path, None).unwrap();
+        loaded.optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+            primary_seat: 0,
+            seat_weights: Some(vec![3.0, 1.0]),
+            seat_identity: Some(roomeq_model::SeatIdentityMap {
+                ids: vec!["mic-2".into(), "mic-1".into()],
+            }),
+            ..Default::default()
+        });
+        let (normalized, evidence) =
+            crate::room_optimization::input_snapshot::normalize_seat_identity(&loaded);
+        assert!(evidence.checks.iter().all(|check| check.passed));
+        let SpeakerConfig::Single(MeasurementSource::Multiple(source)) = &normalized.speakers["L"]
+        else {
+            panic!()
+        };
+        assert_eq!(source.measurements[0].name(), Some("mic-2"));
+        assert_eq!(
+            source.provenance.capture.as_ref().unwrap().takes[0].microphone_id,
+            "mic-2"
+        );
+        assert_eq!(
+            autoeq_measurements::read::load_measurement_strict(&source.measurements[0])
+                .unwrap()
+                .spl
+                .to_vec(),
+            vec![90.0, 91.0]
+        );
+        assert!(
+            source
+                .provenance
+                .verified_fixed_projection
+                .as_ref()
+                .unwrap()
+                .matches_snapshot(source)
+        );
+        let capture = source.provenance.capture.as_ref().unwrap();
+        assert_eq!(
+            capture
+                .reflection_report
+                .as_ref()
+                .unwrap()
+                .direct_sound
+                .as_ref()
+                .unwrap()
+                .microphone_energy_db,
+            vec![-7.0, 3.0]
+        );
+        let mut changed_reflection = source.clone();
+        changed_reflection
+            .provenance
+            .capture
+            .as_mut()
+            .unwrap()
+            .reflection_report
+            .as_mut()
+            .unwrap()
+            .direct_sound
+            .as_mut()
+            .unwrap()
+            .microphone_energy_db[0] += 1.0;
+        assert!(
+            !source
+                .provenance
+                .verified_fixed_projection
+                .as_ref()
+                .unwrap()
+                .matches_snapshot(&changed_reflection)
+        );
+        assert_eq!(
+            normalized
+                .optimizer
+                .multi_seat
+                .as_ref()
+                .unwrap()
+                .seat_weights,
+            Some(vec![3.0, 1.0])
+        );
     }
 }

@@ -42,6 +42,7 @@ fn wolfram_rw09_scaled_replay() {
     );
 
     let chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: vec![
             plugin("gain", serde_json::json!({"gain_db": gain_db})),

@@ -655,6 +655,7 @@ mod tests {
             veto_adjudication: None,
         };
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: name.to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -901,6 +902,7 @@ mod tests {
     #[test]
     fn headroom_peak_boost_db_reads_gain_and_eq() {
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![
                 PluginConfigWrapper {
@@ -938,6 +940,7 @@ mod tests {
     #[test]
     fn headroom_peak_boost_db_no_plugins_none() {
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -965,6 +968,7 @@ mod tests {
         let curve = small_curve();
         let data = curve_data_from(&curve);
         let lfe = ChannelDspChain {
+            physical_correction_target: None,
             channel: "lfe".to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -1005,6 +1009,7 @@ mod tests {
             ..Default::default()
         };
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: "center".to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -1033,6 +1038,7 @@ mod tests {
         let curve = small_curve();
         let data = curve_data_from(&curve);
         let a = ChannelDspChain {
+            physical_correction_target: None,
             channel: "a".to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -1063,6 +1069,7 @@ mod tests {
     #[test]
     fn group_mean_deviation_rms_db_mismatched_grids_none() {
         let a = ChannelDspChain {
+            physical_correction_target: None,
             channel: "a".to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -1089,6 +1096,7 @@ mod tests {
             early_late_curves: None,
         };
         let b = ChannelDspChain {
+            physical_correction_target: None,
             channel: "b".to_string(),
             plugins: Vec::new(),
             drivers: None,
@@ -1364,6 +1372,7 @@ mod tests {
     #[test]
     fn excursion_hpf_hz_from_chain_reads_labeled_plugin() {
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![
                 PluginConfigWrapper {
@@ -1403,6 +1412,7 @@ mod tests {
     #[test]
     fn excursion_hpf_hz_from_chain_none_without_labeled_plugin() {
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "eq".to_string(),

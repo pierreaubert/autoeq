@@ -431,6 +431,7 @@ fn test_build_dba_dsp_chain() {
 #[test]
 fn test_add_delay_plugin() {
     let mut chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "test".to_string(),
         plugins: vec![create_gain_plugin(-3.0)],
         drivers: None,

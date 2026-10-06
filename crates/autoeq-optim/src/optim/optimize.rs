@@ -7,6 +7,65 @@ use super::types::OptimProgressCallback;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Reduce positive gains until the configured composite ceiling is feasible.
+///
+/// Penalty backends can return a slightly infeasible winner. Preserve centers,
+/// Q, cuts, gain bounds, and minimum active gain; verify the exact constraint
+/// rather than accepting a numerical tolerance. A nonfeasible lower endpoint
+/// is refused, including fixed boosts that cannot satisfy the ceiling.
+fn project_scalar_ceiling(
+    x: &[f64],
+    lower_bounds: &[f64],
+    data: &ObjectiveData,
+) -> Result<Vec<f64>, String> {
+    let violation = |candidate: &[f64]| {
+        super::compute::compute_ceiling_violation_into(
+            &data.freqs,
+            candidate,
+            data.srate,
+            data.peq_model,
+            data.max_db,
+        )
+    };
+    if data.max_db <= 0.0 || violation(x) == 0.0 {
+        return Ok(x.to_vec());
+    }
+    let width = crate::param_utils::params_per_filter(data.peq_model);
+    let gain_offset = width - 1;
+    let mut endpoint = x.to_vec();
+    for index in (gain_offset..x.len()).step_by(width) {
+        if x[index] > 0.0 {
+            endpoint[index] = lower_bounds[index].max(data.min_db.max(0.0)).min(x[index]);
+        }
+    }
+    if violation(&endpoint) != 0.0 {
+        return Err(String::from(
+            "composite ceiling has no feasible gain-reduction endpoint",
+        ));
+    }
+    let mut feasible = endpoint.clone();
+    let mut feasible_scale = 0.0;
+    let mut infeasible_scale = 1.0;
+    // Fifty-three binary subdivisions resolve the f64 gain scale. These are
+    // constraint-response checks, not additional optimizer objective calls.
+    for _ in 0..53 {
+        let scale = (feasible_scale + infeasible_scale) * 0.5;
+        let mut candidate = x.to_vec();
+        for index in (gain_offset..x.len()).step_by(width) {
+            if x[index] > endpoint[index] {
+                candidate[index] = endpoint[index] + scale * (x[index] - endpoint[index]);
+            }
+        }
+        if violation(&candidate) == 0.0 {
+            feasible = candidate;
+            feasible_scale = scale;
+        } else {
+            infeasible_scale = scale;
+        }
+    }
+    Ok(feasible)
+}
+
 /// Finalize one backend winner through the shared envelope choke-point.
 ///
 /// Every optimizer backend funnels through the three dispatchers below, so
@@ -44,6 +103,14 @@ fn finalize_dispatch_winner(
         }
     } else {
         x.to_vec()
+    };
+    let repaired = if super::constraint_envelope::is_peq_layout_loss(data.loss_type) {
+        match project_scalar_ceiling(&repaired, lower_bounds, data) {
+            Ok(repaired) => repaired,
+            Err(reason) => return failed(reason),
+        }
+    } else {
+        repaired
     };
     let adjusted = repaired != x;
     match finalize_candidate(candidate_id, &repaired, data, &owned.as_spec()) {
@@ -97,7 +164,7 @@ fn finalize_dispatch_winner(
             }
             x.copy_from_slice(&finalized.params);
             let status = if adjusted {
-                format!("{algo}; minimum-spacing projection applied")
+                format!("{algo}; constraint feasibility projection applied")
             } else {
                 algo
             };
@@ -1743,6 +1810,169 @@ mod staged_run_control_tests {
         let (lower, upper) = super::super::setup::setup_bounds(&params);
         let initial = super::super::setup::initial_guess(&params, &lower, &upper);
         (objective, params, lower, upper, initial)
+    }
+
+    #[test]
+    fn scalar_ceiling_projection_repairs_captured_penalty_winner_without_relaxation() {
+        let (mut objective, _, _, _, _) = scalar_fixture();
+        objective.freqs = std::sync::Arc::new(Array1::from_iter(
+            (0..=120).map(|index| 20.0 + 4.0 * f64::from(index)),
+        ));
+        objective.max_db = 4.0;
+        objective.min_db = -9.0;
+        objective.peq_model = crate::PeqModel::Pk;
+        // Retained medium QA seed 424283: the penalty winner exceeds the
+        // summed 4 dB ceiling although both individual boosts obey their box.
+        let original = vec![
+            2.0403492166056214,
+            5.999999763230809,
+            3.999999618977638,
+            2.203774829173711,
+            3.960197449423821,
+            4.0,
+            2.3297769726370374,
+            4.968916657871044,
+            -9.0,
+            2.659911160584285,
+            3.9715693590382495,
+            -6.51035342083007,
+        ];
+        let lower: Vec<_> = (0..4).flat_map(|_| [20.0_f64.log10(), 0.5, -9.0]).collect();
+        let before = super::super::compute::compute_ceiling_violation_into(
+            &objective.freqs,
+            &original,
+            objective.srate,
+            objective.peq_model,
+            4.0,
+        );
+        assert!(
+            before > 0.0,
+            "the captured winner must reproduce the violation: {before}"
+        );
+        let repaired = project_scalar_ceiling(&original, &lower, &objective)
+            .expect("boost reductions admit a feasible ceiling");
+        assert_eq!(
+            super::super::compute::compute_ceiling_violation_into(
+                &objective.freqs,
+                &repaired,
+                objective.srate,
+                objective.peq_model,
+                4.0,
+            ),
+            0.0
+        );
+        for (before, after) in original
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(repaired.as_chunks::<3>().0.iter())
+        {
+            assert_eq!(
+                &before[..2],
+                &after[..2],
+                "frequency and Q remain unchanged"
+            );
+            if before[2] <= 0.0 {
+                assert_eq!(before[2], after[2], "cuts remain unchanged");
+            } else {
+                assert!(after[2] >= 0.0 && after[2] <= before[2]);
+                assert!(
+                    before[2] - after[2] < 1e-4,
+                    "repair the defect without discarding the correction"
+                );
+            }
+        }
+        // Independent complex biquad transfer evaluation bypasses the cached
+        // polynomial response used by the production ceiling constraint.
+        for frequency in objective.freqs.iter().copied() {
+            let db: f64 = repaired
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|filter| {
+                    crate::iir::Biquad::new(
+                        crate::iir::BiquadFilterType::Peak,
+                        10.0_f64.powf(filter[0]),
+                        objective.srate,
+                        filter[1],
+                        filter[2],
+                    )
+                    .complex_response(frequency)
+                    .norm()
+                    .log10()
+                        * 20.0
+                })
+                .sum();
+            assert!(
+                db <= 4.0 + 1e-8,
+                "independent response {db} dB at {frequency} Hz"
+            );
+        }
+        assert_eq!(
+            project_scalar_ceiling(&repaired, &lower, &objective).expect("already feasible winner"),
+            repaired
+        );
+        let mut fixed = lower;
+        fixed[2] = original[2];
+        fixed[5] = original[5];
+        assert!(
+            project_scalar_ceiling(&original, &fixed, &objective).is_err(),
+            "fixed boosts cannot be falsely certified feasible"
+        );
+    }
+
+    #[test]
+    fn scalar_ceiling_projection_preserves_active_gain_floor_and_fixed_boost() {
+        let (mut objective, _, _, _, _) = scalar_fixture();
+        objective.freqs = std::sync::Arc::new(Array1::from_iter(
+            (0..=120).map(|index| 20.0 + 4.0 * f64::from(index)),
+        ));
+        objective.min_db = 2.0;
+        objective.max_db = 4.0;
+        let original = vec![100.0_f64.log10(), 0.8, 4.0, 200.0_f64.log10(), 0.8, 4.0];
+        let lower = vec![20.0_f64.log10(), 0.5, 0.0, 20.0_f64.log10(), 0.5, 0.0];
+        let repaired = project_scalar_ceiling(&original, &lower, &objective)
+            .expect("active-gain floor admits a feasible composite response");
+        assert!(repaired[2] >= 2.0 && repaired[5] >= 2.0);
+        assert!(repaired[2] < 4.0 && repaired[5] < 4.0);
+        assert_eq!(
+            crate::constraints::viol_min_gain_from_xs(&repaired, objective.peq_model, 2.0),
+            0.0
+        );
+        assert_eq!(
+            super::super::compute::compute_ceiling_violation_into(
+                &objective.freqs,
+                &repaired,
+                objective.srate,
+                objective.peq_model,
+                4.0,
+            ),
+            0.0
+        );
+        let mut fixed = lower;
+        fixed[2] = original[2];
+        objective.max_db = 5.0;
+        let mixed = project_scalar_ceiling(&original, &fixed, &objective)
+            .expect("one free boost can satisfy the ceiling with the other fixed");
+        assert_eq!(mixed[2], original[2]);
+        assert!(mixed[5] >= 2.0 && mixed[5] < original[5]);
+        assert_eq!(&mixed[..2], &original[..2]);
+        assert_eq!(&mixed[3..5], &original[3..5]);
+        assert_eq!(
+            super::super::compute::compute_ceiling_violation_into(
+                &objective.freqs,
+                &mixed,
+                objective.srate,
+                objective.peq_model,
+                5.0,
+            ),
+            0.0
+        );
+        objective.max_db = 1.0;
+        assert!(
+            project_scalar_ceiling(&original, &fixed, &objective).is_err(),
+            "an incompatible floor and fixed boost must refuse"
+        );
     }
 
     #[test]

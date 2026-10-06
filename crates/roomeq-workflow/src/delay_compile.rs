@@ -238,6 +238,108 @@ impl Branch {
 /// overlap inflates the bound above the realized peak, which is the safe
 /// direction for a backstop: the acceptance gate enforces this bound and
 /// fails closed when it is unevaluable.
+pub(crate) fn correction_strength_for_electrical_ceiling(
+    channels: &HashMap<String, ChannelDspChain>,
+    routes: Option<&[BassManagementRoute]>,
+    ceiling_db: f64,
+) -> Option<f64> {
+    if !ceiling_db.is_finite() || ceiling_db < 0.0 {
+        return None;
+    }
+    let bound_at = |strength| {
+        let mut scaled = channels.clone();
+        scale_eq_gains_for_bound(&mut scaled, strength)?;
+        electrical_boost_bound_db(&scaled, routes)
+    };
+    let zero = bound_at(0.0)?;
+    if zero > ceiling_db {
+        return None;
+    }
+    let full = bound_at(1.0)?;
+    if full <= ceiling_db {
+        return Some(1.0);
+    }
+
+    // Each scaled EQ contribution is max(strength * gain_db, 0); fixed gain
+    // plugins and route gains are unchanged. The exact evaluator is monotone
+    // on [0, 1], including negative gains and branches with different trims.
+    let mut feasible = 0.0;
+    let mut infeasible = 1.0;
+    for _ in 0..64 {
+        let middle = feasible + (infeasible - feasible) * 0.5;
+        if middle == feasible || middle == infeasible {
+            break;
+        }
+        if bound_at(middle).is_some_and(|bound| bound <= ceiling_db) {
+            feasible = middle;
+        } else {
+            infeasible = middle;
+        }
+    }
+    // Keep an inward representable point in case the branch sum rounded up
+    // at the computed endpoint. Re-evaluate with the same branch evaluator.
+    while bound_at(feasible).is_none_or(|bound| bound > ceiling_db) {
+        feasible = feasible.next_down();
+        if feasible <= 0.0 {
+            return Some(0.0);
+        }
+    }
+    Some(feasible)
+}
+
+fn scale_eq_gains_for_bound(
+    channels: &mut HashMap<String, ChannelDspChain>,
+    strength: f64,
+) -> Option<()> {
+    if !strength.is_finite() || !(0.0..=1.0).contains(&strength) {
+        return None;
+    }
+    let scale_plugins = |plugins: &mut [roomeq_model::PluginConfigWrapper]| -> Option<()> {
+        for plugin in plugins
+            .iter_mut()
+            .filter(|plugin| plugin.plugin_type == "eq")
+        {
+            let filters = plugin.parameters.get_mut("filters")?.as_array_mut()?;
+            for filter in filters {
+                // Sectioned Kautz weights are not interpreted as dB by the
+                // current electrical bound; its correction scaler also leaves
+                // the legacy top-level db_gain untouched in that case.
+                if filter.get("topology").and_then(serde_json::Value::as_str)
+                    == Some("kautz_filter")
+                {
+                    let sections = match (filter.get("kautz_sections"), filter.get("sections")) {
+                        (Some(_), Some(_)) => return None,
+                        (Some(sections), None) | (None, Some(sections)) => {
+                            Some(sections.as_array()?)
+                        }
+                        (None, None) => None,
+                    };
+                    if sections.is_some_and(|sections| !sections.is_empty()) {
+                        continue;
+                    }
+                }
+                if let Some(value) = filter.get_mut("db_gain") {
+                    let gain = value.as_f64()?;
+                    if !gain.is_finite() {
+                        return None;
+                    }
+                    *value = serde_json::json!(gain * strength);
+                }
+            }
+        }
+        Some(())
+    };
+    for chain in channels.values_mut() {
+        scale_plugins(&mut chain.plugins)?;
+        if let Some(drivers) = &mut chain.drivers {
+            for driver in drivers {
+                scale_plugins(&mut driver.plugins)?;
+            }
+        }
+    }
+    Some(())
+}
+
 pub(crate) fn electrical_boost_bound_db(
     channels: &HashMap<String, ChannelDspChain>,
     routes: Option<&[BassManagementRoute]>,
@@ -281,12 +383,12 @@ fn branch_gain_bound(
     if let Some(name) = endpoints.input.as_ref()
         && let Some(input) = channels.get(name.as_str())
     {
-        sum += chain_gain_sum(&input.plugins)?;
+        sum += routed_chain_gain_sum(&input.plugins, "pre_route")?;
     }
     let post = channels.get(endpoints.post.as_str())?;
-    sum += chain_gain_sum(&post.plugins)?;
+    sum += routed_chain_gain_sum(&post.plugins, "post_route")?;
     if let Some(driver) = endpoints.driver {
-        sum += chain_gain_sum(&post.drivers.as_ref()?.get(driver)?.plugins)?;
+        sum += routed_driver_gain_sum(&post.drivers.as_ref()?.get(driver)?.plugins)?;
     }
     Some(sum)
 }
@@ -334,6 +436,97 @@ fn chain_gain_sum(plugins: &[roomeq_model::PluginConfigWrapper]) -> Option<f64> 
             "convolution" => return None,
             _ => {}
         }
+    }
+    Some(sum)
+}
+
+/// Positive gain in the plugin stage consumed by one physical route endpoint.
+///
+/// Physical routing resolves source `pre_route` and destination `post_route`
+/// plugins into separate ports. Summing a channel's full plugin list at both
+/// endpoints double-counts self-routes and assigns output-owned main EQ to
+/// redirected sub branches. `route_owned` controls are already represented by
+/// `route.gain_db`; do not add them a second time. Unknown ownership fails
+/// closed because it cannot be mirrored safely.
+fn routed_chain_gain_sum(
+    plugins: &[roomeq_model::PluginConfigWrapper],
+    owner: &str,
+) -> Option<f64> {
+    let mut sum = 0.0;
+    for plugin in plugins {
+        let stage = plugin
+            .parameters
+            .get("room_eq_stage")
+            .and_then(serde_json::Value::as_str)?;
+        match stage {
+            "pre_route" | "post_route" if stage == owner => {
+                sum += plugin_gain_sum(plugin)?;
+            }
+            "pre_route" | "post_route" => {}
+            "route_owned"
+                if matches!(plugin.plugin_type.as_str(), "gain" | "delay" | "crossover") => {}
+            _ => return None,
+        }
+    }
+    Some(sum)
+}
+
+/// Positive gain in a physical sub driver, mirroring the routing resolver.
+/// Ordinary driver gain/delay controls are already baked into route values;
+/// only explicitly correction-owned gain is emitted as driver processing.
+fn routed_driver_gain_sum(plugins: &[roomeq_model::PluginConfigWrapper]) -> Option<f64> {
+    let mut sum = 0.0;
+    for plugin in plugins {
+        if plugin
+            .parameters
+            .get("room_eq_stage")
+            .and_then(serde_json::Value::as_str)
+            != Some("post_route")
+        {
+            return None;
+        }
+        match plugin.plugin_type.as_str() {
+            "gain"
+                if plugin
+                    .parameters
+                    .get("room_eq_correction_gain")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true) =>
+            {
+                sum += plugin_gain_sum(plugin)?;
+            }
+            "gain" | "delay" => {}
+            "eq" => sum += plugin_gain_sum(plugin)?,
+            "convolution" => return None,
+            "crossover" | "limiter" => {}
+            _ => return None,
+        }
+    }
+    Some(sum)
+}
+
+fn plugin_gain_sum(plugin: &roomeq_model::PluginConfigWrapper) -> Option<f64> {
+    let mut sum = 0.0;
+    match plugin.plugin_type.as_str() {
+        "gain" => {
+            let gain = plugin.parameters.get("gain_db")?.as_f64()?;
+            if !gain.is_finite() {
+                return None;
+            }
+            sum += gain.max(0.0);
+        }
+        "eq" => {
+            for filter in plugin.parameters.get("filters")?.as_array()? {
+                let gain = filter.get("db_gain")?.as_f64()?;
+                if !gain.is_finite() {
+                    return None;
+                }
+                sum += gain.max(0.0);
+            }
+        }
+        "delay" | "crossover" | "limiter" => {}
+        "convolution" => return None,
+        _ => return None,
     }
     Some(sum)
 }
@@ -757,6 +950,7 @@ mod tests {
         drivers: &[(&str, f64)],
     ) -> ChannelDspChain {
         ChannelDspChain {
+            physical_correction_target: None,
             channel: String::new(),
             plugins: plugin_delays
                 .iter()
@@ -1034,6 +1228,14 @@ mod tests {
         }
     }
 
+    fn stage_plugin(
+        mut plugin: roomeq_model::PluginConfigWrapper,
+        stage: &str,
+    ) -> roomeq_model::PluginConfigWrapper {
+        plugin.parameters["room_eq_stage"] = serde_json::json!(stage);
+        plugin
+    }
+
     fn convolution_plugin() -> roomeq_model::PluginConfigWrapper {
         roomeq_model::PluginConfigWrapper {
             plugin_type: "convolution".to_string(),
@@ -1072,8 +1274,11 @@ mod tests {
             (
                 "Sub".to_string(),
                 chain_with_gains(
-                    vec![eq_plugin(&[3.0, -2.0]), gain_plugin(1.5)],
-                    &[("L-sub", vec![eq_plugin(&[1.0])])],
+                    vec![
+                        stage_plugin(eq_plugin(&[3.0, -2.0]), "post_route"),
+                        stage_plugin(gain_plugin(1.5), "post_route"),
+                    ],
+                    &[("L-sub", vec![stage_plugin(eq_plugin(&[1.0]), "post_route")])],
                 ),
             ),
         ]);
@@ -1082,6 +1287,126 @@ mod tests {
         routes[0].gain_db = 2.0;
         let bound = electrical_boost_bound_db(&channels, Some(&routes)).unwrap();
         assert!((bound - 7.5).abs() < 1e-9, "bound was {bound}");
+    }
+
+    #[test]
+    fn correction_strength_respects_fixed_route_headroom_and_signed_eq_gains() {
+        let channels = HashMap::from([
+            ("L".to_string(), chain_with_gains(vec![], &[])),
+            ("R".to_string(), chain_with_gains(vec![], &[])),
+            (
+                "Sub".to_string(),
+                chain_with_gains(
+                    vec![
+                        stage_plugin(eq_plugin(&[10.0, -6.0]), "post_route"),
+                        stage_plugin(gain_plugin(2.0), "post_route"),
+                    ],
+                    &[
+                        ("L-sub", vec![stage_plugin(eq_plugin(&[1.0]), "post_route")]),
+                        ("R-sub", vec![stage_plugin(eq_plugin(&[1.0]), "post_route")]),
+                    ],
+                ),
+            ),
+        ]);
+        let mut routes = vec![route("L", "L-sub", 0.0), route("R", "R-sub", 0.0)];
+        routes[1].gain_db = 5.0;
+
+        // L allows (8 - fixed 2) / scaled 11 = 6/11. R's larger fixed
+        // route trim allows only (8 - fixed 7) / scaled 11 = 1/11.
+        let strength =
+            correction_strength_for_electrical_ceiling(&channels, Some(&routes), 8.0).unwrap();
+        assert!(
+            (strength - (1.0 / 11.0)).abs() < 1e-14,
+            "strength was {strength}"
+        );
+        let mut candidate = channels.clone();
+        scale_eq_gains_for_bound(&mut candidate, strength).unwrap();
+        assert!(electrical_boost_bound_db(&candidate, Some(&routes)).unwrap() <= 8.0);
+
+        let mut above = channels.clone();
+        scale_eq_gains_for_bound(&mut above, strength.next_up()).unwrap();
+        assert!(electrical_boost_bound_db(&above, Some(&routes)).unwrap() > 8.0);
+    }
+
+    #[test]
+    fn routed_electrical_bound_uses_each_self_route_stage_once() {
+        let mut chain = chain_with_gains(
+            vec![
+                stage_plugin(eq_plugin(&[2.0, -1.0]), "pre_route"),
+                stage_plugin(gain_plugin(0.5), "pre_route"),
+                stage_plugin(eq_plugin(&[3.0]), "post_route"),
+                stage_plugin(gain_plugin(0.25), "post_route"),
+                stage_plugin(gain_plugin(9.0), "route_owned"),
+            ],
+            &[],
+        );
+        chain.channel = "L".into();
+        let channels = HashMap::from([("L".to_string(), chain)]);
+        let bound = electrical_boost_bound_db(&channels, Some(&[route("L", "L", 0.0)]))
+            .expect("tagged route bound");
+        assert!((bound - 5.75).abs() < 1e-9, "bound was {bound}");
+    }
+
+    #[test]
+    fn routed_electrical_bound_uses_input_and_output_owners_and_route_gain_once() {
+        let mut input = chain_with_gains(
+            vec![
+                stage_plugin(gain_plugin(0.5), "pre_route"),
+                stage_plugin(eq_plugin(&[2.0]), "pre_route"),
+                stage_plugin(eq_plugin(&[9.0]), "post_route"),
+            ],
+            &[],
+        );
+        input.channel = "L".into();
+        let mut output = chain_with_gains(
+            vec![
+                stage_plugin(gain_plugin(8.0), "pre_route"),
+                stage_plugin(gain_plugin(0.5), "post_route"),
+                stage_plugin(eq_plugin(&[3.0]), "post_route"),
+            ],
+            &[],
+        );
+        output.channel = "Sub".into();
+        let channels = HashMap::from([("L".to_string(), input), ("Sub".to_string(), output)]);
+        let mut redirected = route("L", "Sub", 0.0);
+        redirected.gain_db = 1.25;
+        let bound =
+            electrical_boost_bound_db(&channels, Some(&[redirected])).expect("tagged route bound");
+        assert!((bound - 7.25).abs() < 1e-9, "bound was {bound}");
+    }
+
+    #[test]
+    fn routed_electrical_bound_refuses_unknown_plugin_ownership() {
+        let mut input = chain_with_gains(vec![gain_plugin(1.0)], &[]);
+        input.channel = "L".into();
+        let mut output = chain_with_gains(vec![stage_plugin(gain_plugin(1.0), "post_route")], &[]);
+        output.channel = "Sub".into();
+        let channels = HashMap::from([("L".to_string(), input), ("Sub".to_string(), output)]);
+        assert_eq!(
+            electrical_boost_bound_db(&channels, Some(&[route("L", "Sub", 0.0)])),
+            None
+        );
+    }
+
+    #[test]
+    fn correction_strength_refuses_zero_strength_overage_and_keeps_safe_full_strength() {
+        let fixed_overage = HashMap::from([(
+            "L".to_string(),
+            chain_with_gains(vec![gain_plugin(9.0), eq_plugin(&[2.0])], &[]),
+        )]);
+        assert_eq!(
+            correction_strength_for_electrical_ceiling(&fixed_overage, None, 8.0),
+            None
+        );
+
+        let already_safe = HashMap::from([(
+            "L".to_string(),
+            chain_with_gains(vec![gain_plugin(1.0), eq_plugin(&[2.0, -5.0])], &[]),
+        )]);
+        assert_eq!(
+            correction_strength_for_electrical_ceiling(&already_safe, None, 8.0),
+            Some(1.0)
+        );
     }
 
     #[test]

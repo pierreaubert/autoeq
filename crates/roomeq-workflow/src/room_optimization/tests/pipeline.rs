@@ -361,6 +361,7 @@ fn assemble_generic_result_non_empty_success() {
     channel_chains.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: Vec::new(),
             drivers: None,

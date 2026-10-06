@@ -423,6 +423,7 @@ fn channel_result(name: &str, delay_ms: f64) -> ChannelOptimizationResult {
 
 fn dsp_chain(name: &str) -> ChannelDspChain {
     ChannelDspChain {
+        physical_correction_target: None,
         channel: name.to_string(),
         plugins: Vec::new(),
         drivers: None,

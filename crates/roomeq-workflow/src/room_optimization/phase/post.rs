@@ -661,6 +661,7 @@ mod tests {
             &initial, "LR24", 80.0, 48_000.0, false,
         );
         let chain = roomeq_model::ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![roomeq_engine::output::create_crossover_plugin(
                 "LR24", 80.0, "high",

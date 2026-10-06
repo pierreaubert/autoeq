@@ -1141,6 +1141,264 @@ struct AdaptiveSelection {
     optimizer_evidence: Vec<autoeq_optim::optim::OptimizerRunEvidence>,
 }
 
+/// Return the largest requested filter count that can fit the spacing constraint.
+///
+/// This is only a necessary global-bandwidth preflight. The exact projector
+/// remains authoritative for every attempted pass and emitted candidate.
+fn max_spacing_feasible_filter_count(
+    requested: usize,
+    min_freq_hz: f64,
+    max_freq_hz: f64,
+    min_spacing_oct: f64,
+) -> usize {
+    if requested == 0
+        || requested == 1
+        || !min_freq_hz.is_finite()
+        || !max_freq_hz.is_finite()
+        || min_freq_hz <= 0.0
+        || max_freq_hz < min_freq_hz
+        || !min_spacing_oct.is_finite()
+        || min_spacing_oct <= 0.0
+    {
+        return requested;
+    }
+
+    let available_octaves = (max_freq_hz / min_freq_hz).log2();
+    let rounding_margin = 8.0 * f64::EPSILON * available_octaves.abs().max(1.0);
+    (1..=requested)
+        .take_while(|&count| {
+            let required_octaves = (count - 1) as f64 * min_spacing_oct;
+            required_octaves <= available_octaves + rounding_margin
+        })
+        .last()
+        .unwrap_or(1)
+}
+
+#[cfg(test)]
+mod spacing_feasibility_preflight_tests {
+    use super::*;
+    use autoeq_optim::OptimParams;
+    use autoeq_optim::optim::{ObjectiveData, OptimProgressCallback};
+    use ndarray::Array1;
+    use std::sync::{Arc, Mutex};
+
+    struct CountingIdentityBackend {
+        counts: Arc<Mutex<Vec<usize>>>,
+    }
+
+    impl CountingIdentityBackend {
+        fn run(
+            &self,
+            x: &mut [f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            let mut counts = self.counts.lock().expect("test mutex");
+            if counts.last() != Some(&params.num_filters) {
+                counts.push(params.num_filters);
+            }
+            let parameters_per_filter =
+                autoeq_core::param_utils::params_per_filter(params.peq_model);
+            let gain_offset = if parameters_per_filter == 3 { 2 } else { 3 };
+            for filter in 0..params.num_filters {
+                let gain_index = filter * parameters_per_filter + gain_offset;
+                if gain_index < x.len() {
+                    x[gain_index] = 0.0;
+                }
+            }
+            let loss = autoeq_optim::optim::compute_fitness_penalties_ref(x, &objective);
+            if loss.is_finite() {
+                Ok((String::from("identity-test"), loss))
+            } else {
+                Err((
+                    String::from("identity objective is not finite"),
+                    f64::INFINITY,
+                ))
+            }
+        }
+    }
+
+    impl OptimizerBackend for CountingIdentityBackend {
+        fn optimize_filters(
+            &self,
+            x: &mut [f64],
+            _lower: &[f64],
+            _upper: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.run(x, objective, params)
+        }
+
+        fn optimize_filters_with_callback(
+            &self,
+            x: &mut [f64],
+            _lower: &[f64],
+            _upper: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+            mut callback: OptimProgressCallback,
+        ) -> Result<(String, f64), (String, f64)> {
+            let result = self.run(x, objective, params);
+            if let Ok((_, loss)) = &result {
+                callback(1, *loss, None);
+            }
+            result
+        }
+
+        fn optimize_filters_with_algo_override(
+            &self,
+            x: &mut [f64],
+            _lower: &[f64],
+            _upper: &[f64],
+            objective: ObjectiveData,
+            params: &OptimParams,
+            _algorithm: Option<&str>,
+        ) -> Result<(String, f64), (String, f64)> {
+            self.run(x, objective, params)
+        }
+    }
+
+    fn run_adaptive_search(
+        min_hz: f64,
+        max_hz: f64,
+        requested: usize,
+    ) -> (Vec<usize>, AdaptiveSelection) {
+        let frequencies = Array1::logspace(10.0, min_hz.log10(), max_hz.log10(), 129);
+        let curve = Curve {
+            spl: frequencies
+                .mapv(|frequency| 0.5 * (-((frequency / 66.0).log2() / 0.3).powi(2)).exp()),
+            freq: frequencies,
+            ..Curve::default()
+        };
+        let config = OptimizerConfig {
+            algorithm: String::from("autoeq:cmaes"),
+            num_filters: requested,
+            min_freq: min_hz,
+            max_freq: max_hz,
+            min_filter_improvement: 0.0,
+            max_iter: 1000,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+        let prep =
+            prepare_single_channel_eq_with_normalization(&curve, &config, None, 48_000.0, None)
+                .expect("prepared test objective");
+        let context = OptimizationPassContext {
+            objective_data: &prep.objective_data,
+            args_template: &prep.args_template,
+            peq_model: prep.peq_model,
+            sample_rate: prep.sample_rate,
+            normalization: OptimizationPassNormalization::Single(&prep.input_normalization),
+        };
+        let counts = Arc::new(Mutex::new(Vec::new()));
+        let backend = CountingIdentityBackend {
+            counts: Arc::clone(&counts),
+        };
+        let selection = adaptive_filter_search(&context, &config, None, &backend, None)
+            .expect("spacing-feasible passes should retain a winner");
+        let counts = counts.lock().expect("test mutex").clone();
+        (counts, selection)
+    }
+
+    #[test]
+    fn narrowband_adaptive_search_skips_only_impossible_counts() {
+        let (counts, selection) = run_adaptive_search(60.0, 72.453_964_233, 4);
+        assert_eq!(counts, [1, 2]);
+        assert!(selection.loss.is_finite());
+    }
+
+    #[test]
+    fn wideband_adaptive_search_keeps_the_full_attempt_inventory() {
+        let (counts, selection) = run_adaptive_search(60.0, 500.0, 4);
+        assert_eq!(counts, [1, 2, 3, 4]);
+        assert!(selection.loss.is_finite());
+    }
+
+    #[test]
+    fn fixed_count_keeps_the_strict_infeasible_projection_error() {
+        let min_hz: f64 = 60.0;
+        let max_hz: f64 = 72.453_964_233;
+        let frequencies = Array1::logspace(10.0, min_hz.log10(), max_hz.log10(), 129);
+        let curve = Curve {
+            spl: frequencies
+                .mapv(|frequency| 0.5 * (-((frequency / 66.0).log2() / 0.3).powi(2)).exp()),
+            freq: frequencies,
+            ..Curve::default()
+        };
+        let config = OptimizerConfig {
+            algorithm: String::from("autoeq:cmaes"),
+            num_filters: 3,
+            min_freq: min_hz,
+            max_freq: 500.0,
+            min_filter_improvement: 0.0,
+            max_iter: 1000,
+            seed: Some(42),
+            ..OptimizerConfig::default()
+        };
+        let prep =
+            prepare_single_channel_eq_with_normalization(&curve, &config, None, 48_000.0, None)
+                .expect("prepared test objective");
+        let context = OptimizationPassContext {
+            objective_data: &prep.objective_data,
+            args_template: &prep.args_template,
+            peq_model: prep.peq_model,
+            sample_rate: prep.sample_rate,
+            normalization: OptimizationPassNormalization::Single(&prep.input_normalization),
+        };
+        let result = run_optimization_pass_with_context(
+            &context,
+            3,
+            100,
+            &config,
+            None,
+            &RealOptimizerBackend::new(),
+            None,
+        );
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("spacing projection: no ordering satisfies the frequency bounds")
+        );
+    }
+
+    #[test]
+    fn exact_spacing_boundary_is_attempted_and_finalizer_remains_authoritative() {
+        let max_hz = 60.0 * 2.0_f64.powf(0.4);
+        let (counts, selection) = run_adaptive_search(60.0, max_hz, 3);
+        assert_eq!(counts, [1, 2, 3]);
+        assert!(selection.loss.is_finite());
+
+        let min_log = 60.0_f64.log10();
+        let max_log = max_hz.log10();
+        let centers = [min_log, min_log + 0.2 * std::f64::consts::LOG10_2, max_log];
+        let parameters = centers
+            .into_iter()
+            .flat_map(|frequency| [frequency, 1.0, 0.0])
+            .collect::<Vec<_>>();
+        let lower = (0..3)
+            .flat_map(|_| [min_log, 0.5, -6.0])
+            .collect::<Vec<_>>();
+        let upper = (0..3).flat_map(|_| [max_log, 3.0, 3.0]).collect::<Vec<_>>();
+        let projection = autoeq_optim::constraints::project_min_spacing(
+            &parameters,
+            &lower,
+            &upper,
+            PeqModel::Pk,
+            0.2,
+        );
+        if let Ok(projected) = projection {
+            assert_eq!(
+                autoeq_optim::constraints::viol_spacing_from_xs(&projected, PeqModel::Pk, 0.2),
+                0.0,
+                "the projector may accept only a strictly feasible boundary result"
+            );
+        }
+    }
+}
+
 /// Shared pass selection for single- and multi-measurement adaptive EQ.
 fn adaptive_filter_search(
     context: &OptimizationPassContext<'_>,
@@ -1150,6 +1408,30 @@ fn adaptive_filter_search(
     control: Option<&EqRunControl<'_>>,
 ) -> Result<AdaptiveSelection, Box<dyn Error>> {
     let max_filters = config.num_filters;
+    let spacing = context
+        .args_template
+        .min_spacing_oct
+        .max(context.objective_data.min_spacing_oct);
+    let feasible_max_filters = if context.args_template.peq_model == PeqModel::Pk {
+        max_spacing_feasible_filter_count(
+            max_filters,
+            context.args_template.min_freq,
+            context.args_template.max_freq,
+            spacing,
+        )
+    } else {
+        max_filters
+    };
+    if feasible_max_filters < max_filters {
+        let available_octaves =
+            (context.args_template.max_freq / context.args_template.min_freq).log2();
+        log::info!(
+            "Skipping adaptive Pk filter counts above {} as spacing-infeasible: available {:.6} octaves, minimum spacing {:.6} octaves",
+            feasible_max_filters,
+            available_octaves,
+            spacing,
+        );
+    }
     let base_budget_per_step = adaptive_budget_for_step(config.max_iter, max_filters, 1);
 
     let mut best_filters: Vec<Biquad> = vec![];
@@ -1162,13 +1444,14 @@ fn adaptive_filter_search(
     let last_iteration = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     log::info!(
-        "  Adaptive filter selection: up to {} filters, threshold={:.6}, base budget/step={}",
+        "  Adaptive filter selection: up to {} requested Pk filters ({} spacing-feasible), threshold={:.6}, base budget/step={}",
         max_filters,
+        feasible_max_filters,
         config.min_filter_improvement,
         base_budget_per_step
     );
 
-    for k in 1..=max_filters {
+    for k in 1..=feasible_max_filters {
         if let Some(control) = control {
             control.check_terminal()?;
         }
@@ -2301,6 +2584,76 @@ mod pruning_workflow_tests {
                 ..Default::default()
             })
             .collect()
+    }
+
+    #[test]
+    fn routed_training_preparation_preserves_target_loss_and_controls() {
+        let mut curves = curves();
+        curves.truncate(1);
+        let frequencies = curves[0].freq.clone();
+        let target = Curve {
+            freq: frequencies.clone(),
+            spl: frequencies.mapv(|frequency| 2.5 * (frequency / 1000.0).log10()),
+            ..Default::default()
+        };
+        let resources = EqResources {
+            target: Some(super::super::resources::PreparedEqTarget::Curve(Box::new(
+                target,
+            ))),
+            ..Default::default()
+        };
+        let mut optimizer = config(1, true);
+        optimizer.loss_type = String::from("flat");
+        optimizer.asymmetric_loss = true;
+        optimizer.psychoacoustic = true;
+        optimizer.audibility_deadband = Some(roomeq_model::AudibilityDeadbandConfig::default());
+        optimizer.smoothness_penalty = Some(
+            serde_json::from_value(serde_json::json!({
+                "tv2_weight": 0.001,
+                "schroeder_hz": 200.0,
+                "modal_weight_scale": 0.1,
+                "exponent": 1.0
+            }))
+            .unwrap(),
+        );
+
+        let (prepared, params, _, _) = prepare_multi_measurement_objective_recorded(
+            &curves,
+            &optimizer,
+            &MultiMeasurementConfig::default(),
+            Some(&resources),
+            48_000.0,
+        )
+        .unwrap();
+        let seat = &prepared.multi_objective.as_ref().unwrap().objectives[0];
+
+        let mut without_psychoacoustics = optimizer.clone();
+        without_psychoacoustics.psychoacoustic = false;
+        let (unprocessed, _, _, _) = prepare_multi_measurement_objective_recorded(
+            &curves,
+            &without_psychoacoustics,
+            &MultiMeasurementConfig::default(),
+            Some(&resources),
+            48_000.0,
+        )
+        .unwrap();
+        let unprocessed_seat = &unprocessed.multi_objective.as_ref().unwrap().objectives[0];
+        let preprocessing_delta = (&*seat.deviation - &*unprocessed_seat.deviation)
+            .mapv(|value| value.powi(2))
+            .sum()
+            .sqrt();
+
+        assert_eq!(seat.loss_type, LossType::SpeakerFlatAsymmetric);
+        assert!(seat.target.iter().any(|value| value.abs() > 0.1));
+        assert!(preprocessing_delta > 1e-3);
+        assert!(seat.audibility_deadband.is_some());
+        assert_eq!(seat.smooth, params.smooth);
+        assert_eq!(seat.smooth_n, params.smooth_n);
+        let configured_penalty = seat.smoothness_penalty.as_ref().unwrap();
+        assert_eq!(configured_penalty.tv2_weight, 0.001);
+        assert_eq!(configured_penalty.schroeder_hz, Some(200.0));
+        assert_eq!(configured_penalty.modal_weight_scale, 0.1);
+        assert_eq!(configured_penalty.exponent, 1.0);
     }
 
     fn config(measurement_count: usize, report_only: bool) -> OptimizerConfig {

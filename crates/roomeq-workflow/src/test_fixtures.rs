@@ -67,6 +67,7 @@ pub fn single_channel_room_result(channel_name: &str) -> RoomOptimizationResult 
     channels.insert(
         channel_name.to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: channel_name.to_string(),
             plugins: Vec::new(),
             drivers: None,

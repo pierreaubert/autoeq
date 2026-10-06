@@ -2274,6 +2274,7 @@ mod tests {
                 response_file: Some("response.csv".into()),
                 calibration_file: "calibration.txt".into(),
                 provenance: autoeq_core::capture_provenance::CaptureTakeProvenance {
+                    seat_id: None,
                     microphone_id: "mic-1".into(),
                     device_id: "input-1".into(),
                     offset_samples: None,

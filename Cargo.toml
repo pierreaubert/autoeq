@@ -96,6 +96,7 @@ criterion = "0.8.2"
 csv = "1.4"
 directories = "6"
 env_logger = "0.11"
+libm = { version = "=0.2.16", default-features = false }
 log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"

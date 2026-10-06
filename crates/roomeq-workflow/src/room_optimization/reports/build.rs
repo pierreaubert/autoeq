@@ -314,6 +314,7 @@ mod tests {
             }
         };
         let chain = |plugins| roomeq_model::ChannelDspChain {
+            physical_correction_target: None,
             channel: String::new(),
             plugins,
             drivers: None,

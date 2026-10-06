@@ -73,6 +73,69 @@ pub(crate) fn run_post_eq(
     })
 }
 
+/// Optimize one common pre-route correction against the routed training seats.
+///
+/// The input curves are coherent, fixed-route responses for training seats.
+/// Held-out seats are deliberately not accepted by this helper; they remain
+/// part of the caller's independent acceptance pass.
+pub(crate) fn run_routed_training_post_eq(
+    _role: &str,
+    curves: &[Curve],
+    opt_config: &OptimizerConfig,
+    target: Option<&TargetCurveConfig>,
+    sample_rate: f64,
+    progress: Option<WorkflowProgressCallback>,
+) -> Result<eq::EqOptimizationResult> {
+    if curves.is_empty() {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "routed training Post-EQ has no training-seat curves".into(),
+        });
+    }
+    let data_min_freq = curves
+        .iter()
+        .map(|curve| curve.freq.first().copied().unwrap_or(f64::INFINITY))
+        .fold(f64::NEG_INFINITY, f64::max);
+    let data_max_freq = curves
+        .iter()
+        .map(|curve| curve.freq.last().copied().unwrap_or(f64::NEG_INFINITY))
+        .fold(f64::INFINITY, f64::min);
+    let effective_min_freq = opt_config.min_freq.max(data_min_freq);
+    let effective_max_freq = opt_config.max_freq.min(data_max_freq);
+    if !effective_min_freq.is_finite()
+        || !effective_max_freq.is_finite()
+        || effective_min_freq >= effective_max_freq
+    {
+        warn!(
+            "Skipping routed Post-EQ: empty frequency band after intersecting configured [{:.1}, {:.1}] Hz with common training support [{:.1}, {:.1}] Hz",
+            opt_config.min_freq, opt_config.max_freq, data_min_freq, data_max_freq
+        );
+        return Ok(eq::EqOptimizationResult {
+            filters: Vec::new(),
+            loss: 0.0,
+            optimizer_evidence: Vec::new(),
+            audibility_veto: Vec::new(),
+            veto_adjudication: None,
+        });
+    }
+
+    let (callback, stopped) = progress
+        .map(|state| (Some(state.callback), Some(state.stopped)))
+        .unwrap_or((None, None));
+    let result = eq::optimize_channel_eq_multi_for_routed_training_detailed(
+        curves,
+        opt_config,
+        &opt_config.multi_measurement.clone().unwrap_or_default(),
+        target,
+        sample_rate,
+        callback,
+    );
+    workflow_progress_stopped(&stopped, "routed training Post-EQ")?;
+    let result = result.map_err(|error| AutoeqError::OptimizationFailed {
+        message: error.to_string(),
+    })?;
+    Ok(result)
+}
+
 /// Runs a single channel through `roomeq_workflow::process_single_channel` and prepends an
 /// alignment-gain plugin to the returned DSP chain.
 ///
@@ -230,6 +293,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
     plugins.extend(raw_chain.plugins);
 
     let chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: role.to_string(),
         plugins,
         drivers: raw_chain.drivers,

@@ -856,6 +856,7 @@ fn two_channel_generic_collection() -> GenericChannelCollection {
     let right = "right".to_string();
     let curve = flat_curve();
     let chain = |name: &str| ChannelDspChain {
+        physical_correction_target: None,
         channel: name.to_string(),
         plugins: Vec::new(),
         drivers: None,

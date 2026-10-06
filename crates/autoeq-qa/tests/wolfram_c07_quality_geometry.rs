@@ -33,6 +33,7 @@ fn provenance_takes(residual_us: f64) -> CaptureProvenance {
         reflection_report: None,
         takes: (0..2)
             .map(|index| CaptureTakeProvenance {
+                seat_id: None,
                 microphone_id: format!("mic-{index}"),
                 device_id: "aggregate-input".into(),
                 offset_samples: Some(123.25),

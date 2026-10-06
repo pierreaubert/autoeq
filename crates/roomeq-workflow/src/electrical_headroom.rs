@@ -447,6 +447,7 @@ pub fn expand_routed_electrical_paths(
             ]
             .into_iter()
             .map(|plugins| ChannelDspChain {
+                physical_correction_target: None,
                 // Virtual LFE inputs and physical driver outputs need not
                 // share a name with any stored logical channel. Resolved
                 // plugins completely describe each electrical stage.

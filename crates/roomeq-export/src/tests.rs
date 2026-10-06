@@ -120,6 +120,7 @@ fn test_camilladsp_uses_second_order_filters() {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "eq".to_string(),
@@ -180,6 +181,7 @@ fn test_camilladsp_no_duplicate_yaml_keys() {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![
                 PluginConfigWrapper {
@@ -231,6 +233,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "gain".to_string(),
@@ -257,6 +260,7 @@ fn test_easyeffects_rejects_different_channel_gains() {
     channels.insert(
         "right".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "right".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "gain".to_string(),
@@ -301,6 +305,7 @@ fn test_unknown_channels_sort_alphabetically() {
         channels.insert(
             name.to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: name.to_string(),
                 plugins: vec![],
                 drivers: None,
@@ -343,6 +348,7 @@ fn standard_channel_order_places_rears_before_surrounds() {
         channels.insert(
             name.to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: name.to_string(),
                 plugins: Vec::new(),
                 drivers: None,
@@ -424,6 +430,7 @@ fn test_export_with_drivers() {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "eq".to_string(),
@@ -542,6 +549,7 @@ fn per_driver_low_pass_survives_canonical_graph_paths() {
     channels.insert(
         "LFE".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "LFE".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "crossover".to_string(),

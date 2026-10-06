@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 clap = { workspace = true }
+libm = { workspace = true }
 log = { workspace = true }
 math-iir-fir = { workspace = true }
 ndarray = { workspace = true }

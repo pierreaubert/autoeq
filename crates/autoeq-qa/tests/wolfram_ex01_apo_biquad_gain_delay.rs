@@ -36,6 +36,7 @@ fn graph() -> DspGraph {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![
                 plugin("gain", serde_json::json!({"gain_db": -3.0})),

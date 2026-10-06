@@ -40,6 +40,7 @@ fn wolfram_rw05_electrical_headroom() {
     assert_eq!(want_amps.len(), freqs.len());
 
     let chain = roomeq_model::ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: vec![roomeq_engine::output::create_gain_plugin(gain_db)],
         drivers: None,

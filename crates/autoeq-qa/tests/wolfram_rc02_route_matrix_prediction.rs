@@ -35,6 +35,7 @@ fn plugin(plugin_type: &str, parameters: serde_json::Value) -> PluginConfigWrapp
 
 fn chain(channel: &str, plugins: Vec<PluginConfigWrapper>) -> ChannelDspChain {
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel.to_string(),
         plugins,
         drivers: None,

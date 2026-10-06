@@ -1445,3 +1445,36 @@ mod backend_tests {
         assert_eq!(ref_val, wrapped_val);
     }
 }
+
+#[test]
+fn portable_bound_coordinates_reach_the_owning_initial_guess() {
+    use super::setup::{initial_guess, setup_bounds};
+    use crate::{OptimParams, cli::Args};
+    use clap::Parser;
+
+    let args = Args::parse_from([
+        "autoeq",
+        "--peq-model",
+        "pk",
+        "-n",
+        "1",
+        "--min-freq",
+        "80",
+        "--max-freq",
+        "44100",
+    ]);
+    let params = OptimParams::from(&args);
+    let (lower, upper) = setup_bounds(&params);
+    // Independent 140-digit references for non-40 Hz frequency bounds.
+    assert_eq!(lower[0].to_bits(), 4_611_249_574_528_916_351);
+    assert_eq!(upper[0].to_bits(), 4_616_915_191_402_606_031);
+    let guess = initial_guess(&params, &lower, &upper);
+    assert_eq!(guess.len(), 3);
+    assert!(guess.iter().all(|value| value.is_finite()));
+    assert!(
+        guess
+            .iter()
+            .zip(lower.iter().zip(&upper))
+            .all(|(&value, (&lo, &hi))| value >= lo && value <= hi)
+    );
+}

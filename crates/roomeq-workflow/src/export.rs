@@ -2577,6 +2577,7 @@ mod tests {
             channels: HashMap::from([(
                 "left".to_string(),
                 ChannelDspChain {
+                    physical_correction_target: None,
                     channel: "left".to_string(),
                     plugins,
                     drivers: None,

@@ -52,8 +52,10 @@ use misc::percentage;
 use misc::push_finite_diff;
 use misc::read_metadata_pref_score;
 use misc::run_one;
+use misc::{record_scenario, require_complete_benchmark};
 use print::print_distribution_stats;
 use print::print_pairwise_stats;
+use std::sync::Mutex;
 
 #[tokio::main]
 pub async fn run_command() -> Result<(), Box<dyn Error>> {
@@ -139,7 +141,11 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
     };
     if speakers.is_empty() {
         eprintln!("No speakers found under ./data. Exiting.");
-        return Ok(());
+        return if args.base.qa.is_some() {
+            Err("Benchmark QA requires a nonempty speaker corpus".into())
+        } else {
+            Ok(())
+        };
     }
 
     // Determine parallelism
@@ -164,8 +170,10 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
     let sem = std::sync::Arc::new(Semaphore::new(jobs));
     let mut set = JoinSet::new();
 
+    let scenario_failures = Arc::new(Mutex::new(Vec::new()));
     for speaker in speakers.clone() {
         let tx = tx.clone();
+        let scenario_failures = scenario_failures.clone();
         let sem = sem.clone();
         let base_args = args.base.clone();
         let shutdown_clone = shutdown.clone();
@@ -190,12 +198,21 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
             a1.curve_name = "Listening Window".to_string();
             a1.loss = autoeq::LossType::SpeakerFlat;
             let s1 = if shutdown_clone.is_requested() {
-                None
+                record_scenario(
+                    Err("Scenario cancelled before evaluation".to_string()),
+                    &speaker,
+                    "flat_cea2034_lw",
+                    &scenario_failures,
+                )
             } else {
-                run_one(&a1, shutdown_clone.clone())
-                    .await
-                    .ok()
-                    .map(|m| m.pref_score)
+                record_scenario(
+                    run_one(&a1, shutdown_clone.clone())
+                        .await
+                        .map(|(metrics, qa_failure)| (metrics.pref_score, qa_failure)),
+                    &speaker,
+                    "flat_cea2034_lw",
+                    &scenario_failures,
+                )
             };
 
             // Scenario 2
@@ -206,12 +223,21 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
             a2.curve_name = "Estimated In-Room Response".to_string();
             a2.loss = autoeq::LossType::SpeakerFlat;
             let s2 = if shutdown_clone.is_requested() {
-                None
+                record_scenario(
+                    Err("Scenario cancelled before evaluation".to_string()),
+                    &speaker,
+                    "flat_eir",
+                    &scenario_failures,
+                )
             } else {
-                run_one(&a2, shutdown_clone.clone())
-                    .await
-                    .ok()
-                    .map(|m| m.pref_score)
+                record_scenario(
+                    run_one(&a2, shutdown_clone.clone())
+                        .await
+                        .map(|(metrics, qa_failure)| (metrics.pref_score, qa_failure)),
+                    &speaker,
+                    "flat_eir",
+                    &scenario_failures,
+                )
             };
 
             // Scenario 3: Score loss with mh:rga
@@ -222,12 +248,21 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
             a3.loss = autoeq::LossType::SpeakerScore;
             a3.algo = "mh:rga".to_string();
             let s3 = if shutdown_clone.is_requested() {
-                None
+                record_scenario(
+                    Err("Scenario cancelled before evaluation".to_string()),
+                    &speaker,
+                    "score_mh_rga",
+                    &scenario_failures,
+                )
             } else {
-                run_one(&a3, shutdown_clone.clone())
-                    .await
-                    .ok()
-                    .map(|m| m.pref_score)
+                record_scenario(
+                    run_one(&a3, shutdown_clone.clone())
+                        .await
+                        .map(|(metrics, qa_failure)| (metrics.pref_score, qa_failure)),
+                    &speaker,
+                    "score_mh_rga",
+                    &scenario_failures,
+                )
             };
 
             // Scenario 4: Score loss with mh:pso
@@ -238,12 +273,21 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
             a4.loss = autoeq::LossType::SpeakerScore;
             a4.algo = "mh:pso".to_string();
             let s4 = if shutdown_clone.is_requested() {
-                None
+                record_scenario(
+                    Err("Scenario cancelled before evaluation".to_string()),
+                    &speaker,
+                    "score_mh_pso",
+                    &scenario_failures,
+                )
             } else {
-                run_one(&a4, shutdown_clone.clone())
-                    .await
-                    .ok()
-                    .map(|m| m.pref_score)
+                record_scenario(
+                    run_one(&a4, shutdown_clone.clone())
+                        .await
+                        .map(|(metrics, qa_failure)| (metrics.pref_score, qa_failure)),
+                    &speaker,
+                    "score_mh_pso",
+                    &scenario_failures,
+                )
             };
 
             // Scenario 5: Score loss with autoeq:de
@@ -254,12 +298,21 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
             a5.loss = autoeq::LossType::SpeakerScore;
             a5.algo = "autoeq:de".to_string();
             let s5 = if shutdown_clone.is_requested() {
-                None
+                record_scenario(
+                    Err("Scenario cancelled before evaluation".to_string()),
+                    &speaker,
+                    "score_autoeq_de",
+                    &scenario_failures,
+                )
             } else {
-                run_one(&a5, shutdown_clone.clone())
-                    .await
-                    .ok()
-                    .map(|m| m.pref_score)
+                record_scenario(
+                    run_one(&a5, shutdown_clone.clone())
+                        .await
+                        .map(|(metrics, qa_failure)| (metrics.pref_score, qa_failure)),
+                    &speaker,
+                    "score_autoeq_de",
+                    &scenario_failures,
+                )
             };
 
             // Scenario 6: Score loss with autoeq:cmaes
@@ -270,12 +323,21 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
             a6.loss = autoeq::LossType::SpeakerScore;
             a6.algo = "autoeq:cmaes".to_string();
             let s6 = if shutdown_clone.is_requested() {
-                None
+                record_scenario(
+                    Err("Scenario cancelled before evaluation".to_string()),
+                    &speaker,
+                    "score_autoeq_cmaes",
+                    &scenario_failures,
+                )
             } else {
-                run_one(&a6, shutdown_clone.clone())
-                    .await
-                    .ok()
-                    .map(|m| m.pref_score)
+                record_scenario(
+                    run_one(&a6, shutdown_clone.clone())
+                        .await
+                        .map(|(metrics, qa_failure)| (metrics.pref_score, qa_failure)),
+                    &speaker,
+                    "score_autoeq_cmaes",
+                    &scenario_failures,
+                )
             };
 
             // Metadata preference
@@ -479,6 +541,15 @@ async fn run_benchmark(args: BenchArgs, shutdown: ShutdownSignal) -> Result<(), 
         eprintln!("{label:>20}: tied-best={count:>4} ({pct:>5.1}%)");
     }
 
+    let failures = scenario_failures
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for failure in failures.iter() {
+        eprintln!("Scenario failure: {failure}");
+    }
+    if args.base.qa.is_some() {
+        require_complete_benchmark(total_speakers, completed_speakers, &failures)?;
+    }
     Ok(())
 }
 

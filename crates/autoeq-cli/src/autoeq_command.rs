@@ -36,13 +36,13 @@ mod prescore;
 #[path = "autoeq/progress.rs"]
 mod progress;
 #[path = "autoeq/qa.rs"]
-mod qa;
+pub(crate) mod qa;
 #[path = "autoeq/runopt.rs"]
 mod runopt;
 #[path = "autoeq/save.rs"]
 mod save;
 #[path = "autoeq/spacing.rs"]
-mod spacing;
+pub(crate) mod spacing;
 
 #[cfg(test)]
 #[path = "autoeq/load_tests.rs"]

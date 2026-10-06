@@ -1,7 +1,7 @@
 use autoeq::optim;
 
 /// Check if spacing constraints are met
-pub(super) fn check_spacing_constraints(x: &[f64], params: &autoeq::OptimParams) -> bool {
+pub(crate) fn check_spacing_constraints(x: &[f64], params: &autoeq::OptimParams) -> bool {
     let peq_model = params.peq_model;
     let (_, adj_spacings) = optim::compute_sorted_freqs_and_adjacent_octave_spacings(x, peq_model);
     let min_adj = adj_spacings.iter().cloned().fold(f64::INFINITY, f64::min);

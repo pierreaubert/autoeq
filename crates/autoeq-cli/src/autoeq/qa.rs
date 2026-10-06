@@ -1,7 +1,7 @@
 use anyhow::{Result, bail};
 
 /// Structure to hold QA analysis results
-pub(super) struct QaAnalysisResult {
+pub(crate) struct QaAnalysisResult {
     pub(super) converge_ok: bool,
     pub(super) spacing_ok: bool,
     pub(super) improvement_ok: bool,
@@ -17,7 +17,7 @@ impl QaAnalysisResult {
 }
 
 /// Perform QA analysis similar to qa_check.sh
-pub(super) fn perform_qa_analysis(
+pub(crate) fn perform_qa_analysis(
     converged: bool,
     spacing_ok: bool,
     pre_score: Option<f64>,
@@ -35,8 +35,11 @@ pub(super) fn perform_qa_analysis(
 
     // Check improvement: post > pre + threshold
     let improvement_threshold = pre_value + threshold;
-    let improvement_ok =
-        !pre_value.is_nan() && !post_value.is_nan() && post_value > improvement_threshold;
+    let improvement_ok = pre_value.is_finite()
+        && post_value.is_finite()
+        && threshold.is_finite()
+        && improvement_threshold.is_finite()
+        && post_value > improvement_threshold;
 
     QaAnalysisResult {
         converge_ok,
@@ -82,7 +85,7 @@ pub(super) fn display_qa_analysis(result: &QaAnalysisResult) {
 }
 
 /// Return a failing process result for any failed QA criterion.
-pub(super) fn require_qa_pass(result: &QaAnalysisResult) -> Result<()> {
+pub(crate) fn require_qa_pass(result: &QaAnalysisResult) -> Result<()> {
     if result.passes() {
         Ok(())
     } else {

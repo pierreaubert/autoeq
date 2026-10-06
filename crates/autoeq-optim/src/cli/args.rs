@@ -237,8 +237,9 @@ pub struct Args {
     pub seed: Option<u64>,
 
     /// Quality assurance mode with optional threshold: suppress normal output, show summary line and analysis
-    /// If a threshold is provided (e.g., --qa 0.4), also perform QA analysis
-    #[arg(long, value_name = "THRESHOLD")]
+    /// Bare `--qa` requires strict improvement at threshold zero, convergence, and spacing.
+    /// A supplied threshold (e.g., `--qa 0.4`) keeps the same strict predicate.
+    #[arg(long, value_name = "THRESHOLD", num_args = 0..=1, default_missing_value = "0")]
     pub qa: Option<f64>,
 
     /// Path to first driver measurement CSV file (for multi-driver optimization with --loss drivers-flat)

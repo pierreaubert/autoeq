@@ -303,6 +303,10 @@ incremental = false
 # Vello's registry dependencies must resolve to the same pinned Zed fork as
 # gpui-toolkit. Patches in a sibling workspace are not inherited here.
 [patch.crates-io]
+# SOTF owned maintenance forks; upstream 2.1.1, local version 2.1.2.
+derive_more = { path = "../math-audio/crates/3rdparties/derive_more" }
+derive_more-impl = { path = "../math-audio/crates/3rdparties/derive_more-impl" }
+
 oo7 = { path = "../gpui-toolkit/crates/3rdparties/crypto-forks/oo7" }
 # Match GPUI compatibility forks: workspace patches are not inherited.
 fontconfig-parser = { git = "https://github.com/pierreaubert/fontconfig-parser.git", rev = "d247c91f5a57edd6ba6eb26e884d4904dbfbc87e" }

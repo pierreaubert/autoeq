@@ -3918,9 +3918,7 @@ dependencies = [
 
 [[package]]
 name = "predicates"
-version = "3.1.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ada8f2932f28a27ee7b70dd6c1c39ea0675c55a36879ab92f3a715eaa1e63cfe"
+version = "3.1.5"
 dependencies = [
  "anstyle",
  "difflib",

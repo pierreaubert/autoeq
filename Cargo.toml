@@ -303,6 +303,7 @@ incremental = false
 # Vello's registry dependencies must resolve to the same pinned Zed fork as
 # gpui-toolkit. Patches in a sibling workspace are not inherited here.
 [patch.crates-io]
+predicates = { path = "../math-audio/crates/3rdparties/predicates" }
 # SOTF owned maintenance forks; upstream 2.1.1, local version 2.1.2.
 derive_more = { path = "../math-audio/crates/3rdparties/derive_more" }
 derive_more-impl = { path = "../math-audio/crates/3rdparties/derive_more-impl" }

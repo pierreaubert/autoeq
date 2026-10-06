@@ -53,7 +53,10 @@ pub fn parse_css_color(spec: &str) -> Option<[f32; 4]> {
                 .and_then(|inner| inner.strip_suffix(')'))
                 .map(|inner| (inner, false))
         })?;
-    let nums: Vec<f32> = parts.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+    let nums: Vec<f32> = parts
+        .split(',')
+        .filter_map(|p| p.trim().parse().ok())
+        .collect();
     match (alpha, nums.as_slice()) {
         (true, [r, g, b, a]) => Some([*r / 255.0, *g / 255.0, *b / 255.0, *a]),
         (false, [r, g, b]) => Some([*r / 255.0, *g / 255.0, *b / 255.0, 1.0]),
@@ -62,7 +65,11 @@ pub fn parse_css_color(spec: &str) -> Option<[f32; 4]> {
 }
 
 fn series_stat(s: &schema::Series) -> SeriesStat {
-    let finite: Vec<f64> = s.y.iter().filter_map(|v| *v).filter(|v| v.is_finite()).collect();
+    let finite: Vec<f64> =
+        s.y.iter()
+            .filter_map(|v| *v)
+            .filter(|v| v.is_finite())
+            .collect();
     let range = if finite.is_empty() {
         None
     } else {
@@ -97,9 +104,12 @@ impl ExplorerModel {
         let mut cards = Vec::new();
         for section in &report.sections {
             let (tab, headline, details, series) = match section {
-                Section::Html { html: _, tab } => {
-                    (tab.clone(), "Report block".to_string(), vec!["tables and notes".to_string()], vec![])
-                }
+                Section::Html { html: _, tab } => (
+                    tab.clone(),
+                    "Report block".to_string(),
+                    vec!["tables and notes".to_string()],
+                    vec![],
+                ),
                 Section::Figure { figure, tab } | Section::Grid { figure, tab, .. } => {
                     let stats: Vec<SeriesStat> = figure.series.iter().map(series_stat).collect();
                     let detail = format!("{} series", stats.len());
@@ -110,7 +120,8 @@ impl ExplorerModel {
                     (tab.clone(), chart.title.clone(), vec![detail], vec![])
                 }
                 Section::Sankey { chart, tab } => {
-                    let detail = format!("{} nodes, {} links", chart.nodes.len(), chart.links.len());
+                    let detail =
+                        format!("{} nodes, {} links", chart.nodes.len(), chart.links.len());
                     (tab.clone(), chart.title.clone(), vec![detail], vec![])
                 }
             };
@@ -119,18 +130,30 @@ impl ExplorerModel {
             {
                 tabs.push(name.clone());
             }
-            cards.push(SectionCard { tab, headline, details, series });
+            cards.push(SectionCard {
+                tab,
+                headline,
+                details,
+                series,
+            });
         }
-        ExplorerModel { title: report.title.clone(), tabs, active_tab: None, cards }
+        ExplorerModel {
+            title: report.title.clone(),
+            tabs,
+            active_tab: None,
+            cards,
+        }
     }
 
     /// Cards passing the active tab filter, in payload order.
     pub fn visible_cards(&self) -> impl Iterator<Item = &SectionCard> {
-        self.cards.iter().filter(|card| match (&self.active_tab, &card.tab) {
-            (None, _) => true,
-            (Some(active), Some(tab)) => active == tab,
-            (Some(_), None) => false,
-        })
+        self.cards
+            .iter()
+            .filter(|card| match (&self.active_tab, &card.tab) {
+                (None, _) => true,
+                (Some(active), Some(tab)) => active == tab,
+                (Some(_), None) => false,
+            })
     }
 
     pub fn set_active_tab(&mut self, tab: Option<String>) {
@@ -177,10 +200,12 @@ mod viewer {
                 .text_color(if active { rgb(0xffffff) } else { rgb(0x2a6496) })
                 .text_sm()
                 .child(label.to_string())
-                .on_click(cx.listener(move |view: &mut Self, _: &ClickEvent, _: &mut Window, cx| {
-                    view.model.set_active_tab(tab.clone());
-                    cx.notify();
-                }))
+                .on_click(cx.listener(
+                    move |view: &mut Self, _: &ClickEvent, _: &mut Window, cx| {
+                        view.model.set_active_tab(tab.clone());
+                        cx.notify();
+                    },
+                ))
         }
     }
 
@@ -232,7 +257,12 @@ mod viewer {
                 }
                 entry = entry.child(div().text_sm().child(head));
                 for detail in &card.details {
-                    entry = entry.child(div().text_sm().text_color(rgb(0x666666)).child(detail.clone()));
+                    entry = entry.child(
+                        div()
+                            .text_sm()
+                            .text_color(rgb(0x666666))
+                            .child(detail.clone()),
+                    );
                 }
                 for stat in &card.series {
                     let mut line = format!("{} — {} pts", stat.name, stat.points);
@@ -277,7 +307,9 @@ mod viewer {
         let tag = document
             .get_element_by_id("report-payload")
             .ok_or_else(|| "report-payload script tag missing".to_string())?;
-        let text = tag.text_content().ok_or_else(|| "report payload is empty".to_string())?;
+        let text = tag
+            .text_content()
+            .ok_or_else(|| "report payload is empty".to_string())?;
         serde_json::from_str(&text).map_err(|e| format!("report payload is not valid JSON: {e}"))
     }
 
@@ -296,7 +328,8 @@ mod viewer {
             .map_err(|_| format!("container #{container_id} is not an element"))?;
         let container_node: &web_sys::Node = container.unchecked_ref();
         let body = document.body().ok_or_else(|| "no body".to_string())?;
-        let body_el: web_sys::Element = body.clone().dyn_into().map_err(|_| "no body".to_string())?;
+        let body_el: web_sys::Element =
+            body.clone().dyn_into().map_err(|_| "no body".to_string())?;
         let canvases = document.get_elements_by_tag_name("canvas");
         for i in 0..canvases.length() {
             let Some(el) = canvases.item(i) else { continue };
@@ -305,7 +338,9 @@ mod viewer {
                 return Ok(());
             }
             if el.parent_element().as_ref() == Some(&body_el) {
-                container.append_child(&el).map_err(|e| format!("canvas move failed: {e:?}"))?;
+                container
+                    .append_child(&el)
+                    .map_err(|e| format!("canvas move failed: {e:?}"))?;
                 el.set_attribute("id", "gpui-report-canvas").ok();
                 return Ok(());
             }
@@ -370,8 +405,18 @@ mod tests {
         Section::Figure {
             figure: Figure {
                 title: title.to_string(),
-                x: AxisSpec { label: "x".to_string(), scale: XScale::Linear, min: None, max: None },
-                y: AxisSpec { label: "y".to_string(), scale: XScale::Linear, min: None, max: None },
+                x: AxisSpec {
+                    label: "x".to_string(),
+                    scale: XScale::Linear,
+                    min: None,
+                    max: None,
+                },
+                y: AxisSpec {
+                    label: "y".to_string(),
+                    scale: XScale::Linear,
+                    min: None,
+                    max: None,
+                },
                 y2: None,
                 series: vec![schema::Series {
                     name: "s".to_string(),
@@ -398,7 +443,10 @@ mod tests {
             schema: schema::SCHEMA_VERSION.to_string(),
             title: "Demo".to_string(),
             sections: vec![
-                Section::Html { html: "<p>hi</p>".to_string(), tab: None },
+                Section::Html {
+                    html: "<p>hi</p>".to_string(),
+                    tab: None,
+                },
                 figure_section("A", Some("Left")),
                 figure_section("B", Some("Right")),
                 figure_section("C", None),
@@ -439,8 +487,14 @@ mod tests {
 
     #[test]
     fn css_color_parsing() {
-        assert_eq!(parse_css_color("rgba(255, 0, 0, 0.5)"), Some([1.0, 0.0, 0.0, 0.5]));
-        assert_eq!(parse_css_color("rgb(0, 128, 255)"), Some([0.0, 128.0 / 255.0, 1.0, 1.0]));
+        assert_eq!(
+            parse_css_color("rgba(255, 0, 0, 0.5)"),
+            Some([1.0, 0.0, 0.0, 0.5])
+        );
+        assert_eq!(
+            parse_css_color("rgb(0, 128, 255)"),
+            Some([0.0, 128.0 / 255.0, 1.0, 1.0])
+        );
         assert_eq!(parse_css_color("#ff0000"), None);
         assert_eq!(parse_css_color("red"), None);
     }

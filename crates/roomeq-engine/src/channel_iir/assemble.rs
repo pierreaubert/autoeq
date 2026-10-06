@@ -96,6 +96,7 @@ pub(super) fn assemble_iir_result(
     let target_curve = Some(display_target_curve(request, &display_initial, norm_range));
     let report_filters = optimizer_output.eq_filters().to_vec();
     let channel = ChannelDspChain {
+        physical_correction_target: None,
         channel: request.channel_name.to_string(),
         plugins: dsp.plugins,
         drivers: None,
@@ -142,6 +143,7 @@ fn realized_iir_curve(
     sample_rate: f64,
 ) -> Result<Curve> {
     let chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: String::from("iir-report"),
         plugins,
         drivers: None,

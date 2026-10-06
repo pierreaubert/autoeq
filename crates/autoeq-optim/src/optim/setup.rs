@@ -10,6 +10,7 @@ use crate::Curve;
 use crate::HeadphoneLossData;
 use crate::SpeakerLossData;
 use crate::loss::DriversLossData;
+use autoeq_core::param_utils::freq_to_log10;
 use std::collections::HashMap;
 
 mod drivers;
@@ -165,8 +166,8 @@ pub fn setup_drivers_bounds(
         // Use log10 space for better optimization
         // Allow range from 0.5x mean_low to 2x mean_high, centered on geometric mean of the two means
         let geometric_center = (mean_low * mean_high).sqrt();
-        let xover_min = (geometric_center * 0.5).max(params.min_freq).log10();
-        let xover_max = (geometric_center * 2.0).min(params.max_freq).log10();
+        let xover_min = freq_to_log10((geometric_center * 0.5).max(params.min_freq));
+        let xover_max = freq_to_log10((geometric_center * 2.0).min(params.max_freq));
 
         // Ensure bounds are valid
         let xover_min = xover_min.min(xover_max - 0.1);
@@ -256,19 +257,19 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
     };
     let n_main = params.num_filters - n_tilt;
     let range = if n_main > 0 {
-        (params.max_freq.log10() - params.min_freq.log10()) / (n_main as f64)
+        (freq_to_log10(params.max_freq) - freq_to_log10(params.min_freq)) / (n_main as f64)
     } else {
-        params.max_freq.log10() - params.min_freq.log10()
+        freq_to_log10(params.max_freq) - freq_to_log10(params.min_freq)
     };
 
     for i in 0..n_main {
         // Center frequency for this filter in log space
-        let f_center = params.min_freq.log10() + (i as f64) * range;
+        let f_center = freq_to_log10(params.min_freq) + (i as f64) * range;
 
         // Calculate bounds with overlap
         // Each filter can range from (center - spacing*range) to (center + spacing*range)
-        let f_low = (f_center - spacing * range).max(params.min_freq.log10());
-        let f_high = (f_center + spacing * range).min(params.max_freq.log10());
+        let f_low = (f_center - spacing * range).max(freq_to_log10(params.min_freq));
+        let f_high = (f_center + spacing * range).min(freq_to_log10(params.max_freq));
 
         // Ensure progressive increase: each filter's lower bound should be >= previous filter's lower bound
         let f_low_adjusted = if i > 0 {
@@ -343,8 +344,8 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
     match model {
         PeqModel::HpPk | PeqModel::HpPkLp => {
             // First filter is highpass - fixed 3-param layout
-            lower_bounds[0] = 20.0_f64.max(params.min_freq).log10();
-            upper_bounds[0] = 120.0_f64.min(params.min_freq + 20.0).log10();
+            lower_bounds[0] = freq_to_log10(20.0_f64.max(params.min_freq));
+            upper_bounds[0] = freq_to_log10(120.0_f64.min(params.min_freq + 20.0));
             lower_bounds[1] = 1.0_f64.max(q_lower).min(params.max_q);
             upper_bounds[1] = 1.5_f64.max(lower_bounds[1]).min(params.max_q);
             lower_bounds[2] = 0.0;
@@ -352,8 +353,8 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
         }
         PeqModel::LsPk | PeqModel::LsPkHs => {
             // First filter is low shelves - fixed 3-param layout
-            lower_bounds[0] = 20.0_f64.max(params.min_freq).log10();
-            upper_bounds[0] = 120.0_f64.min(params.min_freq + 20.0).log10();
+            lower_bounds[0] = freq_to_log10(20.0_f64.max(params.min_freq));
+            upper_bounds[0] = freq_to_log10(120.0_f64.min(params.min_freq + 20.0));
             // Standard RBJ shelves in the DSP core do not use Q.  Pin the
             // serialized value so the optimizer does not spend a dead
             // dimension or imply a slope control that is not implemented.
@@ -371,8 +372,8 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
             // Last filter is lowpass - fixed 3-param layout
             let last_idx = (params.num_filters - 1) * ppf;
             if ppf == 3 {
-                lower_bounds[last_idx] = (params.max_freq - 2000.0).max(5000.0).log10();
-                upper_bounds[last_idx] = params.max_freq.log10();
+                lower_bounds[last_idx] = freq_to_log10((params.max_freq - 2000.0).max(5000.0));
+                upper_bounds[last_idx] = freq_to_log10(params.max_freq);
                 lower_bounds[last_idx + 1] = 1.0_f64.max(q_lower).min(params.max_q);
                 upper_bounds[last_idx + 1] =
                     1.5_f64.max(lower_bounds[last_idx + 1]).min(params.max_q);
@@ -385,8 +386,8 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
             // Last filter is lowpass - fixed 3-param layout
             let last_idx = (params.num_filters - 1) * ppf;
             if ppf == 3 {
-                lower_bounds[last_idx] = (params.max_freq - 2000.0).max(5000.0).log10();
-                upper_bounds[last_idx] = params.max_freq.log10();
+                lower_bounds[last_idx] = freq_to_log10((params.max_freq - 2000.0).max(5000.0));
+                upper_bounds[last_idx] = freq_to_log10(params.max_freq);
                 let shelf_q = 1.0_f64.clamp(params.min_q, params.max_q);
                 lower_bounds[last_idx + 1] = shelf_q;
                 upper_bounds[last_idx + 1] = shelf_q;
@@ -405,18 +406,18 @@ pub fn setup_bounds(params: &crate::OptimParams) -> (Vec<f64>, Vec<f64>) {
         let (ls_band, hs_band) = tilt_hinge_bands(params);
         // The degenerate single-group layout keeps only the treble shelf.
         if n_tilt == 2 {
-            lower_bounds.extend_from_slice(&[ls_band[0].log10(), shelf_q, -params.max_db]);
-            upper_bounds.extend_from_slice(&[ls_band[1].log10(), shelf_q, params.max_db]);
+            lower_bounds.extend_from_slice(&[freq_to_log10(ls_band[0]), shelf_q, -params.max_db]);
+            upper_bounds.extend_from_slice(&[freq_to_log10(ls_band[1]), shelf_q, params.max_db]);
         }
-        lower_bounds.extend_from_slice(&[hs_band[0].log10(), shelf_q, -params.max_db]);
-        upper_bounds.extend_from_slice(&[hs_band[1].log10(), shelf_q, params.max_db]);
+        lower_bounds.extend_from_slice(&[freq_to_log10(hs_band[0]), shelf_q, -params.max_db]);
+        upper_bounds.extend_from_slice(&[freq_to_log10(hs_band[1]), shelf_q, params.max_db]);
     }
 
     // Model-specific fixed HP/LP/shelf anchors must not escape the measured
     // optimization band. Clamp both ends before repairing any collapsed range
     // so every candidate remains meaningful for the available data.
-    let min_log_freq = params.min_freq.log10();
-    let max_log_freq = params.max_freq.log10();
+    let min_log_freq = freq_to_log10(params.min_freq);
+    let max_log_freq = freq_to_log10(params.max_freq);
     for i in 0..params.num_filters {
         let freq_idx = if ppf == 3 { i * ppf } else { i * ppf + 1 };
         lower_bounds[freq_idx] = lower_bounds[freq_idx].clamp(min_log_freq, max_log_freq);

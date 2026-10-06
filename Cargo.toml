@@ -96,6 +96,7 @@ criterion = "0.8.2"
 csv = "1.4"
 directories = "6"
 env_logger = "0.11"
+libm = { version = "=0.2.16", default-features = false }
 log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"
@@ -303,6 +304,14 @@ incremental = false
 # Vello's registry dependencies must resolve to the same pinned Zed fork as
 # gpui-toolkit. Patches in a sibling workspace are not inherited here.
 [patch.crates-io]
+predicates = { path = "../math-audio/crates/3rdparties/predicates" }
+# SOTF owned maintenance forks; upstream 2.1.1, local version 2.1.2.
+derive_more = { path = "../math-audio/crates/3rdparties/derive_more" }
+derive_more-impl = { path = "../math-audio/crates/3rdparties/derive_more-impl" }
+
+oo7 = { path = "../gpui-toolkit/crates/3rdparties/crypto-forks/oo7" }
+# Match GPUI compatibility forks: workspace patches are not inherited.
+fontconfig-parser = { git = "https://github.com/pierreaubert/fontconfig-parser.git", rev = "d247c91f5a57edd6ba6eb26e884d4904dbfbc87e" }
 psm = { git = "https://github.com/pierreaubert/stacker.git", rev = "48bf8e3abfb350de9387a675275a629e4daf9717" }
 nalgebra = { git = "https://github.com/pierreaubert/nalgebra.git", rev = "a42573dbc9649af62fb07b469c98c852e62720fd" }
 block = { path = "../gpui-toolkit/crates/3rdparties/block" }

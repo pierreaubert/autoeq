@@ -15,7 +15,9 @@ use super::run_control::OptimizerBudgetProfile;
 use super::{ObjectiveData, OptimProgressCallback, PenaltyMode};
 
 /// Stop condition observed by the metaheuristics solver task.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum BackendSearchStopCause {
     /// The configured number of task callbacks was reached.
@@ -53,7 +55,7 @@ pub struct BackendSearchEvidence {
 #[derive(Debug, Clone, PartialEq)]
 #[expect(
     clippy::large_enum_variant,
-    reason = "the typed completion keeps its same-invocation Pareto report attached"
+    reason = "the Pareto dispatch report remains attached to its legacy result"
 )]
 pub enum FilterOptimizerOutput {
     /// Backend completed or failed under its legacy tuple contract.
@@ -214,6 +216,29 @@ pub trait FilterOptimizer: Send + Sync {
             result: self.optimize(x, lower, upper, objective, params, callback),
             pareto_report: None,
         }
+    }
+
+    /// Retain a typed solver completion alongside the existing report output.
+    ///
+    /// Existing optimizer implementations inherit `None`; implementations
+    /// that return a typed stop can override this method without changing the
+    /// legacy [`Self::optimize_with_report`] result shape.
+    fn optimize_with_typed_completion(
+        &self,
+        x: &mut [f64],
+        lower: &[f64],
+        upper: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+        callback: Option<OptimProgressCallback>,
+    ) -> (
+        FilterOptimizerOutput,
+        Option<super::optimize::OptimizerBackendCompletion>,
+    ) {
+        (
+            self.optimize_with_report(x, lower, upper, objective, params, callback),
+            None,
+        )
     }
 }
 

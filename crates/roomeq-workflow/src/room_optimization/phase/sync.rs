@@ -181,6 +181,7 @@ mod tests {
             veto_adjudication: None,
         };
         let chain = ChannelDspChain {
+            physical_correction_target: None,
             channel: name.to_string(),
             plugins: Vec::new(),
             drivers: None,

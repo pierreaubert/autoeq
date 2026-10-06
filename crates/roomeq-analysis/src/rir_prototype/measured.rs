@@ -225,6 +225,7 @@ mod tests {
             .iter()
             .enumerate()
             .map(|(index, position)| CaptureTakeProvenance {
+                seat_id: None,
                 microphone_id: format!("mic-{index}"),
                 device_id: "aggregate".into(),
                 offset_samples: Some(100.0),

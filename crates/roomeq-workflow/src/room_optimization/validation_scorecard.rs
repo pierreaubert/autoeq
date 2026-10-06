@@ -6,6 +6,41 @@ use roomeq_model::{
 
 use super::RoomOptimizationResult;
 
+pub(super) fn needs_native_routed_acceptance(result: &RoomOptimizationResult) -> bool {
+    result
+        .metadata
+        .bass_management
+        .as_ref()
+        .is_some_and(|bass| bass.routing_graph.is_some())
+        || result.channels.values().any(|chain| {
+            chain.plugins.iter().any(|plugin| {
+                plugin.plugin_type == "crossover"
+                    && plugin
+                        .parameters
+                        .get("room_eq_stage")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("route_owned")
+            })
+        })
+}
+
+pub(super) fn defer_native_routed_acceptance(result: &mut RoomOptimizationResult) {
+    if let Some(report) = result.metadata.correction_acceptance.as_mut() {
+        report.accepted = false;
+        report.outcome = roomeq_model::RoomEqOutcome::InsufficientEvidence;
+        report.acoustic_quality = None;
+        if !report
+            .observations
+            .iter()
+            .any(|observation| observation == "native_routed_acceptance_pending")
+        {
+            report
+                .observations
+                .push("native_routed_acceptance_pending".into());
+        }
+    }
+}
+
 pub(super) fn attach_validation_scorecard(
     result: &mut RoomOptimizationResult,
     validation: &HashMap<String, Vec<Curve>>,
@@ -13,6 +48,13 @@ pub(super) fn attach_validation_scorecard(
     schroeder_hz: Option<f64>,
     processing_mode: roomeq_model::ProcessingMode,
 ) -> Result<()> {
+    if needs_native_routed_acceptance(result) {
+        // A physical output includes intentional crossover routing only on
+        // the post side. Acceptance needs matched native logical-input seats,
+        // which this intermediate display-scorecard boundary does not own.
+        defer_native_routed_acceptance(result);
+        return Ok(());
+    }
     use roomeq_engine::quality::{
         CorrectionAcceptancePolicy, QualityEvaluationConfig, RuntimeAcceptancePolicy,
         TemporalChannelEvidence, derive_temporal_quality_evidence, evaluate_acoustic_quality,
@@ -295,6 +337,64 @@ mod tests {
         assert_eq!(
             ProcessingMode::MixedPhase.runtime_output_class(),
             RuntimeOutputClass::Hybrid
+        );
+    }
+
+    #[test]
+    fn routed_zero_correction_validation_preserves_configured_identity() {
+        let mut result = crate::test_fixtures::single_channel_room_result("left");
+        let initial = result.channel_results["left"].initial_curve.clone();
+        let chain = result.channels.get_mut("left").unwrap();
+        chain.target_curve = Some((&initial).into());
+        chain
+            .plugins
+            .push(roomeq_engine::topology::mark_route_owned_plugin(
+                roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "high"),
+            ));
+        let routed = super::super::room_optimization_result::apply_logical_channel_chain(
+            chain,
+            &initial,
+            48_000.0,
+            std::path::Path::new("."),
+        )
+        .expect("structural crossover response");
+        result.channel_results.get_mut("left").unwrap().final_curve = routed;
+        super::super::room_optimization_result::apply_final_correction_safety_gate(
+            &mut result,
+            48_000.0,
+            3,
+            (60.0, 500.0),
+            std::path::Path::new("."),
+            roomeq_model::ProcessingMode::LowLatency,
+            None,
+        );
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(
+            report.accepted,
+            "configured identity gate: {:?}",
+            report.violations
+        );
+        assert!(report.metrics.improvement_db.abs() < 1e-10);
+        attach_validation_scorecard(
+            &mut result,
+            &HashMap::from([("left".to_string(), vec![initial])]),
+            48_000.0,
+            None,
+            roomeq_model::ProcessingMode::LowLatency,
+        )
+        .expect("validation evidence");
+        let report = result.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(!report.accepted, "native replay is still required");
+        assert_eq!(
+            report.outcome,
+            roomeq_model::RoomEqOutcome::InsufficientEvidence
+        );
+        assert!(
+            !report
+                .violations
+                .iter()
+                .any(|reason| reason == "target_weighted_rms_regressed"
+                    || reason == "worst_position_regressed")
         );
     }
 

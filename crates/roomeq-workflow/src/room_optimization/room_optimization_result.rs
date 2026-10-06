@@ -169,10 +169,21 @@ pub(super) fn apply_final_correction_safety_gate(
             }
             continue;
         }
+        let physical_target = result
+            .channels
+            .get(name)
+            .and_then(|chain| chain.physical_correction_target.as_ref());
+        let target_metadata_valid = physical_target.is_none_or(|target| target.validate().is_ok());
         let mut target = result
             .channels
             .get(name)
-            .and_then(|chain| chain.target_curve.clone())
+            .and_then(|chain| {
+                chain
+                    .physical_correction_target
+                    .as_ref()
+                    .map(|target| target.curve.clone())
+                    .or_else(|| chain.target_curve.clone())
+            })
             .map(roomeq_model::Curve::from)
             .unwrap_or_else(|| {
                 let mean = channel.initial_curve.spl.mean().unwrap_or(0.0);
@@ -181,14 +192,13 @@ pub(super) fn apply_final_correction_safety_gate(
                 target.phase = None;
                 target
             });
-        if result
-            .channels
-            .get(name)
-            .is_none_or(|chain| chain.target_curve.is_none())
-        {
+        if result.channels.get(name).is_none_or(|chain| {
+            chain.target_curve.is_none() && chain.physical_correction_target.is_none()
+        }) {
             align_target_level(&channel.initial_curve, &mut target);
         }
-        let acceptance_post = result
+        let mut acceptance_initial = channel.initial_curve.clone();
+        let mut acceptance_post = result
             .channels
             .get(name)
             .and_then(|chain| {
@@ -201,16 +211,30 @@ pub(super) fn apply_final_correction_safety_gate(
                 )
             })
             .unwrap_or_else(|| channel.final_curve.clone());
-        let mut report = result.channels.get(name).and_then(|chain| {
-            evaluate_passband_correction_acceptance(
-                chain,
-                &channel.initial_curve,
-                &acceptance_post,
-                &target,
-                smoothing_n,
-                excursion_aware_band(chain, evaluation_band),
-            )
-        });
+        if let Some(physical) = physical_target.filter(|_| target_metadata_valid) {
+            // Restore exactly the initial calibrated measurement plane after
+            // removing structural routing; correction trims remain correction.
+            acceptance_initial
+                .spl
+                .mapv_inplace(|level| level + physical.measurement_alignment_gain_db);
+            acceptance_post
+                .spl
+                .mapv_inplace(|level| level + physical.measurement_alignment_gain_db);
+        }
+        let mut report = result
+            .channels
+            .get(name)
+            .filter(|_| target_metadata_valid)
+            .and_then(|chain| {
+                evaluate_passband_correction_acceptance(
+                    chain,
+                    &acceptance_initial,
+                    &acceptance_post,
+                    &target,
+                    smoothing_n,
+                    excursion_aware_band(chain, evaluation_band),
+                )
+            });
         // Routed published scores can include intentional crossover rolloff
         // only on the post side. Use the same correction-only basis and band
         // as the acceptance replay for this veto, not that asymmetric pair.
@@ -220,7 +244,7 @@ pub(super) fn apply_final_correction_safety_gate(
             .and_then(|chain| {
                 route_passband(
                     chain,
-                    &channel.initial_curve,
+                    &acceptance_initial,
                     excursion_aware_band(chain, evaluation_band),
                 )
             })
@@ -241,7 +265,7 @@ pub(super) fn apply_final_correction_safety_gate(
                 .and_then(|chain| {
                     passband_curves(
                         chain,
-                        &[&channel.initial_curve, &acceptance_post],
+                        &[&acceptance_initial, &acceptance_post],
                         excursion_aware_band(chain, evaluation_band),
                     )
                 })
@@ -253,7 +277,13 @@ pub(super) fn apply_final_correction_safety_gate(
                         .channels
                         .get(name)
                         .filter(|chain| has_routed_post_eq(chain))
-                        .and_then(|chain| chain.target_curve.as_ref())
+                        .and_then(|chain| {
+                            chain
+                                .physical_correction_target
+                                .as_ref()
+                                .map(|target| &target.curve)
+                                .or(chain.target_curve.as_ref())
+                        })
                     {
                         let target: roomeq_model::Curve = target.clone().into();
                         return (
@@ -1850,7 +1880,38 @@ fn evaluate_passband_correction_acceptance(
     smoothing_n: usize,
     evaluation_band: (f64, f64),
 ) -> Option<roomeq_engine::quality::CorrectionAcceptanceReport> {
-    let (low, high) = route_passband(chain, initial, evaluation_band)?;
+    let band = route_passband(chain, initial, evaluation_band)?;
+    evaluate_target_passband_correction(
+        initial,
+        post,
+        target,
+        smoothing_n,
+        band,
+        chain.target_curve.is_none() && chain.physical_correction_target.is_none(),
+    )
+}
+
+/// Compare pressure curves and a preserved target in one explicit reference
+/// plane. Shared with final acceptance: crop before smoothing, require target
+/// support, and keep calibrated target shape and absolute level unchanged.
+pub(crate) fn evaluate_preserved_target_passband(
+    before: &roomeq_model::Curve,
+    after: &roomeq_model::Curve,
+    target: &roomeq_model::Curve,
+    smoothing_n: usize,
+    band: (f64, f64),
+) -> Option<roomeq_engine::quality::CorrectionAcceptanceReport> {
+    evaluate_target_passband_correction(before, after, target, smoothing_n, band, false)
+}
+
+fn evaluate_target_passband_correction(
+    initial: &roomeq_model::Curve,
+    post: &roomeq_model::Curve,
+    target: &roomeq_model::Curve,
+    smoothing_n: usize,
+    (low, high): (f64, f64),
+    align_inferred_target: bool,
+) -> Option<roomeq_engine::quality::CorrectionAcceptanceReport> {
     let target_low = *target.freq.first()?;
     let target_high = *target.freq.last()?;
     // Native target grids need not match the routed measurement grid. Align
@@ -1860,13 +1921,16 @@ fn evaluate_passband_correction_acceptance(
         return None;
     }
     let aligned_target = autoeq_core::interpolate_log_space(&initial.freq, target);
-    let mut passband = passband_curves(chain, &[initial, post, &aligned_target], evaluation_band)?;
+    let mut passband = [initial, post, &aligned_target]
+        .into_iter()
+        .map(|curve| crop_curve_to_band(curve, low, high))
+        .collect::<Option<Vec<_>>>()?;
     // Bass-managed mains and LFE are evaluated only inside their routed
     // passbands. Re-level the target after cropping so a sloped target is not
     // anchored by out-of-band frequencies that the channel never reproduces.
     // Explicit targets are the calibrated design reference, not merely a
     // shape to normalize again. Only inferred legacy targets need alignment.
-    if chain.target_curve.is_none() {
+    if align_inferred_target {
         let (reference, target) = passband.split_at_mut(2);
         align_target_level(&reference[0], &mut target[0]);
     }
@@ -2531,6 +2595,78 @@ mod tests {
     use roomeq_engine::quality::CorrectionDecision;
     use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
     use std::collections::HashMap;
+
+    #[test]
+    fn sole_physical_target_keeps_absolute_plane_through_final_safety_gate() {
+        let mut raw = crate::test_fixtures::flat_curve();
+        raw.spl.fill(80.0);
+        let mut calibrated_initial = raw.clone();
+        calibrated_initial.spl.fill(82.0);
+        let mut target = raw.clone();
+        target.spl.fill(85.0);
+        let directory = tempfile::tempdir().unwrap();
+        for (gain, expected_post_rms, expected_accepted) in [(4.0, 1.0, true), (8.0, 5.0, false)] {
+            let mut result = single_channel_room_result("left");
+            let channel = result.channel_results.get_mut("left").unwrap();
+            channel.initial_curve = raw.clone();
+            channel.final_curve = raw.clone();
+            channel.final_curve.spl.fill(80.0 + gain);
+            channel.pre_score = 0.0;
+            channel.post_score = 0.0;
+            let chain = result.channels.get_mut("left").unwrap();
+            chain.target_curve = None;
+            chain.physical_correction_target = Some(roomeq_model::PhysicalCorrectionTarget {
+                curve: (&target).into(),
+                measurement_alignment_gain_db: 2.0,
+            });
+            let mut correction = roomeq_engine::output::create_gain_plugin(gain);
+            correction.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+            chain.plugins = vec![correction];
+            let mut calibrated_post = calibrated_initial.clone();
+            calibrated_post.spl.fill(82.0 + gain);
+            let direct = evaluate_passband_correction_acceptance(
+                chain,
+                &calibrated_initial,
+                &calibrated_post,
+                &target,
+                3,
+                (100.0, 500.0),
+            )
+            .unwrap();
+            // Constant spectra independently give |82-85|=3 and |82+gain-85|.
+            assert!((direct.metrics.pre_target_weighted_rms_db - 3.0).abs() < 1e-9);
+            assert!((direct.metrics.post_target_weighted_rms_db - expected_post_rms).abs() < 1e-9);
+            apply_final_correction_safety_gate(
+                &mut result,
+                48_000.0,
+                3,
+                (100.0, 500.0),
+                directory.path(),
+                roomeq_model::ProcessingMode::LowLatency,
+                None,
+            );
+            let actual = result.metadata.correction_acceptance.as_ref().unwrap();
+            assert!(
+                (actual.metrics.pre_target_weighted_rms_db - 3.0).abs() < 1e-9,
+                "{actual:?}"
+            );
+            assert!(
+                (actual.metrics.post_target_weighted_rms_db - expected_post_rms).abs() < 1e-9,
+                "{actual:?}"
+            );
+            assert_eq!(actual.accepted, expected_accepted, "{actual:?}");
+            assert!(result.channels["left"].target_curve.is_none());
+            assert_eq!(
+                result.channels["left"]
+                    .physical_correction_target
+                    .as_ref()
+                    .unwrap()
+                    .curve
+                    .spl,
+                vec![85.0; target.freq.len()]
+            );
+        }
+    }
 
     #[test]
     fn routed_post_eq_main_gate_protects_response_above_the_splice_window() {
@@ -4278,6 +4414,7 @@ mod tests {
         result.channels.insert(
             "WideLeft_support".to_string(),
             roomeq_model::ChannelDspChain {
+                physical_correction_target: None,
                 channel: "WideLeft_support".to_string(),
                 plugins: vec![
                     roomeq_engine::output::create_gain_plugin(-140.0),
@@ -4383,6 +4520,7 @@ mod tests {
         result.channels.insert(
             "WideLeft_support".to_string(),
             roomeq_model::ChannelDspChain {
+                physical_correction_target: None,
                 channel: "WideLeft_support".to_string(),
                 plugins: vec![
                     roomeq_engine::output::create_gain_plugin(-140.0),

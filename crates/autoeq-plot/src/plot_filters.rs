@@ -45,13 +45,7 @@ fn freq_range_marks(min_freq: f64, max_freq: f64) -> Vec<RangeMark> {
     marks
 }
 
-fn series(
-    name: String,
-    x: Vec<f64>,
-    y: Vec<f64>,
-    color: &str,
-    width: f32,
-) -> Series {
+fn series(name: String, x: Vec<f64>, y: Vec<f64>, color: &str, width: f32) -> Series {
     Series {
         name,
         x,

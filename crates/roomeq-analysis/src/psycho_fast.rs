@@ -9,9 +9,7 @@
 
 use autoeq_core::alignment::timing_uncertainty_to_phase_deg;
 use autoeq_core::evidence::{CalibrationStatus, CaptureKind, EvidenceEnvelope};
-use roomeq_model::eligibility::{
-    CorrectionOperation, EligibilityVerdict, EvidencePolicy,
-};
+use roomeq_model::eligibility::{CorrectionOperation, EligibilityVerdict, EvidencePolicy};
 
 use crate::eligibility::{
     AnalysisBudgets, EligibilityInput, OperationContext, evaluate_operation_eligibility,
@@ -57,8 +55,10 @@ fn psycho_fast_a01_relative_input_blocks_absolute_loudness() {
     ));
     assert_eq!(verdict.verdict, EligibilityVerdict::Unsupported);
     assert!(
-        verdict.observations.iter().any(|note| note.contains("Relative")
-            || note.contains("relative")),
+        verdict
+            .observations
+            .iter()
+            .any(|note| note.contains("Relative") || note.contains("relative")),
         "verdict must name the relative limitation: {:?}",
         verdict.observations
     );

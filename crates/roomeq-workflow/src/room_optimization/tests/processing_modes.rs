@@ -101,6 +101,7 @@ fn inline_source_with_provenance(
 
 fn stationary_provenance() -> autoeq_core::MeasurementProvenance {
     autoeq_core::MeasurementProvenance {
+        verified_fixed_projection: None,
         capture_kind: autoeq_core::ProvenanceCaptureKind::StationaryIr,
         calibration_id: None,
         timing_reference_id: Some(String::from("loopback-1")),

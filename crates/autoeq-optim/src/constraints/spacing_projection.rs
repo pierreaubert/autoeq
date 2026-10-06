@@ -57,11 +57,15 @@ pub fn project_min_spacing(
     min_spacing_oct: f64,
 ) -> Result<Vec<f64>, String> {
     if x.len() != lower.len() || x.len() != upper.len() {
-        return Err(String::from("spacing projection: parameter and bound lengths differ"));
+        return Err(String::from(
+            "spacing projection: parameter and bound lengths differ",
+        ));
     }
     let width = param_utils::params_per_filter(model);
-    if x.len() % width != 0 || !min_spacing_oct.is_finite() || min_spacing_oct < 0.0 {
-        return Err(String::from("spacing projection: invalid vector or spacing"));
+    if !x.len().is_multiple_of(width) || !min_spacing_oct.is_finite() || min_spacing_oct < 0.0 {
+        return Err(String::from(
+            "spacing projection: invalid vector or spacing",
+        ));
     }
     let count = x.len() / width;
     let freq_offset = if width == 3 { 0 } else { 1 };
@@ -74,7 +78,9 @@ pub fn project_min_spacing(
             || x[i] < lower[i]
             || x[i] > upper[i]
     }) {
-        return Err(String::from("spacing projection: frequency outside finite bounds"));
+        return Err(String::from(
+            "spacing projection: frequency outside finite bounds",
+        ));
     }
     if count < 2 || min_spacing_oct == 0.0 {
         return Ok(x.to_vec());
@@ -90,7 +96,9 @@ pub fn project_min_spacing(
             // layouts. The sparse exact search below remains the fallback.
             let mut deadline_order = indices.clone();
             deadline_order.sort_by(|&a, &b| upper[a].total_cmp(&upper[b]).then(a.cmp(&b)));
-            if let Ok(repaired) = project_in_order(x, lower, upper, model, min_spacing_oct, &deadline_order) {
+            if let Ok(repaired) =
+                project_in_order(x, lower, upper, model, min_spacing_oct, &deadline_order)
+            {
                 return Ok(repaired);
             }
             let alternate = feasible_order(&indices, lower, upper, min_spacing_oct)?;
@@ -138,7 +146,9 @@ fn project_in_order(
             let lower_bound = left.lower.max(right.lower);
             let upper_bound = left.upper.min(right.upper);
             if lower_bound > upper_bound {
-                return Err(String::from("spacing projection: frequency bounds are infeasible"));
+                return Err(String::from(
+                    "spacing projection: frequency bounds are infeasible",
+                ));
             }
             let sum = left.sum + right.sum;
             let size = right.end - left.start;
@@ -154,8 +164,7 @@ fn project_in_order(
     }
     let mut repaired = x.to_vec();
     for block in blocks {
-        for rank in block.start..block.end {
-            let index = indices[rank];
+        for (rank, &index) in indices.iter().enumerate().take(block.end).skip(block.start) {
             // Subtracting and adding the rank shift can move a fixed center
             // by one ULP. Restore the exact per-filter box before checking
             // decoded spacing, so fixed filters remain bit-identical.
@@ -167,9 +176,9 @@ fn project_in_order(
     // octaves. Correct only representational rounding, one adjacent float
     // at a time, without changing the requested minimum spacing.
     for _ in 0..(16 * count) {
-        let violating = indices.windows(2).find(|pair| {
-            octave_distance(repaired[pair[0]], repaired[pair[1]]) < min_spacing_oct
-        });
+        let violating = indices
+            .windows(2)
+            .find(|pair| octave_distance(repaired[pair[0]], repaired[pair[1]]) < min_spacing_oct);
         let Some(pair) = violating else {
             break;
         };
@@ -189,10 +198,14 @@ fn project_in_order(
             "spacing projection: decoded frequencies cannot meet spacing within bounds",
         ));
     }
-    if indices.iter().any(|&i| repaired[i] < lower[i] || repaired[i] > upper[i])
+    if indices
+        .iter()
+        .any(|&i| repaired[i] < lower[i] || repaired[i] > upper[i])
         || super::min_spacing::viol_spacing_from_xs(&repaired, model, min_spacing_oct) > 0.0
     {
-        return Err(String::from("spacing projection: rounded result is infeasible"));
+        return Err(String::from(
+            "spacing projection: rounded result is infeasible",
+        ));
     }
     Ok(repaired)
 }
@@ -224,11 +237,14 @@ fn feasible_order(
     let words = count.div_ceil(u64::BITS as usize);
     let empty = vec![0_u64; words];
     let mut states: HashMap<Vec<u64>, State> = HashMap::new();
-    states.insert(empty.clone(), State {
-        last: f64::NEG_INFINITY,
-        prior: empty.clone(),
-        chosen: 0,
-    });
+    states.insert(
+        empty.clone(),
+        State {
+            last: f64::NEG_INFINITY,
+            prior: empty.clone(),
+            chosen: 0,
+        },
+    );
     let mut frontier = vec![empty];
     for rank in 0..count {
         if started.elapsed() >= MAX_SEARCH_TIME {
@@ -248,7 +264,11 @@ fn feasible_order(
                 if mask[choice / 64] & (1_u64 << (choice % 64)) != 0 {
                     continue;
                 }
-                let next = if rank == 0 { lower[index] } else { lower[index].max(last + gap) };
+                let next = if rank == 0 {
+                    lower[index]
+                } else {
+                    lower[index].max(last + gap)
+                };
                 if next > upper[index] {
                     continue;
                 }
@@ -262,9 +282,7 @@ fn feasible_order(
                     .iter()
                     .enumerate()
                     .filter_map(|(remaining_choice, &remaining_index)| {
-                        (next_mask[remaining_choice / 64]
-                            & (1_u64 << (remaining_choice % 64))
-                            == 0)
+                        (next_mask[remaining_choice / 64] & (1_u64 << (remaining_choice % 64)) == 0)
                             .then_some(upper[remaining_index])
                     })
                     .collect();
@@ -281,7 +299,11 @@ fn feasible_order(
                 }
                 match states.get_mut(&next_mask) {
                     Some(old) if next < old.last => {
-                        *old = State { last: next, prior: mask.clone(), chosen: choice };
+                        *old = State {
+                            last: next,
+                            prior: mask.clone(),
+                            chosen: choice,
+                        };
                     }
                     Some(_) => {}
                     None => {
@@ -291,7 +313,14 @@ fn feasible_order(
                             ));
                         }
                         next_frontier.push(next_mask.clone());
-                        states.insert(next_mask, State { last: next, prior: mask.clone(), chosen: choice });
+                        states.insert(
+                            next_mask,
+                            State {
+                                last: next,
+                                prior: mask.clone(),
+                                chosen: choice,
+                            },
+                        );
                     }
                 }
             }
@@ -299,8 +328,9 @@ fn feasible_order(
         frontier = next_frontier;
     }
     let mut full = vec![u64::MAX; words];
-    if count % 64 != 0 {
-        full[words - 1] = (1_u64 << (count % 64)) - 1;
+    let remainder = count % 64;
+    if !count.is_multiple_of(64) {
+        full[words - 1] = (1_u64 << remainder) - 1;
     }
     if !states.contains_key(&full) {
         return Err(String::from(
@@ -408,7 +438,10 @@ mod tests {
             0.0
         );
         for slot in 0..count {
-            assert_eq!(&repaired[slot * 3 + 1..slot * 3 + 3], &x[slot * 3 + 1..slot * 3 + 3]);
+            assert_eq!(
+                &repaired[slot * 3 + 1..slot * 3 + 3],
+                &x[slot * 3 + 1..slot * 3 + 3]
+            );
             if slot != 1 {
                 assert_eq!(repaired[slot * 3].to_bits(), x[slot * 3].to_bits());
             }
@@ -472,10 +505,21 @@ mod tests {
     #[test]
     fn repairs_selected_dt1990pro_subthreshold_spacing() {
         let x = [
-            2.2615865034879357, 0.6054922755266307, 1.4382566575761995,
-            2.3217717980826973, 1.2097280830807673, -3.2338506444654134,
+            2.2615865034879357,
+            0.6054922755266307,
+            1.4382566575761995,
+            2.3217717980826973,
+            1.2097280830807673,
+            -3.2338506444654134,
         ];
-        let lower = [1.6865971391405554, 0.6, -18.0, 2.072164282617129, 0.6, -18.0];
+        let lower = [
+            1.6865971391405554,
+            0.6,
+            -18.0,
+            2.072164282617129,
+            0.6,
+            -18.0,
+        ];
         let upper = [2.4577314260937038, 6.0, 6.0, 2.8432985695702775, 6.0, 6.0];
         assert!(super::super::min_spacing::viol_spacing_from_xs(&x, PeqModel::Pk, 0.2) > 0.0);
         let repaired = project_min_spacing(&x, &lower, &upper, PeqModel::Pk, 0.2).unwrap();
@@ -495,7 +539,10 @@ mod tests {
         let x = [2.0, 1.0, 1.0, 3.0, 2.0, -1.0];
         let lower = [1.0, 1.0, -6.0, 1.0, 1.0, -6.0];
         let upper = [3.0, 6.0, 6.0, 4.0, 6.0, 6.0];
-        assert_eq!(project_min_spacing(&x, &lower, &upper, PeqModel::Pk, 0.2).unwrap(), x);
+        assert_eq!(
+            project_min_spacing(&x, &lower, &upper, PeqModel::Pk, 0.2).unwrap(),
+            x
+        );
     }
 
     #[test]

@@ -395,6 +395,7 @@ mod tests {
                 response_file: Some("response.csv".into()),
                 calibration_file: "calibration.txt".into(),
                 provenance: CaptureTakeProvenance {
+                    seat_id: None,
                     microphone_id: "mic-1".into(),
                     device_id: "input-1".into(),
                     offset_samples: None,
@@ -574,4 +575,254 @@ mod tests {
             assert!(handoff.validate().is_err(), "mutation {mutation}");
         }
     }
+}
+
+/// Runtime evidence binding a fixed capture projection to retained samples.
+///
+/// This read-only receipt covers file and projection integrity. Hardware,
+/// calibration, timing, and physical-seat truth remain separate declarations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedFixedCaptureProjection {
+    source_id: String,
+    session_id: String,
+    projection_sha256: String,
+}
+
+impl VerifiedFixedCaptureProjection {
+    /// Verify original fixed-microphone references and retained sample bindings.
+    ///
+    /// The complete handoff must already pass acquisition-file verification.
+    /// This factory independently checks every response file hash and original
+    /// path/name/take association. It does not authenticate capture hardware.
+    ///
+    /// # Errors
+    /// Rejects contradictory projections, changed files, or unfrozen samples.
+    pub fn verify_source_snapshot(
+        root: &std::path::Path,
+        source: &crate::MeasurementMultiple,
+        source_id: &str,
+        handoff: &CaptureHandoff,
+    ) -> Result<Self, String> {
+        use sha2::{Digest, Sha256};
+        use std::io::Read;
+        handoff.validate()?;
+        let capture = source
+            .provenance
+            .capture
+            .as_ref()
+            .ok_or("fixed projection has no capture provenance")?;
+        if source.measurements.len() != handoff.microphone_ids.len()
+            || capture.takes.len() != source.measurements.len()
+        {
+            return Err("fixed projection measurement/provenance count mismatch".into());
+        }
+        for (index, microphone_id) in handoff.microphone_ids.iter().enumerate() {
+            let take = handoff
+                .takes
+                .iter()
+                .find(|take| {
+                    take.source_id == source_id
+                        && take.provenance.microphone_id == *microphone_id
+                        && handoff
+                            .selected_take_ids
+                            .as_ref()
+                            .map_or(take.repeat_index == 0, |selected| {
+                                selected.iter().any(|id| id == &take.take_id)
+                            })
+                })
+                .ok_or("fixed projection selected take is unavailable")?;
+            let file = take
+                .response_file
+                .as_deref()
+                .ok_or("fixed projection response is unavailable")?;
+            let reference = &source.measurements[index];
+            if !portable_capture_filename(file)
+                || reference.path().and_then(|path| path.to_str()) != Some(file)
+                || reference.name() != Some(microphone_id.as_str())
+                || capture.takes[index] != take.provenance
+                || !matches!(reference, crate::MeasurementRef::Loaded { .. })
+            {
+                return Err("fixed projection original reference/name/take contradiction".into());
+            }
+            let asset = handoff
+                .artifacts
+                .iter()
+                .find(|asset| asset.file == file)
+                .ok_or("fixed projection response is unbound")?;
+            let path = root.join(file);
+            let metadata = std::fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+            if !metadata.file_type().is_file() || metadata.len() > 16 * 1024 * 1024 {
+                return Err("fixed projection response must be a bounded regular file".into());
+            }
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .map_err(|error| error.to_string())?
+                .take(16 * 1024 * 1024 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|error| error.to_string())?;
+            if bytes.len() > 16 * 1024 * 1024 {
+                return Err("fixed projection response exceeds size bound".into());
+            }
+            if bytes.len() as u64 != asset.bytes
+                || Sha256::digest(&bytes)
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect::<String>()
+                    != asset.sha256
+            {
+                return Err("fixed projection response changed before receipt".into());
+            }
+            let parsed = parse_fixed_capture_response(&bytes)?;
+            let crate::MeasurementRef::Loaded {
+                loaded_response, ..
+            } = reference
+            else {
+                return Err("fixed projection samples are not frozen".into());
+            };
+            if parsed.content_hash().map_err(|error| error.to_string())?
+                != loaded_response
+                    .content_hash()
+                    .map_err(|error| error.to_string())?
+            {
+                return Err("retained_samples_do_not_match_verified_response_bytes".into());
+            }
+        }
+        Ok(Self {
+            source_id: source_id.into(),
+            session_id: handoff.session_id.clone(),
+            projection_sha256: fixed_projection_fingerprint(source)?,
+        })
+    }
+
+    /// Preserve integrity across the exact legitimate path-resolution transform.
+    ///
+    /// # Errors
+    /// Rejects a stale receipt or any change beyond resolving original paths.
+    pub fn rebind_resolved_paths(
+        &self,
+        before: &crate::MeasurementMultiple,
+        after: &crate::MeasurementMultiple,
+        base_dir: &std::path::Path,
+    ) -> Result<Self, String> {
+        if !self.matches_snapshot(before) {
+            return Err("stale projection before path resolution".into());
+        }
+        let mut expected = before.clone();
+        for reference in &mut expected.measurements {
+            reference.resolve_paths(base_dir);
+        }
+        let fingerprint = fixed_projection_fingerprint(after)?;
+        if fingerprint != fixed_projection_fingerprint(&expected)? {
+            return Err("projection changed beyond legitimate path resolution".into());
+        }
+        Ok(Self {
+            source_id: self.source_id.clone(),
+            session_id: self.session_id.clone(),
+            projection_sha256: fingerprint,
+        })
+    }
+
+    /// Return the original acquisition source key.
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// Return the verified handoff's session inventory identity.
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Check the retained ref/take/sample pairs, independent of seat ordering.
+    pub fn matches_snapshot(&self, source: &crate::MeasurementMultiple) -> bool {
+        fixed_projection_fingerprint(source)
+            .is_ok_and(|fingerprint| fingerprint == self.projection_sha256)
+    }
+}
+
+fn fixed_projection_fingerprint(source: &crate::MeasurementMultiple) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let capture = source
+        .provenance
+        .capture
+        .as_ref()
+        .ok_or("fixed projection has no capture provenance")?;
+    if capture.takes.len() != source.measurements.len() {
+        return Err("fixed projection take support mismatch".into());
+    }
+    let mut pairs = Vec::new();
+    for (reference, take) in source.measurements.iter().zip(&capture.takes) {
+        let crate::MeasurementRef::Loaded {
+            loaded_response, ..
+        } = reference
+        else {
+            return Err("fixed projection samples are not frozen".into());
+        };
+        let name = reference.name().ok_or("fixed projection name is missing")?;
+        let original_reference = reference.original();
+        pairs.push((
+            name.to_string(),
+            serde_json::json!([name, original_reference, take, loaded_response]),
+        ));
+    }
+    let mut order: Vec<_> = (0..source.measurements.len()).collect();
+    order.sort_by(|a, b| {
+        source.measurements[*a]
+            .name()
+            .cmp(&source.measurements[*b].name())
+    });
+    let canonical_capture = capture.reordered_for_measurements(&order)?;
+    pairs.sort_by(|a, b| a.0.cmp(&b.0));
+    if pairs.windows(2).any(|pair| pair[0].0 == pair[1].0) {
+        return Err("fixed projection has duplicate names".into());
+    }
+    let payload = serde_json::json!([
+        source.provenance.capture_kind,
+        source.provenance.timing_reference_id,
+        canonical_capture.geometry,
+        canonical_capture.reflection_report,
+        pairs
+    ]);
+    let bytes = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
+    Ok(Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>())
+}
+
+/// Parse the two numerical CSV formats emitted by SOTF Capture.
+fn parse_fixed_capture_response(bytes: &[u8]) -> Result<crate::Curve, String> {
+    let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
+    let mut lines = text.lines();
+    let columns = match lines.next().map(str::trim) {
+        Some("frequency_hz,spl_db") => 2,
+        Some("frequency_hz,spl_db,phase_deg") => 3,
+        _ => return Err("unsupported_fixed_capture_response_format".into()),
+    };
+    let mut rows = Vec::new();
+    for line in lines.filter(|line| !line.trim().is_empty()) {
+        let values = line
+            .split(',')
+            .map(|value| {
+                value
+                    .trim()
+                    .parse::<f64>()
+                    .map_err(|error| error.to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if values.len() != columns {
+            return Err("fixed capture response column count mismatch".into());
+        }
+        rows.push(values);
+    }
+    rows.sort_by(|a, b| a[0].total_cmp(&b[0]));
+    let curve = crate::Curve {
+        freq: rows.iter().map(|row| row[0]).collect::<Vec<_>>().into(),
+        spl: rows.iter().map(|row| row[1]).collect::<Vec<_>>().into(),
+        phase: (columns == 3).then(|| rows.iter().map(|row| row[2]).collect::<Vec<_>>().into()),
+        ..Default::default()
+    };
+    curve
+        .validate("fixed capture response bytes")
+        .map_err(|error| error.to_string())?;
+    Ok(curve)
 }

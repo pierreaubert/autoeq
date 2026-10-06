@@ -36,13 +36,13 @@ mod prescore;
 #[path = "autoeq/progress.rs"]
 mod progress;
 #[path = "autoeq/qa.rs"]
-mod qa;
+pub(crate) mod qa;
 #[path = "autoeq/runopt.rs"]
 mod runopt;
 #[path = "autoeq/save.rs"]
 mod save;
 #[path = "autoeq/spacing.rs"]
-mod spacing;
+pub(crate) mod spacing;
 
 #[cfg(test)]
 #[path = "autoeq/load_tests.rs"]
@@ -791,8 +791,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
             smoothness_penalty: objective_data.smoothness_penalty.as_ref(),
         };
         let response = ctx.peq_spl(&opt_result.params);
-        let optimizer_score =
-            autoeq::loss::speaker_score_loss(score_data, ctx.freqs, &response);
+        let optimizer_score = autoeq::loss::speaker_score_loss(score_data, ctx.freqs, &response);
         let error = &response - ctx.deviation;
         let flatness = autoeq::loss::flat_loss(
             ctx.freqs,
@@ -898,7 +897,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
                 "selected_de_completion": opt_result.optimizer_evidence.first()
                     .filter(|evidence| evidence.selected_for_output
                         && evidence.confidence != autoeq::optim::OptimizerConfidence::Unusable)
-                    .and_then(|_| opt_result.global_de_completion.as_ref())
+                    .and(opt_result.global_de_completion.as_ref())
                     .map(|completion| serde_json::json!({
                         "success": completion.success,
                         "message": &completion.message,
@@ -928,8 +927,12 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
                 "qa_spacing_ok": qa_result.spacing_ok,
                 "qa_converge_ok": qa_result.converge_ok,
             });
-            std::fs::write(&path, serde_json::to_vec_pretty(&evidence)?)
-                .with_context(|| format!("failed to write AutoEQ QA evidence to {}", PathBuf::from(path).display()))?;
+            std::fs::write(&path, serde_json::to_vec_pretty(&evidence)?).with_context(|| {
+                format!(
+                    "failed to write AutoEQ QA evidence to {}",
+                    PathBuf::from(path).display()
+                )
+            })?;
         }
         qa::require_qa_pass(&qa_result)?;
 

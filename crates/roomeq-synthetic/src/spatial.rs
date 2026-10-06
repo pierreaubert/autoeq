@@ -155,12 +155,36 @@ pub struct CommonEqSeatPair {
 pub fn common_eq_seat_pair(seed: u64) -> Result<CommonEqSeatPair> {
     let tilt = crate::generate_harman_tilt_curve(20.0, 500.0, 240);
     let modes_a = vec![
-        Biquad::new(BiquadFilterType::Peak, 55.0, SPATIAL_SAMPLE_RATE_HZ, 6.0, 8.0),
-        Biquad::new(BiquadFilterType::Peak, 130.0, SPATIAL_SAMPLE_RATE_HZ, 5.0, -6.0),
+        Biquad::new(
+            BiquadFilterType::Peak,
+            55.0,
+            SPATIAL_SAMPLE_RATE_HZ,
+            6.0,
+            8.0,
+        ),
+        Biquad::new(
+            BiquadFilterType::Peak,
+            130.0,
+            SPATIAL_SAMPLE_RATE_HZ,
+            5.0,
+            -6.0,
+        ),
     ];
     let modes_b = vec![
-        Biquad::new(BiquadFilterType::Peak, 68.0, SPATIAL_SAMPLE_RATE_HZ, 6.0, 10.0),
-        Biquad::new(BiquadFilterType::Peak, 130.0, SPATIAL_SAMPLE_RATE_HZ, 5.0, -3.0),
+        Biquad::new(
+            BiquadFilterType::Peak,
+            68.0,
+            SPATIAL_SAMPLE_RATE_HZ,
+            6.0,
+            10.0,
+        ),
+        Biquad::new(
+            BiquadFilterType::Peak,
+            130.0,
+            SPATIAL_SAMPLE_RATE_HZ,
+            5.0,
+            -3.0,
+        ),
     ];
     let eq_filter = Biquad::new(
         BiquadFilterType::Peak,
@@ -171,10 +195,8 @@ pub fn common_eq_seat_pair(seed: u64) -> Result<CommonEqSeatPair> {
     );
     let seat_a_raw = crate::apply_known_eq(&tilt, &modes_a, SPATIAL_SAMPLE_RATE_HZ);
     let seat_b_raw = crate::apply_known_eq(&tilt, &modes_b, SPATIAL_SAMPLE_RATE_HZ);
-    let noise_a =
-        super::misc::gaussian_noise_vec(seat_a_raw.spl.len(), 0.2, seed.wrapping_add(1));
-    let noise_b =
-        super::misc::gaussian_noise_vec(seat_b_raw.spl.len(), 0.2, seed.wrapping_add(2));
+    let noise_a = super::misc::gaussian_noise_vec(seat_a_raw.spl.len(), 0.2, seed.wrapping_add(1));
+    let noise_b = super::misc::gaussian_noise_vec(seat_b_raw.spl.len(), 0.2, seed.wrapping_add(2));
     let seat_a = Curve {
         freq: seat_a_raw.freq.clone(),
         spl: &seat_a_raw.spl + &Array1::from(noise_a),
@@ -243,8 +265,8 @@ pub fn worse_seat_counterexample() -> WorstSeatCounterexample {
     let candidate_train_residual_db = vec![0.5; 8];
     let candidate_heldout_residual_db = vec![3.0; 8];
     let mean_before_db = (rms(&train_residual_db) + rms(&heldout_residual_db)) / 2.0;
-    let mean_after_db = (rms(&candidate_train_residual_db) + rms(&candidate_heldout_residual_db))
-        / 2.0;
+    let mean_after_db =
+        (rms(&candidate_train_residual_db) + rms(&candidate_heldout_residual_db)) / 2.0;
     let heldout_before_db = rms(&heldout_residual_db);
     let heldout_after_db = rms(&candidate_heldout_residual_db);
     WorstSeatCounterexample {
@@ -430,17 +452,14 @@ pub fn bass_only_candidate_with_upper_fault() -> BassOnlyCandidateFixture {
         0.7,
         5.0,
     );
-    let candidate = crate::apply_known_eq(&baseline, &[bass_cut, upper_shelf], SPATIAL_SAMPLE_RATE_HZ);
+    let candidate =
+        crate::apply_known_eq(&baseline, &[bass_cut, upper_shelf], SPATIAL_SAMPLE_RATE_HZ);
     let bass_band_hi_hz = 200.0;
     let fault_band_lo_hz = 2000.0;
-    let bass_error_before_db =
-        max_abs_error(&baseline, &target, |f| f <= bass_band_hi_hz);
-    let bass_error_after_db =
-        max_abs_error(&candidate, &target, |f| f <= bass_band_hi_hz);
-    let upper_error_before_db =
-        max_abs_error(&baseline, &target, |f| f >= fault_band_lo_hz);
-    let upper_error_after_db =
-        max_abs_error(&candidate, &target, |f| f >= fault_band_lo_hz);
+    let bass_error_before_db = max_abs_error(&baseline, &target, |f| f <= bass_band_hi_hz);
+    let bass_error_after_db = max_abs_error(&candidate, &target, |f| f <= bass_band_hi_hz);
+    let upper_error_before_db = max_abs_error(&baseline, &target, |f| f >= fault_band_lo_hz);
+    let upper_error_after_db = max_abs_error(&candidate, &target, |f| f >= fault_band_lo_hz);
     let full_error_after_db = max_abs_error(&candidate, &target, |_| true);
     BassOnlyCandidateFixture {
         target,
@@ -485,10 +504,7 @@ pub fn overlapping_removals_fixture() -> OverlappingRemovalsFixture {
     // Removal A opens a −1 dB dip around 80 Hz; removal B around 110 Hz. The
     // bands overlap, and removing both collapses the shared support (−3.5 dB
     // in the overlap): a super-additive interaction, not two independent dips.
-    let dip_a: Vec<f64> = freq_hz
-        .iter()
-        .map(|f| -log_gauss(*f, 80.0, 0.35))
-        .collect();
+    let dip_a: Vec<f64> = freq_hz.iter().map(|f| -log_gauss(*f, 80.0, 0.35)).collect();
     let dip_b: Vec<f64> = freq_hz
         .iter()
         .map(|f| -log_gauss(*f, 110.0, 0.35))
@@ -570,8 +586,7 @@ mod tests {
             sum.db().is_none(),
             "cancellation must expose no finite decibel score"
         );
-        let opposite =
-            shared_bass_fixture(BassPolarity::Opposite).expect("bass fixture");
+        let opposite = shared_bass_fixture(BassPolarity::Opposite).expect("bass fixture");
         assert!(opposite.combined.db().is_none());
         assert!(opposite.combined.pressure() < 1e-9);
         assert_ne!(
@@ -589,8 +604,7 @@ mod tests {
         assert!(!pair.ground_truth_delta_db.iter().all(|d| *d == 0.0));
         let mut worst = 0.0_f64;
         for i in 0..pair.seat_a.spl.len() {
-            let after =
-                pair.seat_a_corrected.spl[i] - pair.seat_b_corrected.spl[i];
+            let after = pair.seat_a_corrected.spl[i] - pair.seat_b_corrected.spl[i];
             let drift = (after - pair.ground_truth_delta_db[i]).abs();
             worst = worst.max(drift);
         }
@@ -605,11 +619,11 @@ mod tests {
         // F08: better mean, worse held-out seat — visible without any optimizer.
         let fix = worse_seat_counterexample();
         // Independently recompute the RMS values with plain arithmetic.
-        let plain_rms = |v: &[f64]| {
-            (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt()
-        };
+        let plain_rms = |v: &[f64]| (v.iter().map(|x| x * x).sum::<f64>() / v.len() as f64).sqrt();
         assert!((fix.heldout_before_db - plain_rms(&fix.heldout_residual_db)).abs() < 1e-12);
-        assert!((fix.heldout_after_db - plain_rms(&fix.candidate_heldout_residual_db)).abs() < 1e-12);
+        assert!(
+            (fix.heldout_after_db - plain_rms(&fix.candidate_heldout_residual_db)).abs() < 1e-12
+        );
         assert!(
             fix.mean_after_db < fix.mean_before_db,
             "candidate must improve the seat mean ({} -> {})",
@@ -634,7 +648,11 @@ mod tests {
         assert!(dip.label.contains("moving-dip"));
         assert!(peak.label.contains("narrow-peak"));
         // The dip moves: centers span more than 10 Hz across seats.
-        let span = dip.centers_hz.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+        let span = dip
+            .centers_hz
+            .iter()
+            .cloned()
+            .fold(f64::NEG_INFINITY, f64::max)
             - dip.centers_hz.iter().cloned().fold(f64::INFINITY, f64::min);
         assert!(span > 10.0, "moving dip must move, span was {span} Hz");
         // The peak repeats: one fixed center on every seat.
@@ -647,11 +665,7 @@ mod tests {
                 .freq
                 .iter()
                 .enumerate()
-                .min_by(|a, b| {
-                    (*a.1 - *center)
-                        .abs()
-                        .total_cmp(&(*b.1 - *center).abs())
-                })
+                .min_by(|a, b| (*a.1 - *center).abs().total_cmp(&(*b.1 - *center).abs()))
                 .map(|(i, _)| i)
                 .unwrap();
             assert!(
@@ -707,7 +721,10 @@ mod tests {
             .iter()
             .map(|v| v.abs())
             .fold(0.0_f64, f64::max);
-        assert!(head > tail, "modal IR must decay (head {head:.3}, tail {tail:.3})");
+        assert!(
+            head > tail,
+            "modal IR must decay (head {head:.3}, tail {tail:.3})"
+        );
     }
 
     #[test]

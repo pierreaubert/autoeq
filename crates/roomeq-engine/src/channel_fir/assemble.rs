@@ -86,6 +86,7 @@ pub(super) fn assemble_fir_result(
     let eq_response = output::compute_eq_response(&initial_data, &final_data);
     let filters = optimizer_output.eq_filters().to_vec();
     let channel = ChannelDspChain {
+        physical_correction_target: None,
         channel: request.channel_name.to_string(),
         plugins: dsp.plugins,
         drivers: None,

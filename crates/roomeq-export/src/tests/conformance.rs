@@ -10,6 +10,7 @@ use std::process::{Command, Stdio};
 
 fn channel(name: &str, plugins: Vec<PluginConfigWrapper>) -> ChannelDspChain {
     ChannelDspChain {
+        physical_correction_target: None,
         channel: name.to_string(),
         plugins,
         drivers: None,

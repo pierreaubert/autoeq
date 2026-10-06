@@ -111,7 +111,7 @@ pub(super) fn list_speakers<P: AsRef<Path>>(data_dir: P) -> Result<Vec<String>, 
 pub(super) async fn run_one(
     args: &autoeq::cli::Args,
     shutdown: ShutdownSignal,
-) -> Result<score::ScoreMetrics, String> {
+) -> Result<(score::ScoreMetrics, Option<String>), String> {
     // Check for shutdown before starting
     if shutdown.is_requested() {
         return Err("Task cancelled due to shutdown".into());
@@ -159,7 +159,7 @@ pub(super) async fn run_one(
     }
 
     let params = autoeq::OptimParams::from(args);
-    let x = perform_optimization(&params, &objective_data, shutdown.clone())
+    let optimization = perform_optimization(&params, &objective_data, shutdown.clone())
         .await
         .map_err(|e| e.to_string())?;
 
@@ -167,11 +167,12 @@ pub(super) async fn run_one(
         return Err("Task cancelled before score extraction".into());
     }
 
+    let x = &optimization.parameters;
     if use_cea {
         let freq = &standard_freq;
         let peq_after = autoeq::x2peq::compute_peq_response_from_x(
             freq,
-            &x,
+            x,
             args.sample_rate,
             args.effective_peq_model(),
         );
@@ -179,7 +180,23 @@ pub(super) async fn run_one(
             score::compute_cea2034_metrics(freq, spin_data.as_ref().unwrap(), Some(&peq_after))
                 .await
                 .map_err(|e| e.to_string())?;
-        Ok(metrics)
+        let qa_failure = if let Some(threshold) = args.qa {
+            let pre = score::compute_cea2034_metrics(freq, spin_data.as_ref().unwrap(), None)
+                .await
+                .map_err(|e| e.to_string())?;
+            let converged = optimization.selected_converged();
+            let spacing_ok = crate::autoeq_command::spacing::check_spacing_constraints(x, &params);
+            scenario_qa_failure(
+                converged,
+                spacing_ok,
+                pre.pref_score,
+                metrics.pref_score,
+                threshold,
+            )
+        } else {
+            None
+        };
+        Ok((metrics, qa_failure))
     } else {
         Err("CEA2034 data required to compute preference score".to_string())
     }
@@ -222,11 +239,11 @@ pub(super) fn setup_objective_data(
     )
 }
 
-pub(super) async fn perform_optimization(
+async fn perform_optimization(
     params: &autoeq::OptimParams,
     objective_data: &ObjectiveData,
     shutdown: ShutdownSignal,
-) -> Result<Vec<f64>, String> {
+) -> Result<ControlledOptimization, String> {
     if shutdown.is_requested() {
         return Err("Optimization cancelled by shutdown".to_string());
     }
@@ -309,10 +326,19 @@ struct ControlledOptimization {
 }
 
 impl ControlledOptimization {
-    fn into_result(self) -> Result<Vec<f64>, String> {
-        match self.failure {
-            Some(error) => Err(format!("Optimization error: {error}")),
-            None => Ok(self.parameters),
+    fn selected_converged(&self) -> bool {
+        let mut selected = self
+            .runs
+            .iter()
+            .filter(|run| run.evidence.selected_for_output);
+        selected.next().is_some_and(|run| run.evidence.converged) && selected.next().is_none()
+    }
+
+    fn into_result(self) -> Result<Self, String> {
+        if let Some(error) = &self.failure {
+            Err(format!("Optimization error: {error}"))
+        } else {
+            Ok(self)
         }
     }
 
@@ -359,7 +385,7 @@ fn optimize_with_controlled_stages(
     );
     let mut runs = Vec::with_capacity(2);
 
-    let global = match run_controlled_stage(params, objective_data, &mut parameters, active) {
+    let mut global = match run_controlled_stage(params, objective_data, &mut parameters, active) {
         Ok(run) => run,
         Err(error) => {
             return ControlledOptimization {
@@ -371,6 +397,7 @@ fn optimize_with_controlled_stages(
     };
     let global_objective = global.evidence.objective;
     let global_error = controlled_run_error(&global);
+    global.evidence.selected_for_output = true;
     runs.push(global);
     if let Some(error) = global_error {
         return ControlledOptimization {
@@ -408,6 +435,9 @@ fn optimize_with_controlled_stages(
                 failure: Some(error),
             };
         }
+        let selected_local = refinement_is_selected(global_objective, local_objective);
+        runs[0].evidence.selected_for_output = !selected_local;
+        runs[1].evidence.selected_for_output = selected_local;
         parameters =
             select_refined_candidate(before_refine, parameters, global_objective, local_objective);
     }
@@ -426,16 +456,19 @@ fn optimize_with_controlled_stages(
     }
 }
 
+fn refinement_is_selected(global: Option<f64>, refined: Option<f64>) -> bool {
+    refined
+        .zip(global)
+        .is_some_and(|(refined, global)| refined <= global)
+}
+
 fn select_refined_candidate(
     global_parameters: Vec<f64>,
     refined_parameters: Vec<f64>,
     global_objective: Option<f64>,
     refined_objective: Option<f64>,
 ) -> Vec<f64> {
-    if refined_objective
-        .zip(global_objective)
-        .is_some_and(|(refined, global)| refined <= global)
-    {
+    if refinement_is_selected(global_objective, refined_objective) {
         refined_parameters
     } else {
         global_parameters
@@ -884,6 +917,209 @@ mod cancellation_tests {
         assert_eq!(
             select_refined_candidate(global.clone(), vec![9.0, 9.0], Some(1.0), None),
             global
+        );
+    }
+
+    #[test]
+    fn actual_controlled_runs_retain_selected_convergence_provenance() {
+        let (params, objective) = test_optimizer(false);
+        let global =
+            optimize_with_controlled_stages(&params, &objective, &ActiveRunControl::default());
+        assert!(global.failure.is_none());
+        assert_eq!(global.runs.len(), 1);
+        assert!(global.runs[0].evidence.selected_for_output);
+        assert_eq!(
+            global.selected_converged(),
+            global.runs[0].evidence.converged
+        );
+
+        let (params, objective) = test_optimizer(true);
+        let mut refined =
+            optimize_with_controlled_stages(&params, &objective, &ActiveRunControl::default());
+        assert!(refined.failure.is_none());
+        assert_eq!(refined.runs.len(), 2);
+        let selected = usize::from(super::refinement_is_selected(
+            refined.runs[0].evidence.objective,
+            refined.runs[1].evidence.objective,
+        ));
+        assert_eq!(
+            refined
+                .runs
+                .iter()
+                .filter(|run| run.evidence.selected_for_output)
+                .count(),
+            1
+        );
+        assert!(refined.runs[selected].evidence.selected_for_output);
+        assert_eq!(
+            refined.selected_converged(),
+            refined.runs[selected].evidence.converged
+        );
+        // Metamorphic negative proof: a superseded pass cannot supply QA convergence.
+        refined.runs[selected].evidence.converged = false;
+        refined.runs[1 - selected].evidence.converged = true;
+        assert!(!refined.selected_converged());
+        refined.runs[selected].evidence.converged = true;
+        refined.runs[1 - selected].evidence.converged = false;
+        assert!(refined.selected_converged());
+        // Ambiguous or absent selection never confers convergence.
+        refined.runs[1 - selected].evidence.selected_for_output = true;
+        assert!(!refined.selected_converged());
+        for run in &mut refined.runs {
+            run.evidence.selected_for_output = false;
+        }
+        assert!(!refined.selected_converged());
+    }
+
+    #[test]
+    fn parameter_selection_and_convergence_ownership_agree_on_edge_cases() {
+        for (global, local, selected_local) in [
+            (Some(1.0), Some(0.5), true),
+            (Some(1.0), Some(1.0), true),
+            (Some(1.0), Some(2.0), false),
+            (None, Some(1.0), false),
+            (Some(1.0), None, false),
+            (Some(f64::NAN), Some(1.0), false),
+            (Some(1.0), Some(f64::NAN), false),
+            (Some(1.0), Some(f64::INFINITY), false),
+            (Some(f64::INFINITY), Some(1.0), true),
+            (Some(f64::INFINITY), Some(f64::INFINITY), true),
+        ] {
+            assert_eq!(super::refinement_is_selected(global, local), selected_local);
+            assert_eq!(
+                select_refined_candidate(vec![1.0], vec![2.0], global, local),
+                if selected_local { vec![2.0] } else { vec![1.0] }
+            );
+        }
+        // Nonfinite objectives cannot reach selection in production: controlled_run_error
+        // rejects evidence without a finite valid candidate. The comparator stays unchanged.
+    }
+}
+
+pub(super) fn scenario_qa_failure(
+    converged: bool,
+    spacing_ok: bool,
+    pre: f64,
+    post: f64,
+    threshold: f64,
+) -> Option<String> {
+    let analysis = crate::autoeq_command::qa::perform_qa_analysis(
+        converged,
+        spacing_ok,
+        Some(pre),
+        Some(post),
+        threshold,
+    );
+    crate::autoeq_command::qa::require_qa_pass(&analysis)
+        .err()
+        .map(|error| error.to_string())
+}
+
+pub(super) fn record_scenario(
+    result: Result<(f64, Option<String>), String>,
+    speaker: &str,
+    scenario: &str,
+    failures: &Mutex<Vec<String>>,
+) -> Option<f64> {
+    let (score, failure) = match result {
+        Ok((score, failure)) => (Some(score), failure),
+        Err(error) => (None, Some(error)),
+    };
+    if let Some(error) = failure {
+        failures
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(format!("{speaker} / {scenario}: {error}"));
+    }
+    score
+}
+
+pub(super) fn require_complete_benchmark(
+    expected: usize,
+    completed: usize,
+    failures: &[String],
+) -> Result<(), String> {
+    if expected == 0 || completed != expected || !failures.is_empty() {
+        Err(format!(
+            "Benchmark QA failed: completed {completed}/{expected} speakers; {} scenario failures",
+            failures.len()
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod qa_contract_tests {
+    use super::{record_scenario, require_complete_benchmark, scenario_qa_failure};
+    use std::sync::Mutex;
+
+    #[test]
+    fn owning_qa_rejects_nonconvergence_spacing_and_nonpositive_improvement() {
+        assert!(scenario_qa_failure(true, true, 5.0, 6.0, 0.0).is_none());
+        for (converged, spacing, post, threshold) in [
+            (false, true, 6.0, 0.0),
+            (true, false, 6.0, 0.0),
+            (true, true, 5.0, 0.0),
+            (true, true, 4.0, 0.0),
+            (true, true, 6.0, 1.0),
+            (true, true, f64::NAN, 0.0),
+        ] {
+            assert!(scenario_qa_failure(converged, spacing, 5.0, post, threshold).is_some());
+        }
+        assert!(scenario_qa_failure(true, true, 5.0, 6.01, 1.0).is_none());
+    }
+
+    #[test]
+    fn incomplete_scenarios_refuse_qa_without_discarding_actual_scores() {
+        let failures = Mutex::new(Vec::new());
+        assert_eq!(
+            record_scenario(
+                Ok((6.0, Some("not converged".into()))),
+                "A",
+                "score",
+                &failures
+            ),
+            Some(6.0)
+        );
+        assert_eq!(
+            record_scenario(
+                Err("missing Listening Window".into()),
+                "B",
+                "flat",
+                &failures
+            ),
+            None
+        );
+        let failures = failures.into_inner().unwrap();
+        assert_eq!(failures.len(), 2);
+        assert!(failures[0].contains("A / score: not converged"));
+        assert!(failures[1].contains("B / flat: missing Listening Window"));
+        assert!(require_complete_benchmark(2, 2, &failures).is_err());
+        assert!(require_complete_benchmark(0, 0, &[]).is_err());
+        assert!(require_complete_benchmark(2, 1, &[]).is_err());
+        assert!(require_complete_benchmark(2, 2, &[]).is_ok());
+    }
+
+    #[test]
+    fn bare_and_explicit_qa_thresholds_parse_without_changing_explicit_values() {
+        use crate::benchmark::BenchArgs;
+        use clap::Parser;
+        assert_eq!(
+            BenchArgs::parse_from(["benchmark", "--qa", "--jobs", "1"])
+                .base
+                .qa,
+            Some(0.0)
+        );
+        assert_eq!(
+            BenchArgs::parse_from(["benchmark", "--qa", "1.5", "--jobs", "1"])
+                .base
+                .qa,
+            Some(1.5)
+        );
+        assert_eq!(
+            BenchArgs::parse_from(["benchmark", "--jobs", "1"]).base.qa,
+            None
         );
     }
 }

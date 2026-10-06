@@ -56,6 +56,7 @@ fn wolfram_rw03_dsp_fir_convolution() {
     );
 
     let chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: vec![
             PluginConfigWrapper {

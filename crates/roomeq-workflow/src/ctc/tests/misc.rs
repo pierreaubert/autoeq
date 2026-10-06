@@ -111,6 +111,7 @@ pub(super) fn test_channel_chain(
     drivers: Option<Vec<roomeq_model::DriverDspChain>>,
 ) -> ChannelDspChain {
     ChannelDspChain {
+        physical_correction_target: None,
         channel: "left".to_string(),
         plugins,
         drivers,

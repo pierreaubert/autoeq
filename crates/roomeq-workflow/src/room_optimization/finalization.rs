@@ -931,13 +931,18 @@ fn select_inner(
         return Ok(());
     }
     if result.metadata.correction_acceptance.is_none() {
-        super::validation_scorecard::attach_validation_scorecard(
-            result,
-            held_out,
-            fs,
-            roomeq_model::auto_tune::resolved_schroeder_hz(&config.optimizer),
-            config.optimizer.processing_mode.clone(),
-        )?;
+        if super::validation_scorecard::needs_native_routed_acceptance(result) {
+            refresh_configured_native_acceptance(result, config, fs, dir)?;
+            super::validation_scorecard::defer_native_routed_acceptance(result);
+        } else {
+            super::validation_scorecard::attach_validation_scorecard(
+                result,
+                held_out,
+                fs,
+                roomeq_model::auto_tune::resolved_schroeder_hz(&config.optimizer),
+                config.optimizer.processing_mode.clone(),
+            )?;
+        }
     }
     if result.metadata.correction_acceptance.is_none() {
         result.metadata.stage_outcomes.push(StageOutcome {
@@ -1031,6 +1036,28 @@ fn select_inner(
     let strengths = [
         1.0, 0.875, 0.75, 0.625, 0.5, 0.375, 0.25, 0.125, 0.0625, 0.03125, 0.0,
     ];
+    // Preserve the sampled strengths, and add the exact branchwise point at
+    // the existing electrical backstop when the full correction exceeds it.
+    // Acceptance still rechecks the emitted graph after topology recalibration.
+    let electrical_boundary_strength = original
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .and_then(|report| report.runtime_policy.as_ref())
+        .and_then(|policy| {
+            let routes = original
+                .metadata
+                .bass_management
+                .as_ref()
+                .and_then(|bass| bass.routing_graph.as_ref())
+                .map(|graph| graph.routes.as_slice());
+            crate::delay_compile::correction_strength_for_electrical_ceiling(
+                &original.channels,
+                routes,
+                policy.max_boost_db + 0.5,
+            )
+        })
+        .filter(|strength| *strength > 0.0 && *strength < 1.0);
     let sub_roles: std::collections::BTreeSet<_> = original
         .channels
         .keys()
@@ -1060,6 +1087,13 @@ fn select_inner(
             ]
         })
         .collect();
+    if let Some(strength) = electrical_boundary_strength {
+        parameters.extend([
+            (strength, strength, "output", 0.0),
+            (strength, strength, "common", 0.0),
+            (strength, strength, "spectral", 0.0),
+        ]);
+    }
     // A main's correction and a shared sub array's correction affect different
     // acoustic branches. Reducing both together can destroy a useful bass
     // correction just to repair a main's target error or crossover rotation.
@@ -2326,7 +2360,10 @@ fn refresh_responses(result: &mut RoomOptimizationResult, fs: f64, dir: &Path) -
                 dir,
             )?;
     } else if result.deployed_source_curves.is_empty()
-        && result.channels.values().any(|chain| chain.drivers.is_some())
+        && result
+            .channels
+            .values()
+            .any(|chain| chain.drivers.is_some())
     {
         // Generic driver groups use an empty deployed map to signal that their
         // reported aggregate owns final level validation (see
@@ -2353,6 +2390,17 @@ pub(super) fn rebuild(
     fs: f64,
     dir: &Path,
 ) -> Result<()> {
+    if super::validation_scorecard::needs_native_routed_acceptance(result)
+        && let Some(report) = result.metadata.correction_acceptance.as_ref()
+        && !report.violations.is_empty()
+    {
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "previous_graph_acceptance_history".into(),
+            status: StageStatus::Skipped,
+            advisories: report.violations.clone(),
+            checks: Vec::new(),
+        });
+    }
     refresh_responses(result, fs, dir)?;
     // This also refreshes temporal IR evidence for the safety gate below.
     // Repeating it before any graph mutation replays the same chain twice.
@@ -2388,7 +2436,82 @@ pub(super) fn rebuild(
             config.optimizer.processing_mode.clone(),
         )?;
     }
-    preserve_safety_reversion_decision(result);
+    if super::validation_scorecard::needs_native_routed_acceptance(result) {
+        super::validation_scorecard::defer_native_routed_acceptance(result);
+    } else {
+        preserve_safety_reversion_decision(result);
+    }
+    Ok(())
+}
+
+fn configured_acceptance_graph(value: &RoomOptimizationResult) -> serde_json::Value {
+    serde_json::to_value((
+        &value.channels,
+        value.to_dsp_chain_output().global_plugins,
+        &value.metadata.bass_management,
+        &value.metadata.ctc,
+        &value.deployed_source_curves,
+        retained_fir_coeffs_by_channel(value),
+    ))
+    .expect("serializable deployed graph")
+}
+
+pub(super) fn refresh_configured_native_acceptance(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> Result<()> {
+    let previous = result.metadata.correction_acceptance.clone();
+    let before = configured_acceptance_graph(result);
+    let mut replay = result.clone();
+    replay.metadata.correction_acceptance = None;
+    room_optimization_result::apply_final_correction_safety_gate(
+        &mut replay,
+        fs,
+        config.optimizer.smooth_n,
+        (config.optimizer.min_freq, config.optimizer.max_freq),
+        dir,
+        config.optimizer.processing_mode.clone(),
+        group_delay_budget_ms(config),
+    );
+    if configured_acceptance_graph(&replay) != before {
+        return Err(failed(
+            "fresh configured acceptance would change the candidate graph",
+        ));
+    }
+    let mut report = replay
+        .metadata
+        .correction_acceptance
+        .ok_or_else(|| failed("fresh configured native acceptance evidence unavailable"))?;
+    if let Some(previous) = previous {
+        if let Some(policy) = previous.runtime_policy {
+            let quality = report
+                .acoustic_quality
+                .clone()
+                .ok_or_else(|| failed("fresh preserved-policy acoustic evidence unavailable"))?;
+            let realization = report
+                .realization_quality
+                .clone()
+                .ok_or_else(|| failed("fresh preserved-policy realization evidence unavailable"))?;
+            roomeq_quality::enforce_runtime_acceptance_evidence(
+                &mut report,
+                quality,
+                realization,
+                policy,
+            )
+            .map_err(failed)?;
+        }
+        if !previous.violations.is_empty() {
+            result.metadata.stage_outcomes.push(StageOutcome {
+                stage: "previous_graph_acceptance_history".into(),
+                status: StageStatus::Skipped,
+                advisories: previous.violations,
+                checks: Vec::new(),
+            });
+        }
+    }
+    result.metadata.correction_acceptance = Some(report);
     Ok(())
 }
 
@@ -2548,6 +2671,7 @@ fn headroom_input_chain<'a>(
             .channels
             .entry(input.to_string())
             .or_insert_with(|| roomeq_model::ChannelDspChain {
+                physical_correction_target: None,
                 channel: input.to_string(),
                 plugins: Vec::new(),
                 drivers: None,
@@ -2858,6 +2982,50 @@ fn refinement_delay_reference(delay_samples: f64, support: usize, fs: f64) -> Re
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deployed_acceptance_comparison_detects_physical_target_mutation() {
+        let mut result = crate::test_fixtures::single_channel_room_result("L");
+        let curve = crate::test_fixtures::flat_curve();
+        result
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .physical_correction_target = Some(roomeq_model::PhysicalCorrectionTarget {
+            curve: (&curve).into(),
+            measurement_alignment_gain_db: 3.0,
+        });
+        let snapshot = configured_acceptance_graph(&result);
+        let mut gain_changed = result.clone();
+        gain_changed
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .physical_correction_target
+            .as_mut()
+            .unwrap()
+            .measurement_alignment_gain_db = -3.0;
+        assert_ne!(configured_acceptance_graph(&gain_changed), snapshot);
+        let mut target_changed = result.clone();
+        target_changed
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .physical_correction_target
+            .as_mut()
+            .unwrap()
+            .curve
+            .spl[1] += 1.0;
+        assert_ne!(configured_acceptance_graph(&target_changed), snapshot);
+        let mut removed = result.clone();
+        removed
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .physical_correction_target = None;
+        assert_ne!(configured_acceptance_graph(&removed), snapshot);
+        assert_eq!(configured_acceptance_graph(&result), snapshot);
+    }
+
     use super::*;
     use roomeq_model::StageStatus;
 
@@ -4276,9 +4444,8 @@ mod tests {
             "stale deployed cache survived refresh: {spread}"
         );
 
-        let error =
-            verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path())
-                .expect_err("a stale matched cache must not authorize an imbalanced graph");
+        let error = verify_delivered_channel_alignment(&mut result, &config, 48_000.0, dir.path())
+            .expect_err("a stale matched cache must not authorize an imbalanced graph");
         assert!(error.to_string().contains("2.000 dB"), "{error}");
 
         let outcome =

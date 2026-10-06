@@ -402,6 +402,110 @@ pub fn predict_bass_bus_curve_from_routes(
 }
 
 #[cfg(test)]
+mod routed_factor_tests {
+    use super::*;
+    use crate::Curve;
+    use crate::response;
+    use crate::topology::complex_sum_mains;
+    use math_audio_iir_fir::{Biquad, BiquadFilterType};
+    use ndarray::Array1;
+    use roomeq_model::{BassManagementRoute, BassManagementRoutingGraph};
+    use std::collections::HashMap;
+
+    #[test]
+    fn common_peq_factor_commutes_with_complex_main_sub_route_sum() {
+        let frequencies = Array1::logspace(10.0, 25.0_f64.log10(), 1500.0_f64.log10(), 91);
+        let main = Curve {
+            freq: frequencies.clone(),
+            spl: frequencies.mapv(|frequency| 78.0 - 3.0 * (frequency / 300.0).log2().abs()),
+            phase: Some(frequencies.mapv(|frequency| -frequency * 0.08)),
+            ..Default::default()
+        };
+        let sub = Curve {
+            freq: frequencies.clone(),
+            spl: frequencies.mapv(|frequency| 75.0 - 2.0 * (frequency / 90.0).log2().abs()),
+            phase: Some(frequencies.mapv(|frequency| -frequency * 0.11 + 23.0)),
+            ..Default::default()
+        };
+        let source_transfer = Curve {
+            freq: frequencies.clone(),
+            spl: frequencies.mapv(|frequency| 1.5 - 0.25 * (frequency / 200.0).log2().abs()),
+            phase: Some(frequencies.mapv(|frequency| -frequency * 0.005)),
+            ..Default::default()
+        };
+        let route = BassManagementRoute {
+            group_id: Some("lcr".into()),
+            source_channel: "L".into(),
+            source_index: 0,
+            destination: "Sub".into(),
+            destination_index: 0,
+            pre_chain_channel: Some("L".into()),
+            post_chain_channel: Some("Sub".into()),
+            route_kind: "redirected_bass_lowpass_to_sub".into(),
+            crossover_type: "LR24".into(),
+            high_pass_hz: None,
+            low_pass_hz: Some(90.0),
+            gain_db: -2.5,
+            gain_linear: 10.0_f64.powf(-2.5 / 20.0),
+            matrix_gain: 1.0,
+            delay_ms: 1.7,
+            polarity_inverted: true,
+        };
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "Sub".into(),
+            physical_sub_outputs: vec!["Sub".into()],
+            input_channels: vec!["L".into()],
+            output_channels: vec!["L".into(), "Sub".into()],
+            routes: vec![route],
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
+            stereo_routing: None,
+            advisories: Vec::new(),
+        };
+        let routed = predict_deployed_source_curve_from_routes(
+            Some(&main),
+            &sub,
+            Some(&source_transfer),
+            &graph,
+            "L",
+            48_000.0,
+        )
+        .unwrap();
+        let bass = predict_bass_source_curve_from_routes(
+            &sub,
+            Some(&source_transfer),
+            &graph,
+            "L",
+            48_000.0,
+        )
+        .unwrap();
+        let peq = [Biquad::new(
+            BiquadFilterType::Peak,
+            72.0,
+            48_000.0,
+            0.8,
+            3.0,
+        )];
+        let candidate_response =
+            response::compute_peq_complex_response(&peq, &frequencies, 48_000.0);
+        let applied_after_sum = response::apply_complex_response(&routed, &candidate_response);
+        let main_after_peq = response::apply_complex_response(&main, &candidate_response);
+        let bass_after_peq = response::apply_complex_response(&bass, &candidate_response);
+        let applied_before_sum = complex_sum_mains(&[&main_after_peq, &bass_after_peq]);
+        for (actual, expected) in applied_after_sum.spl.iter().zip(&applied_before_sum.spl) {
+            assert!((actual - expected).abs() < 1e-10);
+        }
+        let actual_phase = applied_after_sum.phase.as_ref().unwrap();
+        let expected_phase = applied_before_sum.phase.as_ref().unwrap();
+        for (actual, expected) in actual_phase.iter().zip(expected_phase) {
+            let wrapped_difference = (actual - expected + 180.0).rem_euclid(360.0) - 180.0;
+            assert!(wrapped_difference.abs() < 1e-8);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::topology::apply_crossover_response_to_curve;

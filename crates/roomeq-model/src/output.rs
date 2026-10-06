@@ -327,6 +327,34 @@ pub struct ChannelWavelet {
     pub mags_db: Vec<Vec<f32>>,
 }
 
+/// Owning physical Main target before structural routing.
+///
+/// The reference curve is in the initially calibrated measurement plane.
+/// `measurement_alignment_gain_db` maps raw measured pressure into that plane;
+/// later routing gains and correction trims are not part of this mapping.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct PhysicalCorrectionTarget {
+    /// Owning Main solve target with its original shape and support.
+    pub curve: CurveData,
+    /// Initial measurement calibration gain, applied exactly once to pre/post.
+    pub measurement_alignment_gain_db: f64,
+}
+
+impl PhysicalCorrectionTarget {
+    /// Validate numerical target support and the explicit calibration mapping.
+    ///
+    /// # Errors
+    /// Rejects nonfinite gain or malformed target measurements.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.measurement_alignment_gain_db.is_finite() {
+            return Err("nonfinite physical target alignment gain".into());
+        }
+        crate::Curve::from(self.curve.clone())
+            .validate("physical correction target")
+            .map_err(|error| error.to_string())
+    }
+}
+
 /// DSP chain for a single channel
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ChannelDspChain {
@@ -349,6 +377,11 @@ pub struct ChannelDspChain {
     /// Effective target curve the optimizer worked against (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_curve: Option<CurveData>,
+    /// Optional owning physical target for correction-only safety.
+    /// Native coherent evaluation continues to use `target_curve`.
+    /// Old results lack this evidence and retain their conservative legacy gate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub physical_correction_target: Option<PhysicalCorrectionTarget>,
     /// Impulse response before correction (optional, requires phase data)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pre_ir: Option<IrWaveform>,
@@ -1032,6 +1065,39 @@ pub struct OptimizationMetadata {
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn physical_target_contract_preserves_legacy_json_and_validates_metadata() {
+        let mut graph = crate::DspGraph::new("1");
+        graph.add_channel("L", Vec::new());
+        let legacy = serde_json::to_value(&graph.channels["L"]).unwrap();
+        assert!(legacy.get("physical_correction_target").is_none());
+        let restored: ChannelDspChain = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(restored.physical_correction_target.is_none());
+        assert_eq!(serde_json::to_value(restored).unwrap(), legacy);
+        let schema = serde_json::to_value(schemars::schema_for!(ChannelDspChain)).unwrap();
+        assert!(
+            schema["properties"]
+                .get("physical_correction_target")
+                .is_some()
+        );
+        let mut target = PhysicalCorrectionTarget {
+            curve: (&sample_curve()).into(),
+            measurement_alignment_gain_db: -3.0,
+        };
+        assert!(target.validate().is_ok());
+        target.measurement_alignment_gain_db = f64::NAN;
+        assert!(target.validate().is_err());
+        target.measurement_alignment_gain_db = 3.0;
+        target.curve.freq[1] = target.curve.freq[0];
+        assert!(target.validate().is_err());
+        graph
+            .channels
+            .get_mut("L")
+            .unwrap()
+            .physical_correction_target = Some(target);
+        assert!(graph.validate().is_err());
+    }
 
     fn sample_curve() -> Curve {
         Curve {

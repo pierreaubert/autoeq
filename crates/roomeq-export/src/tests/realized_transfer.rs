@@ -1873,6 +1873,7 @@ fn multisub_allpass_is_phase_only() {
         channels: HashMap::from([(
             "left".to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: "left".to_string(),
                 plugins: vec![PluginConfigWrapper {
                     plugin_type: "eq".to_string(),
@@ -2147,6 +2148,7 @@ fn multisub_delay_precision_contract() {
         channels: HashMap::from([(
             "left".to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: "left".to_string(),
                 plugins: vec![PluginConfigWrapper {
                     plugin_type: "delay".to_string(),
@@ -2276,6 +2278,7 @@ fn camilladsp_rejects_shared_global_eq() {
         channels: HashMap::from([(
             "left".to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: "left".to_string(),
                 plugins: vec![PluginConfigWrapper {
                     plugin_type: "gain".to_string(),
@@ -2335,6 +2338,7 @@ fn staged_chain(
         });
     }
     ChannelDspChain {
+        physical_correction_target: None,
         channel: name.to_string(),
         plugins,
         drivers: None,

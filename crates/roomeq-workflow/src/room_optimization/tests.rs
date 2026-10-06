@@ -102,6 +102,7 @@ fn route_owned_topology_owns_main_sub_phase_alignment() {
     let mut route_plugin = output::create_gain_plugin(0.0);
     route_plugin.parameters["room_eq_stage"] = serde_json::json!("route_owned");
     let routed_chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "LFE".to_string(),
         plugins: vec![route_plugin],
         drivers: None,
@@ -129,6 +130,7 @@ fn route_owned_topology_owns_main_sub_phase_alignment() {
 
 fn routed_test_chain(target: &Curve) -> ChannelDspChain {
     ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: vec![output::create_crossover_plugin("LR24", 100.0, "high")],
         drivers: None,
@@ -534,6 +536,7 @@ fn final_channel_level_refreshes_non_routed_curves_but_preserves_generic_sentine
 #[test]
 fn topology_height_residual_is_added_after_existing_delay() {
     let mut chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "TFL".to_string(),
         plugins: vec![output::create_delay_plugin(1.25)],
         drivers: None,
@@ -585,6 +588,7 @@ fn reported_curve_retains_user_preference_filters() {
         6.0,
     );
     let chain = ChannelDspChain {
+        physical_correction_target: None,
         channel: "L".to_string(),
         plugins: vec![roomeq_engine::output::create_labeled_eq_plugin(
             &[preference],

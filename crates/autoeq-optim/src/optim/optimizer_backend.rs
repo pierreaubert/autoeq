@@ -13,6 +13,27 @@ use super::run_control::{OptimizerBudgetProfile, OptimizerRunControl};
 use super::{ControlledOptimizerRun, ObjectiveData, OptimProgressCallback};
 use crate::OptimParams;
 
+/// Legacy backend result paired with its optional DE completion counters.
+pub type OptimizerBackendDeCompletion = (
+    Result<(String, f64), (String, f64)>,
+    Option<super::de::DECompletion>,
+);
+
+/// Legacy backend result paired with its optional DE and search evidence.
+pub type OptimizerBackendCompletionEvidence = (
+    Result<(String, f64), (String, f64)>,
+    Option<super::de::DECompletion>,
+    Option<super::backend::BackendSearchEvidence>,
+);
+
+/// Backend result and all same-run typed completion evidence.
+pub type OptimizerBackendTypedCompletionEvidence = (
+    Result<(String, f64), (String, f64)>,
+    Option<super::de::DECompletion>,
+    Option<super::backend::BackendSearchEvidence>,
+    Option<super::optimize::OptimizerBackendCompletion>,
+);
+
 /// Effective registered backend and native budget profile for a dispatch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptimizerDispatchBudgetProfile {
@@ -70,10 +91,7 @@ pub trait OptimizerBackend: Send + Sync {
         upper_bounds: &[f64],
         objective: ObjectiveData,
         params: &OptimParams,
-    ) -> (
-        Result<(String, f64), (String, f64)>,
-        Option<super::de::DECompletion>,
-    ) {
+    ) -> OptimizerBackendDeCompletion {
         (
             self.optimize_filters(x, lower_bounds, upper_bounds, objective, params),
             None,
@@ -92,15 +110,37 @@ pub trait OptimizerBackend: Send + Sync {
         upper_bounds: &[f64],
         objective: ObjectiveData,
         params: &OptimParams,
-    ) -> (
-        Result<(String, f64), (String, f64)>,
-        Option<super::de::DECompletion>,
-        Option<super::backend::BackendSearchEvidence>,
-    ) {
+    ) -> OptimizerBackendCompletionEvidence {
         let (result, de_completion) = self.optimize_filters_with_de_completion(
-            x, lower_bounds, upper_bounds, objective, params,
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective,
+            params,
         );
         (result, de_completion, None)
+    }
+
+    /// Retain typed completion while preserving the legacy evidence method.
+    ///
+    /// Existing backend implementations inherit `None` for completion.
+    fn optimize_filters_with_typed_completion_evidence(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+    ) -> OptimizerBackendTypedCompletionEvidence {
+        let (result, de_completion, search_evidence) = self
+            .optimize_filters_with_completion_evidence(
+                x,
+                lower_bounds,
+                upper_bounds,
+                objective,
+                params,
+            );
+        (result, de_completion, search_evidence, None)
     }
 
     /// Run the configured global optimizer with a per-iteration progress callback.
@@ -178,8 +218,36 @@ impl OptimizerBackend for RealOptimizerBackend {
         Option<super::de::DECompletion>,
         Option<super::backend::BackendSearchEvidence>,
     ) {
-        super::optimize_filters_with_completion_evidence(
-            x, lower_bounds, upper_bounds, objective, params,
+        let (result, de_completion, search_evidence, _) =
+            super::optimize_filters_with_typed_completion_evidence(
+                x,
+                lower_bounds,
+                upper_bounds,
+                objective,
+                params,
+            );
+        (result, de_completion, search_evidence)
+    }
+
+    fn optimize_filters_with_typed_completion_evidence(
+        &self,
+        x: &mut [f64],
+        lower_bounds: &[f64],
+        upper_bounds: &[f64],
+        objective: ObjectiveData,
+        params: &OptimParams,
+    ) -> (
+        Result<(String, f64), (String, f64)>,
+        Option<super::de::DECompletion>,
+        Option<super::backend::BackendSearchEvidence>,
+        Option<super::optimize::OptimizerBackendCompletion>,
+    ) {
+        super::optimize_filters_with_typed_completion_evidence(
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective,
+            params,
         )
     }
 
@@ -229,13 +297,7 @@ impl OptimizerBackend for RealOptimizerBackend {
         Result<(String, f64), (String, f64)>,
         Option<super::de::DECompletion>,
     ) {
-        super::optimize_filters_with_de_completion(
-            x,
-            lower_bounds,
-            upper_bounds,
-            objective,
-            params,
-        )
+        super::optimize_filters_with_de_completion(x, lower_bounds, upper_bounds, objective, params)
     }
 
     fn optimize_filters_with_callback(

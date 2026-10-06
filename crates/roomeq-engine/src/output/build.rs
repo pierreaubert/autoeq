@@ -149,6 +149,7 @@ pub fn build_channel_dsp_chain_with_curves(
     }
 
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel_name.to_string(),
         plugins,
         drivers: None,
@@ -302,6 +303,7 @@ pub fn build_multidriver_dsp_chain_with_curves(
     }
 
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel_name.to_string(),
         plugins: combined_plugins,
         drivers: Some(driver_chains),
@@ -402,6 +404,7 @@ pub fn build_topology_dsp_chain_with_curves(
         .collect();
 
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel_name.to_string(),
         plugins: (!eq_filters.is_empty())
             .then(|| create_eq_plugin(eq_filters))
@@ -614,6 +617,7 @@ pub fn build_multisub_dsp_chain_advanced(
     }
 
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel_name.to_string(),
         plugins: combined_plugins,
         drivers: Some(driver_chains),
@@ -711,6 +715,7 @@ fn build_dual_driver_array_chain(
     }
 
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel_name.to_string(),
         plugins: combined_plugins,
         drivers: Some(driver_chains),
@@ -907,6 +912,7 @@ pub fn build_mixed_mode_crossover_chain_with_post_merge_eq(
     }
 
     ChannelDspChain {
+        physical_correction_target: None,
         channel: channel_name.to_string(),
         plugins,
         drivers: None,
@@ -945,6 +951,7 @@ pub fn build_supporting_source_dsp_chains(
     constrained_target: Option<&crate::Curve>,
 ) -> (ChannelDspChain, ChannelDspChain) {
     let primary = ChannelDspChain {
+        physical_correction_target: None,
         channel: logical_channel.to_string(),
         plugins: vec![],
         drivers: None,
@@ -975,6 +982,7 @@ pub fn build_supporting_source_dsp_chains(
     support_plugins.push(create_convolution_plugin(fir_wav_path));
 
     let support = ChannelDspChain {
+        physical_correction_target: None,
         channel: support_channel_name.to_string(),
         plugins: support_plugins,
         drivers: None,

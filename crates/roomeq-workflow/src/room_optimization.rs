@@ -30,7 +30,7 @@ use std::sync::{
 
 mod finalization;
 mod gd;
-mod input_snapshot;
+pub(crate) mod input_snapshot;
 mod parallel_timing;
 mod per_driver_fir;
 mod phase;
@@ -42,6 +42,9 @@ mod process;
 mod room_optimization_callback_observer;
 mod room_optimization_progress;
 mod room_optimization_result;
+pub(crate) use room_optimization_result::{
+    evaluate_preserved_target_passband, remove_routing_transfer,
+};
 pub mod seat_replay;
 #[cfg(test)]
 mod tests;
@@ -56,7 +59,36 @@ pub(crate) fn rebuild_routed_pruning_test_candidate(
     sample_rate: f64,
     directory: &Path,
 ) -> Result<()> {
-    finalization::rebuild(result, config, held_out, sample_rate, directory)
+    let baseline = result.clone();
+    let captures = seat_replay::capture_training(config)?;
+    finalization::rebuild(result, config, held_out, sample_rate, directory)?;
+    match seat_replay::validate_candidate_final_seats(
+        result,
+        &baseline,
+        &captures,
+        held_out,
+        config,
+        sample_rate,
+        directory,
+    ) {
+        Err(error @ AutoeqError::OptimizationFailed { .. }) => {
+            // Native correction refusal still permits the production fallback
+            // policy to publish an explicitly unaccepted structural baseline.
+            let store = autoeq_artifacts::MemoryArtifactStore::new();
+            finalization::publish_baseline(
+                result,
+                &captures,
+                held_out,
+                config,
+                sample_rate,
+                directory,
+                &store,
+                &error.to_string(),
+                Vec::new(),
+            )
+        }
+        verdict => verdict,
+    }
 }
 
 #[cfg(test)]
@@ -248,7 +280,9 @@ fn optimize_room_pipeline_impl_with_optional_recovery(
         &dyn crate::pipeline::FinalizationDiagnosticSink,
     )>,
 ) -> Result<RoomOptimizationResult> {
-    let snapshot = input_snapshot::freeze(request.config)?;
+    let (identity_config, identity_receipt) =
+        input_snapshot::normalize_seat_identity(request.config);
+    let snapshot = input_snapshot::freeze(&identity_config)?;
     let request = roomeq_engine::EngineRequest {
         config: &snapshot,
         ..request
@@ -392,6 +426,7 @@ fn optimize_room_pipeline_impl_with_optional_recovery(
         request.sample_rate,
         context.output_dir.unwrap_or_else(|| Path::new(".")),
     )?;
+    result.metadata.stage_outcomes.push(identity_receipt);
     result.metadata.stage_outcomes.push(input_receipt);
     crate::evidence_intake::attach_measurement_conditioning(&mut result, request.config)
         .map_err(|message| AutoeqError::OptimizationFailed { message })?;

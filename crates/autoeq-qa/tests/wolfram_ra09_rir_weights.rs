@@ -255,6 +255,7 @@ fn compact_capture(mics: &[[f64; 3]], ref_json: &serde_json::Value) -> CapturePr
         .iter()
         .enumerate()
         .map(|(index, position)| CaptureTakeProvenance {
+            seat_id: None,
             microphone_id: format!("mic-{index}"),
             device_id: "aggregate".into(),
             offset_samples: Some(100.0),

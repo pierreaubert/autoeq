@@ -152,6 +152,10 @@ pub enum ProvenanceCaptureKind {
 /// undeclared provenance degrades to unknown, never to an authorization.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct MeasurementProvenance {
+    /// Read-only runtime file/projection integrity; JSON cannot supply this receipt.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub verified_fixed_projection: Option<crate::capture_handoff::VerifiedFixedCaptureProjection>,
     /// Declared acquisition kind (default unknown).
     #[serde(default)]
     pub capture_kind: ProvenanceCaptureKind,
@@ -489,8 +493,24 @@ impl MeasurementSource {
         match self {
             Self::Single(single) => single.measurement.resolve_paths(base_dir),
             Self::Multiple(multiple) => {
+                let before = multiple
+                    .provenance
+                    .verified_fixed_projection
+                    .as_ref()
+                    .map(|_| multiple.clone());
                 for measurement in &mut multiple.measurements {
                     measurement.resolve_paths(base_dir);
+                }
+                if let Some(before) = before {
+                    multiple.provenance.verified_fixed_projection = before
+                        .provenance
+                        .verified_fixed_projection
+                        .as_ref()
+                        .and_then(|receipt| {
+                            receipt
+                                .rebind_resolved_paths(&before, multiple, base_dir)
+                                .ok()
+                        });
                 }
             }
             Self::InMemory(_) | Self::InMemoryMultiple(_) => {}
@@ -599,6 +619,7 @@ mod tests {
             measurement: MeasurementRef::Path(PathBuf::from("meas.csv")),
             speaker_name: None,
             provenance: MeasurementProvenance {
+                verified_fixed_projection: None,
                 capture_kind: ProvenanceCaptureKind::StationaryIr,
                 calibration_id: Some(String::from("spl-cal-94db")),
                 timing_reference_id: Some(String::from("loopback-1")),

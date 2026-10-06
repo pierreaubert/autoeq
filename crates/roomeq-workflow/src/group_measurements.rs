@@ -210,6 +210,253 @@ pub fn load_multisub_seat_measurements_with_frequency_samples(
     }
 }
 
+/// Resolve a declared physical seat order without positional fallbacks.
+pub(crate) fn seat_permutation(
+    canonical: &[String],
+    declared: &[String],
+) -> std::result::Result<Vec<usize>, String> {
+    use std::collections::HashSet;
+    let valid = |ids: &[String]| {
+        !ids.is_empty()
+            && ids.iter().all(|id| !id.trim().is_empty())
+            && ids.iter().collect::<HashSet<_>>().len() == ids.len()
+    };
+    if !valid(canonical) || !valid(declared) {
+        return Err("missing_or_duplicate_physical_seat_identity".into());
+    }
+    if canonical.len() != declared.len() {
+        return Err("physical_seat_identity_support_mismatch_no_singleton_broadcast".into());
+    }
+    canonical
+        .iter()
+        .map(|id| {
+            declared
+                .iter()
+                .position(|candidate| candidate == id)
+                .ok_or_else(|| "different_physical_seat_identity_sets".into())
+        })
+        .collect()
+}
+
+pub(crate) fn speaker_measurement_sources(
+    speaker: &roomeq_model::SpeakerConfig,
+) -> Vec<&MeasurementSource> {
+    use roomeq_model::SpeakerConfig;
+    match speaker {
+        SpeakerConfig::Single(source) => vec![source],
+        SpeakerConfig::Topology(topology) => topology
+            .drivers
+            .iter()
+            .map(|driver| &driver.measurement)
+            .collect(),
+        SpeakerConfig::Group(group) => group.measurements.iter().collect(),
+        SpeakerConfig::MultiSub(group) => group.subwoofers.iter().collect(),
+        SpeakerConfig::Dba(group) => group.front.iter().chain(&group.rear).collect(),
+        SpeakerConfig::Cardioid(group) => vec![&group.front, &group.rear],
+        SpeakerConfig::SupportingSource(group) => vec![&group.primary, &group.support],
+    }
+}
+
+/// Check that ordered take metadata explicitly binds each measurement's seat.
+pub(crate) fn validate_source_seat_bindings(
+    source: &MeasurementSource,
+) -> std::result::Result<(), String> {
+    let labels = seat_labels(source).ok_or("missing_physical_seat_identity")?;
+    let provenance = source.provenance();
+    let verified = match source {
+        MeasurementSource::Multiple(multiple) => provenance
+            .verified_fixed_projection
+            .as_ref()
+            .is_some_and(|receipt| receipt.matches_snapshot(multiple)),
+        _ => false,
+    };
+    if provenance.verified_fixed_projection.is_some() && !verified {
+        return Err("stale_fixed_capture_projection_receipt".into());
+    }
+    if let Some(capture) = provenance.capture.as_ref() {
+        if capture.takes.len() != labels.len() {
+            return Err("physical_acquisition_identity_support_mismatch".into());
+        }
+        for (take, label) in capture.takes.iter().zip(labels) {
+            match take.seat_id.as_deref() {
+                Some(seat) if seat == label => {}
+                Some(_) => {
+                    return Err("explicit_seat_binding_contradicts_measurement_identity".into());
+                }
+                None if verified && take.microphone_id == label => {}
+                None => return Err("physical_seat_binding_missing_from_unverified_capture".into()),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Validate identity and weight ownership for a coherent Main/Sub seat join.
+///
+/// Display labels alone authorize no physical-seat join. Explicit configured
+/// IDs or matching ordered acquisition identities and positions are required.
+pub(crate) fn routed_seat_identity_order(
+    config: &roomeq_model::RoomConfig,
+    main: &MeasurementSource,
+    sub: &roomeq_model::SpeakerConfig,
+    main_count: usize,
+    sub_count: usize,
+) -> std::result::Result<Vec<String>, String> {
+    let mut sources = vec![main];
+    sources.extend(speaker_measurement_sources(sub));
+    let declared: Vec<Vec<String>> = sources
+        .iter()
+        .map(|source| {
+            seat_labels(source).ok_or_else(|| "missing_physical_seat_identity".to_string())
+        })
+        .collect::<std::result::Result<_, _>>()?;
+    for source in &sources {
+        validate_source_seat_bindings(source)?;
+    }
+    let policy = config.optimizer.multi_seat.as_ref();
+    let explicit = policy.and_then(|policy| policy.seat_identity.as_ref());
+    let canonical = explicit.map_or_else(|| declared[0].clone(), |map| map.ids.clone());
+    if main_count != canonical.len() || sub_count != canonical.len() {
+        return Err("physical_seat_identity_support_mismatch_no_singleton_broadcast".into());
+    }
+    for labels in &declared {
+        let permutation = seat_permutation(&canonical, labels)?;
+        if permutation
+            .iter()
+            .enumerate()
+            .any(|(index, actual)| index != *actual)
+        {
+            return Err("physical_seat_identity_not_normalized_before_primary_selection".into());
+        }
+    }
+    if explicit.is_none() {
+        let mut reference_positions = None;
+        let mut reference_clock = None;
+        let mut reference_session = None;
+        for (source, labels) in sources.iter().zip(&declared) {
+            let MeasurementSource::Multiple(multiple) = source else {
+                return Err("fixed_projection_identity_requires_verified_multiple_capture".into());
+            };
+            if !multiple
+                .provenance
+                .verified_fixed_projection
+                .as_ref()
+                .is_some_and(|receipt| receipt.matches_snapshot(multiple))
+            {
+                return Err(
+                    "fixed_projection_identity_requires_verified_ref_path_take_receipt".into(),
+                );
+            }
+            let session = multiple
+                .provenance
+                .verified_fixed_projection
+                .as_ref()
+                .unwrap()
+                .session_id();
+            if reference_session
+                .as_ref()
+                .is_some_and(|reference: &String| reference != session)
+            {
+                return Err("different_verified_capture_sessions".into());
+            }
+            reference_session = Some(session.to_string());
+            let provenance = source.provenance();
+            let capture = provenance
+                .capture
+                .as_ref()
+                .ok_or_else(|| "labels_without_physical_acquisition_identity".to_string())?;
+            if capture.takes.len() != labels.len() {
+                return Err("physical_acquisition_identity_support_mismatch".into());
+            }
+            let clock = capture
+                .coherent_reference(labels.len())
+                .map_err(|reason| format!("unverified_physical_acquisition_contract: {reason}"))?;
+            if reference_clock
+                .as_ref()
+                .is_some_and(|reference: &String| reference != clock)
+            {
+                return Err("different_physical_acquisition_reference_frames".into());
+            }
+            reference_clock = Some(clock.to_string());
+            let mut positions = Vec::new();
+            for (take, label) in capture.takes.iter().zip(labels) {
+                if take.microphone_id != *label
+                    || take.position_m.iter().any(|value| !value.is_finite())
+                {
+                    return Err("physical_acquisition_identity_label_or_position_mismatch".into());
+                }
+                positions.push(take.position_m);
+            }
+            if reference_positions
+                .as_ref()
+                .is_some_and(|reference| reference != &positions)
+            {
+                return Err("different_physical_acquisition_positions".into());
+            }
+            reference_positions = Some(positions);
+        }
+    }
+    if explicit.is_some() {
+        let mut reference_positions = None;
+        for source in &sources {
+            let provenance = source.provenance();
+            if let Some(capture) = provenance.capture.as_ref() {
+                if capture.takes.len() != canonical.len() {
+                    return Err("physical_acquisition_identity_support_mismatch".into());
+                }
+                let positions: Vec<_> = capture.takes.iter().map(|take| take.position_m).collect();
+                if positions.iter().flatten().any(|value| !value.is_finite()) {
+                    return Err("invalid_physical_acquisition_position".into());
+                }
+                if reference_positions
+                    .as_ref()
+                    .is_some_and(|reference| reference != &positions)
+                {
+                    return Err(
+                        "explicit_identity_conflicts_with_physical_acquisition_positions".into(),
+                    );
+                }
+                reference_positions = Some(positions);
+            }
+        }
+    }
+    let count = canonical.len();
+    if policy.is_some_and(|policy| policy.primary_seat >= count) {
+        return Err("primary_physical_seat_identity_unavailable".into());
+    }
+    let main_weights = policy.and_then(|policy| policy.seat_weights.as_ref());
+    let optimizer_weights = config
+        .optimizer
+        .multi_measurement
+        .as_ref()
+        .and_then(|policy| policy.weights.as_ref());
+    let normalized = |weights: &Vec<f64>| -> std::result::Result<Vec<f64>, String> {
+        if weights.len() != count
+            || weights
+                .iter()
+                .any(|weight| !weight.is_finite() || *weight < 0.0)
+        {
+            return Err("invalid_physical_seat_weight_support".into());
+        }
+        let sum: f64 = weights.iter().sum();
+        if !sum.is_finite() || sum <= 0.0 {
+            return Err("nonfinite_or_zero_physical_seat_weight_sum".into());
+        }
+        Ok(weights.iter().map(|weight| weight / sum).collect())
+    };
+    let main_weights = main_weights.map(normalized).transpose()?;
+    let optimizer_weights = optimizer_weights.map(normalized).transpose()?;
+    if let (Some(main), Some(optimizer)) = (main_weights, optimizer_weights)
+        && main
+            .iter()
+            .zip(optimizer)
+            .any(|(a, b)| (*a - b).abs() > 1e-12)
+    {
+        return Err("conflicting_configured_physical_seat_weights".into());
+    }
+    Ok(canonical)
+}
+
 #[cfg(test)]
 mod tests {
     use ndarray::array;

@@ -28,6 +28,7 @@ pub(super) fn make_test_output() -> DspGraph {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![
                 PluginConfigWrapper {
@@ -72,6 +73,7 @@ pub(super) fn make_test_output() -> DspGraph {
     channels.insert(
         "right".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "right".to_string(),
             plugins: vec![
                 PluginConfigWrapper {
@@ -174,6 +176,7 @@ fn make_single_filter_output(filter_type: &str, gain_db: f64) -> DspGraph {
     channels.insert(
         "left".to_string(),
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "left".to_string(),
             plugins: vec![PluginConfigWrapper {
                 plugin_type: "eq".to_string(),
@@ -229,6 +232,7 @@ pub(super) fn make_routed_bass_output() -> DspGraph {
         channels.insert(
             channel.to_string(),
             ChannelDspChain {
+                physical_correction_target: None,
                 channel: channel.to_string(),
                 plugins: vec![
                     PluginConfigWrapper {

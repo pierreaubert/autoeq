@@ -34,6 +34,10 @@ pub enum CaptureCorrection {
 pub struct CaptureTakeProvenance {
     /// Physical microphone identity, unique within this source capture.
     pub microphone_id: String,
+    /// Declared physical listening-seat identity, independent of microphone hardware.
+    /// Missing preserves legacy JSON; it never supplies an inferred seat binding.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seat_id: Option<String>,
     /// Actual negotiated input device identity.
     pub device_id: String,
     /// Input sample index corresponding to reference sample zero.
@@ -77,6 +81,46 @@ pub struct CaptureProvenance {
 }
 
 impl CaptureProvenance {
+    /// Reorder all measurement-parallel provenance using one complete permutation.
+    ///
+    /// # Errors
+    /// Rejects incomplete permutations or contradictory per-microphone energy support.
+    pub fn reordered_for_measurements(&self, order: &[usize]) -> Result<Self, String> {
+        let count = self.takes.len();
+        let mut unique = HashSet::new();
+        if order.len() != count
+            || order
+                .iter()
+                .any(|index| *index >= count || !unique.insert(*index))
+        {
+            return Err("capture provenance permutation is not a complete bijection".into());
+        }
+        let mut capture = self.clone();
+        capture.takes = order
+            .iter()
+            .map(|index| self.takes[*index].clone())
+            .collect();
+        if let Some(report) = capture.reflection_report.as_mut() {
+            for arrival in report
+                .direct_sound
+                .iter_mut()
+                .chain(&mut report.early_reflections)
+            {
+                if arrival.microphone_energy_db.is_empty() {
+                    continue;
+                }
+                if arrival.microphone_energy_db.len() != count {
+                    return Err(
+                        "reflection microphone-energy support disagrees with capture order".into(),
+                    );
+                }
+                let energy = arrival.microphone_energy_db.clone();
+                arrival.microphone_energy_db = order.iter().map(|index| energy[*index]).collect();
+            }
+        }
+        Ok(capture)
+    }
+
     /// Validate the shared reference for a requested upper frequency.
     ///
     /// Each microphone's conditional clock bound must imply no more than nine
@@ -204,6 +248,7 @@ mod tests {
             reflection_report: None,
             takes: (0..2)
                 .map(|index| CaptureTakeProvenance {
+                    seat_id: None,
                     microphone_id: format!("mic-{index}"),
                     device_id: "aggregate-input".into(),
                     offset_samples: Some(123.25),
@@ -221,6 +266,50 @@ mod tests {
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn capture_permutation_preserves_reflection_energy_ownership() {
+        let mut evidence = capture();
+        evidence.reflection_report = Some(
+            serde_json::from_value(serde_json::json!({
+                "source_id": "L", "direct_sound": {
+                    "arrival_ms": 1.0, "relative_ms": 0.0, "level_db": 0.0,
+                    "microphone_energy_db": [3.0, -7.0], "direction": null,
+                    "mirror_ambiguous": false, "residual_samples": null, "band_hz": null,
+                    "issues": []
+                }, "early_reflections": [], "issues": []
+            }))
+            .unwrap(),
+        );
+        let reordered = evidence.reordered_for_measurements(&[1, 0]).unwrap();
+        assert_eq!(reordered.takes[0].microphone_id, "mic-1");
+        assert_eq!(
+            reordered
+                .reflection_report
+                .as_ref()
+                .unwrap()
+                .direct_sound
+                .as_ref()
+                .unwrap()
+                .microphone_energy_db,
+            vec![-7.0, 3.0]
+        );
+        assert_eq!(
+            reordered.reordered_for_measurements(&[1, 0]).unwrap(),
+            evidence
+        );
+        assert!(evidence.reordered_for_measurements(&[0, 0]).is_err());
+        evidence
+            .reflection_report
+            .as_mut()
+            .unwrap()
+            .direct_sound
+            .as_mut()
+            .unwrap()
+            .microphone_energy_db
+            .pop();
+        assert!(evidence.reordered_for_measurements(&[1, 0]).is_err());
     }
 
     #[test]
@@ -324,5 +413,45 @@ mod tests {
             "fixed-emitter-1"
         );
         assert!(saved["provenance"]["capture"]["takes"][1]["residual_uncertainty_us"].is_null());
+    }
+    #[test]
+    fn physical_seat_binding_is_optional_and_legacy_json_roundtrips_unchanged() {
+        let old = serde_json::to_value(capture()).unwrap();
+        assert!(
+            old["takes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|take| take.get("seat_id").is_none())
+        );
+        let parsed: CaptureProvenance = serde_json::from_value(old.clone()).unwrap();
+        assert!(parsed.takes.iter().all(|take| take.seat_id.is_none()));
+        assert_eq!(serde_json::to_value(parsed).unwrap(), old);
+        let mut bound = capture();
+        bound.takes[0].seat_id = Some("seat-independent-of-microphone-hardware".into());
+        let json = serde_json::to_value(&bound).unwrap();
+        let roundtrip: CaptureProvenance = serde_json::from_value(json).unwrap();
+        assert_eq!(roundtrip.takes[0].seat_id, bound.takes[0].seat_id);
+        assert_eq!(roundtrip.takes[0].microphone_id, "mic-0");
+    }
+
+    #[test]
+    fn json_and_schema_cannot_supply_runtime_projection_receipt() {
+        let provenance: crate::MeasurementProvenance = serde_json::from_value(serde_json::json!({
+            "verified_fixed_projection": {"source_id": "forged", "session_id": "forged", "projection_sha256": "forged"}
+        })).unwrap();
+        assert!(provenance.verified_fixed_projection.is_none());
+        assert!(
+            serde_json::to_value(provenance)
+                .unwrap()
+                .get("verified_fixed_projection")
+                .is_none()
+        );
+        let schema = schemars::schema_for!(crate::MeasurementProvenance);
+        assert!(
+            serde_json::to_value(schema).unwrap()["properties"]
+                .get("verified_fixed_projection")
+                .is_none()
+        );
     }
 }

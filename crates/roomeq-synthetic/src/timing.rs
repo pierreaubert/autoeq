@@ -224,29 +224,20 @@ pub fn uncertainty_band_fixture(params: &UncertaintyBandParams) -> Result<Uncert
                 .to_string(),
         });
     }
-    let raw_curve = crate::generate_flat_curve(
-        params.min_freq_hz,
-        params.max_freq_hz,
-        params.n_points,
-    );
+    let raw_curve =
+        crate::generate_flat_curve(params.min_freq_hz, params.max_freq_hz, params.n_points);
     let expected_degraded_mask: Vec<bool> = raw_curve
         .freq
         .iter()
         .map(|f| *f >= params.band_lo_hz && *f <= params.band_hi_hz)
         .collect();
-    if !expected_degraded_mask.iter().any(|b| *b)
-        || expected_degraded_mask.iter().all(|b| *b)
-    {
+    if !expected_degraded_mask.iter().any(|b| *b) || expected_degraded_mask.iter().all(|b| *b) {
         return Err(AutoeqError::InvalidConfiguration {
             message: "planted uncertainty band must cover a strict non-empty subset of the grid"
                 .to_string(),
         });
     }
-    let noise = gaussian_noise_vec(
-        raw_curve.spl.len(),
-        params.band_noise_rms_db,
-        params.seed,
-    );
+    let noise = gaussian_noise_vec(raw_curve.spl.len(), params.band_noise_rms_db, params.seed);
     let mut degraded_spl = raw_curve.spl.clone();
     for (i, degraded) in expected_degraded_mask.iter().enumerate() {
         if *degraded {
@@ -315,8 +306,9 @@ pub fn coverage_gap_fixture(params: &CoverageGapParams) -> Result<CoverageGapFix
         || params.gap_lo_hz >= params.gap_hi_hz
     {
         return Err(AutoeqError::InvalidConfiguration {
-            message: "coverage gap fixture requires ordered positive grids and an ordered finite gap"
-                .to_string(),
+            message:
+                "coverage gap fixture requires ordered positive grids and an ordered finite gap"
+                    .to_string(),
         });
     }
     let raw_curve =
@@ -449,8 +441,7 @@ mod tests {
     #[test]
     fn synthetic_clock_drift_known_truth() {
         // F01: 50 ppm over 20 s accumulates exactly 1 ms (sign preserved).
-        let fixture =
-            clock_drift_fixture(&ClockDriftParams::f01()).expect("clock drift fixture");
+        let fixture = clock_drift_fixture(&ClockDriftParams::f01()).expect("clock drift fixture");
         assert!(
             (fixture.expected_total_offset_s - 1e-3).abs() < 1e-9,
             "50 ppm over 20 s must be 1 ms, got {} s",
@@ -513,12 +504,16 @@ mod tests {
             onset(&fixture.recentered_ir_b),
             "recentered onsets must align"
         );
-        let delay_a =
-            (fixture.params.true_delay_a_s * fixture.params.sample_rate_hz) as usize;
-        let delay_b =
-            (fixture.params.true_delay_b_s * fixture.params.sample_rate_hz) as usize;
-        assert_eq!(onset(&fixture.raw_ir_a) - onset(&fixture.recentered_ir_a), delay_a);
-        assert_eq!(onset(&fixture.raw_ir_b) - onset(&fixture.recentered_ir_b), delay_b);
+        let delay_a = (fixture.params.true_delay_a_s * fixture.params.sample_rate_hz) as usize;
+        let delay_b = (fixture.params.true_delay_b_s * fixture.params.sample_rate_hz) as usize;
+        assert_eq!(
+            onset(&fixture.raw_ir_a) - onset(&fixture.recentered_ir_a),
+            delay_a
+        );
+        assert_eq!(
+            onset(&fixture.raw_ir_b) - onset(&fixture.recentered_ir_b),
+            delay_b
+        );
         assert_eq!(
             fixture.shared_reference_id, SHARED_REFERENCE_ID,
             "both captures share one timing reference"
@@ -531,7 +526,10 @@ mod tests {
         // Mask matches the analytic band expectation bin by bin.
         for (i, f) in fixture.raw_curve.freq.iter().enumerate() {
             let expected = *f >= 1500.0 && *f <= 3000.0;
-            assert_eq!(fixture.expected_degraded_mask[i], expected, "bin {i} at {f} Hz");
+            assert_eq!(
+                fixture.expected_degraded_mask[i], expected,
+                "bin {i} at {f} Hz"
+            );
         }
         // Outside the band the observation is bit-identical to ground truth.
         for (i, degraded) in fixture.expected_degraded_mask.iter().enumerate() {
@@ -605,10 +603,8 @@ mod tests {
         assert_eq!(first.degraded_curve.spl, second.degraded_curve.spl);
         assert_eq!(first.coherence, second.coherence);
 
-        let drift_a =
-            clock_drift_fixture(&ClockDriftParams::f01()).expect("drift");
-        let drift_b =
-            clock_drift_fixture(&ClockDriftParams::f01()).expect("drift");
+        let drift_a = clock_drift_fixture(&ClockDriftParams::f01()).expect("drift");
+        let drift_b = clock_drift_fixture(&ClockDriftParams::f01()).expect("drift");
         assert_eq!(drift_a.observed_markers_s, drift_b.observed_markers_s);
 
         // A different seed changes the declared stochastic component only:
@@ -638,8 +634,8 @@ mod tests {
 
     #[test]
     fn synthetic_magnitude_only_attaches_no_phase_or_sensitivity() {
-        let sample = spatial_magnitude_only_sample(20.0, 20_000.0, 200, 5)
-            .expect("magnitude-only sample");
+        let sample =
+            spatial_magnitude_only_sample(20.0, 20_000.0, 200, 5).expect("magnitude-only sample");
         assert_eq!(sample.capture_kind, CaptureKind::SpatialMagnitude);
         assert!(
             sample.curve.phase.is_none(),
@@ -650,18 +646,15 @@ mod tests {
             "magnitude-only capture must not gain fabricated coherence"
         );
 
-        let unknown = calibration_unknown_sample(20.0, 20_000.0, 200, 5)
-            .expect("calibration-unknown sample");
+        let unknown =
+            calibration_unknown_sample(20.0, 20_000.0, 200, 5).expect("calibration-unknown sample");
         assert_eq!(unknown.calibration, CalibrationStatus::Unknown);
         assert!(
             unknown.curve.phase.is_none(),
             "calibration-unknown capture must not gain fabricated phase"
         );
         assert!(
-            !matches!(
-                unknown.calibration,
-                CalibrationStatus::KnownDbfsPerPa(_)
-            ),
+            !matches!(unknown.calibration, CalibrationStatus::KnownDbfsPerPa(_)),
             "unknown calibration must not carry a sensitivity value"
         );
     }

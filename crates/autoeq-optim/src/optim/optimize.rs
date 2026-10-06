@@ -7,6 +7,65 @@ use super::types::OptimProgressCallback;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Reduce positive gains until the configured composite ceiling is feasible.
+///
+/// Penalty backends can return a slightly infeasible winner. Preserve centers,
+/// Q, cuts, gain bounds, and minimum active gain; verify the exact constraint
+/// rather than accepting a numerical tolerance. A nonfeasible lower endpoint
+/// is refused, including fixed boosts that cannot satisfy the ceiling.
+fn project_scalar_ceiling(
+    x: &[f64],
+    lower_bounds: &[f64],
+    data: &ObjectiveData,
+) -> Result<Vec<f64>, String> {
+    let violation = |candidate: &[f64]| {
+        super::compute::compute_ceiling_violation_into(
+            &data.freqs,
+            candidate,
+            data.srate,
+            data.peq_model,
+            data.max_db,
+        )
+    };
+    if data.max_db <= 0.0 || violation(x) == 0.0 {
+        return Ok(x.to_vec());
+    }
+    let width = crate::param_utils::params_per_filter(data.peq_model);
+    let gain_offset = width - 1;
+    let mut endpoint = x.to_vec();
+    for index in (gain_offset..x.len()).step_by(width) {
+        if x[index] > 0.0 {
+            endpoint[index] = lower_bounds[index].max(data.min_db.max(0.0)).min(x[index]);
+        }
+    }
+    if violation(&endpoint) != 0.0 {
+        return Err(String::from(
+            "composite ceiling has no feasible gain-reduction endpoint",
+        ));
+    }
+    let mut feasible = endpoint.clone();
+    let mut feasible_scale = 0.0;
+    let mut infeasible_scale = 1.0;
+    // Fifty-three binary subdivisions resolve the f64 gain scale. These are
+    // constraint-response checks, not additional optimizer objective calls.
+    for _ in 0..53 {
+        let scale = (feasible_scale + infeasible_scale) * 0.5;
+        let mut candidate = x.to_vec();
+        for index in (gain_offset..x.len()).step_by(width) {
+            if x[index] > endpoint[index] {
+                candidate[index] = endpoint[index] + scale * (x[index] - endpoint[index]);
+            }
+        }
+        if violation(&candidate) == 0.0 {
+            feasible = candidate;
+            feasible_scale = scale;
+        } else {
+            infeasible_scale = scale;
+        }
+    }
+    Ok(feasible)
+}
+
 /// Finalize one backend winner through the shared envelope choke-point.
 ///
 /// Every optimizer backend funnels through the three dispatchers below, so
@@ -44,6 +103,14 @@ fn finalize_dispatch_winner(
         }
     } else {
         x.to_vec()
+    };
+    let repaired = if super::constraint_envelope::is_peq_layout_loss(data.loss_type) {
+        match project_scalar_ceiling(&repaired, lower_bounds, data) {
+            Ok(repaired) => repaired,
+            Err(reason) => return failed(reason),
+        }
+    } else {
+        repaired
     };
     let adjusted = repaired != x;
     match finalize_candidate(candidate_id, &repaired, data, &owned.as_spec()) {
@@ -97,7 +164,7 @@ fn finalize_dispatch_winner(
             }
             x.copy_from_slice(&finalized.params);
             let status = if adjusted {
-                format!("{algo}; minimum-spacing projection applied")
+                format!("{algo}; constraint feasibility projection applied")
             } else {
                 algo
             };
@@ -303,7 +370,7 @@ impl OptimizerRunEvidence {
             || (lower_status.contains("not converged")
                 && (lower_status.contains("maximum")
                     || lower_status.contains("maxeval")
-                    || lower_status.contains("limit")
+                    || contains_status_word(&lower_status, "limit")
                     || lower_status.contains("budget")))
         {
             OptimizerTermination::EvaluationLimit
@@ -492,6 +559,12 @@ fn parse_evaluation_count(status: &str) -> Option<usize> {
     (!digits.is_empty()).then(|| digits.parse().ok()).flatten()
 }
 
+fn contains_status_word(status: &str, word: &str) -> bool {
+    status
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .any(|part| part == word)
+}
+
 fn max_bound_violation(parameters: &[f64], lower_bounds: &[f64], upper_bounds: &[f64]) -> f64 {
     if parameters.len() != lower_bounds.len() || parameters.len() != upper_bounds.len() {
         return f64::INFINITY;
@@ -580,12 +653,18 @@ pub fn optimize_filters_with_de_completion(
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
     params: &crate::OptimParams,
-) -> (Result<(String, f64), (String, f64)>, Option<super::de::DECompletion>) {
+) -> super::optimizer_backend::OptimizerBackendDeCompletion {
     let Some(backend) = super::registry::resolve(&params.algo) else {
-        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+        return (
+            optimize_filters(x, lower_bounds, upper_bounds, objective_data, params),
+            None,
+        );
     };
     if !backend.name().eq_ignore_ascii_case("autoeq:de") {
-        return (optimize_filters(x, lower_bounds, upper_bounds, objective_data, params), None);
+        return (
+            optimize_filters(x, lower_bounds, upper_bounds, objective_data, params),
+            None,
+        );
     }
     let snapshot = objective_data.clone();
     let (result, completion) = super::de::optimize_filters_autoeq_with_completion(
@@ -610,43 +689,66 @@ pub fn optimize_filters_with_de_completion(
     )
 }
 
-/// Preserve same-invocation search diagnostics on the ordinary MH route.
-///
-/// This dispatch performs the same solver call and candidate finalization as
-/// [`optimize_filters_with_de_completion`]. The extra value is observational:
-/// it does not classify a generation-limit result as converged.
+/// Preserve DE and search diagnostics from one ordinary dispatch.
 pub fn optimize_filters_with_completion_evidence(
     x: &mut [f64],
     lower_bounds: &[f64],
     upper_bounds: &[f64],
     objective_data: ObjectiveData,
     params: &crate::OptimParams,
-) -> (
-    Result<(String, f64), (String, f64)>,
-    Option<super::de::DECompletion>,
-    Option<super::backend::BackendSearchEvidence>,
-) {
+) -> super::optimizer_backend::OptimizerBackendCompletionEvidence {
+    let (result, de_completion, search_evidence, _) =
+        optimize_filters_with_typed_completion_evidence(
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective_data,
+            params,
+        );
+    (result, de_completion, search_evidence)
+}
+
+/// Preserve typed completion and search diagnostics from one ordinary dispatch.
+///
+/// Completion is taken directly from the backend's typed report and is never
+/// inferred from status text. Search diagnostics cannot override a budget stop.
+pub fn optimize_filters_with_typed_completion_evidence(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+) -> super::optimizer_backend::OptimizerBackendTypedCompletionEvidence {
     if let Some(backend) = super::registry::resolve(&params.algo)
-        && backend.name().starts_with("mh:")
+        && (backend.name().starts_with("mh:")
+            || backend.name().eq_ignore_ascii_case("autoeq:cobyla"))
     {
         let snapshot = objective_data.clone();
-        let output = backend.optimize_with_report(
-            x, lower_bounds, upper_bounds, objective_data, params, None,
-        );
-        let normalized = normalize_backend_output(output, backend.name(), x);
-        return (
-            finalize_dispatch_winner(
-                &params.algo, x, lower_bounds, upper_bounds, &snapshot, params,
-                normalized.result,
-            ),
+        let (output, backend_completion) = backend.optimize_with_typed_completion(
+            x,
+            lower_bounds,
+            upper_bounds,
+            objective_data,
+            params,
             None,
-            normalized.search_evidence,
         );
+        let normalized =
+            normalize_backend_output_with_completion(output, backend_completion, backend.name(), x);
+        let result = finalize_dispatch_winner(
+            &params.algo,
+            x,
+            lower_bounds,
+            upper_bounds,
+            &snapshot,
+            params,
+            normalized.result,
+        );
+        let completion = normalized.backend_completion.filter(|_| result.is_ok());
+        return (result, None, normalized.search_evidence, completion);
     }
-    let (result, de_completion) = optimize_filters_with_de_completion(
-        x, lower_bounds, upper_bounds, objective_data, params,
-    );
-    (result, de_completion, None)
+    let (result, de_completion) =
+        optimize_filters_with_de_completion(x, lower_bounds, upper_bounds, objective_data, params);
+    (result, de_completion, None, None)
 }
 
 /// Optimize filters and return structured termination/convergence evidence.
@@ -711,6 +813,7 @@ struct ControlledOptimizationDispatch {
     validation_stop_refusal: bool,
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     search_evidence: Option<super::backend::BackendSearchEvidence>,
+    backend_completion: Option<OptimizerBackendCompletion>,
 }
 
 struct NormalizedBackendOutput {
@@ -718,6 +821,18 @@ struct NormalizedBackendOutput {
     pareto_report: Option<roomeq_model::ParetoDispatchReport>,
     validation_stop_refusal: bool,
     search_evidence: Option<super::backend::BackendSearchEvidence>,
+    backend_completion: Option<OptimizerBackendCompletion>,
+}
+
+fn normalize_backend_output_with_completion(
+    output: FilterOptimizerOutput,
+    completion: Option<OptimizerBackendCompletion>,
+    expected_backend: &str,
+    parameters: &[f64],
+) -> NormalizedBackendOutput {
+    let mut normalized = normalize_backend_output(output, expected_backend, parameters);
+    normalized.backend_completion = completion;
+    normalized
 }
 
 fn normalize_backend_output(
@@ -731,6 +846,7 @@ fn normalize_backend_output(
             pareto_report: None,
             validation_stop_refusal: true,
             search_evidence: None,
+            backend_completion: None,
         },
         FilterOptimizerOutput::CompletedWithSearchEvidence { result, search } => {
             NormalizedBackendOutput {
@@ -738,6 +854,7 @@ fn normalize_backend_output(
                 pareto_report: None,
                 validation_stop_refusal: false,
                 search_evidence: Some(search),
+                backend_completion: None,
             }
         }
         FilterOptimizerOutput::Completed {
@@ -753,6 +870,7 @@ fn normalize_backend_output(
                     pareto_report: None,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 };
             }
             let Some(report) = pareto_report.as_ref() else {
@@ -761,6 +879,7 @@ fn normalize_backend_output(
                     pareto_report: None,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 };
             };
             let invalid = report.validate().err().or_else(|| {
@@ -791,12 +910,14 @@ fn normalize_backend_output(
                     pareto_report: None,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 },
                 None => NormalizedBackendOutput {
                     result,
                     pareto_report,
                     validation_stop_refusal: false,
                     search_evidence: None,
+                    backend_completion: None,
                 },
             }
         }
@@ -830,6 +951,7 @@ fn optimize_filters_with_run_control_dispatch(
         validation_stop_refusal: false,
         pareto_report: None,
         search_evidence: None,
+        backend_completion: None,
     };
     let algorithm = algo_override.unwrap_or(&params.algo);
     let Some(backend) = super::registry::resolve(algorithm) else {
@@ -903,6 +1025,7 @@ fn optimize_filters_with_run_control_dispatch(
             validation_stop_refusal: false,
             pareto_report: None,
             search_evidence: None,
+            backend_completion: None,
         };
     }
 
@@ -933,7 +1056,7 @@ fn optimize_filters_with_run_control_dispatch(
     } else {
         None
     };
-    let backend_output = backend.optimize_with_report(
+    let (backend_output, backend_completion) = backend.optimize_with_typed_completion(
         x,
         lower_bounds,
         upper_bounds,
@@ -946,7 +1069,13 @@ fn optimize_filters_with_run_control_dispatch(
         pareto_report,
         validation_stop_refusal: typed_validation_stop,
         search_evidence,
-    } = normalize_backend_output(backend_output, backend.name(), x);
+        backend_completion,
+    } = normalize_backend_output_with_completion(
+        backend_output,
+        backend_completion,
+        backend.name(),
+        x,
+    );
     let snapshot = run_control.snapshot();
     let stage_snapshot_before_finalization = run_control.stage_snapshot();
     let stop_before_finalization = snapshot.cancellation_requested
@@ -988,6 +1117,11 @@ fn optimize_filters_with_run_control_dispatch(
             && !snapshot.deadline_reached
             && report.returned_parameters == x
     });
+    let backend_completion = if finalized.is_ok() {
+        backend_completion
+    } else {
+        None
+    };
     ControlledOptimizationDispatch {
         result: finalized,
         dispatch: OptimizerDispatchOutcome::BackendInvoked,
@@ -995,6 +1129,7 @@ fn optimize_filters_with_run_control_dispatch(
         validation_stop_refusal,
         pareto_report,
         search_evidence,
+        backend_completion,
     }
 }
 
@@ -1069,6 +1204,7 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
     let validation_stop_refusal = dispatch_result.validation_stop_refusal;
     let pareto_report = dispatch_result.pareto_report;
     let search_evidence = dispatch_result.search_evidence;
+    let backend_completion = dispatch_result.backend_completion;
     let snapshot = run_control.snapshot();
     let stage_snapshot = run_control.stage_snapshot();
     let algorithm = algo_override.unwrap_or(&params.algo);
@@ -1098,6 +1234,11 @@ pub fn optimize_filters_with_run_control_and_algo_override_detailed(
         if result.is_ok() {
             evidence.apply_backend_completion(search.completion);
         }
+    }
+    if result.is_ok()
+        && let Some(completion) = backend_completion
+    {
+        evidence.apply_backend_completion(completion);
     }
     if matches!(
         dispatch,
@@ -1153,7 +1294,15 @@ pub fn optimize_filters_with_algo_override(
         .ok_or_else(|| (format!("Unknown algorithm: {}", algo), f64::INFINITY))?;
     let snapshot = objective_data.clone();
     let result = backend.optimize(x, lower_bounds, upper_bounds, objective_data, params, None);
-    finalize_dispatch_winner(algo, x, lower_bounds, upper_bounds, &snapshot, params, result)
+    finalize_dispatch_winner(
+        algo,
+        x,
+        lower_bounds,
+        upper_bounds,
+        &snapshot,
+        params,
+        result,
+    )
 }
 
 /// Optimize filter parameters with a progress callback for per-iteration updates.
@@ -1194,7 +1343,13 @@ pub fn optimize_filters_with_callback(
             callback,
         );
         return finalize_dispatch_winner(
-            backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+            backend.name(),
+            x,
+            lower_bounds,
+            upper_bounds,
+            &snapshot,
+            params,
+            result,
         );
     }
 
@@ -1228,7 +1383,13 @@ pub fn optimize_filters_with_callback(
         cb_for_backend,
     );
     finalize_dispatch_winner(
-        backend.name(), x, lower_bounds, upper_bounds, &snapshot, params, result,
+        backend.name(),
+        x,
+        lower_bounds,
+        upper_bounds,
+        &snapshot,
+        params,
+        result,
     )
 }
 
@@ -1649,6 +1810,169 @@ mod staged_run_control_tests {
         let (lower, upper) = super::super::setup::setup_bounds(&params);
         let initial = super::super::setup::initial_guess(&params, &lower, &upper);
         (objective, params, lower, upper, initial)
+    }
+
+    #[test]
+    fn scalar_ceiling_projection_repairs_captured_penalty_winner_without_relaxation() {
+        let (mut objective, _, _, _, _) = scalar_fixture();
+        objective.freqs = std::sync::Arc::new(Array1::from_iter(
+            (0..=120).map(|index| 20.0 + 4.0 * f64::from(index)),
+        ));
+        objective.max_db = 4.0;
+        objective.min_db = -9.0;
+        objective.peq_model = crate::PeqModel::Pk;
+        // Retained medium QA seed 424283: the penalty winner exceeds the
+        // summed 4 dB ceiling although both individual boosts obey their box.
+        let original = vec![
+            2.0403492166056214,
+            5.999999763230809,
+            3.999999618977638,
+            2.203774829173711,
+            3.960197449423821,
+            4.0,
+            2.3297769726370374,
+            4.968916657871044,
+            -9.0,
+            2.659911160584285,
+            3.9715693590382495,
+            -6.51035342083007,
+        ];
+        let lower: Vec<_> = (0..4).flat_map(|_| [20.0_f64.log10(), 0.5, -9.0]).collect();
+        let before = super::super::compute::compute_ceiling_violation_into(
+            &objective.freqs,
+            &original,
+            objective.srate,
+            objective.peq_model,
+            4.0,
+        );
+        assert!(
+            before > 0.0,
+            "the captured winner must reproduce the violation: {before}"
+        );
+        let repaired = project_scalar_ceiling(&original, &lower, &objective)
+            .expect("boost reductions admit a feasible ceiling");
+        assert_eq!(
+            super::super::compute::compute_ceiling_violation_into(
+                &objective.freqs,
+                &repaired,
+                objective.srate,
+                objective.peq_model,
+                4.0,
+            ),
+            0.0
+        );
+        for (before, after) in original
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .zip(repaired.as_chunks::<3>().0.iter())
+        {
+            assert_eq!(
+                &before[..2],
+                &after[..2],
+                "frequency and Q remain unchanged"
+            );
+            if before[2] <= 0.0 {
+                assert_eq!(before[2], after[2], "cuts remain unchanged");
+            } else {
+                assert!(after[2] >= 0.0 && after[2] <= before[2]);
+                assert!(
+                    before[2] - after[2] < 1e-4,
+                    "repair the defect without discarding the correction"
+                );
+            }
+        }
+        // Independent complex biquad transfer evaluation bypasses the cached
+        // polynomial response used by the production ceiling constraint.
+        for frequency in objective.freqs.iter().copied() {
+            let db: f64 = repaired
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|filter| {
+                    crate::iir::Biquad::new(
+                        crate::iir::BiquadFilterType::Peak,
+                        10.0_f64.powf(filter[0]),
+                        objective.srate,
+                        filter[1],
+                        filter[2],
+                    )
+                    .complex_response(frequency)
+                    .norm()
+                    .log10()
+                        * 20.0
+                })
+                .sum();
+            assert!(
+                db <= 4.0 + 1e-8,
+                "independent response {db} dB at {frequency} Hz"
+            );
+        }
+        assert_eq!(
+            project_scalar_ceiling(&repaired, &lower, &objective).expect("already feasible winner"),
+            repaired
+        );
+        let mut fixed = lower;
+        fixed[2] = original[2];
+        fixed[5] = original[5];
+        assert!(
+            project_scalar_ceiling(&original, &fixed, &objective).is_err(),
+            "fixed boosts cannot be falsely certified feasible"
+        );
+    }
+
+    #[test]
+    fn scalar_ceiling_projection_preserves_active_gain_floor_and_fixed_boost() {
+        let (mut objective, _, _, _, _) = scalar_fixture();
+        objective.freqs = std::sync::Arc::new(Array1::from_iter(
+            (0..=120).map(|index| 20.0 + 4.0 * f64::from(index)),
+        ));
+        objective.min_db = 2.0;
+        objective.max_db = 4.0;
+        let original = vec![100.0_f64.log10(), 0.8, 4.0, 200.0_f64.log10(), 0.8, 4.0];
+        let lower = vec![20.0_f64.log10(), 0.5, 0.0, 20.0_f64.log10(), 0.5, 0.0];
+        let repaired = project_scalar_ceiling(&original, &lower, &objective)
+            .expect("active-gain floor admits a feasible composite response");
+        assert!(repaired[2] >= 2.0 && repaired[5] >= 2.0);
+        assert!(repaired[2] < 4.0 && repaired[5] < 4.0);
+        assert_eq!(
+            crate::constraints::viol_min_gain_from_xs(&repaired, objective.peq_model, 2.0),
+            0.0
+        );
+        assert_eq!(
+            super::super::compute::compute_ceiling_violation_into(
+                &objective.freqs,
+                &repaired,
+                objective.srate,
+                objective.peq_model,
+                4.0,
+            ),
+            0.0
+        );
+        let mut fixed = lower;
+        fixed[2] = original[2];
+        objective.max_db = 5.0;
+        let mixed = project_scalar_ceiling(&original, &fixed, &objective)
+            .expect("one free boost can satisfy the ceiling with the other fixed");
+        assert_eq!(mixed[2], original[2]);
+        assert!(mixed[5] >= 2.0 && mixed[5] < original[5]);
+        assert_eq!(&mixed[..2], &original[..2]);
+        assert_eq!(&mixed[3..5], &original[3..5]);
+        assert_eq!(
+            super::super::compute::compute_ceiling_violation_into(
+                &objective.freqs,
+                &mixed,
+                objective.srate,
+                objective.peq_model,
+                5.0,
+            ),
+            0.0
+        );
+        objective.max_db = 1.0;
+        assert!(
+            project_scalar_ceiling(&original, &fixed, &objective).is_err(),
+            "an incompatible floor and fixed boost must refuse"
+        );
     }
 
     #[test]

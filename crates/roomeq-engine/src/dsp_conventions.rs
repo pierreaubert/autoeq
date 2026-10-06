@@ -126,6 +126,7 @@ mod tests {
 
     fn chain(plugins: Vec<PluginConfigWrapper>) -> ChannelDspChain {
         ChannelDspChain {
+            physical_correction_target: None,
             channel: "L".to_string(),
             plugins,
             drivers: None,

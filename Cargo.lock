@@ -6814,3 +6814,7 @@ dependencies = [
 [[patch.unused]]
 name = "zed-font-kit"
 version = "0.14.1-zed"
+
+[[patch.unused]]
+name = "oo7"
+version = "0.7.0"

@@ -557,6 +557,7 @@ name = "autoeq-core"
 version = "0.5.12"
 dependencies = [
  "clap",
+ "libm",
  "log",
  "math-iir-fir",
  "ndarray",

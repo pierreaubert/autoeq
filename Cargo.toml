@@ -101,7 +101,7 @@ log = "0.4.28"
 num_cpus = "1.17"
 num-complex = "0.4"
 nalgebra = { version = "0.35", default-features = false, features = ["std"] }
-metaheuristics-nature = { version = "10.1", git = "https://github.com/pierreaubert/metaheuristics-nature-rs.git", rev = "4f0b603c521e0b4e20239c827f1a0975442bb740" }
+metaheuristics-nature = { version = "10.1", path = "../sotf-3rdparties/metaheuristics-nature-rs" }
 rustfft = "6.4"
 hound = "3.5"
 # Reports are self-contained HTML+WASM documents (no Plotly dependency).
@@ -304,24 +304,24 @@ incremental = false
 # Vello's registry dependencies must resolve to the same pinned Zed fork as
 # gpui-toolkit. Patches in a sibling workspace are not inherited here.
 [patch.crates-io]
-predicates = { path = "../math-audio/crates/3rdparties/predicates" }
+predicates = { path = "../sotf-3rdparties/predicates" }
 # SOTF owned maintenance forks; upstream 2.1.1, local version 2.1.2.
-derive_more = { path = "../math-audio/crates/3rdparties/derive_more" }
-derive_more-impl = { path = "../math-audio/crates/3rdparties/derive_more-impl" }
+derive_more = { path = "../sotf-3rdparties/derive_more" }
+derive_more-impl = { path = "../sotf-3rdparties/derive_more-impl" }
 
-oo7 = { path = "../gpui-toolkit/crates/3rdparties/crypto-forks/oo7" }
+oo7 = { path = "../sotf-3rdparties/oo7" }
 # Match GPUI compatibility forks: workspace patches are not inherited.
-fontconfig-parser = { git = "https://github.com/pierreaubert/fontconfig-parser.git", rev = "d247c91f5a57edd6ba6eb26e884d4904dbfbc87e" }
-psm = { git = "https://github.com/pierreaubert/stacker.git", rev = "48bf8e3abfb350de9387a675275a629e4daf9717" }
-nalgebra = { git = "https://github.com/pierreaubert/nalgebra.git", rev = "a42573dbc9649af62fb07b469c98c852e62720fd" }
-block = { path = "../gpui-toolkit/crates/3rdparties/block" }
-objc = { path = "../gpui-toolkit/crates/3rdparties/objc" }
-async-task = { git = "https://github.com/smol-rs/async-task.git", rev = "b4486cd71e4e94fbda54ce6302444de14f4d190e" }
-wgpu = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
-wgpu-core = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
-wgpu-hal = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
-wgpu-types = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
-naga = { git = "https://github.com/zed-industries/wgpu.git", rev = "357a0c56e0070480ad9daea5d2eaa83150b79e88" }
+fontconfig-parser = { path = "../sotf-3rdparties/fontconfig-parser" }
+psm = { path = "../sotf-3rdparties/stacker/psm" }
+nalgebra = { path = "../sotf-3rdparties/nalgebra" }
+block = { path = "../sotf-3rdparties/block" }
+objc = { path = "../sotf-3rdparties/objc" }
+async-task = { path = "../sotf-3rdparties/async-task" }
+wgpu = { path = "../sotf-3rdparties/wgpu/wgpu" }
+wgpu-core = { path = "../sotf-3rdparties/wgpu/wgpu-core" }
+wgpu-hal = { path = "../sotf-3rdparties/wgpu/wgpu-hal" }
+wgpu-types = { path = "../sotf-3rdparties/wgpu/wgpu-types" }
+naga = { path = "../sotf-3rdparties/wgpu/naga" }
 
 [patch."https://github.com/zed-industries/font-kit"]
-zed-font-kit = { path = "../gpui-toolkit/crates/3rdparties/zed-font-kit" }
+zed-font-kit = { path = "../sotf-3rdparties/zed-font-kit" }

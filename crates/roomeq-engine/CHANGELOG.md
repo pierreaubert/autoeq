@@ -9,6 +9,10 @@
 
 - Share one crossover-safety-restoration predicate between route acceptance and source-report evidence.
 
+## 0.5.83
+
+- Initialize the new measured-IR STI report field as absent for synthesized channel responses and require the updated RoomEQ model contract.
+
 ## 0.5.71
 
 - Fix: fractional delay edge gain error.

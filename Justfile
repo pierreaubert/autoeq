@@ -230,7 +230,7 @@ examples-autoeq:
 
 [group('publish')]
 publish-autoeq:
-	{{cargo}} publish
+	{{cargo}} release publish --workspace
 
 # ----------------------------------------------------------------------
 # DEMO
@@ -247,3 +247,24 @@ demo-headphone-loss:
 # ----------------------------------------------------------------------
 
 qa : qa-autoeq-all qa-roomeq-all qa-export-all qa-wolfram-validation
+
+# ----------------------------------------------------------------------
+# utils
+# ----------------------------------------------------------------------
+
+[group('install')]
+rust-install-tools:
+	~/.cargo/bin/rustup default stable
+	~/.cargo/bin/cargo install cargo-wizard
+	~/.cargo/bin/cargo install cross
+	~/.cargo/bin/cargo install cargo-binstall
+	~/.cargo/bin/cargo install cargo-release
+	~/.cargo/bin/cargo binstall cargo-nextest --secure
+	~/.cargo/bin/cargo install cargo-insta
+	~/.cargo/bin/cargo install tokensave
+	~/.cargo/bin/tokensave init
+	~/.cargo/bin/cargo install samply
+	~/.cargo/bin/cargo install mbx
+	~/.cargo/bin/cargo install --git https://github.com/rtk-ai/rtk
+
+

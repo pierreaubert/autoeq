@@ -310,6 +310,7 @@ pub(crate) fn run_channel_via_generic_path_with_frequency_samples(
         early_late_curves: raw_chain.early_late_curves,
         early_reflections: raw_chain.early_reflections,
         t60_octaves: raw_chain.t60_octaves,
+        speech_transmission: raw_chain.speech_transmission,
         waterfall: raw_chain.waterfall,
         resonance_decays: raw_chain.resonance_decays,
         wavelet: raw_chain.wavelet,

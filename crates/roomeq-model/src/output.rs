@@ -410,6 +410,9 @@ pub struct ChannelDspChain {
     /// complete IR was declared at optimization time.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub t60_octaves: Option<ChannelOctaveT60>,
+    /// Full indirect STI from the native measured room impulse response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_transmission: Option<ChannelSpeechTransmission>,
     /// STFT waterfall decay grid from the channel's measured room IR, when
     /// a complete 500 ms post-peak window was declared at optimization
     /// time.
@@ -463,12 +466,40 @@ pub struct MeasuredRoomAcoustics {
     pub early_reflections: Option<ChannelEarlyReflections>,
     /// Measured octave decay fits, including invalid/unavailable bands.
     pub t60_octaves: Option<ChannelOctaveT60>,
+    /// Full indirect STI from the native measured room impulse response.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_transmission: Option<ChannelSpeechTransmission>,
     /// Measured STFT decay grid within the capture's frequency coverage.
     pub waterfall: Option<ChannelWaterfall>,
     /// Resonance fits accompanying the measured waterfall.
     pub resonance_decays: Option<ChannelResonanceDecays>,
     /// Measured wavelet grid within the capture's frequency coverage.
     pub wavelet: Option<ChannelWavelet>,
+}
+
+/// Full indirect speech transmission results with measured-capture provenance.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct ChannelSpeechTransmission {
+    /// Analysis contract: `iec_60268_16_2020_indirect_ir_only_v1`.
+    pub method: String,
+    /// Always `measured_room_ir`; never derived from a synthesized waveform.
+    pub basis: String,
+    /// Native capture sampling rate in Hz.
+    pub sample_rate_hz: f64,
+    /// Original capture duration, without analysis padding, in seconds.
+    pub duration_s: f64,
+    /// Overall full STI in [0, 1].
+    pub sti: f64,
+    /// Seven nominal octave centers in ascending order, 125 Hz through 8 kHz.
+    pub octave_centers_hz: [f64; 7],
+    /// Fourteen nominal modulation frequencies, 0.63 Hz through 12.5 Hz.
+    pub modulation_frequencies_hz: [f64; 14],
+    /// Modulation transfer values, indexed by modulation frequency then octave.
+    pub modulation_transfer: [[f64; 7]; 14],
+    /// Per-octave mean transmission indices over all 14 modulations.
+    pub mti: [f64; 7],
+    /// Capture limitations, including possible decay truncation on short inputs.
+    pub warnings: Vec<String>,
 }
 
 /// Backend-neutral serialized plugin descriptor. Native adapters translate this

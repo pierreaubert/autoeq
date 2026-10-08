@@ -64,6 +64,7 @@ fn wolfram_re01_dsp_gain_delay() {
         joint_sub: None,
         early_reflections: None,
         t60_octaves: None,
+        speech_transmission: None,
         waterfall: None,
         resonance_decays: None,
         wavelet: None,

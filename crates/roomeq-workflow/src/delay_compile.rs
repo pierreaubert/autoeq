@@ -985,6 +985,7 @@ mod tests {
             resonance_decays: None,
             wavelet: None,
             t60_octaves: None,
+            speech_transmission: None,
         }
     }
 

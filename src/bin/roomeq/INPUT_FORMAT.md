@@ -1253,6 +1253,22 @@ preserves the dedicated engine's filters, primary seat, and global-EQ selection.
 `multi_seat.max_deviation_db` defines a soft penalty for
 `primary_with_constraints`, not a per-seat hard bound.
 
+### Speech Transmission Index
+
+Declared measured room IRs also produce `speech_transmission`: full indirect,
+IR-only STI using the IEC 60268-16:2020 model in `math-rir`. The report displays
+the 14 × 7 modulation transfer matrix (0.63–12.5 Hz, 125 Hz–8 kHz), octave MTI,
+overall STI and capture warnings. Driver-targeted IRs report only on that driver.
+The full 8 kHz octave must fit below native Nyquist (24 kHz or higher is suitable)
+and all seven bands must have usable energy; otherwise STI is unavailable.
+
+No operational ambient-noise, speech-level, hearing-threshold or auditory-masking
+corrections are inferred from uncalibrated IR amplitudes. The complete measured
+decay and adequate measurement SNR are the operator's responsibility. Captures
+shorter than 1.6 s carry a possible-truncation warning. No onset cropping or noise
+tail subtraction is applied. Synthesized frequency-response/EQ impulses are not
+analyzed. This is not an IEC measurement-device certification claim.
+
 ### Measurement response snapshots
 
 The public workflow freezes configured numerical measurement responses before

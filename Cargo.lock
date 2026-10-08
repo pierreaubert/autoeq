@@ -328,7 +328,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "autoeq"
-version = "0.5.74"
+version = "0.5.76"
 dependencies = [
  "anyhow",
  "assert_fs",
@@ -3217,7 +3217,7 @@ dependencies = [
 
 [[package]]
 name = "math-rir"
-version = "0.5.11"
+version = "0.5.12"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -4460,7 +4460,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-cli"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "anyhow",
  "autoeq-optim",
@@ -4485,7 +4485,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.5.82"
+version = "0.5.83"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
@@ -4516,7 +4516,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-export"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "anyhow",
  "clap",
@@ -4534,7 +4534,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-model"
-version = "0.5.13"
+version = "0.5.14"
 dependencies = [
  "autoeq-core",
  "clap",
@@ -4606,7 +4606,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-workflow"
-version = "0.5.33"
+version = "0.5.34"
 dependencies = [
  "anyhow",
  "autoeq-artifacts",

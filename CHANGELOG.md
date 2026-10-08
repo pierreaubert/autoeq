@@ -1,3 +1,9 @@
+# 0.5.76
+
+- Add measured-IR full indirect Speech Transmission Index and per-octave modulation
+  tables to RoomEQ reports using the IEC 60268-16:2020 model in `math-rir`.
+- Require `math-rir` 0.5.12 and the updated RoomEQ STI output contracts.
+
 # Unreleased
 
 - Move RoomEQ signal supervision and runtime startup into the CLI crate,

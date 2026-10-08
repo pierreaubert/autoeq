@@ -67,6 +67,7 @@ fn wolfram_rw09_scaled_replay() {
         joint_sub: None,
         early_reflections: None,
         t60_octaves: None,
+        speech_transmission: None,
         waterfall: None,
         resonance_decays: None,
         wavelet: None,

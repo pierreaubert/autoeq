@@ -22,6 +22,10 @@ use roomeq_model::{
 use std::collections::BTreeMap;
 use std::path::Path;
 
+/// Approximately one period of the lowest STI modulation (0.63 Hz).
+/// Shorter captures require an explicit check that the decay was not truncated.
+const STI_SHORT_CAPTURE_S: f64 = 1.6;
+
 /// Minimum samples for a measured IR to ingest.
 const MIN_SAMPLES: usize = 64;
 
@@ -509,6 +513,31 @@ fn wavelet_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelWavelet
     })
 }
 
+fn speech_transmission_report(
+    samples: &[f32],
+    sample_rate_hz: f64,
+) -> Result<roomeq_model::ChannelSpeechTransmission, String> {
+    use math_rir::sti::{STI_MODULATION_FREQUENCIES_HZ, STI_OCTAVE_CENTERS_HZ, analyze_sti};
+    let result = analyze_sti(samples, sample_rate_hz).map_err(|error| error.to_string())?;
+    let warnings = if result.duration_s < STI_SHORT_CAPTURE_S {
+        vec!["Capture is shorter than 1.6 s; verify the full room decay was captured. Truncation can overestimate STI.".into()]
+    } else {
+        Vec::new()
+    };
+    Ok(roomeq_model::ChannelSpeechTransmission {
+        method: "iec_60268_16_2020_indirect_ir_only_v1".into(),
+        basis: BASIS_MEASURED_ROOM_IR.into(),
+        sample_rate_hz,
+        duration_s: result.duration_s,
+        sti: result.sti,
+        octave_centers_hz: STI_OCTAVE_CENTERS_HZ,
+        modulation_frequencies_hz: STI_MODULATION_FREQUENCIES_HZ,
+        modulation_transfer: result.modulation_transfer,
+        mti: result.mti,
+        warnings,
+    })
+}
+
 /// Attach declared measured IRs to an optimized output.
 ///
 /// For every declared channel present in the output, the measured waveform
@@ -542,6 +571,16 @@ pub fn attach_measured_acoustics(
             .iter()
             .map(|v| *v as f32)
             .collect();
+        let speech_transmission =
+            match speech_transmission_report(&samples, measured.sample_rate_hz) {
+                Ok(report) => Some(report),
+                Err(reason) => {
+                    warnings.push(format!(
+                        "capture '{channel}': speech transmission unavailable: {reason}"
+                    ));
+                    None
+                }
+            };
         if let Some(driver_name) = &source.driver {
             let driver = chain.drivers.as_mut().and_then(|drivers| {
                 drivers.iter_mut().find(|driver| driver.name == *driver_name)
@@ -559,6 +598,7 @@ pub fn attach_measured_acoustics(
                 ),
                 early_reflections: reflection_report(&samples, measured.sample_rate_hz),
                 t60_octaves: t60_report(&samples, measured.sample_rate_hz),
+                speech_transmission,
                 waterfall: waterfall.as_ref().map(|(grid, _)| grid.clone()),
                 resonance_decays: waterfall.map(|(_, decays)| decays),
                 wavelet: wavelet_report(&samples, measured.sample_rate_hz),
@@ -567,6 +607,7 @@ pub fn attach_measured_acoustics(
             continue;
         }
         chain.pre_ir = Some(measured.waveform);
+        chain.speech_transmission = speech_transmission;
         match crate::channel_acoustics::measured_early_late_curves(
             &samples,
             measured.sample_rate_hz,
@@ -652,6 +693,7 @@ mod tests {
         assert_eq!(capture.pre_ir.amplitude.len(), 3_000);
         assert!(capture.timing_reference_id.is_none());
         assert!(capture.early_reflections.is_none());
+        assert!(capture.speech_transmission.is_none());
         assert!(
             capture
                 .t60_octaves
@@ -762,6 +804,17 @@ mod tests {
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         let chain = &output.channels["L"];
         assert!(chain.pre_ir.is_some());
+        let sti = chain
+            .speech_transmission
+            .as_ref()
+            .expect("full-band native STI");
+        assert_eq!(sti.basis, "measured_room_ir");
+        assert_eq!(sti.octave_centers_hz[6], 8000.0);
+        assert!((0.0..=1.0).contains(&sti.sti));
+        assert!(
+            !sti.warnings.is_empty(),
+            "1 s capture carries truncation warning"
+        );
         let curves = chain
             .early_late_curves
             .as_ref()
@@ -782,6 +835,85 @@ mod tests {
         let mut output = DspGraph::new("1");
         output.add_channel("L", Vec::new());
         assert!(attach_measured_acoustics(&mut output, &declared, dir.path()).is_err());
+    }
+
+    #[test]
+    fn sti_report_roundtrips_and_legacy_graphs_remain_readable() {
+        let mut output = DspGraph::new("1");
+        output.add_channel("L", Vec::new());
+        assert!(output.channels["L"].speech_transmission.is_none());
+        let mut samples = vec![0.0; 96_000];
+        samples[2400] = 1.0;
+        let report = speech_transmission_report(&samples, 48_000.0).expect("STI");
+        assert!(report.warnings.is_empty());
+        output.channels.get_mut("L").unwrap().speech_transmission = Some(report);
+        let json = serde_json::to_value(&output).unwrap();
+        let decoded: DspGraph = serde_json::from_value(json.clone()).unwrap();
+        assert!(
+            decoded.channels["L"]
+                .speech_transmission
+                .as_ref()
+                .unwrap()
+                .sti
+                > 0.99
+        );
+        let mut legacy = json;
+        legacy["channels"]["L"]
+            .as_object_mut()
+            .unwrap()
+            .remove("speech_transmission");
+        let decoded: DspGraph = serde_json::from_value(legacy).unwrap();
+        assert!(decoded.channels["L"].speech_transmission.is_none());
+        assert!(speech_transmission_report(&samples, 3_000.0).is_err());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("room.json");
+        crate::output_bundle::save_output_bundle(&mut output, &path).expect("save");
+        let restored = crate::output_bundle::load_output_bundle(&path).expect("load");
+        assert!(
+            restored.channels["L"]
+                .speech_transmission
+                .as_ref()
+                .unwrap()
+                .sti
+                > 0.99
+        );
+    }
+
+    #[test]
+    fn sti_survives_native_bundle_and_stays_on_its_physical_driver() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = write_ir(dir.path(), "driver.csv", 48_000.0, 1.0);
+        let mut source = source_for(path);
+        source.output_channel = Some("L".into());
+        source.driver = Some("mid".into());
+        let declared = BTreeMap::from([("mid_capture".into(), source)]);
+        let mut output = DspGraph::new("1");
+        output.add_channel("L", Vec::new());
+        output.channels.get_mut("L").unwrap().drivers = Some(vec![roomeq_model::DriverDspChain {
+            measured_acoustics: None,
+            name: "mid".into(),
+            index: 0,
+            plugins: Vec::new(),
+            initial_curve: None,
+            measured_band_hz: None,
+        }]);
+        attach_measured_acoustics(&mut output, &declared, dir.path()).expect("attach");
+        assert!(output.channels["L"].speech_transmission.is_none());
+        let get_sti = |graph: &DspGraph| {
+            graph.channels["L"].drivers.as_ref().unwrap()[0]
+                .measured_acoustics
+                .as_ref()
+                .unwrap()
+                .speech_transmission
+                .as_ref()
+                .unwrap()
+                .sti
+        };
+        let expected = get_sti(&output);
+        let output_path = dir.path().join("room.json");
+        crate::output_bundle::save_output_bundle(&mut output, &output_path).expect("save");
+        let restored = crate::output_bundle::load_output_bundle(&output_path).expect("load");
+        assert_eq!(get_sti(&restored), expected);
     }
 
     /// Decaying 1 s room IR with a 10 ms reflection bounce, as f32 samples.

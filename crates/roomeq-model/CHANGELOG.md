@@ -18,6 +18,10 @@
 - Inherited the workspace policy forbidding unsafe Rust code.
 - Documented crate ownership and verification expectations.
 
+## 0.5.14
+
+- Add backward-compatible serialized `speech_transmission` results for measured channel and physical-driver impulse responses, including full-STI modulation values, octave MTI and capture warnings.
+
 ## 0.4.51
 
 - Established `roomeq-model` as the canonical owner of RoomEQ configuration and DSP contracts.

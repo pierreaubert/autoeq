@@ -6,6 +6,8 @@ import re
 from html import escape
 from pathlib import Path
 
+from speech_transmission import speech_transmission_html
+
 import wasm_report
 from acceptance_views import acceptance_views_html, waveform_status_html
 from acoustic_report import (
@@ -1613,6 +1615,8 @@ def create_html_report(
         ))
 
         if not is_driver_tab or acoustic_data:
+            _emit_html(sections, speech_transmission_html(acoustic_data, tab_label),
+                       tab=tab_label)
             _emit_html(sections, early_reflections_html(acoustic_data, tab_label),
                        tab=tab_label)
             _emit_fig(sections, early_reflection_figures(acoustic_data, tab_label, tab=tab_label))

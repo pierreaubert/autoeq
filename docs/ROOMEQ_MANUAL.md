@@ -1042,6 +1042,20 @@ stays small. The Python viewer (`ui/display-roomeq`, via
 directory automatically, so plots are unchanged. Legacy outputs with
 embedded curves and sidecars next to the JSON keep loading as before.
 
+### Indirect Speech Transmission Index
+
+The measured-room-IR report includes full IR-only Speech Transmission Index
+(STI), computed by `math-rir` using the IEC 60268-16:2020 model. Each channel or
+physical driver with a declared native measured IR gets its own STI section,
+with octave columns from 125 Hz to 8 kHz, 14 modulation-frequency rows,
+per-octave MTI and overall STI. See [measured IR input](../src/bin/roomeq/INPUT_FORMAT.md#speech-transmission-index).
+
+Full octave coverage, complete decay and sufficient measurement SNR are required.
+Speech/noise SPL, auditory masking and hearing thresholds are not inferred from
+IR amplitudes; the result is explicitly IR-only. Short captures carry a warning,
+and unsupported sample rates or missing band energy leave STI unavailable.
+Synthesized EQ impulses and predicted post-DSP responses do not produce STI.
+
 ### Interactive diagnostic plots
 
 The room-mean T60 graph overlays the ITU-R BS.1116-3

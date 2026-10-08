@@ -33,5 +33,5 @@ web-sys = { version = "0.3", features = [
     "Node",
     "console",
 ] }
-gpui = { package = "gpui-toolkit-gpui", path = "../../../sotf-3rdparties/gpui/crates/gpui", version = "0.2.3", default-features = false }
-gpui_web = { package = "gpui-toolkit-gpui-web", path = "../../../sotf-3rdparties/gpui/crates/gpui_web", version = "0.1.1" }
+gpui = { package = "sotf-gpui-toolkit-gpui", path = "../../../sotf-3rdparties/gpui/crates/gpui", version = "0.2.3", default-features = false }
+gpui_web = { package = "sotf-gpui-toolkit-gpui-web", path = "../../../sotf-3rdparties/gpui/crates/gpui_web", version = "0.1.1" }

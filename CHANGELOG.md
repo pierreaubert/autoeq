@@ -1,4 +1,14 @@
-# Unreleased
+# 0.5.76
+
+- Fix the DT1990 Pro flat QA recipe by using seeded native DE, whose
+  convergence evidence satisfies the strict QA gate; PSO only reports budget
+  completion. Keep the spacing and score-improvement checks unchanged.
+
+- Add measured-IR full indirect Speech Transmission Index and per-octave modulation
+  tables to RoomEQ reports using the IEC 60268-16:2020 model in `math-rir`.
+- Require `math-rir` 0.5.12 and the updated RoomEQ STI output contracts.
+
+# 0.5.75
 
 - Move RoomEQ signal supervision and runtime startup into the CLI crate,
   keeping the root binary as a compatibility launcher.

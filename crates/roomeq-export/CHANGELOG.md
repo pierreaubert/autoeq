@@ -12,6 +12,10 @@
 - Inherited the workspace policy forbidding unsafe Rust code.
 - Documented crate ownership and verification expectations.
 
+## 0.5.9
+
+- Support the updated optional STI output contract when constructing channel graphs; require the updated model and engine dependencies.
+
 ## 0.4.51
 
 - Established `roomeq-export` as the canonical external DSP rendering and packaging boundary.

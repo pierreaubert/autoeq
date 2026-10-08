@@ -45,12 +45,13 @@ qa-beyerdynamic-dt1990pro-score2:
 	--loss headphone-score	--max-db 6 --max-q 6 --algo mh:rga --maxeval 100000 --min-freq=20 --max-freq 10000 --peq-model hp-pk-lp --min-q 0.6 --min-db 0.25 \
 	--qa 1.5
 
+# Strict QA requires solver convergence; MH backends report budget stops only.
 [group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-flat:
 	./target/release/autoeq -n 5 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
-	--loss headphone-flat  --max-db 6 --max-q 6 --maxeval 100000 --algo mh:pso --min-freq=20 --max-freq 10000 --peq-model pk \
+	--loss headphone-flat  --max-db 6 --max-q 6 --maxeval 100000 --algo autoeq:de --seed 42 --min-freq=20 --max-freq 10000 --peq-model pk \
 	--qa 0.5
 
 [group('qa-autoeq')]

@@ -21,6 +21,11 @@
 - Prepare file-backed targets before engine execution and preserve calibrated SPL across IIR, FIR, and hybrid paths.
 - Stage main-channel correction after redirected-bass routing, preserve residual height delays, and reject duplicate phase mappings and supporting-source output collisions.
 - Keep mixed-phase ownership, CTC response caches, broadband correction, and reported final curves consistent with the exported DSP chain.
+
+## 0.5.34
+
+- Compute full indirect IR-only STI from declared native measured impulse responses with `math-rir` 0.5.12. Preserve channel results in native bundles and physical-driver results in measured-acoustics sidecars; retain legacy JSON compatibility and warn on short captures.
+
 ## 0.4.53
 
 - Keep canonical final curves aligned with topology gain and tolerate only

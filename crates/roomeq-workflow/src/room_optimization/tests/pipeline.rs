@@ -376,6 +376,7 @@ fn assemble_generic_result_non_empty_success() {
             joint_sub: None,
             early_reflections: None,
             t60_octaves: None,
+            speech_transmission: None,
             waterfall: None,
             resonance_decays: None,
             wavelet: None,

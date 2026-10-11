@@ -159,6 +159,7 @@ h2 {
 }
 .bucket-bar {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
     gap: 6px;
     margin: 4px 0 20px;
@@ -207,11 +208,12 @@ th {
 }
 .header-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 16px;
 }
 .header-row h1 {
-    flex: 1;
+    flex: 1 1 200px;
     margin: 0;
 }
 .header-meta {
@@ -219,7 +221,9 @@ th {
     flex-direction: column;
     align-items: flex-end;
     gap: 2px;
-    flex-shrink: 0;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 #report-provenance {
     font-size: 12px;
@@ -230,6 +234,7 @@ th {
 }
 .viewbar {
     display: flex;
+    flex-wrap: wrap;
     gap: 10px;
     align-items: center;
     margin-bottom: 0;

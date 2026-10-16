@@ -87,19 +87,36 @@ fn escape_html(s: &str) -> String {
 }
 
 /// Load the checked-in shell template plus `dist/` bundle bytes.
+///
+/// The `dist/` bundles are generated (`just report-wasm`) and may be absent
+/// from a fresh checkout, so they are read at runtime and a missing bundle is
+/// reported as `Err` instead of failing compilation via `include_bytes!`.
+/// Every caller already handles that `Err` by surfacing it to the user.
 pub fn checked_in_assets() -> Result<ShellAssets, String> {
     let template = include_str!("../shell/template.html").to_string();
-    let wasm_2d_b64 = b64(include_bytes!("../dist/report2d.wasm"));
-    let glue_2d_b64 = b64(include_bytes!("../dist/report2d.js"));
-    let wasm_gpui_b64 = b64(include_bytes!("../dist/reportgpui.wasm"));
-    let glue_gpui_b64 = b64(include_bytes!("../dist/reportgpui.js"));
-    Ok(ShellAssets {
-        template,
-        wasm_2d_b64,
-        glue_2d_b64,
-        wasm_gpui_b64,
-        glue_gpui_b64,
-    })
+    // The WebAssembly producer must not embed its own checked-in WASM binary
+    // (or the separate GPUI renderer) inside itself; `std::fs` is not
+    // available on that target either.
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = template;
+        return Err("WebAssembly assembly requires explicit `shell_assets`".into());
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let dist = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist");
+        let load = |file: &str| {
+            std::fs::read(dist.join(file))
+                .map_err(|error| format!("could not read dist/{file}: {error}"))
+        };
+        Ok(ShellAssets {
+            template,
+            wasm_2d_b64: b64(&load("report2d.wasm")?),
+            glue_2d_b64: b64(&load("report2d.js")?),
+            wasm_gpui_b64: b64(&load("reportgpui.wasm")?),
+            glue_gpui_b64: b64(&load("reportgpui.js")?),
+        })
+    }
 }
 
 #[cfg(test)]

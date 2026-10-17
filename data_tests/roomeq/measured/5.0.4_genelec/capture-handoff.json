@@ -1,0 +1,3640 @@
+{
+  "version": 1,
+  "producer": "sotf-capture",
+  "producer_version": "0.5.2",
+  "session_id": "fd99270d3c0f10def72f4f9461e7322fc73b17a8be2eb9d3c5e78c7bed5d9e75",
+  "completion": "complete",
+  "sample_rate_hz": 48000,
+  "source_ids": [
+    "L",
+    "R",
+    "C",
+    "SL",
+    "SR",
+    "TFL",
+    "TFR",
+    "TRL",
+    "TRR"
+  ],
+  "microphone_ids": [
+    "room-reference",
+    "ear-right",
+    "ear-left",
+    "room-secondary"
+  ],
+  "repeat_count": 2,
+  "selected_take_ids": [
+    "take-r000-f2665b591243c0800dc0201faa9ac50556667e34a8db6b3f7340caa12dae091e",
+    "take-r000-57c85224917c324c9e27ced3f9e19842617cadbbce574da65ebd67b6234e2bba",
+    "take-r000-6856d066dc9f3c68f314fa0035a8c91cca1970322e7b39c06a6b03dc90872e0e",
+    "take-r000-423d22326408525929e867d27d655f6d7bb30d922c026c8e244ce099a6fcddec",
+    "take-r000-ca7ec91c34dae565495aaf5c420867edc370ec93f909e681658d45e2b8138489",
+    "take-r000-e213864fa63bde58332fbe86618adcb48590e8e68a69806b571a7bd5b79d77f6",
+    "take-r000-d27a56e5f74ca055865e976e9aaae01eb94d774a19be9fa04761a8acf975a015",
+    "take-r000-625c10ade0dcdfa68c65c3274354be5b858316f03de6748fa817222939d50b6d",
+    "take-r000-3f0b798245a197f86d171e952b27108781824c59f0d418ada3ad52832616d2e9",
+    "take-r000-cacfbaf5736b7fa46e5b17570587503367264e11984253dedda0b9897cb3e392",
+    "take-r000-f9e08a6f1480b8196a25b0cfac045358cfdeee347973c043c2758b03c3458f87",
+    "take-r000-a6acd40a302b4efdd2b6b3617157b7c33c9a0a335884b81acb46cde27d8f709a",
+    "take-r000-2ce48ffd597b7225d6096e2f17cedd73b6b3dcf5379d929981c3b1cf1c242532",
+    "take-r000-4aa05558a800f1789e6c57dc76bec1a373886dce7b63f4d00027285c11bb39f9",
+    "take-r000-c5f8f70da4418d4e5f84a22023e989f7a87a13034844a0159be6dedb4645e1d6",
+    "take-r000-e7c8df40165c6180844e4bfbec46eaf7a182a1d293a3f63a4f4bf5bff59632b2",
+    "take-r000-a47d53f348462d7901e653eb6a86008b422eafc8069f68180d930c5ec204c7b3",
+    "take-r000-91e516e9e29a8033a438df1d679ca00c71d39e98275d21ab6894d2155d7d363a",
+    "take-r000-2fda67db06b6a8f926f00b229ef0684dc7abfc028803953963a2d5c8f9ec49c7",
+    "take-r000-4e3e0b6b67aea2f5886656152546a029d3df17938aec39b34a81975748676397",
+    "take-r000-62a78c50c9ae6211cfd4be06a263ea16a4fe25299921a24c461ed27ca7181c99",
+    "take-r000-e5c0ba50381f044ab345acfd1e0a2ba38647dfe0c97e7e006595436dc772c411",
+    "take-r000-2cce7955f6556618e7e34857dc6c26af622d851656594fb392265600baef68e6",
+    "take-r000-47b87acf13ccac4c4992970d82bec8462ef2818c2c011cdb075625bd1fc310dc",
+    "take-r000-e0539dd9d6088f5f45de86e6d83e53a4ad34d596b10a5f41dfe1f91aaf3c7f3d",
+    "take-r000-9a67b4d2277d11d16d4f98dc5d66fb2cca5c114e71eff75d5c3b8b26a15da64a",
+    "take-r000-0d16b8fa09e8b5c2a5df34a3286ebfa9f47e6af57e23b06e0603c7f3eaf21018",
+    "take-r000-201d41a8179e3d9079b0f9bc18435c0f0be559e63c3329066efad417a744ff29",
+    "take-r001-5f56284a542862b6220872b7bb7b290440b705979bc308a4d07931ca8e2633f8",
+    "take-r001-9ef144ab2caf6d276ab9eaa0c3d346ce0ced2d91d446ce1a1c45869b4516168f",
+    "take-r001-9000e88e7533ef4ce760bfd843118e866f05098cc34d23abb902694dd554a1cd",
+    "take-r001-bdd0d5d8119e13fe48ce3e1d552bddcfedf7214974ce9fb7034fc51e928a363e",
+    "take-r001-eaddc48e6ed0f5f93b2198b108e15d2a48f648051681cb88dfef493ed2ec496a",
+    "take-r001-6b87d1e1be6810ab7dfe5e8ca5a16265da33b50a444ece42fd2c6a132964df9e",
+    "take-r001-880346ff4e734a0f44229aad040c269c165562292da9657bcbc8034b2875ceb1",
+    "take-r001-35f1ce27c962d8b538481454f72b5b4970779242a83f05f9f3cc74160b24175b"
+  ],
+  "parent_inventory_file": "capture-raw.json",
+  "configuration_file": "recordings.json",
+  "artifacts": [
+    {
+      "file": "bass-anchor.wav",
+      "role": "supporting_evidence",
+      "bytes": 14976068,
+      "sha256": "f2a7051e7973436006de58277790d9843af66433220d1e860bc6acd62885e011"
+    },
+    {
+      "file": "calibration-00.txt",
+      "role": "calibration",
+      "bytes": 3462,
+      "sha256": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685"
+    },
+    {
+      "file": "calibration-01.txt",
+      "role": "calibration",
+      "bytes": 3452,
+      "sha256": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e"
+    },
+    {
+      "file": "calibration-02.txt",
+      "role": "calibration",
+      "bytes": 3631,
+      "sha256": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48"
+    },
+    {
+      "file": "calibration-03.txt",
+      "role": "calibration",
+      "bytes": 3630,
+      "sha256": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0"
+    },
+    {
+      "file": "capture-clock.json",
+      "role": "supporting_evidence",
+      "bytes": 833975,
+      "sha256": "de0681c5288cb8c643b5b899439c010dd76109b0fa109c8882ef63ae2cd9f868"
+    },
+    {
+      "file": "capture-raw.json",
+      "role": "supporting_evidence",
+      "bytes": 54657,
+      "sha256": "fd99270d3c0f10def72f4f9461e7322fc73b17a8be2eb9d3c5e78c7bed5d9e75"
+    },
+    {
+      "file": "ctc-measurements.json",
+      "role": "supporting_evidence",
+      "bytes": 2292,
+      "sha256": "920f0a78153595424aa8f4c8e01a0b23158ef1255d7572a8cf8013585ab6d385"
+    },
+    {
+      "file": "ctc_main-head_C_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "ad61225b357f103b1e270d1e483d55396c21253174bcba9f584002097babb5c9"
+    },
+    {
+      "file": "ctc_main-head_C_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_L_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "4917d4a90ea5d20369bae50d2bf89cb9302527a3f1322a1f2cae5c44ff5c5771"
+    },
+    {
+      "file": "ctc_main-head_L_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "c24c834db310161c7499bebff1d39ab523ec88e7706d8e150631b3193d8ef914"
+    },
+    {
+      "file": "ctc_main-head_R_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "0ea3378eceedf4776e3ead928d426b8332260bd28607f76f54f25e31ae3ee220"
+    },
+    {
+      "file": "ctc_main-head_R_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_SL_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "b68d7cf7b0a0bf103a0bec33c327d616694334a7752b56e931d8aa05f802ccb1"
+    },
+    {
+      "file": "ctc_main-head_SL_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_SR_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "5f1ae890f013dd8e07050f1eee05657a89f378d41c5bcaa268168694b7e3c694"
+    },
+    {
+      "file": "ctc_main-head_SR_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_TFL_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "96266b1518f5ced34d66e483d50399647e7f81ea3edd29cb443fb7f997049381"
+    },
+    {
+      "file": "ctc_main-head_TFL_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_TFR_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "9fcc6a3a9e2f921f82724612dc0d6f9d1641b2b401bd3fce5ce48c2c1149bee5"
+    },
+    {
+      "file": "ctc_main-head_TFR_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_TRL_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "e0a7d3b1d453a65f8696c746a03aa4fdcbbc6edd810995ad985faa1bb31e378a"
+    },
+    {
+      "file": "ctc_main-head_TRL_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_main-head_TRR_ears.wav",
+      "role": "supporting_evidence",
+      "bytes": 4608068,
+      "sha256": "19fd8651585f02b2adf3fbac5ce1d203bf2a323eb3404052c8678021311b37f0"
+    },
+    {
+      "file": "ctc_main-head_TRR_loopback.wav",
+      "role": "supporting_evidence",
+      "bytes": 2304068,
+      "sha256": "e1d4f652a01fcee26641a8113c65e2259597f74ddb29d0a801b7c8d949c73f11"
+    },
+    {
+      "file": "ctc_reference_sweep.wav",
+      "role": "supporting_evidence",
+      "bytes": 1920068,
+      "sha256": "dc880e881cc5643dc0963a97b37fbebd3435ded5c90725069ca5db53dad33fde"
+    },
+    {
+      "file": "probe.wav",
+      "role": "supporting_evidence",
+      "bytes": 1440068,
+      "sha256": "c81a36fe134ed3438f4840e2ca9a086e304257e194f3cc7eea0b1e39fe77d770"
+    },
+    {
+      "file": "recordings.json",
+      "role": "configuration",
+      "bytes": 51786,
+      "sha256": "9da70052bcd3c001b39fe2b0723e61e7a755e7217738c10b8a7e02ba893b3eae"
+    },
+    {
+      "file": "repeat-00-source-00-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "58a1c08712166d535e4e3caaa770c8c1009f62c93bbb98bf27335895b3a13a5f"
+    },
+    {
+      "file": "repeat-00-source-00-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "aaf2a7ed9b6d11cd25fd501fe3f9933a0e2f879beea7c2560858d6341d41ecbd"
+    },
+    {
+      "file": "repeat-00-source-00-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "deabb12ad31d0878cd6038a5fb3960908d13a892462d3a1251e53efa7cb60522"
+    },
+    {
+      "file": "repeat-00-source-00-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "80712ba5b8a4ed81c982266f3a040cc2887f30a2ba494d0c88da545a24c0514e"
+    },
+    {
+      "file": "repeat-00-source-01-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "155c9f7e30fc7016edf92d6ed710c9a3e82ece5a193a0e462c70e4d225b62b6c"
+    },
+    {
+      "file": "repeat-00-source-01-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "aabc58bad1227b8d06b28c791c5c5d8f1e2c4ac711d0faa180e618738d987674"
+    },
+    {
+      "file": "repeat-00-source-01-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "3e44ef4fc25769ba062afa6463608052738e84b5180ff294182053d41d854334"
+    },
+    {
+      "file": "repeat-00-source-01-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "8a2e20c00d4385525fc933641a622b96ec7ae74b667d4541c0fb7f2f8e91fede"
+    },
+    {
+      "file": "repeat-00-source-02-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "78ef9acde55c31674e43f0df14d063070bab8421e13580bb22bfef5a11be1777"
+    },
+    {
+      "file": "repeat-00-source-02-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "c6ca27d45e64aa828141762a848ef4b00d4a217c90f45a9c2d1f8db88d87f655"
+    },
+    {
+      "file": "repeat-00-source-02-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "769bfb06a8e53e8906b566ef45544e975a8feed742cdda1c372c81fc550fe9fb"
+    },
+    {
+      "file": "repeat-00-source-02-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "931cd2560b2b3d3daad35148cc8f5741e164831667fdd99a2261b569a6741f6d"
+    },
+    {
+      "file": "repeat-00-source-03-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "76a44894324a5b20009fa4dbee1640ad39311013731ecc440830dbf34259b4f3"
+    },
+    {
+      "file": "repeat-00-source-03-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "eb219e992db7be887a3ce5c88cf9bd325abdd0d3b0d3398e4557591f6fbcfdd4"
+    },
+    {
+      "file": "repeat-00-source-03-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "f790480b2971bd9b2fb9a0ff6e7292afb1000f6094bdaf30981198f2c7016ff4"
+    },
+    {
+      "file": "repeat-00-source-03-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "9af342756b7074f60c11cc965bbbc2a088db83516166f644f439f1be5ec957fd"
+    },
+    {
+      "file": "repeat-00-source-04-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "6fde8c442e1e6718548fbb4646e889493610ec498b2b4a89239cdae85c6f0d8f"
+    },
+    {
+      "file": "repeat-00-source-04-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "e20fec2bbc4ecf57c13c5d103af4db5f9d4b4ec285bc572a00ca9ab5b6e43954"
+    },
+    {
+      "file": "repeat-00-source-04-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "af7e07261c81529407e6d0cef35763ec40fe8d5d11c709df3b5d4afd9b7142a0"
+    },
+    {
+      "file": "repeat-00-source-04-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "5ecaace1c4e247fd8e0c90da666304f72a7fbcad7d0daabd47d4dd9f414dcb7b"
+    },
+    {
+      "file": "repeat-00-source-05-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "910b922b05e0a85df18f7c861aafc1a46436e2981d0e5383ae15a7f0d79997a6"
+    },
+    {
+      "file": "repeat-00-source-05-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "13db0c34e401a0ee306a044d3f3ecd22c2059b52055f365cf5f1e6028c27c9c4"
+    },
+    {
+      "file": "repeat-00-source-05-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "14139a23e6c86d416f6f29caf3c2da73518032290555dcd9beda1dac2b18512e"
+    },
+    {
+      "file": "repeat-00-source-05-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "c96e9f408e891fc24ffb23f6793767c38f031f313a99e12b13099740e111802a"
+    },
+    {
+      "file": "repeat-00-source-06-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "5dbcc75fb5d1d7da2877649f538b3fe086214d3675d557d94805f3922a1457d2"
+    },
+    {
+      "file": "repeat-00-source-06-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "bf4ee18abd2d3aa78f649436aa139765556178bd9f4ec7551583294e35767da6"
+    },
+    {
+      "file": "repeat-00-source-06-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "661bf6a5ed38e0ac7aadc81e31e56c35bd9bd7bbcd667d5706383269dd082802"
+    },
+    {
+      "file": "repeat-00-source-06-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "3857e7064098813cf1867756e57f1366983e572bd65817c6aeb6c1a532a503cc"
+    },
+    {
+      "file": "repeat-00-source-07-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2754628,
+      "sha256": "48f5d2fd707292cc762524a1dbd2f740af40f872f78170045a9e42d6910e279e"
+    },
+    {
+      "file": "repeat-00-source-07-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2754628,
+      "sha256": "a07e1908fedcf49fe62321ebf833801a649c60d98c96f786ac92177f185cf867"
+    },
+    {
+      "file": "repeat-00-source-07-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2754628,
+      "sha256": "ef402c910d3684c30ad37d43c17c51e677504e26c6a38b22b7fdb5da6c467c63"
+    },
+    {
+      "file": "repeat-00-source-07-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2754628,
+      "sha256": "55badc1214356f584f22d4e4fbed38bb49425930ff32b4eb6e28da2e8471c96e"
+    },
+    {
+      "file": "repeat-00-source-08-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "e9652fc5202c48ed57c9b0021f354fc60654f1c8d8078f0916d1adcfb688fae1"
+    },
+    {
+      "file": "repeat-00-source-08-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "ab452ccd997b60fe9c7483790af1ad415d084952091895293d5a7350e9bb43f6"
+    },
+    {
+      "file": "repeat-00-source-08-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "7b74b3714f778ee2d3038bd8b7c272dd70061fe514b5b25307ad2538dd9bff1f"
+    },
+    {
+      "file": "repeat-00-source-08-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "3bbb971e0b9154d88f2d6964cd6c3aa89c98f172ddb18c1d548d219f1ec1b6b5"
+    },
+    {
+      "file": "repeat-01-source-00-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "a8627df8c91c1565b57374b93fc4413a0105794da43e45a942407c07de9735cd"
+    },
+    {
+      "file": "repeat-01-source-00-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "a57db4e909087866272f589af9893dd2eff9662b536b454882395fce1b5eafad"
+    },
+    {
+      "file": "repeat-01-source-00-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "01e730b413c9ed0eb1278ccd1f680b5aa7c8c498e41460a9192dba85c55fd2c4"
+    },
+    {
+      "file": "repeat-01-source-00-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2742340,
+      "sha256": "7390992caad54e2a65b3cc917816d889bac1c6e62378f80815cdbd7d729c616c"
+    },
+    {
+      "file": "repeat-01-source-01-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "aa688713d23748920ac43ff7c09033403db5b6332bcf7b89260f7b737145da88"
+    },
+    {
+      "file": "repeat-01-source-01-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "c98c6fb14472411277fd455265f37e1ce97b920054d39abd8bbfed4724835806"
+    },
+    {
+      "file": "repeat-01-source-01-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "afdaf001c8af5a458829816b0e8bb3d0911a4c100f31c7c37ceb6767a4dbacf5"
+    },
+    {
+      "file": "repeat-01-source-01-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "531c33f84856607f81d9576f8c92504e7e485b0c76be65f334a3655dbc72248b"
+    },
+    {
+      "file": "repeat-01-source-02-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "c499661e710479a917726dbf4cee264d7db30611d3edd624aba3a8762d3b2ebd"
+    },
+    {
+      "file": "repeat-01-source-02-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "09cd7da1ad6902815fb52fffd8e409b0ed87c917ec2e998cddecd1d87effe811"
+    },
+    {
+      "file": "repeat-01-source-02-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "b0dc61486d984a8b43a16533e36f86cc3d31bc7a18a0e3d396aea8cc96f566a9"
+    },
+    {
+      "file": "repeat-01-source-02-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2744388,
+      "sha256": "5f999a95eef235a227befabd44d15c9c90b71771fcb21b45b79f099c2b691c56"
+    },
+    {
+      "file": "repeat-01-source-03-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "575aa5d66744019cc9cf0c514616316322587662ccd6f9392aadc9f5205fda78"
+    },
+    {
+      "file": "repeat-01-source-03-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "851127eba9f48c3563369f745189c07854e98fa6ecc8c711873762e2d634f045"
+    },
+    {
+      "file": "repeat-01-source-03-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "f825bdb331306dc0c933e986c02849e24309281bad1c5ab6494af05ee07f29a1"
+    },
+    {
+      "file": "repeat-01-source-03-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "04dcec9f08f363f8ee898b1322313afc3cc09566581ecc4b062323f6cb090a4a"
+    },
+    {
+      "file": "repeat-01-source-04-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "68f918845b3ebd78cc3c1640be1cf736bf7bf50039887c58ea078a2a5eab1d7a"
+    },
+    {
+      "file": "repeat-01-source-04-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "cce1bfb8bbe7b4c8b27369f134d7822052c8f13d0446cb72bcb41f8d6e3a7de7"
+    },
+    {
+      "file": "repeat-01-source-04-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "78dd6475f3709e0b84bb96b38b58c0179680eae18973088348a653a5992f8dab"
+    },
+    {
+      "file": "repeat-01-source-04-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2738244,
+      "sha256": "c9fcc093c44550fb45dfe73d4262ac4742eb9dbb5fbff62d116dee756a25e107"
+    },
+    {
+      "file": "repeat-01-source-05-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "16b8ed038d3087c88cb77485bc44871e141455aa41d80fb48dab33c6974d516b"
+    },
+    {
+      "file": "repeat-01-source-05-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "5ee04d50e2c2685e07f44b2bf1d65bfa1c18ecb33a90830ca2ee6f0585483e73"
+    },
+    {
+      "file": "repeat-01-source-05-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "f1a0277cc380a78dbfcf6f613df2a856775083a50ff67360b120bdc9e580d145"
+    },
+    {
+      "file": "repeat-01-source-05-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "74f6bedd31555ecba15c378e44ac83cb6b91ce5747be318789ba1e51df7305d7"
+    },
+    {
+      "file": "repeat-01-source-06-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "367f501e79c377eb6b720a96ec52964ccda486a8c5273e920252694a52dbf5b5"
+    },
+    {
+      "file": "repeat-01-source-06-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "193f6763c89ade1140cf8d17a81527744bf25739aff0a6e0a25e770ebe9e55f6"
+    },
+    {
+      "file": "repeat-01-source-06-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "2bcc6a81c53601bf22fac0ded5124c3ba77214768e7c9a027fb0f4310e7bddf8"
+    },
+    {
+      "file": "repeat-01-source-06-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "ea194583e211ff26c17f204342bb64c41aa7ea844b4fe79a42c2dc44cb6dceee"
+    },
+    {
+      "file": "repeat-01-source-07-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "3aa7e10f935d16e5cc8a37d44e873991fbafa8047b1c7707c0ac2fc7f77f8ec5"
+    },
+    {
+      "file": "repeat-01-source-07-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "a4597d891ef33b60527535afa9ec68e155c2a3da191c5025a478eee95bedfb9b"
+    },
+    {
+      "file": "repeat-01-source-07-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "aa4af6c175972631584f76237e722b8aef90890767243a1dcc8571dee4f152a5"
+    },
+    {
+      "file": "repeat-01-source-07-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2736196,
+      "sha256": "1f6ee22b39993cc87710243459d1d7ea4731aff6f85572846ed811a3aeb77ba2"
+    },
+    {
+      "file": "repeat-01-source-08-mic-00-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "a55179788222a833338b1baa7e22c89a75e497083ed02fa6ce070019ecc9310d"
+    },
+    {
+      "file": "repeat-01-source-08-mic-01-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "6b9eff106afc02b798b38fa4c60f2a21aa0832053844f9270cbbfeed1b4bc8e3"
+    },
+    {
+      "file": "repeat-01-source-08-mic-02-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "79b922f91535d5384fbcb733148b441e2feb7b9f9c23e3d26e9b3673956d10d1"
+    },
+    {
+      "file": "repeat-01-source-08-mic-03-raw.wav",
+      "role": "raw_audio",
+      "bytes": 2740292,
+      "sha256": "a64195a3a1ae866f1c26900751e8d02a6eb97a2cb493acd924fd548f62373c36"
+    },
+    {
+      "file": "stimulus.wav",
+      "role": "supporting_evidence",
+      "bytes": 2630468,
+      "sha256": "78aa22805527069345d4149edb06ce7966043ee8d74072287de5537c34084457"
+    },
+    {
+      "file": "take-000-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40690,
+      "sha256": "5c1c5e43c7004bcd3f44318b1f5f1c1f1e6d0e4d8f5e8138256e7712cf80a285"
+    },
+    {
+      "file": "take-000.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "478fc18e0a0d350c32e1ad1763b6e44f252952e421520da24b0e3decff3b824e"
+    },
+    {
+      "file": "take-001-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40696,
+      "sha256": "3e0f8ffe3989cedf0a5f0cd8347c57a385c70d60bc3ad606a50a11d8b358020c"
+    },
+    {
+      "file": "take-001.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "a10b0f38072dfabb01a291b6a23bcea6ce333ff2e5b2d08f07af3cf6743f5f52"
+    },
+    {
+      "file": "take-002-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40811,
+      "sha256": "01a5d4d644b448e437c643965db69661a1b879fc802fa4d74c6576dc20af2c2f"
+    },
+    {
+      "file": "take-002.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "d5e9dbd4ca123f40b161d4ec9f0fb183cf02aab6356d439d01d5d8671cfdc973"
+    },
+    {
+      "file": "take-003-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40806,
+      "sha256": "dd850fead4fade0402e660ff9c403f965bf1a1bbe3daff61f6eb4d3f2eb7c837"
+    },
+    {
+      "file": "take-003.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "2d1da00dd807e7d1647964d04213ad8e9d63150be23ec0a2d7b86c3c3d384ac7"
+    },
+    {
+      "file": "take-004-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40792,
+      "sha256": "89ec676bb56456169b4ee45f58cc8c0c69f1f89c828c6c4771285666f990fbd6"
+    },
+    {
+      "file": "take-004.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "9926459851f5ca7b9ea40fe8efb5f45503ebd64fb382ae0b06fe88292c289765"
+    },
+    {
+      "file": "take-005-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40723,
+      "sha256": "511bb05ca87a56569e7510c2ebe7425b0043e615781cbc47c3577001efb98500"
+    },
+    {
+      "file": "take-005.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "07a0b589357d94f03c9cbf93ef26187ff10ee403f86329f35e2ead3ea09aa0d1"
+    },
+    {
+      "file": "take-006-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40788,
+      "sha256": "3069ce2574ea62802aa777e88f9bbac31e4041e68517957d8bc12d195b8a4ab7"
+    },
+    {
+      "file": "take-006.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "6b4cf09c3b2ebc43e647c01ed27e6f64327cd4d035a6c38d6b13b81c8ebd852d"
+    },
+    {
+      "file": "take-007-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40784,
+      "sha256": "27f777b916b9f0de53ad23170c00e865d74274aeb5c5e179b857a54d82af8974"
+    },
+    {
+      "file": "take-007.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "c1c3fd840b98630766f92165a7f91ca81a59e094c15128ef75a06ec3aa659be7"
+    },
+    {
+      "file": "take-008-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40789,
+      "sha256": "d30f8e81106eae0e3335256b3baf10db8294e3f62b5a3540d593fd695a044ca3"
+    },
+    {
+      "file": "take-008.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "680324109baed117468a201e89cb180cd18b63c713f9b4ba1d3adad70fca9460"
+    },
+    {
+      "file": "take-009-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40722,
+      "sha256": "894a7419762370779a51fd5dee464b3dc312dd33aa6faed5a6ba613dd74e1635"
+    },
+    {
+      "file": "take-009.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "e1b498545256111375a882ca3d089eff296cbb50c305e84c95db2423a7d6c487"
+    },
+    {
+      "file": "take-010-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40803,
+      "sha256": "781560b0f4e3985c93e51191bfbd563fd1e2f49dc447cb3605c0f79913d1b697"
+    },
+    {
+      "file": "take-010.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "c44223a7f045df3a3162c105e65136ec7bdb72840fc400dd62642bdab29c508f"
+    },
+    {
+      "file": "take-011-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40767,
+      "sha256": "a6f9a2400fbad088707cb7b7aa030ea64cab3a1c51c72cd388c5677bcd165535"
+    },
+    {
+      "file": "take-011.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "6871dacbc4b8674f96ab33afe392033193db3170468d3d5ba0ada709f8285395"
+    },
+    {
+      "file": "take-012-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40651,
+      "sha256": "6ae4f81cb936e851be06c263136549ed6820a75544160b7ef63e8e21153875c3"
+    },
+    {
+      "file": "take-012.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "15325d5e38fde65b56dc5f792e383f77dd02a0eb5e12ac02234020ddb2f08898"
+    },
+    {
+      "file": "take-013-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40662,
+      "sha256": "cd11686b4320868f2c9a29f65e5a899f8835615a88acd0e601131c64dc8f1187"
+    },
+    {
+      "file": "take-013.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "d1fe2e4ff3b8968a934861b57e3ce7a4e37d707a03201bd86c6e5cf962e0c277"
+    },
+    {
+      "file": "take-014-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40667,
+      "sha256": "8fd2e79fde5390eff90615467b8b955ab60e144f957bf8fc279d74a77fa14ed6"
+    },
+    {
+      "file": "take-014.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "76bc65950e6a44edb16b849162aeb97da1b2237c8ae21dda9475fa5a23a19311"
+    },
+    {
+      "file": "take-015-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40719,
+      "sha256": "32f182f7adc7eb4999af0ad6ad2cdf04efec679a56904cb75c3dc90d8de5b27b"
+    },
+    {
+      "file": "take-015.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "5388807675e462279f365d923a147910197acfcb5360828d8b57489e50aeb594"
+    },
+    {
+      "file": "take-016-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40655,
+      "sha256": "b739d17ac6505eff54d2b35db150800dd2d7693755e125e7acdac8f304de2597"
+    },
+    {
+      "file": "take-016.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "325d2b1805c54cf49747ae3c8e53830fff2864023af6b36f393d310091fc2e37"
+    },
+    {
+      "file": "take-017-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40637,
+      "sha256": "316c0e142fa1dc91abb6ce7228a4fbb8cdce590e85768bfa0edcb7c213b3d8d0"
+    },
+    {
+      "file": "take-017.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "73d61216a98b3a6158a162dea4de8d016eff81f9a9eb7cf4cdb43c618856c72d"
+    },
+    {
+      "file": "take-018-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40689,
+      "sha256": "c159060120411e415af23fa2ac8e2f1eea0c90f73a5d24b183bce1b3824f21c5"
+    },
+    {
+      "file": "take-018.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "cc553ca205800157544bafa8bd6d0d04f0537ba03cc8bece3cba01048bc0ca97"
+    },
+    {
+      "file": "take-019-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40718,
+      "sha256": "109298448c3eaf4813f4ff683ef68cba3b5a9a23d9c52a8a3d371669a0e96900"
+    },
+    {
+      "file": "take-019.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "97f2be9870e969bf9b7b1d6a2fb2c7cab96ed02b9356a2f8800f66bda87ae35d"
+    },
+    {
+      "file": "take-020-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40674,
+      "sha256": "77d9d6326c99a98367cd7270324cdb1dbc60ba6dcb4d5e74b8930e7b9f394ba8"
+    },
+    {
+      "file": "take-020.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "25d05b38113263d911e21c2f288e4f171549bf76edc1c93bde8bcd08bd913ca1"
+    },
+    {
+      "file": "take-021-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40704,
+      "sha256": "1f87479e4f8a0d1448a3c858d7038071eff9d1fd0a7815fed3c9b24ac301ead3"
+    },
+    {
+      "file": "take-021.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "f03252522474fb8c7493c3e683a77629022cea142b094ae5390a3a667b90a041"
+    },
+    {
+      "file": "take-022-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40674,
+      "sha256": "fa22ea656ee5f9107d640cf128452500a39e95bd858932055423c0f4e8c6f96b"
+    },
+    {
+      "file": "take-022.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "de109cf1f9a95d1c237c1ff8f7271a41def460832b0225b49ac6a7fd04be960a"
+    },
+    {
+      "file": "take-023-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40752,
+      "sha256": "4a565938ca0b05ee24bcbaf72a3f59a78616257bb1a5aff28274a33574990edb"
+    },
+    {
+      "file": "take-023.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "4ad6c027f00dc591bc7fd315cb364ad944b8c11a97e471e1971f179a4f6f8abd"
+    },
+    {
+      "file": "take-024-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40727,
+      "sha256": "e104be78aa1ae8fa052383ddb1a621cf771aa1ddca57631cada2bea7d9c32cca"
+    },
+    {
+      "file": "take-024.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "e32d3b0081f81b52efa4f596918c2ccc4660c1a09d6c4193421181f65eb33f8a"
+    },
+    {
+      "file": "take-025-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40729,
+      "sha256": "92a072514f6b48bc558c276b8fe318e2883e680f7a8c85424dc38c0d86733ea5"
+    },
+    {
+      "file": "take-025.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "1e2b1b8ae58d0f145024fe0d8d277cc1d54004edab17a51a0e780dfac653f543"
+    },
+    {
+      "file": "take-026-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40707,
+      "sha256": "c7d714f828fce09a85e7a0c6b8bca479f7fd34e93ff296137df2fa51532156d9"
+    },
+    {
+      "file": "take-026.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "341b76f0c83125e3a5fcc504117750160b899fae2849ea790f89f48f1d9af4f9"
+    },
+    {
+      "file": "take-027-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40684,
+      "sha256": "67d5e6fc8d86785d9cdb574efef0f4bb4dfb73a759cd36103e00cf52295bcfb6"
+    },
+    {
+      "file": "take-027.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "fc9330ae5c6d76ea4ee9d6708fe444a2366591c96379d1a4ca31e8f89f5887a0"
+    },
+    {
+      "file": "take-028-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40644,
+      "sha256": "9ea60b2e5a1d85177bb0516c186a6c138ba7b9f0c92e9ee611fa51789041456f"
+    },
+    {
+      "file": "take-028.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "aa338dc34e0f66c8a22053b5d1a52a4ad1181b5dd9ece1d15b711cd05466da95"
+    },
+    {
+      "file": "take-029-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40601,
+      "sha256": "3f672beef4556db0f4e4755fd07ba91539cfcc6c6d9af60c43856a4b6571eb26"
+    },
+    {
+      "file": "take-029.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "1f1b010c07f58869c73c1ade17b59c3fceff49caa133cf3e070733199a18b1ee"
+    },
+    {
+      "file": "take-030-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40627,
+      "sha256": "4b08c9e2c7ac7b42a098e6e106fc419c5d22b2f168cde45a6d4bd14aef177f66"
+    },
+    {
+      "file": "take-030.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "2bf2c8138d820e16210ecf921d52d3faf13f1bcba288fd7f4b32cdfaeb01a234"
+    },
+    {
+      "file": "take-031-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40686,
+      "sha256": "97c3fb7c962a76addabb973852561eba07dbe057ade61c181671f9d2efb12bf7"
+    },
+    {
+      "file": "take-031.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "4ec9f8c4f430e7896ea32c5a10ce1491ab0ac21b3cdaa8aeed514faf5c3827e7"
+    },
+    {
+      "file": "take-032-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40659,
+      "sha256": "710e9c6929d7f95aba7cb89f76f8e4d509e9afc148c10ac60aa6f1c85c0293f3"
+    },
+    {
+      "file": "take-032.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "d2ae3706bd8c7a363a69d04a806786b9cdfd5582dd6904d2087e330f6089f847"
+    },
+    {
+      "file": "take-033-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40608,
+      "sha256": "04149e7c2b23c7b14c2ed9a022c8267a26a1012cec0fdb2a51d074404cca15ec"
+    },
+    {
+      "file": "take-033.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "41d88b71a4cdfc4d86cbdfd4f64a0ba5a68badd3120beed018dc129df04a9c3f"
+    },
+    {
+      "file": "take-034-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40618,
+      "sha256": "123c778440f0bd9d2b249a4aa4e8bbc23fbad4baac583fc9ef370d8604a83cc6"
+    },
+    {
+      "file": "take-034.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "82966e60334fd05505f1fff7d87393bfc77b50247f304e05286b7a00fea31bfd"
+    },
+    {
+      "file": "take-035-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40683,
+      "sha256": "c1bd70cfad87e1eea85a732edef03c71d158bfb936ca72dcfb8d5dc73f307e0d"
+    },
+    {
+      "file": "take-035.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "26ae5320f633cf0551f2d0ae8841ef617a17a6ca1bdbcd177aa7950accc1c6ca"
+    },
+    {
+      "file": "take-036-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40614,
+      "sha256": "903ac3e2e6bf4503ea63fd96bc1f3deab909d45ce128e3873ac127685164e347"
+    },
+    {
+      "file": "take-036.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "12d495e735d3a260d55b7573415bae30740aae5c2bb53af853fd6d077c405413"
+    },
+    {
+      "file": "take-037-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40629,
+      "sha256": "6c3072697e762dee6e2e62e38b808bc5963e2943ded7d1da65e9b4351812fe60"
+    },
+    {
+      "file": "take-037.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "d84f0fd2c26629ea53f3aeb07cf9089a86c4d85aa5153a87c3a903674f384ec1"
+    },
+    {
+      "file": "take-038-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40772,
+      "sha256": "b417a851e9e351c69bf0cb525d6ddbe6f1fc256dcf0509b46c789b566afc278a"
+    },
+    {
+      "file": "take-038.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "d011f2764b6bc2fdf3aefd48e9ce86ab38bfd92863fdcf00da86942fc525019a"
+    },
+    {
+      "file": "take-039-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40837,
+      "sha256": "c70b3cb6bacdb5399a325cd75a597add1e9d2c14f249f9aefc4fa88b192ff267"
+    },
+    {
+      "file": "take-039.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "557dbe9f47eef28ffd7b688fdd081c2cce6639c41abd7805e1610521905a9538"
+    },
+    {
+      "file": "take-040-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40748,
+      "sha256": "2c85735896ae8ff9eb529c93ac5ce78827eaca61681602dd880ad48f513c3991"
+    },
+    {
+      "file": "take-040.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "da913006bac52af48c8615af7c3cfb99adc0ad75e9138f534b2ab2feead0f15b"
+    },
+    {
+      "file": "take-041-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40766,
+      "sha256": "acd1485de0d21469c25ec4739d5115bbb25983aa70fcfd11f3752862dfac4c89"
+    },
+    {
+      "file": "take-041.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "6be71e4085da0da6fe56a1339065fdd95ef7f47247d493de1e66d4bfb657b432"
+    },
+    {
+      "file": "take-042-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40733,
+      "sha256": "a0541165f2bef959d43968cc9c006e982bc7f10ae7a777d1c1b04efba82e5217"
+    },
+    {
+      "file": "take-042.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "39940fdb0692d727bad4523961ff3a28253176dd7e0db3a7b5aa780822327d76"
+    },
+    {
+      "file": "take-043-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40803,
+      "sha256": "224462e062623221e46eabb2bc54337469bc2933b742a33d86ec4f318f694ad9"
+    },
+    {
+      "file": "take-043.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "26733dd6a130bd2932a959fb354c6c5a9b31b438637c9489df3dec7d61388cf1"
+    },
+    {
+      "file": "take-044-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40768,
+      "sha256": "dab34266f66e71e2354c3dfb72d9c52e07c703a94500095deacf7c66d48e7d1d"
+    },
+    {
+      "file": "take-044.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "0b8f0574dd9819c6580aeb122aca021afe16fc02d0036b19c5247d70d6f8fcee"
+    },
+    {
+      "file": "take-045-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40731,
+      "sha256": "f8b23b6fe6df150b794718a2075301e920ed2c506baa7fcfc1052ab93265008c"
+    },
+    {
+      "file": "take-045.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "cadca24a3fc02a88b49a247998dd087a27f3bbcac29eee4aba30414cde069998"
+    },
+    {
+      "file": "take-046-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40770,
+      "sha256": "f3b31bb4436f8c02ecf42a87ade81daa6126b935cbfe42cc2b4f630f079b8a53"
+    },
+    {
+      "file": "take-046.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "7f58a565dc4bd1d6dc3c1f0bf25ddfe4618be8230ebbf46da9b03c3d7bb5c9e4"
+    },
+    {
+      "file": "take-047-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40793,
+      "sha256": "8615921b312ab9f6bfd6ac7d1fe265767fb765483166b1a8a23445531a157bdc"
+    },
+    {
+      "file": "take-047.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "4d7f19cc1d6a0c1682e9cd1b3f9fd528cb862d37fd0d04684318bf2a7e19ba8b"
+    },
+    {
+      "file": "take-048-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40705,
+      "sha256": "da41a162d078d4b77fc9ab88502ac0f5b122b9d289bc03dcb90a862e60e254e0"
+    },
+    {
+      "file": "take-048.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "2f64c7055597e7fd9680f6370cbe94ce9528d60f36d7d2e281aa6d0e2d8e7d81"
+    },
+    {
+      "file": "take-049-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40683,
+      "sha256": "626c51b805b5c4f74ff428467ff6e45325148af5a24718f3752e80ee261eb65b"
+    },
+    {
+      "file": "take-049.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "01b2fb0fae7b9262b8a41f1aab569d38ac9603071aaddfb48ba91214347946c2"
+    },
+    {
+      "file": "take-050-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40679,
+      "sha256": "fb1816d1532546697e1d362bde93abf23045b46f6bb1630f9c04b3f823deba18"
+    },
+    {
+      "file": "take-050.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "4ac14db8d1d3bff6c6938be0f4c877f2258663cd9f91ccc52f899e756fd619a0"
+    },
+    {
+      "file": "take-051-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40767,
+      "sha256": "9f6b267eeda0c16f867e049dd1777d902e4b7159c05e4a31412b567043a97458"
+    },
+    {
+      "file": "take-051.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "d0d02da25c5594712f2f2bac60342279a85edad6ac399ac35e4bbb8e1f867462"
+    },
+    {
+      "file": "take-052-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40678,
+      "sha256": "282f7795e984546b66915537bcf636701c328348aa75749ad96e28a56298eaed"
+    },
+    {
+      "file": "take-052.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "51c9ee2af5b449b8e452ce278604fb2e17831dd76f5672372f68854ffa9e1842"
+    },
+    {
+      "file": "take-053-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40616,
+      "sha256": "71075434a63c7e10889b1e921c7824a8cc779f0f9c9c2f55b541f99d3454c266"
+    },
+    {
+      "file": "take-053.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "792e46b705159fc491866199c24dd383f2e74cd00653490ca4e395142e0d748e"
+    },
+    {
+      "file": "take-054-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40640,
+      "sha256": "578f53f11a2af15a2ed7062de953e6915f1fddd822f0c3cf11580bb94073cf41"
+    },
+    {
+      "file": "take-054.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "95fa284c1cef7ac4800962b4e65a6e73da0fa74cb0ca8ac43b87a03d723b662c"
+    },
+    {
+      "file": "take-055-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40741,
+      "sha256": "a63aecbde7b707e7b3bf0bc1f35d75c59f7553f632b35464ce88d44337fa3165"
+    },
+    {
+      "file": "take-055.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "2fd404e14c9cde4b317a3f5c357c4c881306b57c0f26957876399a894b1c8963"
+    },
+    {
+      "file": "take-056-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40678,
+      "sha256": "0e0b1e816983a408a2f46992835aace5b1a9c737455e55f688f09e449e76c7bb"
+    },
+    {
+      "file": "take-056.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "7b7ce62bd546ffbf992ca92f50532eebdc1c7ff86c09684cd8eb2776006843c9"
+    },
+    {
+      "file": "take-057-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40692,
+      "sha256": "fae7d1728c4680f4882585a100e773372d3eea751604a2b14862222cec66f9de"
+    },
+    {
+      "file": "take-057.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "363b000fda39943a872758beded7b27abb648c0be3df731ac4a297b1a7bb1b5c"
+    },
+    {
+      "file": "take-058-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40726,
+      "sha256": "e1853cabb1f0ba8dba50827c1bb4e9432a56ae3b7b834cda2930669835894191"
+    },
+    {
+      "file": "take-058.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "adb3f7d285204cd811ae9f1ee0447c215b6b957d75e25e4ce86f339c69c4e913"
+    },
+    {
+      "file": "take-059-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40725,
+      "sha256": "bb7887afb3ecb97a15dfc63e645aa3962be6df50f10e095f74abf6828d6af1d9"
+    },
+    {
+      "file": "take-059.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "f5bb4ff994e6d103c69e2c7f8f4e5ff9528c0232b2083d40bb1e9fb2e1e1e11b"
+    },
+    {
+      "file": "take-060-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40786,
+      "sha256": "f3f5061a1e7af7bc487800573a71e8fb36407c588edd9ccee0c6dfb3f89340f9"
+    },
+    {
+      "file": "take-060.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "f7d8cd8c02d59fff020d73098ca40c5c7117536429fb32624a57d8e3e8c25591"
+    },
+    {
+      "file": "take-061-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40684,
+      "sha256": "9ba8d9268471fd5d41b52a4b125198d57122dc7864b23e67336e5e4fae96ceac"
+    },
+    {
+      "file": "take-061.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "2a1e4a146b728dfe1017679964dc5b7967dd431dc9a796e5c5063cb3397f5097"
+    },
+    {
+      "file": "take-062-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40727,
+      "sha256": "b1d3a34aea5bff99250e21cd671eb0f1c17b4e7ad324e2277d767bd16b52155d"
+    },
+    {
+      "file": "take-062.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "6064c87e1c4ca61d2f72f057b6ceceeaadbce142e53565cfaeec3d597b9ab1c2"
+    },
+    {
+      "file": "take-063-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40729,
+      "sha256": "4544f8aa725d0aaa4489ae78d69f0b2e98781fe2b0c28c081dfb2b05056a3d88"
+    },
+    {
+      "file": "take-063.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "8f8942632c5119ea30669ab2e15dd5509826f5014ace43918c4d86688810ff76"
+    },
+    {
+      "file": "take-064-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40609,
+      "sha256": "2188437bcf01ef4173f0717af5751ca96eb8972cfd6b2f8f0dc5f6782e08506a"
+    },
+    {
+      "file": "take-064.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "7d8e6557585e29c3af1dd5b0b525ac6c304dbd96cd22d3cc7706f063f9bbc470"
+    },
+    {
+      "file": "take-065-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40629,
+      "sha256": "f4d29f3b746a50fa68561e2af3ac26a9896981c2baf89a90d787288e20370381"
+    },
+    {
+      "file": "take-065.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "63bdc2be9ba1287973ffdbeb71eafe21ba0e18a1c5b49587c4ec02856b216af4"
+    },
+    {
+      "file": "take-066-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40685,
+      "sha256": "ee1af9939d4f359c350818b11dcfe4b938d25194bfe86575e8515efadf2028f7"
+    },
+    {
+      "file": "take-066.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "cd81fde1b29d34f54361d2992fcd032f7378d847963e8137d63444e2fe6fbc44"
+    },
+    {
+      "file": "take-067-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40696,
+      "sha256": "e857c0667e05f4e824e9c175c67c502cad10c3318740a6d8db9650dd20397729"
+    },
+    {
+      "file": "take-067.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "f3cdf8adbe6d09e8b96bdcf11ca0ef2cd124f0c45e53942dcc4e18c75c221eea"
+    },
+    {
+      "file": "take-068-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40626,
+      "sha256": "993f0bd578f90755d972e14aa21eb60c862fe4613eb9a157cccef5f9069fe809"
+    },
+    {
+      "file": "take-068.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "588ea88847955b09ab26ff8ad3647c030ab9f5d5ba0fd5dca4600cf6d7f63a4b"
+    },
+    {
+      "file": "take-069-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40565,
+      "sha256": "0e6f8e5a604a1fe26e051c3773d5d31147c1c567f416c56bbc8471d8545fd2f3"
+    },
+    {
+      "file": "take-069.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "13878dc6331d5fb485ce71e30d70e42170c11fb8a5a2ac93d7449ff7bcaddb36"
+    },
+    {
+      "file": "take-070-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40662,
+      "sha256": "459d669fb65c0306026a71bf62997484d1594fa69d556368b02a9f946e521536"
+    },
+    {
+      "file": "take-070.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "cc22b02074559af613c8ef5541d7940093d9f2cff48aa3226968d64cdb56fcf6"
+    },
+    {
+      "file": "take-071-magnitude.csv",
+      "role": "magnitude_response",
+      "bytes": 40679,
+      "sha256": "bed6c704ec7d4e1dd0f3e3ebbbd5df227d49f50f64e5143bc3fd02848057d2bc"
+    },
+    {
+      "file": "take-071.wav",
+      "role": "processed_audio",
+      "bytes": 2630468,
+      "sha256": "6bb8b31d9568351a62392ac8ede17eee43438f4bb95b0fc2483fa5789572e9a4"
+    },
+    {
+      "file": "timing-chirp.wav",
+      "role": "supporting_evidence",
+      "bytes": 19268,
+      "sha256": "177278b23e63b2b77b49fe689a5e3f3fba41a00538e9ef510254d9eebdd8a921"
+    }
+  ],
+  "takes": [
+    {
+      "take_id": "take-r000-f2665b591243c0800dc0201faa9ac50556667e34a8db6b3f7340caa12dae091e",
+      "source_id": "L",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-00-mic-00-raw.wav",
+      "processed_audio_file": "take-000.wav",
+      "response_file": "take-000-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2492.3795584393074,
+        "skew_ppm": 0.0020072364545090492,
+        "residual_uncertainty_us": 224.67157212956664,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-57c85224917c324c9e27ced3f9e19842617cadbbce574da65ebd67b6234e2bba",
+      "source_id": "L",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-00-mic-01-raw.wav",
+      "processed_audio_file": "take-001.wav",
+      "response_file": "take-001-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2490.3084133338434,
+        "skew_ppm": 0.04005839884253902,
+        "residual_uncertainty_us": 220.32020218374618,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-6856d066dc9f3c68f314fa0035a8c91cca1970322e7b39c06a6b03dc90872e0e",
+      "source_id": "L",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-00-mic-02-raw.wav",
+      "processed_audio_file": "take-002.wav",
+      "response_file": "take-002-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2501.2357843438494,
+        "skew_ppm": -0.008142001417110334,
+        "residual_uncertainty_us": 207.10462250280517,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-423d22326408525929e867d27d655f6d7bb30d922c026c8e244ce099a6fcddec",
+      "source_id": "L",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-00-mic-03-raw.wav",
+      "processed_audio_file": "take-003.wav",
+      "response_file": "take-003-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2498.962054771586,
+        "skew_ppm": -0.012932534587966671,
+        "residual_uncertainty_us": 198.44714824709965,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-ca7ec91c34dae565495aaf5c420867edc370ec93f909e681658d45e2b8138489",
+      "source_id": "R",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-01-mic-00-raw.wav",
+      "processed_audio_file": "take-004.wav",
+      "response_file": "take-004-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2492.3916207538964,
+        "skew_ppm": -0.01391625114929748,
+        "residual_uncertainty_us": 223.95671262480963,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-e213864fa63bde58332fbe86618adcb48590e8e68a69806b571a7bd5b79d77f6",
+      "source_id": "R",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-01-mic-01-raw.wav",
+      "processed_audio_file": "take-005.wav",
+      "response_file": "take-005-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2490.3258919729083,
+        "skew_ppm": 0.0033398275561960264,
+        "residual_uncertainty_us": 220.12941631110232,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-d27a56e5f74ca055865e976e9aaae01eb94d774a19be9fa04761a8acf975a015",
+      "source_id": "R",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-01-mic-02-raw.wav",
+      "processed_audio_file": "take-006.wav",
+      "response_file": "take-006-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2501.224173710283,
+        "skew_ppm": 0.04122316993373345,
+        "residual_uncertainty_us": 206.40975371851653,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-625c10ade0dcdfa68c65c3274354be5b858316f03de6748fa817222939d50b6d",
+      "source_id": "R",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-01-mic-03-raw.wav",
+      "processed_audio_file": "take-007.wav",
+      "response_file": "take-007-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2498.947758183916,
+        "skew_ppm": 0.046161524944672856,
+        "residual_uncertainty_us": 198.77478260243146,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-3f0b798245a197f86d171e952b27108781824c59f0d418ada3ad52832616d2e9",
+      "source_id": "C",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-02-mic-00-raw.wav",
+      "processed_audio_file": "take-008.wav",
+      "response_file": "take-008-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3004.395857812976,
+        "skew_ppm": -0.04838533634688127,
+        "residual_uncertainty_us": 224.13298350602324,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-cacfbaf5736b7fa46e5b17570587503367264e11984253dedda0b9897cb3e392",
+      "source_id": "C",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-02-mic-01-raw.wav",
+      "processed_audio_file": "take-009.wav",
+      "response_file": "take-009-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3002.3462822877755,
+        "skew_ppm": -0.05989930499222836,
+        "residual_uncertainty_us": 219.63469671024768,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-f9e08a6f1480b8196a25b0cfac045358cfdeee347973c043c2758b03c3458f87",
+      "source_id": "C",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-02-mic-02-raw.wav",
+      "processed_audio_file": "take-010.wav",
+      "response_file": "take-010-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3013.2481970338545,
+        "skew_ppm": -0.0449809102873486,
+        "residual_uncertainty_us": 205.70773124454507,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-a6acd40a302b4efdd2b6b3617157b7c33c9a0a335884b81acb46cde27d8f709a",
+      "source_id": "C",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-02-mic-03-raw.wav",
+      "processed_audio_file": "take-011.wav",
+      "response_file": "take-011-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3010.983226042416,
+        "skew_ppm": -0.04242537250046019,
+        "residual_uncertainty_us": 198.52739986324855,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-2ce48ffd597b7225d6096e2f17cedd73b6b3dcf5379d929981c3b1cf1c242532",
+      "source_id": "SL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-03-mic-00-raw.wav",
+      "processed_audio_file": "take-012.wav",
+      "response_file": "take-012-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.354073090831,
+        "skew_ppm": -0.055999414779228304,
+        "residual_uncertainty_us": 223.90619531776244,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-4aa05558a800f1789e6c57dc76bec1a373886dce7b63f4d00027285c11bb39f9",
+      "source_id": "SL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-03-mic-01-raw.wav",
+      "processed_audio_file": "take-013.wav",
+      "response_file": "take-013-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.301615384955,
+        "skew_ppm": -0.04445892513002844,
+        "residual_uncertainty_us": 219.8518834814684,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-c5f8f70da4418d4e5f84a22023e989f7a87a13034844a0159be6dedb4645e1d6",
+      "source_id": "SL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-03-mic-02-raw.wav",
+      "processed_audio_file": "take-014.wav",
+      "response_file": "take-014-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.2293641898773,
+        "skew_ppm": -0.07406071292265666,
+        "residual_uncertainty_us": 205.84844441359112,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-e7c8df40165c6180844e4bfbec46eaf7a182a1d293a3f63a4f4bf5bff59632b2",
+      "source_id": "SL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-03-mic-03-raw.wav",
+      "processed_audio_file": "take-015.wav",
+      "response_file": "take-015-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.9555621556497,
+        "skew_ppm": -0.06928538498137429,
+        "residual_uncertainty_us": 198.55232294340854,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-a47d53f348462d7901e653eb6a86008b422eafc8069f68180d930c5ec204c7b3",
+      "source_id": "SR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-04-mic-00-raw.wav",
+      "processed_audio_file": "take-016.wav",
+      "response_file": "take-016-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.3070336553697,
+        "skew_ppm": -0.026016159398312557,
+        "residual_uncertainty_us": 224.6398636580002,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-91e516e9e29a8033a438df1d679ca00c71d39e98275d21ab6894d2155d7d363a",
+      "source_id": "SR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-04-mic-01-raw.wav",
+      "processed_audio_file": "take-017.wav",
+      "response_file": "take-017-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.2545509769525,
+        "skew_ppm": -0.042037487061606565,
+        "residual_uncertainty_us": 219.81530097938668,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-2fda67db06b6a8f926f00b229ef0684dc7abfc028803953963a2d5c8f9ec49c7",
+      "source_id": "SR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-04-mic-02-raw.wav",
+      "processed_audio_file": "take-018.wav",
+      "response_file": "take-018-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.1873790782447,
+        "skew_ppm": -0.06139885402132807,
+        "residual_uncertainty_us": 206.7197968239788,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-4e3e0b6b67aea2f5886656152546a029d3df17938aec39b34a81975748676397",
+      "source_id": "SR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-04-mic-03-raw.wav",
+      "processed_audio_file": "take-019.wav",
+      "response_file": "take-019-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.9097048958965,
+        "skew_ppm": -0.033084419689499,
+        "residual_uncertainty_us": 199.06247319996007,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-62a78c50c9ae6211cfd4be06a263ea16a4fe25299921a24c461ed27ca7181c99",
+      "source_id": "TFL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-05-mic-00-raw.wav",
+      "processed_audio_file": "take-020.wav",
+      "response_file": "take-020-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.289344271622,
+        "skew_ppm": -0.005945490230746501,
+        "residual_uncertainty_us": 224.67893424405418,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-e5c0ba50381f044ab345acfd1e0a2ba38647dfe0c97e7e006595436dc772c411",
+      "source_id": "TFL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-05-mic-01-raw.wav",
+      "processed_audio_file": "take-021.wav",
+      "response_file": "take-021-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.2281237079674,
+        "skew_ppm": -0.00600606188613927,
+        "residual_uncertainty_us": 220.05113591782316,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-2cce7955f6556618e7e34857dc6c26af622d851656594fb392265600baef68e6",
+      "source_id": "TFL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-05-mic-02-raw.wav",
+      "processed_audio_file": "take-022.wav",
+      "response_file": "take-022-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.150425114636,
+        "skew_ppm": 0.004045532495948709,
+        "residual_uncertainty_us": 206.01289268215774,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-47b87acf13ccac4c4992970d82bec8462ef2818c2c011cdb075625bd1fc310dc",
+      "source_id": "TFL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-05-mic-03-raw.wav",
+      "processed_audio_file": "take-023.wav",
+      "response_file": "take-023-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.8742040937773,
+        "skew_ppm": 0.0018902273084330816,
+        "residual_uncertainty_us": 198.6133270356564,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-d1b9e8b5571a757bb7d63febaf0c2e655d5b03cd21083f8c960ceee3e38c5096",
+      "source_id": "TFR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-06-mic-00-raw.wav",
+      "processed_audio_file": "take-024.wav",
+      "response_file": "take-024-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.269968137387,
+        "skew_ppm": 0.0016155132608031318,
+        "residual_uncertainty_us": 223.97375117399005,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-f9d2267e951800941ed532e36b1d184b26aa04be6236a1afbe393659afb199ba",
+      "source_id": "TFR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-06-mic-01-raw.wav",
+      "processed_audio_file": "take-025.wav",
+      "response_file": "take-025-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.219202950377,
+        "skew_ppm": 0.015549942141448989,
+        "residual_uncertainty_us": 220.10747647310058,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-bc1424dcd95e7b2c75cb6a25c03b32a8e737be7c702f97779dca6327eec761e2",
+      "source_id": "TFR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-06-mic-02-raw.wav",
+      "processed_audio_file": "take-026.wav",
+      "response_file": "take-026-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.141550693946,
+        "skew_ppm": 0.016169878717221007,
+        "residual_uncertainty_us": 206.14358461578058,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-835c99b3d18919091e4cbba022e43d1763f72f581a0be70b022d6cd122bf1279",
+      "source_id": "TFR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-06-mic-03-raw.wav",
+      "processed_audio_file": "take-027.wav",
+      "response_file": "take-027-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.8680440172147,
+        "skew_ppm": 0.03514228566288053,
+        "residual_uncertainty_us": 198.73699469800349,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-e0539dd9d6088f5f45de86e6d83e53a4ad34d596b10a5f41dfe1f91aaf3c7f3d",
+      "source_id": "TRL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-07-mic-00-raw.wav",
+      "processed_audio_file": "take-028.wav",
+      "response_file": "take-028-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 5564.281959362623,
+        "skew_ppm": -0.021737477496456464,
+        "residual_uncertainty_us": 224.32818418253743,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-9a67b4d2277d11d16d4f98dc5d66fb2cca5c114e71eff75d5c3b8b26a15da64a",
+      "source_id": "TRL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-07-mic-01-raw.wav",
+      "processed_audio_file": "take-029.wav",
+      "response_file": "take-029-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 5562.224323351374,
+        "skew_ppm": 0.003181564500390243,
+        "residual_uncertainty_us": 220.17441513163033,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-0d16b8fa09e8b5c2a5df34a3286ebfa9f47e6af57e23b06e0603c7f3eaf21018",
+      "source_id": "TRL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-07-mic-02-raw.wav",
+      "processed_audio_file": "take-030.wav",
+      "response_file": "take-030-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 5573.14446655052,
+        "skew_ppm": 0.006577660941869398,
+        "residual_uncertainty_us": 205.99118792255896,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-201d41a8179e3d9079b0f9bc18435c0f0be559e63c3329066efad417a744ff29",
+      "source_id": "TRL",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-07-mic-03-raw.wav",
+      "processed_audio_file": "take-031.wav",
+      "response_file": "take-031-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 5570.869972882167,
+        "skew_ppm": 0.015958339705446238,
+        "residual_uncertainty_us": 198.79623239763558,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-e7977ca64075845e5df64547470da8e18c99b2fbf7e957b80efcb64185823fdd",
+      "source_id": "TRR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-08-mic-00-raw.wav",
+      "processed_audio_file": "take-032.wav",
+      "response_file": "take-032-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.264605627907,
+        "skew_ppm": 0.003206044759338958,
+        "residual_uncertainty_us": 224.37455340743256,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-893ec8a816c0861172b13b346b21b78fb197b7fcc9335b9a3e08cde65d25ed0c",
+      "source_id": "TRR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-08-mic-01-raw.wav",
+      "processed_audio_file": "take-033.wav",
+      "response_file": "take-033-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.2136579763423,
+        "skew_ppm": 0.0039974476794909205,
+        "residual_uncertainty_us": 219.89964626078927,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-c00a1788395c4fd4e5441c5eb6d885c099592dcb07828c656b898cc67df085fc",
+      "source_id": "TRR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-08-mic-02-raw.wav",
+      "processed_audio_file": "take-034.wav",
+      "response_file": "take-034-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.145711346755,
+        "skew_ppm": -0.010066392817298904,
+        "residual_uncertainty_us": 206.03276480446925,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r000-cd6121786c007c1e76a91d6f19afa6d1942dc66be0a790b356a550c1543a591e",
+      "source_id": "TRR",
+      "repeat_index": 0,
+      "raw_audio_file": "repeat-00-source-08-mic-03-raw.wav",
+      "processed_audio_file": "take-035.wav",
+      "response_file": "take-035-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.8798276348457,
+        "skew_ppm": -0.010293133738270155,
+        "residual_uncertainty_us": 199.0231954456017,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-9862c2537feb094e7401333c50588cb5dc17caa0a652186f6f20997ec8d5fbca",
+      "source_id": "L",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-00-mic-00-raw.wav",
+      "processed_audio_file": "take-036.wav",
+      "response_file": "take-036-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.271407112662,
+        "skew_ppm": -0.00833097738115862,
+        "residual_uncertainty_us": 224.01536906312765,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-ed2081514282847a67813af2eddf2822ff378ff5ad2f1ff84c298f909d0a263e",
+      "source_id": "L",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-00-mic-01-raw.wav",
+      "processed_audio_file": "take-037.wav",
+      "response_file": "take-037-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.2136670215064,
+        "skew_ppm": 0.0004396814568632402,
+        "residual_uncertainty_us": 219.50986386400524,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-50bae8474deb54847f9e925aa4a48d754a046bace613e5bd0e59b6b56b1ea481",
+      "source_id": "L",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-00-mic-02-raw.wav",
+      "processed_audio_file": "take-038.wav",
+      "response_file": "take-038-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.1354673937153,
+        "skew_ppm": 0.004854478347817021,
+        "residual_uncertainty_us": 206.2928915681555,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-d486251c7c638674d74c2f7e27872a3b6eaf34ad40f61309e13f6c6129089451",
+      "source_id": "L",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-00-mic-03-raw.wav",
+      "processed_audio_file": "take-039.wav",
+      "response_file": "take-039-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.866873758222,
+        "skew_ppm": 0.006825217525825821,
+        "residual_uncertainty_us": 198.9652951448065,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-2972aa6e5fe16a277f650f222d644a91cbdacff1561d8932f93a5eceb1321221",
+      "source_id": "R",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-01-mic-00-raw.wav",
+      "processed_audio_file": "take-040.wav",
+      "response_file": "take-040-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.259651024226,
+        "skew_ppm": 0.014311812494857351,
+        "residual_uncertainty_us": 223.99276648413715,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-bc7f24c280ef9206bcc28167e75831f7b5478c0bcc8389727c3d7c5d9985f95a",
+      "source_id": "R",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-01-mic-01-raw.wav",
+      "processed_audio_file": "take-041.wav",
+      "response_file": "take-041-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.218534720811,
+        "skew_ppm": -0.007369242326295876,
+        "residual_uncertainty_us": 219.62788622806733,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-5bb87402ca7920f284f2918a911502bbcd54f070f8f2e62ccdec501117c61634",
+      "source_id": "R",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-01-mic-02-raw.wav",
+      "processed_audio_file": "take-042.wav",
+      "response_file": "take-042-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.1509358164517,
+        "skew_ppm": -0.022004213386786414,
+        "residual_uncertainty_us": 206.38925362518538,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-94337ec5bc00c6ad314688f674cb2e47b127ab8e9ba39d6a4b6d32cb569d56dc",
+      "source_id": "R",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-01-mic-03-raw.wav",
+      "processed_audio_file": "take-043.wav",
+      "response_file": "take-043-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.872475513754,
+        "skew_ppm": -0.012274565259609498,
+        "residual_uncertainty_us": 199.16856585121616,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-c4820f94e91167dc41633a63188c605f487db3e2bf121e682da339bd95ffdca4",
+      "source_id": "C",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-02-mic-00-raw.wav",
+      "processed_audio_file": "take-044.wav",
+      "response_file": "take-044-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 4540.257155503721,
+        "skew_ppm": -0.009747293443214157,
+        "residual_uncertainty_us": 223.6388939109528,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-42a7ef5a7f26421aa2602ede67481169f4995147b7bb94042a1b2b0c69c97d62",
+      "source_id": "C",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-02-mic-01-raw.wav",
+      "processed_audio_file": "take-045.wav",
+      "response_file": "take-045-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 4538.209380429777,
+        "skew_ppm": -0.02374089628078788,
+        "residual_uncertainty_us": 220.20037932517562,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-47b808be350492763072de2bc38b4cef91c5d8f5d4c700a60bdb13f8c0e0d415",
+      "source_id": "C",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-02-mic-02-raw.wav",
+      "processed_audio_file": "take-046.wav",
+      "response_file": "take-046-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 4549.137216992731,
+        "skew_ppm": -0.01902126311828849,
+        "residual_uncertainty_us": 205.98529660759678,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-6adce4e8313fe4d7d9433ce29f82253be13208c18b653faa64f7f605a72f68fb",
+      "source_id": "C",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-02-mic-03-raw.wav",
+      "processed_audio_file": "take-047.wav",
+      "response_file": "take-047-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 4546.862279340697,
+        "skew_ppm": -0.02545333563108533,
+        "residual_uncertainty_us": 198.88642907888186,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-db01fba26e5c9e8e841f1df490c7a92b0dd608a17b844b37fa2952ed93ce0bc5",
+      "source_id": "SL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-03-mic-00-raw.wav",
+      "processed_audio_file": "take-048.wav",
+      "response_file": "take-048-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2492.246429063329,
+        "skew_ppm": -0.023466251341521874,
+        "residual_uncertainty_us": 224.0027974147429,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-641342b82ccf7d1254391e36461323c27ff036c61b69dac42841e9edd1da3a62",
+      "source_id": "SL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-03-mic-01-raw.wav",
+      "processed_audio_file": "take-049.wav",
+      "response_file": "take-049-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2490.1959139125734,
+        "skew_ppm": -0.020215500761103747,
+        "residual_uncertainty_us": 219.72020178774358,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-e982cb17ba25de2ba49832c73445faf3344e0f68ecaafafc20c3bf1d6b189c5b",
+      "source_id": "SL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-03-mic-02-raw.wav",
+      "processed_audio_file": "take-050.wav",
+      "response_file": "take-050-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2501.1244336982304,
+        "skew_ppm": -0.031065604753888375,
+        "residual_uncertainty_us": 206.24392436951118,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-4e2a3d5e6f9596493e1376875fee0c2abf5f2843220b3999ee8f2361f76535a0",
+      "source_id": "SL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-03-mic-03-raw.wav",
+      "processed_audio_file": "take-051.wav",
+      "response_file": "take-051-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2498.850244703276,
+        "skew_ppm": -0.02348228435563869,
+        "residual_uncertainty_us": 199.2291950105329,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-32aa4fc0967dd89fd0ca505346f333f41a0a9e83c01f95a90ce15607f4ffa09c",
+      "source_id": "SR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-04-mic-00-raw.wav",
+      "processed_audio_file": "take-052.wav",
+      "response_file": "take-052-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3004.231440105555,
+        "skew_ppm": 0.012262022148697435,
+        "residual_uncertainty_us": 225.1670136977017,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-2f80d3aae62d982fbce9f62b79efa9378e3222e765a364a0c98b9d910408abf3",
+      "source_id": "SR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-04-mic-01-raw.wav",
+      "processed_audio_file": "take-053.wav",
+      "response_file": "take-053-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3002.195428376262,
+        "skew_ppm": -0.0017589888651104596,
+        "residual_uncertainty_us": 219.76715971146683,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-5c7bbaa0a8537cb6297ae39e5396bc9bcbee20cc54bf3ccfc704650d56589580",
+      "source_id": "SR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-04-mic-02-raw.wav",
+      "processed_audio_file": "take-054.wav",
+      "response_file": "take-054-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3013.1094935443284,
+        "skew_ppm": 0.01757038019426757,
+        "residual_uncertainty_us": 206.35543624200898,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-1ac5f2b7a8c7f1c7f563579ecea4869872fc36211bd4e24dbed007fcb12c2300",
+      "source_id": "SR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-04-mic-03-raw.wav",
+      "processed_audio_file": "take-055.wav",
+      "response_file": "take-055-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3010.8319340695853,
+        "skew_ppm": 0.019281777463340657,
+        "residual_uncertainty_us": 199.17547102176187,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-015fe7d04fabe32f1677ddffe6bbe90eef07b1786c0c218db16cdd78416663c0",
+      "source_id": "TFL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-05-mic-00-raw.wav",
+      "processed_audio_file": "take-056.wav",
+      "response_file": "take-056-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2492.2272964333056,
+        "skew_ppm": -0.003954812414531021,
+        "residual_uncertainty_us": 224.31755001757926,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-7ae8e4ad1e04f928acf8dc8633072afaddfe35b095aace63d7765ead32a40aa8",
+      "source_id": "TFL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-05-mic-01-raw.wav",
+      "processed_audio_file": "take-057.wav",
+      "response_file": "take-057-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2490.196652193369,
+        "skew_ppm": -0.036433513198168295,
+        "residual_uncertainty_us": 219.89504357767498,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-88201baf4b4ee5323108a963e700e934c9a675ac17938842e413756b6b1ede34",
+      "source_id": "TFL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-05-mic-02-raw.wav",
+      "processed_audio_file": "take-058.wav",
+      "response_file": "take-058-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2501.1145395385875,
+        "skew_ppm": -0.02238249675111359,
+        "residual_uncertainty_us": 205.8536526610742,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-13c4fa7096b60f2ec1b6dc0607b2593ab334c7352e2bc724ed3fc41792caa72d",
+      "source_id": "TFL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-05-mic-03-raw.wav",
+      "processed_audio_file": "take-059.wav",
+      "response_file": "take-059-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2498.8442843870534,
+        "skew_ppm": -0.028810497939750792,
+        "residual_uncertainty_us": 199.15058921107465,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-5f56284a542862b6220872b7bb7b290440b705979bc308a4d07931ca8e2633f8",
+      "source_id": "TFR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-06-mic-00-raw.wav",
+      "processed_audio_file": "take-060.wav",
+      "response_file": "take-060-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2492.2225050385205,
+        "skew_ppm": 0.0019871825775490837,
+        "residual_uncertainty_us": 224.45613835548016,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-9ef144ab2caf6d276ab9eaa0c3d346ce0ced2d91d446ce1a1c45869b4516168f",
+      "source_id": "TFR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-06-mic-01-raw.wav",
+      "processed_audio_file": "take-061.wav",
+      "response_file": "take-061-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2490.181607836697,
+        "skew_ppm": 0.003127378953476658,
+        "residual_uncertainty_us": 219.7933907762665,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-9000e88e7533ef4ce760bfd843118e866f05098cc34d23abb902694dd554a1cd",
+      "source_id": "TFR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-06-mic-02-raw.wav",
+      "processed_audio_file": "take-062.wav",
+      "response_file": "take-062-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2501.1054375406293,
+        "skew_ppm": 0.0020617375455566664,
+        "residual_uncertainty_us": 206.13281777307768,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-bdd0d5d8119e13fe48ce3e1d552bddcfedf7214974ce9fb7034fc51e928a363e",
+      "source_id": "TFR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-06-mic-03-raw.wav",
+      "processed_audio_file": "take-063.wav",
+      "response_file": "take-063-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2498.8289785801994,
+        "skew_ppm": 0.004496408166386857,
+        "residual_uncertainty_us": 199.13250817086717,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-f6ed84b6bd830c69cc8c403f2e786e274b7cf4d54a1dc665c7d358a7ca1a3450",
+      "source_id": "TRL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-07-mic-00-raw.wav",
+      "processed_audio_file": "take-064.wav",
+      "response_file": "take-064-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2492.22715655344,
+        "skew_ppm": -0.007121389380603595,
+        "residual_uncertainty_us": 224.31106695477118,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-9a46b9782e23fc9466641003d9b33e2aeca0e09a8da1020f0f7040214a8f096f",
+      "source_id": "TRL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-07-mic-01-raw.wav",
+      "processed_audio_file": "take-065.wav",
+      "response_file": "take-065-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2490.1730975708865,
+        "skew_ppm": -0.00911161788117266,
+        "residual_uncertainty_us": 219.69480153939372,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-ae9e50179e629bff8e4ff3d06141c4440ff8d2617066093bbf84325c162b8524",
+      "source_id": "TRL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-07-mic-02-raw.wav",
+      "processed_audio_file": "take-066.wav",
+      "response_file": "take-066-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2501.0960144013534,
+        "skew_ppm": 0.014844433025770485,
+        "residual_uncertainty_us": 205.90447176131082,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-3cf16c62638bfe31972f7fa3a07ce40a6f4ecf6310457c856ac61a2beae17b4c",
+      "source_id": "TRL",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-07-mic-03-raw.wav",
+      "processed_audio_file": "take-067.wav",
+      "response_file": "take-067-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 2498.8275035997276,
+        "skew_ppm": 0.005902721338638455,
+        "residual_uncertainty_us": 198.65058750587394,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-eaddc48e6ed0f5f93b2198b108e15d2a48f648051681cb88dfef493ed2ec496a",
+      "source_id": "TRR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-08-mic-00-raw.wav",
+      "processed_audio_file": "take-068.wav",
+      "response_file": "take-068-magnitude.csv",
+      "calibration_file": "calibration-00.txt",
+      "provenance": {
+        "microphone_id": "room-reference",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3516.234344367973,
+        "skew_ppm": -0.02233115722485607,
+        "residual_uncertainty_us": 224.13003552283894,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-6b87d1e1be6810ab7dfe5e8ca5a16265da33b50a444ece42fd2c6a132964df9e",
+      "source_id": "TRR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-08-mic-01-raw.wav",
+      "processed_audio_file": "take-069.wav",
+      "response_file": "take-069-magnitude.csv",
+      "calibration_file": "calibration-01.txt",
+      "provenance": {
+        "microphone_id": "ear-right",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3514.176104256624,
+        "skew_ppm": -0.0008667376956538415,
+        "residual_uncertainty_us": 219.88913691874558,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-880346ff4e734a0f44229aad040c269c165562292da9657bcbc8034b2875ceb1",
+      "source_id": "TRR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-08-mic-02-raw.wav",
+      "processed_audio_file": "take-070.wav",
+      "response_file": "take-070-magnitude.csv",
+      "calibration_file": "calibration-02.txt",
+      "provenance": {
+        "microphone_id": "ear-left",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3525.1085570418254,
+        "skew_ppm": -0.01588756624437458,
+        "residual_uncertainty_us": 206.36217499701385,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.16,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    },
+    {
+      "take_id": "take-r001-35f1ce27c962d8b538481454f72b5b4970779242a83f05f9f3cc74160b24175b",
+      "source_id": "TRR",
+      "repeat_index": 1,
+      "raw_audio_file": "repeat-01-source-08-mic-03-raw.wav",
+      "processed_audio_file": "take-071.wav",
+      "response_file": "take-071-magnitude.csv",
+      "calibration_file": "calibration-03.txt",
+      "provenance": {
+        "microphone_id": "room-secondary",
+        "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+        "offset_samples": 3522.836855943777,
+        "skew_ppm": -0.019737929941435122,
+        "residual_uncertainty_us": 199.2893600353455,
+        "correction_applied": "resampled",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+        "gain_db": 40.0,
+        "calibration_orientation": "ninety_degrees",
+        "position_m": [
+          -0.24,
+          0.0,
+          1.25
+        ],
+        "position_uncertainty_mm": 5.0,
+        "preserves_acoustic_delay": true,
+        "quality_passed": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,1475 @@
+{
+  "version": "3.0.0",
+  "speakers": {
+    "C": {
+      "measurements": [
+        {
+          "path": "take-008-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-009-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-010-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-011-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3004.395857812976,
+              "skew_ppm": -0.04838533634688127,
+              "residual_uncertainty_us": 224.13298350602324,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3002.3462822877755,
+              "skew_ppm": -0.05989930499222836,
+              "residual_uncertainty_us": 219.63469671024768,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3013.2481970338545,
+              "skew_ppm": -0.0449809102873486,
+              "residual_uncertainty_us": 205.70773124454507,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3010.983226042416,
+              "skew_ppm": -0.04242537250046019,
+              "residual_uncertainty_us": 198.52739986324855,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "C",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "TFL": {
+      "measurements": [
+        {
+          "path": "take-020-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-021-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-022-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-023-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3516.289344271622,
+              "skew_ppm": -0.005945490230746501,
+              "residual_uncertainty_us": 224.67893424405418,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3514.2281237079674,
+              "skew_ppm": -0.00600606188613927,
+              "residual_uncertainty_us": 220.05113591782316,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3525.150425114636,
+              "skew_ppm": 0.004045532495948709,
+              "residual_uncertainty_us": 206.01289268215774,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3522.8742040937773,
+              "skew_ppm": 0.0018902273084330816,
+              "residual_uncertainty_us": 198.6133270356564,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "TFL",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "TFR": {
+      "measurements": [
+        {
+          "path": "take-060-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-061-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-062-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-063-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2492.2225050385205,
+              "skew_ppm": 0.0019871825775490837,
+              "residual_uncertainty_us": 224.45613835548016,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2490.181607836697,
+              "skew_ppm": 0.003127378953476658,
+              "residual_uncertainty_us": 219.7933907762665,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2501.1054375406293,
+              "skew_ppm": 0.0020617375455566664,
+              "residual_uncertainty_us": 206.13281777307768,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2498.8289785801994,
+              "skew_ppm": 0.004496408166386857,
+              "residual_uncertainty_us": 199.13250817086717,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "TFR",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "TRL": {
+      "measurements": [
+        {
+          "path": "take-028-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-029-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-030-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-031-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 5564.281959362623,
+              "skew_ppm": -0.021737477496456464,
+              "residual_uncertainty_us": 224.32818418253743,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 5562.224323351374,
+              "skew_ppm": 0.003181564500390243,
+              "residual_uncertainty_us": 220.17441513163033,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 5573.14446655052,
+              "skew_ppm": 0.006577660941869398,
+              "residual_uncertainty_us": 205.99118792255896,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 5570.869972882167,
+              "skew_ppm": 0.015958339705446238,
+              "residual_uncertainty_us": 198.79623239763558,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "TRL",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "R": {
+      "measurements": [
+        {
+          "path": "take-004-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-005-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-006-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-007-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2492.3916207538964,
+              "skew_ppm": -0.01391625114929748,
+              "residual_uncertainty_us": 223.95671262480963,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2490.3258919729083,
+              "skew_ppm": 0.0033398275561960264,
+              "residual_uncertainty_us": 220.12941631110232,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2501.224173710283,
+              "skew_ppm": 0.04122316993373345,
+              "residual_uncertainty_us": 206.40975371851653,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2498.947758183916,
+              "skew_ppm": 0.046161524944672856,
+              "residual_uncertainty_us": 198.77478260243146,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "R",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "TRR": {
+      "measurements": [
+        {
+          "path": "take-068-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-069-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-070-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-071-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3516.234344367973,
+              "skew_ppm": -0.02233115722485607,
+              "residual_uncertainty_us": 224.13003552283894,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3514.176104256624,
+              "skew_ppm": -0.0008667376956538415,
+              "residual_uncertainty_us": 219.88913691874558,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3525.1085570418254,
+              "skew_ppm": -0.01588756624437458,
+              "residual_uncertainty_us": 206.36217499701385,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3522.836855943777,
+              "skew_ppm": -0.019737929941435122,
+              "residual_uncertainty_us": 199.2893600353455,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "TRR",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "SL": {
+      "measurements": [
+        {
+          "path": "take-012-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-013-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-014-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-015-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3516.354073090831,
+              "skew_ppm": -0.055999414779228304,
+              "residual_uncertainty_us": 223.90619531776244,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3514.301615384955,
+              "skew_ppm": -0.04445892513002844,
+              "residual_uncertainty_us": 219.8518834814684,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3525.2293641898773,
+              "skew_ppm": -0.07406071292265666,
+              "residual_uncertainty_us": 205.84844441359112,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3522.9555621556497,
+              "skew_ppm": -0.06928538498137429,
+              "residual_uncertainty_us": 198.55232294340854,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "SL",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "SR": {
+      "measurements": [
+        {
+          "path": "take-016-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-017-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-018-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-019-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3516.3070336553697,
+              "skew_ppm": -0.026016159398312557,
+              "residual_uncertainty_us": 224.6398636580002,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3514.2545509769525,
+              "skew_ppm": -0.042037487061606565,
+              "residual_uncertainty_us": 219.81530097938668,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3525.1873790782447,
+              "skew_ppm": -0.06139885402132807,
+              "residual_uncertainty_us": 206.7197968239788,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 3522.9097048958965,
+              "skew_ppm": -0.033084419689499,
+              "residual_uncertainty_us": 199.06247319996007,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "SR",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    },
+    "L": {
+      "measurements": [
+        {
+          "path": "take-000-magnitude.csv",
+          "name": "room-reference"
+        },
+        {
+          "path": "take-001-magnitude.csv",
+          "name": "ear-right"
+        },
+        {
+          "path": "take-002-magnitude.csv",
+          "name": "ear-left"
+        },
+        {
+          "path": "take-003-magnitude.csv",
+          "name": "room-secondary"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "spatial_magnitude",
+        "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+        "capture": {
+          "geometry": "spread",
+          "takes": [
+            {
+              "microphone_id": "room-reference",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2492.3795584393074,
+              "skew_ppm": 0.0020072364545090492,
+              "residual_uncertainty_us": 224.67157212956664,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "3dbd4b5131bdb2a5e313b2e2752bfb037c0affe661ad96e292507e59054b2685",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-right",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2490.3084133338434,
+              "skew_ppm": 0.04005839884253902,
+              "residual_uncertainty_us": 220.32020218374618,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "93b5874a0bc7858c12fbfde6ee0f09ae1cd707638c8f24017a484a5bbd041c1e",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "ear-left",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2501.2357843438494,
+              "skew_ppm": -0.008142001417110334,
+              "residual_uncertainty_us": 207.10462250280517,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "ad6c84c4218601706d133ff33a9f2ee42cb0824ce0eb41bcd15334008a5e5e48",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.16,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            },
+            {
+              "microphone_id": "room-secondary",
+              "device_id": "coreaudio:RMEUSBDevice-193-24006088",
+              "offset_samples": 2498.962054771586,
+              "skew_ppm": -0.012932534587966671,
+              "residual_uncertainty_us": 198.44714824709965,
+              "correction_applied": "resampled",
+              "timing_reference_id": "coreaudio:RMEUSBDevice-193-24006088:0",
+              "calibration_id": "08b1837ca24331cecc91c1e07c88c4e41036bd37117c91951fa078782f8f58d0",
+              "gain_db": 40.0,
+              "calibration_orientation": "ninety_degrees",
+              "position_m": [
+                -0.24,
+                0.0,
+                1.25
+              ],
+              "position_uncertainty_mm": 5.0,
+              "preserves_acoustic_delay": true,
+              "quality_passed": false
+            }
+          ],
+          "reflection_report": {
+            "source_id": "L",
+            "direct_sound": null,
+            "early_reflections": [],
+            "issues": [
+              "spread geometry does not support array directions"
+            ]
+          }
+        }
+      },
+      "estimated_position": {
+        "mirror_ambiguous": false,
+        "reason": "insufficient_ranges",
+        "ranges": [
+          {
+            "microphone_id": "room-reference",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-right",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "ear-left",
+            "reason": "band_snr_low"
+          },
+          {
+            "microphone_id": "room-secondary",
+            "reason": "band_snr_low"
+          }
+        ]
+      }
+    }
+  },
+  "optimizer": {
+    "max_crossover_cancellation_db": 3.0,
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": 0.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "processing_mode": "low_latency",
+    "loss_type": "flat",
+    "algorithm": "autoeq:cmaes",
+    "strategy": "lshade",
+    "num_filters": 7,
+    "min_filter_improvement": 0.01,
+    "elimination_threshold": 0.005,
+    "min_q": 0.5,
+    "max_q": 3.0,
+    "min_db": -12.0,
+    "max_db": 4.0,
+    "min_freq": 20.0,
+    "max_freq": 1600.0,
+    "max_iter": 50000,
+    "population": 300,
+    "peq_model": "pk",
+    "refine": true,
+    "local_algo": "cobyla",
+    "psychoacoustic": true,
+    "smooth_n": 2,
+    "asymmetric_loss": true,
+    "tolerance": 0.00001,
+    "atolerance": 0.00001
+  },
+  "recording_config": {
+    "capture_handoff_file": "capture-handoff.json",
+    "recording_sample_rate": 48000,
+    "recording_channels": 4,
+    "signal_type": "Sweep",
+    "signal_duration_secs": 10.0,
+    "signal_level_db": -20.0,
+    "sweep_start_freq": 20.0,
+    "sweep_end_freq": 20000.0,
+    "room_dimensions": {
+      "length": 3.0,
+      "width": 4.2,
+      "height": 2.7
+    },
+    "setup_description": "Fireface 5.0.4 baseline. Output 3 (LFE) omitted. All four microphones recorded simultaneously; left ear=input 2, right ear=input 1. Fixed surveyed L speaker emits start/end timing chirps. Electrical loopback records the actual active playback stream. Record microphone orientation, gain, room temperature, speaker processing and routing before acquisition.",
+    "probe_results": {
+      "channels": [
+        {
+          "channel_name": "L",
+          "channel_index": 0,
+          "arrival_ms": 7.097555267706042,
+          "gain_db": -30.669361934271837,
+          "snr_db": 55.04523897784093
+        },
+        {
+          "channel_name": "R",
+          "channel_index": 1,
+          "arrival_ms": 5.7713167347352226,
+          "gain_db": -26.732354524688382,
+          "snr_db": 54.95962577597197
+        },
+        {
+          "channel_name": "C",
+          "channel_index": 2,
+          "arrival_ms": 3.870923307323096,
+          "gain_db": -28.448767901008054,
+          "snr_db": 51.40510520045051
+        },
+        {
+          "channel_name": "SL",
+          "channel_index": 4,
+          "arrival_ms": 7.40795637619442,
+          "gain_db": -33.27158995012327,
+          "snr_db": 54.133728741386406
+        },
+        {
+          "channel_name": "SR",
+          "channel_index": 5,
+          "arrival_ms": 5.694633377961225,
+          "gain_db": -32.471140539438125,
+          "snr_db": 48.27623762846089
+        },
+        {
+          "channel_name": "TFL",
+          "channel_index": 6,
+          "arrival_ms": 1.6038488802306858,
+          "gain_db": -28.98893059871398,
+          "snr_db": 52.04733285605314
+        },
+        {
+          "channel_name": "TFR",
+          "channel_index": 7,
+          "arrival_ms": 0.0,
+          "gain_db": -26.529038285821155,
+          "snr_db": 53.40527882218575
+        },
+        {
+          "channel_name": "TRL",
+          "channel_index": 8,
+          "arrival_ms": 2.9525545982521635,
+          "gain_db": -32.60546468707656,
+          "snr_db": 50.563609955648644
+        },
+        {
+          "channel_name": "TRR",
+          "channel_index": 9,
+          "arrival_ms": 1.8668466085875366,
+          "gain_db": -32.47656409451672,
+          "snr_db": 57.323243334546056
+        }
+      ],
+      "sample_rate": 48000,
+      "alignment_delays_ms": [
+        0.310401108488378,
+        1.6366396414591975,
+        3.537033068871324,
+        0.0,
+        1.7133229982331954,
+        5.804107495963734,
+        7.40795637619442,
+        4.455401777942257,
+        5.5411097676068835
+      ]
+    },
+    "probe_wav_relative": "probe.wav",
+    "bass_anchor_results": {
+      "channels": [
+        {
+          "channel_name": "L",
+          "channel_index": 0,
+          "bass_anchor_phase_deg": -139.1203709971598,
+          "bass_anchor_magnitude": 0.012319302594403949,
+          "bass_anchor_stability_deg": 0.014288976846559106,
+          "bass_anchor_loopback_phase_deg": -22.799999999991194,
+          "bass_anchor_coherence": 0.9999974468394638
+        },
+        {
+          "channel_name": "R",
+          "channel_index": 1,
+          "bass_anchor_phase_deg": -33.0603542548334,
+          "bass_anchor_magnitude": 0.006006298667468532,
+          "bass_anchor_stability_deg": 0.08868040014394214,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "C",
+          "channel_index": 2,
+          "bass_anchor_phase_deg": 94.29008438930823,
+          "bass_anchor_magnitude": 0.0036658245914017867,
+          "bass_anchor_stability_deg": 0.5032424700279614,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "SL",
+          "channel_index": 4,
+          "bass_anchor_phase_deg": 103.77360061819155,
+          "bass_anchor_magnitude": 0.00481107229430122,
+          "bass_anchor_stability_deg": 0.27267022226032683,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "SR",
+          "channel_index": 5,
+          "bass_anchor_phase_deg": 29.8598701188013,
+          "bass_anchor_magnitude": 0.002135810425125477,
+          "bass_anchor_stability_deg": 0.5865814955801205,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "TFL",
+          "channel_index": 6,
+          "bass_anchor_phase_deg": 163.31379268712232,
+          "bass_anchor_magnitude": 0.011329718176544577,
+          "bass_anchor_stability_deg": 0.038884004637232746,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "TFR",
+          "channel_index": 7,
+          "bass_anchor_phase_deg": -81.97206238176273,
+          "bass_anchor_magnitude": 0.004429580001785966,
+          "bass_anchor_stability_deg": 0.14392599439395554,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "TRL",
+          "channel_index": 8,
+          "bass_anchor_phase_deg": -94.91121144512249,
+          "bass_anchor_magnitude": 0.009014210685229713,
+          "bass_anchor_stability_deg": 0.1646431690169547,
+          "bass_anchor_loopback_phase_deg": 0.0
+        },
+        {
+          "channel_name": "TRR",
+          "channel_index": 9,
+          "bass_anchor_phase_deg": -147.44567913651292,
+          "bass_anchor_magnitude": 0.005160375824838072,
+          "bass_anchor_stability_deg": 0.148801884893812,
+          "bass_anchor_loopback_phase_deg": 0.0
+        }
+      ],
+      "sample_rate": 48000,
+      "bass_freq_hz": 80.0,
+      "bass_duration_s": 4.0
+    },
+    "bass_anchor_wav_relative": "bass-anchor.wav",
+    "bass_octave_duration_s": 1.0034333,
+    "num_sweeps": 1,
+    "bass_probe_freq_hz": 80.0,
+    "bass_probe_duration_s": 4.0
+  }
+}

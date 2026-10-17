@@ -2837,6 +2837,9 @@ fn assemble_workflow_result_with_frequency_samples(
         prepare_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir);
     workflow_refresh_needed |= level_alignment.status == StageStatus::Applied;
     result.metadata.stage_outcomes.push(level_alignment);
+    // Finals now share the aligned level basis; publish the one room target
+    // on that same basis instead of each channel's design-time anchor.
+    share_main_target_curves(&mut result, config);
 
     emit_pipeline_event(
         observer_shared,
@@ -3045,6 +3048,49 @@ fn prepare_cumulative_correction(
         });
     }
     Ok(())
+}
+
+/// Publish one shared target for every main channel after level alignment.
+///
+/// Per-channel design anchors each target to its own measured band, but the
+/// topology level-alignment stages then move every final to a common level.
+/// Without this step the serialized targets keep their pre-alignment levels
+/// (one divergent line per speaker) even though the finals share one basis.
+/// This mirrors the generic assembly's shared-target step. Subwoofer
+/// channels keep their own targets.
+fn share_main_target_curves(result: &mut RoomOptimizationResult, config: &RoomConfig) {
+    let mut names: Vec<String> = result
+        .channels
+        .keys()
+        .filter(|name| !is_subwoofer_channel(config, name))
+        .cloned()
+        .collect();
+    names.sort();
+    let targets: Option<Vec<Curve>> = names
+        .iter()
+        .map(|name| {
+            result
+                .channels
+                .get(name)?
+                .target_curve
+                .clone()
+                .map(Curve::from)
+        })
+        .collect();
+    let Some(targets) = targets.filter(|targets| targets.len() > 1) else {
+        return;
+    };
+    let mut shared = targets[0].clone();
+    shared.spl.fill(0.0);
+    for target in &targets {
+        shared.spl += &autoeq_core::interpolate_log_space(&shared.freq, target).spl;
+    }
+    shared.spl /= targets.len() as f64;
+    for name in &names {
+        if let Some(chain) = result.channels.get_mut(name) {
+            chain.target_curve = Some((&shared).into());
+        }
+    }
 }
 
 fn prepare_final_channel_level_alignment(

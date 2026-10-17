@@ -170,6 +170,12 @@ Non-FIR parallel reports also replay individual branch captures and serialized
 common processing. Missing capture/phase evidence withholds the predicted pair
 and logs a reason; no combined-curve PEQ-summary fallback is used.
 
+Waveform views are built from the primary seat's complex response when the
+channel response is a spatial average without phase. For magnitude-only sweep
+capture handoffs, phase is first recovered at load time by deconvolving each
+selected take's processed audio against the handoff stimulus WAV at the
+handoff sample rate; no input configuration fields are added for this.
+
 Output `metadata.stage_outcomes` records current waveform availability in the
 `waveform_views` stage, using check IDs `pre_ir:<channel>` and `post_ir:<channel>`.
 Failed checks carry a diagnostic reason; successful checks indicate a saved

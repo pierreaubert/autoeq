@@ -511,7 +511,7 @@ def compare_scenario(out_dir: pathlib.Path, scenario: str, modes: list[str]) -> 
 DEFAULT_SCENARIOS = (
     "2.2_unknown 2.2_sigberg1 2.2_sigberg2 2.2_sigberg3 2.2_genelec "
     "2.0_8361a 2.0_d3v 2.0_fidelia 2.0_t7v_2024 2.0_t7v_2026 "
-    "5.0_genelec 5.1_kef 5.1.4_genelec 2.0_ascilab1 2.0_ascilab2 2.0_ascilab3 "
+    "5.0_genelec 5.1_kef 5.1.4_genelec 5.0.4_genelec 2.0_ascilab1 2.0_ascilab2 2.0_ascilab3 "
     "2.0_gen8340a_p1_badroom 2.0_kefls60_p1_badroom 2.1_kefls60_p2_badroom "
     "2.2_genelec8340a_4m_p1_badroom 2.2_genelec8340a_4m_p2_badroom 2.2_kefls60_p2_badroom"
 )

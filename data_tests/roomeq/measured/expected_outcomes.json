@@ -260,6 +260,26 @@
       "outcome": "unchanged",
       "status": "unchanged"
     },
+    "5.0.4_genelec/fir": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
+    "5.0.4_genelec/iir": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
+    "5.0.4_genelec/mixed": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
+    "5.0.4_genelec/mixed-phase": {
+      "improvement_db": null,
+      "outcome": null,
+      "status": "error"
+    },
     "5.0_genelec/fir": {
       "improvement_db": 0.389134,
       "outcome": "accepted",

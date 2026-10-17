@@ -348,6 +348,29 @@ fn assemble_workflow_result_empty_channels_succeeds() {
 }
 
 #[test]
+fn shared_main_target_averages_per_channel_targets() {
+    // Topology level alignment moves finals to a common level after design;
+    // serialized targets must then share one basis (one target per room).
+    let mut result = crate::test_fixtures::single_channel_room_result("L");
+    let mut r_chain = result.channels["L"].clone();
+    r_chain.channel = "R".to_string();
+    let mut r_result = result.channel_results["L"].clone();
+    r_result.name = "R".to_string();
+    result.channels.insert("R".to_string(), r_chain);
+    result.channel_results.insert("R".to_string(), r_result);
+    for (name, level) in [("L", 80.0), ("R", 70.0)] {
+        let mut target = result.channel_results[name].initial_curve.clone();
+        target.spl.fill(level);
+        result.channels.get_mut(name).unwrap().target_curve = Some((&target).into());
+    }
+    share_main_target_curves(&mut result, &RoomConfig::default());
+    let l_target = result.channels["L"].target_curve.as_ref().unwrap();
+    let r_target = result.channels["R"].target_curve.as_ref().unwrap();
+    assert_eq!(l_target.spl, r_target.spl);
+    assert!(l_target.spl.iter().all(|level| (*level - 75.0).abs() < 1e-9));
+}
+
+#[test]
 fn assemble_generic_result_non_empty_success() {
     let mut speakers = HashMap::new();
     speakers.insert(

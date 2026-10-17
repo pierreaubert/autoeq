@@ -126,12 +126,22 @@ pub fn create_crossover_plugin(
     }
 }
 
-/// Create a delay plugin configuration
+/// Create a delay plugin configuration.
+///
+/// RoomEQ delays are alignment delays, so the effect parameters are pinned
+/// to pure-delay values. Emitting only `delay_ms` would let the delay
+/// plugin apply its effect-style defaults (mix 0.5, feedback 0.3).
 pub fn create_delay_plugin(delay_ms: f64) -> PluginConfigWrapper {
     PluginConfigWrapper {
         plugin_type: "delay".to_string(),
         parameters: json!({
-            "delay_ms": delay_ms
+            "delay_ms": delay_ms,
+            "mix": 1.0,
+            "feedback": 0.0,
+            "lfo_rate_hz": 0.0,
+            "lfo_depth_ms": 0.0,
+            "pitch_preserving": false,
+            "allpass_feedback": false,
         }),
     }
 }

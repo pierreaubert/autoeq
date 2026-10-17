@@ -315,6 +315,24 @@
   pre-existing 5.1.4 precedent). `roomeq_suite_report.py --expect`
   passes on the fresh sweep.
 
+- Recover measured phase for magnitude-only sweep capture handoffs: when a
+  handoff retains its processed take audio and an unambiguous stimulus WAV,
+  config loading deconvolves each selected take at the handoff sample rate
+  and attaches the recovered phase to the frozen response (magnitude is
+  untouched, and the fixed-bytes projection receipt no longer covers
+  augmented sources). Waveform views for spatial-average channels are then
+  built from the primary seat's complex response instead of reporting
+  `initial measurement phase unavailable`; the 5.0.4 Genelec session now
+  passes all `pre_ir`/`post_ir` waveform checks.
+
+- Publish one shared target for all main channels in topology (stereo /
+  home-cinema) results, mirroring the generic assembly: after final level
+  alignment every final shares one level basis, so serialized per-channel
+  design targets are averaged into the single room target instead of
+  keeping their pre-alignment levels. Combined-overview reports no longer
+  draw a divergent target line per speaker (the 5.0.4 Genelec targets sat
+  8.5–17.4 dB below their corrected curves; now within ~1 dB).
+
 # 0.5.76
 
 <<<<<<< HEAD

@@ -1,0 +1,122 @@
+{
+  "target_curve": "target-10db-downward-tilt.csv",
+  "system": {
+    "model": "home_cinema",
+    "speakers": {
+      "L": "L",
+      "R": "R",
+      "C": "C",
+      "SL": "SL",
+      "SR": "SR",
+      "TFL": "TFL",
+      "TFR": "TFR",
+      "TRL": "TRL",
+      "TRR": "TRR"
+    }
+  },
+  "ctc": {
+    "enabled": true,
+    "matrix_source": "raw_sweep",
+    "measurements": {
+      "speakers": [
+        "L",
+        "R",
+        "C",
+        "SL",
+        "SR",
+        "TFL",
+        "TFR",
+        "TRL",
+        "TRR"
+      ],
+      "mics": [
+        "left_ear",
+        "right_ear"
+      ],
+      "head_positions": [
+        {
+          "id": "main-head",
+          "x": 0.0,
+          "y": 0.0,
+          "z": 1.25,
+          "yaw_deg": 0.0
+        }
+      ],
+      "files": [
+        {
+          "head_position": "main-head",
+          "speaker": "L",
+          "raw_sweep": "ctc_main-head_L_ears.wav",
+          "loopback": "ctc_main-head_L_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "R",
+          "raw_sweep": "ctc_main-head_R_ears.wav",
+          "loopback": "ctc_main-head_R_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "C",
+          "raw_sweep": "ctc_main-head_C_ears.wav",
+          "loopback": "ctc_main-head_C_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "SL",
+          "raw_sweep": "ctc_main-head_SL_ears.wav",
+          "loopback": "ctc_main-head_SL_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "SR",
+          "raw_sweep": "ctc_main-head_SR_ears.wav",
+          "loopback": "ctc_main-head_SR_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "TFL",
+          "raw_sweep": "ctc_main-head_TFL_ears.wav",
+          "loopback": "ctc_main-head_TFL_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "TFR",
+          "raw_sweep": "ctc_main-head_TFR_ears.wav",
+          "loopback": "ctc_main-head_TFR_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "TRL",
+          "raw_sweep": "ctc_main-head_TRL_ears.wav",
+          "loopback": "ctc_main-head_TRL_loopback.wav"
+        },
+        {
+          "head_position": "main-head",
+          "speaker": "TRR",
+          "raw_sweep": "ctc_main-head_TRR_ears.wav",
+          "loopback": "ctc_main-head_TRR_loopback.wav"
+        }
+      ]
+    },
+    "reference_sweep": "ctc_reference_sweep.wav",
+    "sweep_duration_s": 10.0,
+    "sweep_start_hz": 20.0,
+    "sweep_end_hz": 20000.0
+  },
+  "optimizer": {
+    "processing_mode": "hybrid",
+    "seed": 42,
+    "mixed_config": {
+      "crossover_freq": 300.0,
+      "crossover_type": "LR24",
+      "fir_band": "low"
+    },
+    "fir": {
+      "taps": 4096,
+      "phase": "kirkeby",
+      "correct_excess_phase": true,
+      "phase_smoothing": 0.167
+    }
+  }
+}

@@ -879,6 +879,12 @@ pub fn build_mixed_mode_crossover_chain_with_post_merge_eq(
                 "delay_ms": fir_bulk_delay_ms,
                 "channels": if fir_uses_low { [2, 3] } else { [0, 1] },
                 "label": "hybrid_fir_latency_alignment",
+                "mix": 1.0,
+                "feedback": 0.0,
+                "lfo_rate_hz": 0.0,
+                "lfo_depth_ms": 0.0,
+                "pitch_preserving": false,
+                "allpass_feedback": false,
             }),
         }));
     }

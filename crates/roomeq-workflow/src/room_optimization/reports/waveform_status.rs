@@ -7,9 +7,14 @@ use roomeq_model::{StageCheck, StageCheckKind, StageOutcome, StageStatus};
 use super::super::RoomOptimizationResult;
 
 /// Replace waveform diagnostics with availability for the current channel set.
+///
+/// `waveform_phase` names channels whose waveform basis (the primary-seat
+/// measurement when the spatial average carries no phase) has measured
+/// phase, so a missing view is not blamed on the initial measurement.
 pub(super) fn record(
     result: &mut RoomOptimizationResult,
     replay_errors: &BTreeMap<String, String>,
+    waveform_phase: &std::collections::BTreeSet<String>,
 ) {
     // Candidate rebuilds inherit the preceding report. Log a replay failure
     // only when its reason changes; always retain it in the current report.
@@ -20,7 +25,10 @@ pub(super) fn record(
     }
     let mut checks = Vec::new();
     for (name, chain) in &result.channels {
-        let initial_reason = match result.channel_results.get(name) {
+        let initial_reason = if waveform_phase.contains(name) {
+            None
+        } else {
+            match result.channel_results.get(name) {
             None => Some("initial measurement unavailable".to_owned()),
             Some(channel) => match channel
                 .initial_curve
@@ -32,6 +40,7 @@ pub(super) fn record(
                 }
                 Ok(()) => None,
             },
+            }
         };
         for (view, available) in [
             ("pre_ir", chain.pre_ir.is_some()),
@@ -95,11 +104,11 @@ mod tests {
         let reason = "driver woofer: capture unavailable";
         let errors = BTreeMap::from([("L".into(), reason.into())]);
         assert!(replay_error_changed(&result, "L", reason));
-        record(&mut result, &errors);
+        record(&mut result, &errors, &std::collections::BTreeSet::new());
         assert!(!replay_error_changed(&result, "L", reason));
         assert!(!replay_error_changed(&result.clone(), "L", reason));
         assert!(replay_error_changed(&result, "L", "different failure"));
-        record(&mut result, &errors);
+        record(&mut result, &errors, &std::collections::BTreeSet::new());
         assert_eq!(
             result
                 .metadata
@@ -109,7 +118,7 @@ mod tests {
                 .count(),
             1
         );
-        record(&mut result, &BTreeMap::new());
+        record(&mut result, &BTreeMap::new(), &std::collections::BTreeSet::new());
         assert!(replay_error_changed(&result, "L", reason));
     }
 
@@ -123,7 +132,7 @@ mod tests {
             .initial_curve
             .phase = None;
         let errors = BTreeMap::from([("L".into(), "driver woofer: capture unavailable".into())]);
-        record(&mut result, &errors);
+        record(&mut result, &errors, &std::collections::BTreeSet::new());
         let stage = result.metadata.stage_outcomes.last().unwrap();
         assert_eq!(stage.status, StageStatus::Degraded);
         let pre = stage

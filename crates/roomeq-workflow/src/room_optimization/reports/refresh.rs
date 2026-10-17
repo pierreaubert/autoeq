@@ -1,5 +1,6 @@
 use super::super::room_optimization_result::RoomOptimizationResult;
 use super::super::*;
+use roomeq_model::SpeakerConfig;
 use super::build::build_bootstrap_uncertainty_report;
 use super::build::build_perceptual_policy_report;
 use super::misc::applied_bass_crossover_hz;
@@ -337,6 +338,26 @@ pub(in super::super) fn refresh_final_reports(
     update_perceptual_metrics(&mut result.metadata, Some(&result.channels), Some(config));
 }
 
+/// Return a channel's phase-bearing reference measurement, when available.
+///
+/// The detailed loader's primary seat is the first measurement's own complex
+/// response, retained for phase-sensitive work. Dense-grid conditioning is
+/// only a fallback: it resamples and rebuilds phase from a low-frequency
+/// delay estimate, which would move the waveform's direct-sound peak.
+fn waveform_basis_curve(source: &MeasurementSource) -> Option<autoeq_core::Curve> {
+    if let Ok(detailed) = autoeq_measurements::read::load_source_detailed(source, None)
+        && detailed.primary_seat.phase.is_some()
+    {
+        return Some(detailed.primary_seat);
+    }
+    crate::measurement::load_source_with_conditioning(source, crate::DEFAULT_FREQUENCY_SAMPLES)
+        .ok()?
+        .individual
+        .into_iter()
+        .next()
+        .filter(|curve| curve.phase.is_some())
+}
+
 /// (Re)compute per-channel impulse-response waveforms and FIR temporal
 /// masking evidence from the currently deployed chains.
 ///
@@ -366,6 +387,22 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
         chain.direct_early_late_correction = None;
     }
 
+    // Waveform views need measured phase. A spatial (power-RMS) average
+    // never carries phase, so fall back to the channel's first measurement
+    // (the primary seat) when it is phase-bearing: the view then shows the
+    // impulse response at that reference microphone, before and after the
+    // deployed correction, instead of reporting the view unavailable.
+    let waveform_basis: std::collections::BTreeMap<String, autoeq_core::Curve> = result
+        .channel_results
+        .keys()
+        .filter_map(|name| {
+            let Some(SpeakerConfig::Single(source)) = config.speakers.get(name) else {
+                return None;
+            };
+            waveform_basis_curve(source).map(|curve| (name.clone(), curve))
+        })
+        .collect();
+
     let ir_inputs: Vec<_> = result
         .channel_results
         .iter()
@@ -376,8 +413,17 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
                 sidecar_dir,
                 sample_rate,
             );
-            (name.clone(), ch.initial_curve.clone(), fir_coeffs)
+            let basis = waveform_basis
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ch.initial_curve.clone());
+            (name.clone(), basis, fir_coeffs)
         })
+        .collect();
+    let waveform_phase: std::collections::BTreeSet<String> = ir_inputs
+        .iter()
+        .filter(|(_, curve, _)| curve.phase.is_some())
+        .map(|(name, _, _)| name.clone())
         .collect();
 
     for (channel_name, initial_curve, fir_coeffs) in ir_inputs {
@@ -559,7 +605,7 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
         }
     }
     stamp_convolution_identities(result, sidecar_dir);
-    super::waveform_status::record(result, &waveform_errors);
+    super::waveform_status::record(result, &waveform_errors, &waveform_phase);
 }
 
 /// Stamp actual tap count and sample rate on every resolvable convolution.
@@ -903,6 +949,38 @@ mod tests {
             result.channels["L"].post_ir.is_none(),
             "stale measured-phase post-IR survived"
         );
+    }
+
+    #[test]
+    fn temporal_ir_uses_primary_seat_phase_when_spatial_average_has_none() {
+        let mut result = single_channel_room_result("L");
+        // The spatial average (the channel's initial curve) carries no phase.
+        assert!(result.channel_results["L"].initial_curve.phase.is_none());
+        let mut primary = result.channel_results["L"].initial_curve.clone();
+        primary.phase = Some(ndarray::Array1::zeros(primary.freq.len()));
+        let secondary = result.channel_results["L"].initial_curve.clone();
+        let mut config = RoomConfig::default();
+        config.speakers.insert(
+            "L".into(),
+            SpeakerConfig::Single(autoeq_measurements::MeasurementSource::InMemoryMultiple(
+                vec![primary, secondary],
+            )),
+        );
+        refresh_temporal_ir_evidence(&mut result, &config, 48_000.0, Path::new("."));
+        assert!(result.channels["L"].pre_ir.is_some());
+        assert!(result.channels["L"].post_ir.is_some());
+        let stage = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "waveform_views")
+            .unwrap();
+        let post = stage
+            .checks
+            .iter()
+            .find(|check| check.id == "post_ir:L")
+            .unwrap();
+        assert!(post.passed, "{post:?}");
     }
 
     #[test]

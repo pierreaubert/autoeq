@@ -177,6 +177,132 @@ pub fn verify_capture_handoff(
     Ok(Some(handoff))
 }
 
+/// Identify the producer's stimulus artifact, when unambiguously declared.
+///
+/// The stimulus is retained as supporting evidence; exactly one WAV whose
+/// stem is `stimulus` is eligible. Anything else keeps magnitude-only loading.
+fn stimulus_artifact(handoff: &CaptureHandoff) -> Option<&CaptureArtifactIdentity> {
+    let mut candidates = handoff.artifacts.iter().filter(|artifact| {
+        artifact.role == CaptureArtifactRole::SupportingEvidence && {
+            let path = Path::new(&artifact.file);
+            path.extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("wav"))
+                && path
+                    .file_stem()
+                    .is_some_and(|stem| stem.eq_ignore_ascii_case("stimulus"))
+        }
+    });
+    let first = candidates.next()?;
+    candidates.next().is_none().then_some(first)
+}
+
+/// Return whether the configuration declares a sweep capture.
+fn sweep_capture_declared(config: &RoomConfig) -> bool {
+    config
+        .recording_config
+        .as_ref()
+        .and_then(|recording| recording.signal_type.as_deref())
+        .is_some_and(|kind| kind.to_ascii_lowercase().contains("sweep"))
+}
+
+/// Decode a hash-bound audio artifact from a private snapshot.
+fn verified_audio_samples(
+    root: &Path,
+    handoff: &CaptureHandoff,
+    file: &str,
+) -> Option<Vec<f32>> {
+    let asset = handoff.artifacts.iter().find(|artifact| {
+        artifact.file == file
+            && matches!(
+                artifact.role,
+                CaptureArtifactRole::RawAudio
+                    | CaptureArtifactRole::ProcessedAudio
+                    | CaptureArtifactRole::SupportingEvidence
+            )
+    })?;
+    let bytes = read_bounded(&regular_local_file(root, file).ok()?, MAX_ARTIFACT_BYTES).ok()?;
+    if bytes.len() as u64 != asset.bytes || autoeq_artifacts::sha256_hex(&bytes) != asset.sha256 {
+        log::warn!("Capture audio changed before phase extraction: {file}");
+        return None;
+    }
+    let mut snapshot = tempfile::NamedTempFile::new().ok()?;
+    snapshot.write_all(&bytes).ok()?;
+    snapshot.flush().ok()?;
+    let decoded = crate::wav::decode_first_channel(snapshot.path()).ok()?;
+    if decoded.sample_rate != handoff.sample_rate_hz {
+        return None;
+    }
+    Some(decoded.samples)
+}
+
+/// Interpolate unwrapped deconvolved phase onto a response grid, in degrees.
+fn phase_on_grid(
+    spectrum: &[rustfft::num_complex::Complex<f32>],
+    sample_rate: u32,
+    frequencies: &[f64],
+) -> Option<Vec<f64>> {
+    if spectrum.len() < 2 || frequencies.is_empty() {
+        return None;
+    }
+    let fft_size = (spectrum.len() - 1).checked_mul(2)?;
+    let step = f64::from(sample_rate) / fft_size as f64;
+    let mut unwrapped = Vec::with_capacity(spectrum.len());
+    let mut offset = 0.0_f64;
+    let mut previous = f64::from(spectrum[0].arg().to_degrees());
+    unwrapped.push(previous);
+    for value in &spectrum[1..] {
+        let wrapped = f64::from(value.arg().to_degrees());
+        let delta = wrapped - (previous - offset);
+        if delta > 180.0 {
+            offset += 360.0;
+        } else if delta < -180.0 {
+            offset -= 360.0;
+        }
+        let current = wrapped + offset;
+        unwrapped.push(current);
+        previous = current;
+    }
+    let mut phase = Vec::with_capacity(frequencies.len());
+    for &frequency in frequencies {
+        if !frequency.is_finite() || frequency <= 0.0 {
+            return None;
+        }
+        let position = (frequency / step).clamp(0.0, (spectrum.len() - 1) as f64);
+        let lower = position.floor() as usize;
+        let upper = (lower + 1).min(spectrum.len() - 1);
+        let fraction = position - lower as f64;
+        let value = unwrapped[lower] + fraction * (unwrapped[upper] - unwrapped[lower]);
+        if !value.is_finite() {
+            return None;
+        }
+        phase.push((value + 180.0).rem_euclid(360.0) - 180.0);
+    }
+    Some(phase)
+}
+
+/// Recover measured phase for one take from its processed sweep recording.
+///
+/// Deconvolution against the retained stimulus preserves the acoustic delay
+/// already present in the aligned processed audio. Any gap — missing or
+/// changed audio, unsupported stimulus, failed deconvolution — returns
+/// `None` and the take stays magnitude-only instead of inventing phase.
+fn extract_take_phase(
+    root: &Path,
+    handoff: &CaptureHandoff,
+    processed_audio_file: &str,
+    stimulus: &[f32],
+    curve_frequencies: &[f64],
+) -> Option<Vec<f64>> {
+    let recording = verified_audio_samples(root, handoff, processed_audio_file)?;
+    let spectrum =
+        math_audio_dsp::analysis::deconvolve_sweep(&recording, stimulus, handoff.sample_rate_hz)
+            .inspect_err(|error| {
+                log::debug!("Sweep deconvolution unavailable for {processed_audio_file}: {error}");
+            })
+            .ok()?;
+    phase_on_grid(&spectrum, handoff.sample_rate_hz, curve_frequencies)
+}
+
 /// Freeze verified responses and validate their ordered acquisition provenance.
 ///
 /// Call before resolving relative paths. Later numerical loading consumes the
@@ -204,6 +330,14 @@ pub fn freeze_capture_responses(
     {
         bail!("capture configuration source count or sample rate disagrees with handoff");
     }
+    // Magnitude-only sweep responses can recover measured phase from the
+    // retained processed audio. The stimulus is decoded once, from its
+    // hash-bound snapshot, at the handoff's own sample rate.
+    let stimulus = sweep_capture_declared(config).then(|| {
+        stimulus_artifact(handoff)
+            .and_then(|artifact| verified_audio_samples(root, handoff, &artifact.file))
+    });
+    let stimulus = stimulus.flatten();
     for source_id in &handoff.source_ids {
         let Some(SpeakerConfig::Single(MeasurementSource::Multiple(source))) =
             config.speakers.get_mut(source_id)
@@ -220,6 +354,7 @@ pub fn freeze_capture_responses(
         {
             bail!("capture projection measurement/provenance count mismatch for {source_id}");
         }
+        let mut phase_extracted = false;
         for (index, microphone_id) in handoff.microphone_ids.iter().enumerate() {
             let take = handoff
                 .takes
@@ -287,17 +422,47 @@ pub fn freeze_capture_responses(
                 }
                 _ => bail!("capture response role is invalid"),
             }
+            let mut curve = curve;
+            if curve.phase.is_none()
+                && let Some(stimulus) = stimulus.as_deref()
+            {
+                let frequencies: Vec<f64> = curve.freq.iter().copied().collect();
+                if let Some(phase) = extract_take_phase(
+                    root,
+                    handoff,
+                    &take.processed_audio_file,
+                    stimulus,
+                    &frequencies,
+                ) {
+                    curve.phase = Some(phase.into());
+                    if curve.validate("phase-augmented capture response").is_ok() {
+                        phase_extracted = true;
+                        log::debug!(
+                            "Extracted measured phase for {source_id}/{microphone_id} from {}",
+                            take.processed_audio_file
+                        );
+                    } else {
+                        curve.phase = None;
+                    }
+                }
+            }
             source.measurements[index] = MeasurementRef::Loaded {
                 original: Box::new(reference.clone()),
                 loaded_response: Box::new(curve),
             };
         }
-        source.provenance.verified_fixed_projection = match
-            autoeq_core::capture_handoff::VerifiedFixedCaptureProjection::verify_source_snapshot(root, source, source_id, handoff) {
-                Ok(receipt) => Some(receipt),
-                Err(reason) if reason == "unsupported_fixed_capture_response_format" => None,
-                Err(reason) => return Err(anyhow::Error::msg(reason)),
-            };
+        // Derived phase is not part of the verified response bytes, so the
+        // fixed-bytes projection receipt cannot cover augmented sources.
+        source.provenance.verified_fixed_projection = if phase_extracted {
+            None
+        } else {
+            match
+                autoeq_core::capture_handoff::VerifiedFixedCaptureProjection::verify_source_snapshot(root, source, source_id, handoff) {
+                    Ok(receipt) => Some(receipt),
+                    Err(reason) if reason == "unsupported_fixed_capture_response_format" => None,
+                    Err(reason) => return Err(anyhow::Error::msg(reason)),
+                }
+        };
     }
     Ok(())
 }
@@ -468,6 +633,176 @@ mod tests {
         )
         .unwrap();
         (configuration, handoff)
+    }
+
+    fn wav_bytes(samples: &[f32]) -> Vec<u8> {
+        let mut audio = std::io::Cursor::new(Vec::new());
+        {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: 48000,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut writer = hound::WavWriter::new(&mut audio, spec).unwrap();
+            for sample in samples {
+                writer.write_sample(*sample).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        audio.into_inner()
+    }
+
+    fn ess_fixture(root: &Path) -> (PathBuf, CaptureHandoff) {
+        let (path, mut handoff) = fixture(root);
+        let sample_rate = 48000.0_f64;
+        let ratio = (20000.0_f64 / 20.0).ln();
+        let stimulus: Vec<f32> = (0..48000)
+            .map(|i| {
+                let t = i as f64 / sample_rate;
+                let phase =
+                    2.0 * std::f64::consts::PI * 20.0 / ratio * ((ratio * t).exp() - 1.0);
+                (0.1 * phase.sin()) as f32
+            })
+            .collect();
+        // Pure 100-sample delay at half gain: phase(f) = -0.75 * f degrees.
+        let recording: Vec<f32> = (0..48000)
+            .map(|i| {
+                if i >= 100 {
+                    0.5 * stimulus[i - 100]
+                } else {
+                    0.0
+                }
+            })
+            .collect();
+        let stimulus_bytes = wav_bytes(&stimulus);
+        let recording_bytes = wav_bytes(&recording);
+        for (file, bytes) in [
+            ("stimulus.wav", stimulus_bytes.as_slice()),
+            ("raw.wav", recording_bytes.as_slice()),
+            ("processed.wav", recording_bytes.as_slice()),
+        ] {
+            std::fs::write(root.join(file), bytes).unwrap();
+            if let Some(artifact) = handoff
+                .artifacts
+                .iter_mut()
+                .find(|artifact| artifact.file == file)
+            {
+                artifact.bytes = bytes.len() as u64;
+                artifact.sha256 = digest(bytes);
+            }
+        }
+        handoff.artifacts.push(CaptureArtifactIdentity {
+            file: "stimulus.wav".into(),
+            role: CaptureArtifactRole::SupportingEvidence,
+            bytes: stimulus_bytes.len() as u64,
+            sha256: digest(&stimulus_bytes),
+        });
+        std::fs::write(
+            root.join(CAPTURE_HANDOFF_FILENAME),
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+        let mut config_bytes = std::fs::read(&path).unwrap();
+        let mut config: serde_json::Value = serde_json::from_slice(&config_bytes).unwrap();
+        config["recording_config"]["signal_type"] = serde_json::json!("Sweep");
+        config["recording_config"]["sweep_start_freq"] = serde_json::json!(20.0);
+        config["recording_config"]["sweep_end_freq"] = serde_json::json!(20000.0);
+        config_bytes = serde_json::to_vec_pretty(&config).unwrap();
+        std::fs::write(&path, &config_bytes).unwrap();
+        // The configuration artifact identity must cover the edited bytes.
+        let handoff_path = root.join(CAPTURE_HANDOFF_FILENAME);
+        let mut handoff: CaptureHandoff =
+            serde_json::from_slice(&std::fs::read(&handoff_path).unwrap()).unwrap();
+        let identity = handoff
+            .artifacts
+            .iter_mut()
+            .find(|artifact| artifact.file == "recording.json")
+            .unwrap();
+        identity.bytes = config_bytes.len() as u64;
+        identity.sha256 = digest(&config_bytes);
+        std::fs::write(
+            &handoff_path,
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+        (path, handoff)
+    }
+
+    #[test]
+    fn phase_on_grid_recovers_delay_at_non_48k_rates() {
+        // Captures are not necessarily 48 kHz: the grid math must follow the
+        // declared sample rate. A 0.7 ms delay is +108 degrees at 1 kHz.
+        for rate in [44_100_u32, 96_000] {
+            let fft_size = 8192_usize;
+            let spectrum: Vec<rustfft::num_complex::Complex<f32>> = (0..=fft_size / 2)
+                .map(|bin| {
+                    let frequency = bin as f64 * f64::from(rate) / fft_size as f64;
+                    rustfft::num_complex::Complex::from_polar(
+                        1.0_f32,
+                        (-2.0 * std::f64::consts::PI * frequency * 0.0007) as f32,
+                    )
+                })
+                .collect();
+            let phase = phase_on_grid(&spectrum, rate, &[1000.0]).unwrap();
+            let diff = (phase[0] - 108.0 + 180.0).rem_euclid(360.0) - 180.0;
+            assert!(diff.abs() < 1.0, "{rate} Hz: {} degrees", phase[0]);
+        }
+    }
+
+    #[test]
+    fn freeze_extracts_phase_from_processed_audio_when_response_is_magnitude_only() {
+        let directory = tempfile::tempdir().unwrap();
+        let (path, _) = ess_fixture(directory.path());
+        std::fs::write(
+            directory.path().join("response.csv"),
+            b"frequency_hz,spl_db\n100,80\n1000,80\n5000,80\n",
+        )
+        .unwrap();
+        // Response bytes are bound by the handoff; rebind after the rewrite.
+        let handoff_path = directory.path().join(CAPTURE_HANDOFF_FILENAME);
+        let mut handoff: CaptureHandoff =
+            serde_json::from_slice(&std::fs::read(&handoff_path).unwrap()).unwrap();
+        let response_bytes = std::fs::read(directory.path().join("response.csv")).unwrap();
+        let identity = handoff
+            .artifacts
+            .iter_mut()
+            .find(|artifact| artifact.file == "response.csv")
+            .unwrap();
+        identity.bytes = response_bytes.len() as u64;
+        identity.sha256 = digest(&response_bytes);
+        std::fs::write(
+            &handoff_path,
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+
+        let (config, _) = crate::config_loader::load_merged_config_strict(&path, None).unwrap();
+        let SpeakerConfig::Single(MeasurementSource::Multiple(source)) = &config.speakers["L"]
+        else {
+            panic!("multiple capture");
+        };
+        let MeasurementRef::Loaded {
+            loaded_response, ..
+        } = &source.measurements[0]
+        else {
+            panic!("frozen response");
+        };
+        assert_eq!(loaded_response.spl.to_vec(), vec![80.0, 80.0, 80.0]);
+        let phase = loaded_response
+            .phase
+            .as_ref()
+            .expect("phase extracted from processed sweep audio");
+        // 100-sample delay at 48 kHz: -75 deg at 100 Hz, -30 at 1 kHz,
+        // -150 at 5 kHz (wrapped).
+        for (actual, expected) in phase.iter().zip([-75.0, -30.0, -150.0]) {
+            let diff = (actual - expected + 180.0).rem_euclid(360.0) - 180.0;
+            assert!(diff.abs() < 8.0, "phase {actual} vs expected {expected}");
+        }
+        assert!(
+            source.provenance.verified_fixed_projection.is_none(),
+            "derived phase is not covered by the fixed-bytes projection receipt"
+        );
     }
 
     #[test]

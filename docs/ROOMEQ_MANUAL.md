@@ -73,6 +73,16 @@ the common chain once, rather than applying a PEQ summary to a combined curve.
 Non-FIR waveform pairs are withheld if required branch evidence is unavailable;
 the reason is logged. They are not replaced by a combined-curve PEQ fallback.
 
+Waveform views need measured phase. When a channel's response is a spatial
+(power-RMS) average — which never carries phase — the view is built from the
+primary seat's (first measurement's) complex response instead: it shows the
+impulse response at that reference microphone before and after the deployed
+correction. For magnitude-only sweep capture handoffs, config loading first
+recovers each selected take's phase by deconvolving its retained processed
+audio against the handoff's stimulus WAV at the handoff sample rate, so such
+sessions no longer report `initial measurement phase unavailable` solely
+because the producer emitted magnitude-only CSVs.
+
 Availability is also saved in `metadata.stage_outcomes` under `waveform_views`,
 with `pre_ir:<channel>` and `post_ir:<channel>` checks. Each refresh replaces old
 checks and clears stale waveform views, including channels without measurements.

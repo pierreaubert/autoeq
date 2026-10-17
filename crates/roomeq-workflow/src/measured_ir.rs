@@ -16,8 +16,9 @@ use math_rir::report::{
 };
 use roomeq_model::config::{MeasuredIrSource, validate_measured_ir_map};
 use roomeq_model::{
-    ChannelEarlyReflections, ChannelOctaveT60, ChannelReflectionEvent, ChannelResonanceDecay,
-    ChannelResonanceDecays, ChannelT60Band, ChannelWaterfall, ChannelWavelet, DspGraph, IrWaveform,
+    ChannelDspChain, ChannelEarlyReflections, ChannelOctaveT60, ChannelReflectionEvent,
+    ChannelResonanceDecay, ChannelResonanceDecays, ChannelT60Band, ChannelWaterfall,
+    ChannelWavelet, DspGraph, IrWaveform, MeasurementSource, RoomConfig, SpeakerConfig,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -222,15 +223,23 @@ fn reflection_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelEarl
             window_ms: REFLECTION_WINDOW_MS,
         },
     );
-    if table.reflections.len() > 64 {
-        return None;
+    // Dense ringing (e.g. flutter echo) can yield more envelope crests than
+    // the table holds. Keep the loudest candidates instead of declining
+    // the whole channel; the cap itself is unchanged.
+    let mut picked = table.reflections;
+    if picked.len() > 64 {
+        picked.sort_by(|a, b| b.gain_db.total_cmp(&a.gain_db));
+        picked.truncate(64);
+        picked.sort_by(|a, b| a.delay_ms.total_cmp(&b.delay_ms));
     }
-    let mut pre = Vec::with_capacity(table.reflections.len());
+    let mut pre = Vec::with_capacity(picked.len());
     let mut last_time_ms = 0.0;
-    for reflection in &table.reflections {
+    for reflection in &picked {
         let gain_dbfs = reflection.gain_db.clamp(-15.0, 0.0);
         let time_ms = reflection.delay_ms;
         let distance_cm = reflection.path_difference_m * 100.0;
+        // Drop individual out-of-contract events (a refined peak can land
+        // just past the window) instead of declining the whole table.
         if !(time_ms > last_time_ms
             && time_ms <= REFLECTION_WINDOW_MS
             && distance_cm > 0.0
@@ -242,7 +251,7 @@ fn reflection_report(samples: &[f32], sample_rate_hz: f64) -> Option<ChannelEarl
             && reflection.first_dip_hz.is_finite()
             && reflection.comb_ripple_db.is_finite())
         {
-            return None;
+            continue;
         }
         last_time_ms = time_ms;
         pre.push(ChannelReflectionEvent {
@@ -608,50 +617,271 @@ pub fn attach_measured_acoustics(
         }
         chain.pre_ir = Some(measured.waveform);
         chain.speech_transmission = speech_transmission;
-        match crate::channel_acoustics::measured_early_late_curves(
-            &samples,
-            measured.sample_rate_hz,
-            is_sub_channel(channel),
-        ) {
-            Some(curves) => chain.early_late_curves = Some(curves),
-            None => warnings.push(format!(
-                "channel '{channel}': early/late analysis declined on the measured IR \
-                 (too short or too narrow for the 1–8 kHz contract); cell stays pending"
-            )),
-        }
-        match reflection_report(&samples, measured.sample_rate_hz) {
-            Some(report) => chain.early_reflections = Some(report),
-            None => warnings.push(format!(
-                "channel '{channel}': reflection-table analysis declined on the measured IR; \
-                 cell stays pending"
-            )),
-        }
-        match t60_report(&samples, measured.sample_rate_hz) {
-            Some(report) => chain.t60_octaves = Some(report),
-            None => warnings.push(format!(
-                "channel '{channel}': octave-T60 analysis declined on the measured IR; \
-                 cell stays pending"
-            )),
-        }
-        match waterfall_report(&samples, measured.sample_rate_hz) {
-            Some((waterfall, decays)) => {
-                chain.waterfall = Some(waterfall);
-                chain.resonance_decays = Some(decays);
-            }
-            None => warnings.push(format!(
-                "channel '{channel}': waterfall analysis declined on the measured IR; \
-                 cells stay pending"
-            )),
-        }
-        match wavelet_report(&samples, measured.sample_rate_hz) {
-            Some(report) => chain.wavelet = Some(report),
-            None => warnings.push(format!(
-                "channel '{channel}': wavelet analysis declined on the measured IR; \
-                 cell stays pending"
-            )),
-        }
+        apply_chain_acoustics(chain, &samples, measured.sample_rate_hz, channel, &mut warnings);
     }
     Ok(warnings)
+}
+
+/// Run the R1–R5 chain-level acoustic analyses on measured IR samples.
+///
+/// Every analysis is quality-gated: a decline leaves the field unset (the
+/// report cell stays pending) and records a warning instead of fabricating
+/// a value.
+fn apply_chain_acoustics(
+    chain: &mut ChannelDspChain,
+    samples: &[f32],
+    sample_rate_hz: f64,
+    channel: &str,
+    warnings: &mut Vec<String>,
+) {
+    match crate::channel_acoustics::measured_early_late_curves(
+        samples,
+        sample_rate_hz,
+        is_sub_channel(channel),
+    ) {
+        Some(curves) => chain.early_late_curves = Some(curves),
+        None => warnings.push(format!(
+            "channel '{channel}': early/late analysis declined on the measured IR \
+             (too short or too narrow for the 1–8 kHz contract); cell stays pending"
+        )),
+    }
+    match reflection_report(samples, sample_rate_hz) {
+        Some(report) => chain.early_reflections = Some(report),
+        None => warnings.push(format!(
+            "channel '{channel}': reflection-table analysis declined on the measured IR; \
+             cell stays pending"
+        )),
+    }
+    match t60_report(samples, sample_rate_hz) {
+        Some(report) => chain.t60_octaves = Some(report),
+        None => warnings.push(format!(
+            "channel '{channel}': octave-T60 analysis declined on the measured IR; \
+             cell stays pending"
+        )),
+    }
+    match waterfall_report(samples, sample_rate_hz) {
+        Some((waterfall, decays)) => {
+            chain.waterfall = Some(waterfall);
+            chain.resonance_decays = Some(decays);
+        }
+        None => warnings.push(format!(
+            "channel '{channel}': waterfall analysis declined on the measured IR; \
+             cells stay pending"
+        )),
+    }
+    match wavelet_report(samples, sample_rate_hz) {
+        Some(report) => chain.wavelet = Some(report),
+        None => warnings.push(format!(
+            "channel '{channel}': wavelet analysis declined on the measured IR; \
+             cell stays pending"
+        )),
+    }
+}
+
+/// Maximum capture-derived IR length fed to the acoustic analyses.
+///
+/// Five seconds covers domestic-room decays and the STI duration check
+/// while bounding analysis cost; later deconvolution noise is excluded.
+const MAX_CAPTURE_IR_SECONDS: f64 = 5.0;
+
+/// Deconvolve a processed take against the stimulus, preserving delay.
+///
+/// Unlike a lag-stripped analysis IR, the direct sound keeps its measured
+/// arrival offset, so the reflection picker's onset search sees the same
+/// pre-direct silence as in a declared measured IR.
+fn capture_impulse_response(
+    recording: &[f32],
+    stimulus: &[f32],
+    sample_rate_hz: u32,
+) -> Option<Vec<f32>> {
+    use rustfft::{FftPlanner, num_complex::Complex};
+    let spectrum =
+        math_audio_dsp::analysis::deconvolve_sweep(recording, stimulus, sample_rate_hz).ok()?;
+    let fft_size = (spectrum.len().checked_sub(1)?).checked_mul(2)?;
+    if fft_size == 0 {
+        return None;
+    }
+    let mut full_spectrum = vec![Complex::new(0.0_f32, 0.0_f32); fft_size];
+    for (index, value) in spectrum.iter().enumerate() {
+        full_spectrum[index] = *value;
+    }
+    for index in 1..fft_size / 2 {
+        full_spectrum[fft_size - index] = spectrum[index].conj();
+    }
+    let mut planner = FftPlanner::<f32>::new();
+    planner.plan_fft_inverse(fft_size).process(&mut full_spectrum);
+    let scale = 1.0 / fft_size as f32;
+    Some(
+        full_spectrum
+            .iter()
+            .map(|value| value.re * scale)
+            .collect(),
+    )
+}
+
+/// Attach measured acoustics derived from a capture handoff's sweep takes.
+///
+/// Sessions captured as spatial magnitude sweeps already contain a full
+/// measured impulse response per speaker and microphone: the selected
+/// primary (first) microphone take is deconvolved against the handoff
+/// stimulus at the handoff sample rate, and the R1–R5 analyses run on the
+/// result, exactly as for a declared measured IR. The synthesized `pre_ir`
+/// is left untouched. Any gap — no handoff, no stimulus, changed audio,
+/// failed deconvolution, or a declined analysis — leaves the affected
+/// fields pending with a warning; this path never fails the output.
+///
+/// Returns per-channel warning lines.
+///
+/// # Errors
+///
+/// This function does not intentionally return an error; failures are
+/// reported as warnings so a capture gap cannot refuse a valid output.
+pub fn attach_capture_measured_acoustics(
+    output: &mut DspGraph,
+    config: &RoomConfig,
+    config_dir: &Path,
+) -> Vec<String> {
+    let mut warnings = Vec::new();
+    let Some(handoff_name) = config
+        .recording_config
+        .as_ref()
+        .and_then(|recording| recording.capture_handoff_file.as_deref())
+    else {
+        return warnings;
+    };
+    if !crate::capture_handoff::sweep_capture_declared(config) {
+        return warnings;
+    }
+    let Some(handoff) = std::fs::read(config_dir.join(handoff_name))
+        .ok()
+        .and_then(|bytes| {
+            serde_json::from_slice::<autoeq_core::capture_handoff::CaptureHandoff>(&bytes).ok()
+        })
+        .filter(|handoff| handoff.validate().is_ok())
+    else {
+        warnings.push("capture measured acoustics unavailable: handoff unreadable".into());
+        return warnings;
+    };
+    let Some(stimulus) = crate::capture_handoff::stimulus_artifact(&handoff)
+        .and_then(|artifact| {
+            crate::capture_handoff::verified_audio_samples(config_dir, &handoff, &artifact.file)
+        })
+    else {
+        warnings.push("capture measured acoustics unavailable: no usable stimulus".into());
+        return warnings;
+    };
+    let Some(_sweep_range_hz) = config
+        .recording_config
+        .as_ref()
+        .and_then(|recording| {
+            Some((recording.sweep_start_freq?, recording.sweep_end_freq?))
+        })
+        .filter(|(start, end)| start.is_finite() && end.is_finite() && *start > 0.0 && *end > *start)
+    else {
+        warnings.push("capture measured acoustics unavailable: no sweep range".into());
+        return warnings;
+    };
+    let sample_rate_hz = f64::from(handoff.sample_rate_hz);
+    let max_samples = (MAX_CAPTURE_IR_SECONDS * sample_rate_hz) as usize;
+    let primary_microphone = handoff.microphone_ids.first().cloned();
+    let channel_names: Vec<String> = output.channels.keys().cloned().collect();
+    for channel in &channel_names {
+        let Some(source_id) = capture_source_id(config, channel) else {
+            continue;
+        };
+        let Some(SpeakerConfig::Single(MeasurementSource::Multiple(_))) =
+            config.speakers.get(&source_id)
+        else {
+            continue;
+        };
+        let Some(microphone_id) = primary_microphone.as_deref() else {
+            continue;
+        };
+        let Some(take) = handoff.takes.iter().find(|take| {
+            take.source_id == source_id
+                && take.provenance.microphone_id == microphone_id
+                && handoff
+                    .selected_take_ids
+                    .as_ref()
+                    .map_or(take.repeat_index == 0, |selected| {
+                        selected.iter().any(|id| id == &take.take_id)
+                    })
+        }) else {
+            warnings.push(format!(
+                "channel '{channel}': capture measured acoustics unavailable: primary take missing"
+            ));
+            continue;
+        };
+        let Some(recording) = crate::capture_handoff::verified_audio_samples(
+            config_dir,
+            &handoff,
+            &take.processed_audio_file,
+        ) else {
+            warnings.push(format!(
+                "channel '{channel}': capture measured acoustics unavailable: processed audio unusable"
+            ));
+            continue;
+        };
+        let Some(samples) = capture_impulse_response(&recording, &stimulus, handoff.sample_rate_hz)
+        else {
+            warnings.push(format!(
+                "channel '{channel}': capture measured acoustics unavailable: deconvolution failed"
+            ));
+            continue;
+        };
+        // Window to 5 ms before the direct peak: deconvolution pre-ringing
+        // at the buffer start must not be mistaken for the direct sound.
+        // The deconvolved IR is circular, so a take whose direct arrival
+        // precedes the stimulus reference wraps to the buffer end; rotate
+        // the window around the peak instead of slicing.
+        let peak = samples
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.abs().total_cmp(&b.1.abs()))
+            .map_or(0, |(index, _)| index);
+        let pre_roll = (0.005 * sample_rate_hz) as usize;
+        let window_start = if samples.is_empty() || peak >= pre_roll {
+            peak.saturating_sub(pre_roll)
+        } else {
+            samples.len() - (pre_roll - peak)
+        };
+        let count = max_samples.min(samples.len());
+        let samples: Vec<f32> = (0..count)
+            .map(|offset| samples[(window_start + offset) % samples.len()])
+            .collect();
+        if samples.len() < MIN_SAMPLES {
+            warnings.push(format!(
+                "channel '{channel}': capture measured acoustics unavailable: deconvolved IR too short"
+            ));
+            continue;
+        }
+        let Some(chain) = output.channels.get_mut(channel) else {
+            continue;
+        };
+        match speech_transmission_report(&samples, sample_rate_hz) {
+            Ok(report) => chain.speech_transmission = Some(report),
+            Err(reason) => warnings.push(format!(
+                "capture '{channel}': speech transmission unavailable: {reason}"
+            )),
+        }
+        apply_chain_acoustics(chain, &samples, sample_rate_hz, channel, &mut warnings);
+    }
+    warnings
+}
+
+/// Resolve an output channel name to its capture source identifier.
+fn capture_source_id(config: &RoomConfig, channel: &str) -> Option<String> {
+    if config.speakers.contains_key(channel) {
+        return Some(channel.to_owned());
+    }
+    config
+        .system
+        .as_ref()?
+        .speakers
+        .iter()
+        .find(|(role, _)| role == &channel)
+        .map(|(_, measurement_key)| measurement_key.clone())
+        .filter(|key| config.speakers.contains_key(key))
 }
 
 #[cfg(test)]
@@ -790,6 +1020,221 @@ mod tests {
         let mut source = source_for(path);
         source.sample_rate_hz = Some(44_100.0);
         assert!(load_measured_ir("L", &source, dir.path()).is_err());
+    }
+
+    fn capture_wav_bytes(samples: &[f32]) -> Vec<u8> {
+        let mut audio = std::io::Cursor::new(Vec::new());
+        {
+            let spec = hound::WavSpec {
+                channels: 1,
+                sample_rate: 48000,
+                bits_per_sample: 32,
+                sample_format: hound::SampleFormat::Float,
+            };
+            let mut writer = hound::WavWriter::new(&mut audio, spec).unwrap();
+            for sample in samples {
+                writer.write_sample(*sample).unwrap();
+            }
+            writer.finalize().unwrap();
+        }
+        audio.into_inner()
+    }
+
+    #[test]
+    fn capture_handoff_takes_populate_measured_acoustics() {
+        use autoeq_core::capture_handoff::{
+            CaptureArtifactIdentity, CaptureArtifactRole, CaptureCompletion, CaptureHandoff,
+            CaptureTakeIdentity,
+        };
+        use autoeq_core::capture_provenance::{
+            CaptureCorrection, CaptureGeometry, CaptureProvenance, CaptureTakeProvenance,
+        };
+        use autoeq_core::{MeasurementProvenance, ProvenanceCaptureKind};
+        use roomeq_model::{MeasurementMultiple, MeasurementRef, RecordingConfiguration};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let digest = |bytes: &[u8]| autoeq_artifacts::sha256_hex(bytes);
+        // ESS stimulus (100 ms silence head, as in real captures) and a
+        // recording through a two-tap room (direct plus a 10 ms reflection).
+        let ratio = (20000.0_f64 / 20.0).ln();
+        let stimulus: Vec<f32> = (0..48000)
+            .map(|i| {
+                if i < 4800 {
+                    return 0.0;
+                }
+                let t = (i - 4800) as f64 / 48000.0;
+                let phase = 2.0 * std::f64::consts::PI * 20.0 / ratio * ((ratio * t).exp() - 1.0);
+                (0.1 * phase.sin()) as f32
+            })
+            .collect();
+        // The sweep reaches the microphone 960 samples (20 ms) after the
+        // stimulus starts; the room adds a reflection 480 samples (10 ms)
+        // later over an exponentially decaying noise tail (T60 ~ 0.3 s).
+        let room: Vec<f32> = (0..48000)
+            .map(|i| {
+                if i < 960 {
+                    return 0.0;
+                }
+                let t = (i - 960) as f64 / 48000.0;
+                let noise = ((i as f64 * 12.9898).sin() * 43758.5453).fract() - 0.5;
+                let mut amp = (0.3 * noise * (-t * 23.0).exp()) as f32;
+                if i == 960 {
+                    amp += 1.0;
+                }
+                if i == 1440 {
+                    amp += 0.8;
+                }
+                amp
+            })
+            .collect();
+        let recording: Vec<f32> = {
+            use rustfft::{FftPlanner, num_complex::Complex};
+            let size = 131072_usize;
+            let mut planner = FftPlanner::<f32>::new();
+            let fft = planner.plan_fft_forward(size);
+            let mut a: Vec<Complex<f32>> = stimulus
+                .iter()
+                .map(|&s| Complex::new(s, 0.0))
+                .collect();
+            a.resize(size, Complex::default());
+            let mut b: Vec<Complex<f32>> = room
+                .iter()
+                .map(|&s| Complex::new(s, 0.0))
+                .collect();
+            b.resize(size, Complex::default());
+            fft.process(&mut a);
+            fft.process(&mut b);
+            let mut spectrum: Vec<Complex<f32>> =
+                a.iter().zip(&b).map(|(x, y)| x * y).collect();
+            planner.plan_fft_inverse(size).process(&mut spectrum);
+            spectrum[..48000]
+                .iter()
+                .map(|value| value.re / size as f32)
+                .collect()
+        };
+        let calibration = b"20 0\n20000 0\n";
+        let provenance = CaptureTakeProvenance {
+            seat_id: None,
+            microphone_id: "room-reference".into(),
+            device_id: "declared-usb-device".into(),
+            offset_samples: None,
+            skew_ppm: None,
+            residual_uncertainty_us: None,
+            correction_applied: CaptureCorrection::None,
+            timing_reference_id: None,
+            calibration_id: digest(calibration),
+            gain_db: 0.0,
+            calibration_orientation: "on_axis".into(),
+            position_m: [0.0; 3],
+            position_uncertainty_mm: 2.0,
+            preserves_acoustic_delay: true,
+            quality_passed: true,
+        };
+        let config = RoomConfig {
+            speakers: std::collections::HashMap::from([(
+                "L".into(),
+                SpeakerConfig::Single(MeasurementSource::Multiple(MeasurementMultiple {
+                    measurements: vec![MeasurementRef::Named {
+                        path: "response.csv".into(),
+                        name: Some("room-reference".into()),
+                    }],
+                    speaker_name: None,
+                    provenance: MeasurementProvenance {
+                        capture_kind: ProvenanceCaptureKind::SpatialMagnitude,
+                        capture: Some(CaptureProvenance {
+                            geometry: CaptureGeometry::Spread,
+                            takes: vec![provenance.clone()],
+                            reflection_report: None,
+                        }),
+                        ..Default::default()
+                    },
+                    estimated_position: None,
+                })),
+            )]),
+            recording_config: Some(RecordingConfiguration {
+                recording_sample_rate: Some(48000),
+                capture_handoff_file: Some(
+                    autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME.into(),
+                ),
+                signal_type: Some("Sweep".into()),
+                sweep_start_freq: Some(20.0),
+                sweep_end_freq: Some(20000.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let config_bytes = serde_json::to_vec_pretty(&config).unwrap();
+        let stimulus_bytes = capture_wav_bytes(&stimulus);
+        let recording_bytes = capture_wav_bytes(&recording);
+        let payloads: Vec<(&str, CaptureArtifactRole, &[u8])> = vec![
+            ("recordings.json", CaptureArtifactRole::Configuration, &config_bytes),
+            (
+                "response.csv",
+                CaptureArtifactRole::MagnitudeResponse,
+                b"frequency_hz,spl_db\n100,80\n1000,80\n",
+            ),
+            ("calibration.txt", CaptureArtifactRole::Calibration, calibration),
+            ("raw.wav", CaptureArtifactRole::RawAudio, &recording_bytes),
+            ("processed.wav", CaptureArtifactRole::ProcessedAudio, &recording_bytes),
+            ("stimulus.wav", CaptureArtifactRole::SupportingEvidence, &stimulus_bytes),
+        ];
+        let artifacts = payloads
+            .iter()
+            .map(|(file, role, bytes)| {
+                std::fs::write(dir.path().join(file), bytes).unwrap();
+                CaptureArtifactIdentity {
+                    file: (*file).into(),
+                    role: *role,
+                    bytes: bytes.len() as u64,
+                    sha256: digest(bytes),
+                }
+            })
+            .collect();
+        let handoff = CaptureHandoff {
+            version: 1,
+            producer: "fixture-producer".into(),
+            producer_version: "1".into(),
+            session_id: "session-1".into(),
+            completion: CaptureCompletion::Complete,
+            sample_rate_hz: 48000,
+            source_ids: vec!["L".into()],
+            microphone_ids: vec!["room-reference".into()],
+            repeat_count: 1,
+            selected_take_ids: None,
+            parent_inventory_file: None,
+            configuration_file: "recordings.json".into(),
+            artifacts,
+            takes: vec![CaptureTakeIdentity {
+                take_id: "take-1".into(),
+                source_id: "L".into(),
+                repeat_index: 0,
+                raw_audio_file: "raw.wav".into(),
+                processed_audio_file: "processed.wav".into(),
+                response_file: Some("response.csv".into()),
+                calibration_file: "calibration.txt".into(),
+                provenance,
+            }],
+        };
+        std::fs::write(
+            dir.path().join(autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME),
+            serde_json::to_vec_pretty(&handoff).unwrap(),
+        )
+        .unwrap();
+
+        let mut output = DspGraph::new("1");
+        output.add_channel("L", Vec::new());
+        let warnings = attach_capture_measured_acoustics(&mut output, &config, dir.path());
+        assert!(
+            !warnings.iter().any(|warning| warning.contains("unavailable")),
+            "{warnings:?}"
+        );
+        let chain = &output.channels["L"];
+        assert!(
+            chain.early_reflections.is_some(),
+            "reflection table attached from deconvolved capture IR"
+        );
+        assert!(chain.t60_octaves.is_some(), "octave T60 report attached");
+        assert!(chain.pre_ir.is_none(), "synthesized pre_ir left untouched");
     }
 
     #[test]

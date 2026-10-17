@@ -1034,6 +1034,14 @@ for room-acoustic analysis. Without that declaration, the IR files are exported
 but not bound into the configuration. Unsupported legacy/derived IR storage is
 reported explicitly.
 
+When no measured IR is declared but the session is a sweep capture
+handoff, the same acoustic analyses are derived automatically at output
+time: each speaker's selected primary-microphone take is deconvolved
+against the handoff stimulus and the reflection table, octave T60,
+early/late, waterfall, wavelet, and STI analyses run on that measured IR.
+Any take or analysis that cannot be supported stays pending with a logged
+warning instead of fabricating values.
+
 Parent configurations can declare native measured IRs directly, including
 3 kHz subwoofer captures. Use `output_channel` and `driver` to attach a capture
 to its exact delivered driver, not the summed parent speaker. Independent

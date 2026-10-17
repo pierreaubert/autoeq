@@ -325,6 +325,16 @@
   `initial measurement phase unavailable`; the 5.0.4 Genelec session now
   passes all `pre_ir`/`post_ir` waveform checks.
 
+- Derive measured-room acoustics from capture handoffs when no measured
+  IR is declared: the selected primary-microphone take of each speaker is
+  deconvolved against the handoff stimulus (delay-preserving, windowed
+  5 ms before the direct peak, circular-wrap safe) and the R1–R5 analyses
+  (reflection table, octave T60, early/late, waterfall, wavelet, STI) run
+  on it, so Results-summary acoustic cells no longer stay pending for
+  sweep capture sessions such as 5.0.4 Genelec. The reflection-table
+  wrapper now caps dense ringing at the loudest 64 candidates and drops
+  individual out-of-window events instead of declining a channel.
+
 - Publish one shared target for all main channels in topology (stereo /
   home-cinema) results, mirroring the generic assembly: after final level
   alignment every final shares one level basis, so serialized per-channel

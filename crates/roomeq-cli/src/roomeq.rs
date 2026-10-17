@@ -1894,6 +1894,18 @@ fn execute_optimization_candidate(
                 anyhow::bail!("measured impulse responses refused delivered output: {reason}")
             }
         }
+    } else {
+        // No declared measured IRs: a sweep capture handoff already holds a
+        // measured IR per speaker in its processed takes. Derive the same
+        // acoustic evidence from the primary take instead of leaving the
+        // report's acoustic cells pending.
+        for warning in roomeq_workflow::measured_ir::attach_capture_measured_acoustics(
+            &mut dsp_output,
+            &room_config,
+            &config_dir,
+        ) {
+            warn!("{warning}");
+        }
     }
     // C08: reconcile provisional decision records against the exact bytes
     // being saved and attach the finalized, graph-bound ledger. The bundle

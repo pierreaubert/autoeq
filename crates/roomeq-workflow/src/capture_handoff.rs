@@ -181,7 +181,7 @@ pub fn verify_capture_handoff(
 ///
 /// The stimulus is retained as supporting evidence; exactly one WAV whose
 /// stem is `stimulus` is eligible. Anything else keeps magnitude-only loading.
-fn stimulus_artifact(handoff: &CaptureHandoff) -> Option<&CaptureArtifactIdentity> {
+pub(crate) fn stimulus_artifact(handoff: &CaptureHandoff) -> Option<&CaptureArtifactIdentity> {
     let mut candidates = handoff.artifacts.iter().filter(|artifact| {
         artifact.role == CaptureArtifactRole::SupportingEvidence && {
             let path = Path::new(&artifact.file);
@@ -197,7 +197,7 @@ fn stimulus_artifact(handoff: &CaptureHandoff) -> Option<&CaptureArtifactIdentit
 }
 
 /// Return whether the configuration declares a sweep capture.
-fn sweep_capture_declared(config: &RoomConfig) -> bool {
+pub(crate) fn sweep_capture_declared(config: &RoomConfig) -> bool {
     config
         .recording_config
         .as_ref()
@@ -206,7 +206,7 @@ fn sweep_capture_declared(config: &RoomConfig) -> bool {
 }
 
 /// Decode a hash-bound audio artifact from a private snapshot.
-fn verified_audio_samples(
+pub(crate) fn verified_audio_samples(
     root: &Path,
     handoff: &CaptureHandoff,
     file: &str,

@@ -780,7 +780,31 @@ pub(super) fn select_with_diagnostic_sink(
         diagnostic.map(|(trial, _)| trial),
         diagnostics.as_mut().map(|capture| &mut *capture),
     )
-    .and_then(|()| verify_delivered_channel_alignment(result, config, fs, dir));
+    .and_then(|()| {
+        if let Err(error) =
+            seat_replay::validate_final_correlated_bass(result, captures, held_out, config, fs, dir)
+        {
+            publish_baseline(
+                result,
+                captures,
+                held_out,
+                config,
+                fs,
+                dir,
+                store,
+                "final_correlated_bass_refused",
+                vec![StageCheck::fail(
+                    "final_correlated_bass",
+                    StageCheckKind::Quality,
+                    error.to_string(),
+                )],
+            )?;
+            seat_replay::validate_final_correlated_bass(
+                result, captures, held_out, config, fs, dir,
+            )?;
+        }
+        verify_delivered_channel_alignment(result, config, fs, dir)
+    });
     match selection {
         Ok(()) => {
             // WP4a advisory: correlated (identical-drive) bass through the
@@ -3070,6 +3094,16 @@ fn publish_baseline_with_alignment(
         .collect();
     let mut baseline = result.clone();
     seat_replay::restore_structural_baseline(&mut baseline);
+    if trials.iter().any(|trial| {
+        trial
+            .diagnostic
+            .as_deref()
+            .is_some_and(|reason| reason.contains("correlated-bass efficiency regressed"))
+    }) {
+        // EQ strength cannot repair mutually cancelling route controls. Restore
+        // the fixed configured routes before judging/publishing the fallback.
+        seat_replay::restore_configured_bass_routes(&mut baseline, config)?;
+    }
     // The discarded correction and its derived trims no longer describe this
     // graph. Recompute the topology-owned trims from the structural candidate
     // before rebuilding playback or measuring levels. Never retain a

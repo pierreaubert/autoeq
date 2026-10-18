@@ -105,6 +105,41 @@ pub(in super::super) fn preprocess_sub_with_frequency_samples(
 }
 
 /// MSO: optimize inter-sub gains/delays, return combined curve + per-sub info
+pub(in super::super) fn preprocess_sub_with_callback(
+    lfe_config: &SpeakerConfig,
+    strategy: &SubwooferStrategy,
+    optimizer: &OptimizerConfig,
+    sample_rate: f64,
+    frequency_samples: usize,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
+) -> Result<SubPreprocessResult> {
+    if let SpeakerConfig::MultiSub(ms) = lfe_config
+        && matches!(strategy, SubwooferStrategy::Mso)
+        && (ms.joint_optimization
+            || ms.allpass_optimization
+            || optimizer
+                .multi_seat
+                .as_ref()
+                .is_some_and(|seat| seat.enabled))
+    {
+        return preprocess_multisub_advanced(
+            ms,
+            optimizer,
+            sample_rate,
+            frequency_samples,
+            callback,
+        );
+    }
+    preprocess_sub_with_frequency_samples(
+        lfe_config,
+        strategy,
+        optimizer,
+        sample_rate,
+        frequency_samples,
+    )
+}
+
+/// Optimize inter-sub controls while retaining every measured physical branch.
 pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
     ms: &MultiSubGroup,
     optimizer: &OptimizerConfig,
@@ -118,7 +153,7 @@ pub(in super::super) fn preprocess_multisub_mso_with_frequency_samples(
             .as_ref()
             .is_some_and(|seat| seat.enabled)
     {
-        return preprocess_multisub_advanced(ms, optimizer, sample_rate, frequency_samples);
+        return preprocess_multisub_advanced(ms, optimizer, sample_rate, frequency_samples, None);
     }
     let measured = ms
         .subwoofers
@@ -234,6 +269,7 @@ fn preprocess_multisub_advanced(
     optimizer: &OptimizerConfig,
     sample_rate: f64,
     frequency_samples: usize,
+    callback: Option<roomeq_engine::OptimProgressCallback>,
 ) -> Result<SubPreprocessResult> {
     use roomeq_engine::bass_management::SubDriverProcessing;
     let seats = crate::group_measurements::load_multisub_seat_measurements_with_frequency_samples(
@@ -290,7 +326,7 @@ fn preprocess_multisub_advanced(
         [bounded.min_freq, bounded.max_freq],
     );
     let (chain, _, _, _, combined, _, _, _, _, evidence) =
-        roomeq_engine::group_processing::process_multisub_group(
+        roomeq_engine::group_processing::process_multisub_group_with_callback(
             &ms.name,
             ms,
             &room,
@@ -298,6 +334,7 @@ fn preprocess_multisub_advanced(
             &prepared,
             &resources,
             &resources,
+            callback,
         )?;
     let chains = chain
         .drivers
@@ -612,7 +649,7 @@ fn render_cardioid_seat(
     })
 }
 
-/// DBA: run DBA optimization, return combined curve + front/rear driver info
+/// Optimize array controls and retain one response per physical DBA driver.
 pub(in super::super) fn preprocess_dba_with_frequency_samples(
     d: &DBAConfig,
     optimizer: &OptimizerConfig,
@@ -621,11 +658,17 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
 ) -> Result<SubPreprocessResult> {
     info!("  DBA optimization");
 
+    let input = dba::prepare_dba_with_frequency_samples(d, frequency_samples).map_err(|e| {
+        AutoeqError::InvalidMeasurement {
+            message: format!("DBA measurements: {e}"),
+        }
+    })?;
     let optimized =
-        dba::optimize_dba_with_frequency_samples(d, optimizer, sample_rate, frequency_samples)
-            .map_err(|e| AutoeqError::OptimizationFailed {
+        dba::optimize_dba_detailed_prepared(&input, optimizer, sample_rate).map_err(|e| {
+            AutoeqError::OptimizationFailed {
                 message: format!("DBA optimization failed: {}", e),
-            })?;
+            }
+        })?;
     let result = optimized.driver;
     let combined = optimized.combined_curve;
 
@@ -634,34 +677,33 @@ pub(in super::super) fn preprocess_dba_with_frequency_samples(
         result.gains, result.delays
     );
 
-    // Load front and rear array responses for display
-    let front_curve = dba::sum_array_response_with_frequency_samples(&d.front, frequency_samples)
-        .map_err(|e| AutoeqError::InvalidMeasurement {
-        message: format!("DBA front array: {}", e),
-    })?;
-    let rear_curve = dba::sum_array_response_with_frequency_samples(&d.rear, frequency_samples)
-        .map_err(|e| AutoeqError::InvalidMeasurement {
-            message: format!("DBA rear array: {}", e),
-        })?;
-
-    let drivers = vec![
-        SubDriverInfo {
-            name: "Front Array".to_string(),
-            gain: result.gains.first().copied().unwrap_or(0.0),
-            delay: result.delays.first().copied().unwrap_or(0.0),
-            inverted: false,
-            processing: None,
-            initial_curve: Some(front_curve),
-        },
-        SubDriverInfo {
-            name: "Rear Array".to_string(),
-            gain: result.gains.get(1).copied().unwrap_or(0.0),
-            delay: result.delays.get(1).copied().unwrap_or(0.0),
-            inverted: true,
-            processing: None,
-            initial_curve: Some(rear_curve),
-        },
-    ];
+    // Two optimization variables describe front/rear arrays; they are not two
+    // physical outputs. Broadcast each array control to its own measured drivers
+    // in declaration order (all front drivers, then all rear drivers).
+    let drivers = [input.front, input.rear]
+        .into_iter()
+        .enumerate()
+        .flat_map(|(array, curves)| {
+            let gain = result.gains[array];
+            let delay = result.delays[array];
+            curves
+                .into_iter()
+                .enumerate()
+                .map(move |(index, curve)| SubDriverInfo {
+                    name: format!(
+                        "{}_{}_{}",
+                        d.name,
+                        if array == 0 { "front" } else { "rear" },
+                        index + 1
+                    ),
+                    gain,
+                    delay,
+                    inverted: array == 1,
+                    processing: None,
+                    initial_curve: Some(curve),
+                })
+        })
+        .collect();
 
     Ok(SubPreprocessResult {
         shared_eq_seats: None,
@@ -1450,6 +1492,60 @@ mod tests {
             0,
         );
         assert!(result.is_err(), "expected Err for mismatched phase lengths");
+    }
+
+    #[test]
+    fn preprocess_dba_expands_array_controls_to_every_physical_driver() {
+        let levels = [80.0, 81.0, 77.0, 78.0, 79.0];
+        let sources: Vec<_> = levels
+            .iter()
+            .map(|&level| MeasurementSource::InMemory(make_curve(16, level, Some(0.0))))
+            .collect();
+        let config = DBAConfig {
+            name: "dba".into(),
+            speaker_name: None,
+            front: sources[..2].to_vec(),
+            rear: sources[2..].to_vec(),
+        };
+        let result =
+            preprocess_dba_with_frequency_samples(&config, &tiny_optimizer(), 48_000.0, 32)
+                .unwrap();
+        let drivers = result.drivers.unwrap();
+        assert_eq!(drivers.len(), 5);
+        for (index, driver) in drivers.iter().enumerate() {
+            let reference = &drivers[if index < 2 { 0 } else { 2 }];
+            assert_eq!(driver.gain, reference.gain);
+            assert_eq!(driver.delay, reference.delay);
+            assert_eq!(driver.inverted, index >= 2);
+            assert!(
+                driver
+                    .initial_curve
+                    .as_ref()
+                    .unwrap()
+                    .spl
+                    .iter()
+                    .all(|level| (level - levels[index]).abs() < 1e-9)
+            );
+        }
+        // Replay every physical branch once; it must reconstruct the optimized
+        // array instead of multiplying an already-summed front/rear response.
+        let controlled: Vec<_> = drivers
+            .iter()
+            .map(|driver| {
+                let mut curve = roomeq_engine::topology::apply_delay_and_polarity_to_curve(
+                    driver.initial_curve.as_ref().unwrap(),
+                    driver.delay,
+                    driver.inverted,
+                );
+                curve.spl.mapv_inplace(|value| value + driver.gain);
+                curve
+            })
+            .collect();
+        let replayed = roomeq_engine::dba::sum_array_response(&controlled).unwrap();
+        let expected = interpolate_log_space(&replayed.freq, &result.combined_curve);
+        for (actual, expected) in replayed.spl.iter().zip(&expected.spl) {
+            assert!((actual - expected).abs() < 1e-7, "{actual} != {expected}");
+        }
     }
 
     #[test]

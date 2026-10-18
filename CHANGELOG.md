@@ -1,3 +1,22 @@
+# Unreleased
+
+- Preserve every physical DBA driver through home-cinema preprocessing, baseline
+  prediction, routing, JSON round-trip, and CamillaDSP export. Front/rear controls
+  are expanded across their measured drivers in declaration order.
+- Honor the configured joint-array primary seat, anchor relative targets to the
+  combined measured level, and allow alignment when the first sub arrives early.
+  Emitted causal delays remove a common minimum while retaining relative timing.
+- Enforce final correlated-bass efficiency against fixed configured routes at
+  each measured seat. Record missing timing evidence explicitly; revert automatic
+  route steering when it introduces cancellation beyond the configured budget.
+- Cache joint gain/delay complex multipliers across seats and evaluate only the
+  active source during independent route searches. Add fixed-score array scaling,
+  verified multi-seat home-cinema, DBA, and long residual-FIR benchmarks.
+- Add separate objective-call caps for joint arrays and bass-management stages,
+  retain actual search effort/timing, and propagate stop requests through joint
+  preprocessing and per-source route optimization. Small budgets no longer grow
+  to fit a minimum DE population or four-generation floor.
+
 # 0.5.77
 
 - Preserve native DE convergence, generations, and fitness counts through the

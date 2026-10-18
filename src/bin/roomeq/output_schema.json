@@ -6067,6 +6067,12 @@
           "format": "double",
           "type": "number"
         },
+        "max_correlated_bass_regression_db": {
+          "default": 3.0,
+          "description": "Maximum baseline-relative loss of coherent/RSS bass efficiency, in dB.\nChecked per frequency and seat for correlated mains through final routes.\nThe default 3 dB is an engineering non-regression budget, not a hearing\nthreshold. A common gain/EQ applied to the whole group cancels in the ratio.",
+          "format": "double",
+          "type": "number"
+        },
         "max_output_safety_attenuation_db": {
           "additionalProperties": {
             "format": "double",
@@ -7141,6 +7147,33 @@
         },
         "scope": {
           "description": "Explicit scope of these predictions and their unavailable claims.",
+          "type": "string"
+        },
+        "search_elapsed_ms": {
+          "default": 0.0,
+          "description": "Elapsed scalar search time, excluding shared EQ and later validation.",
+          "format": "double",
+          "type": "number"
+        },
+        "search_evaluation_limit": {
+          "description": "Explicit hard objective-call cap, independent of generation limits.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "search_evaluations": {
+          "default": 0,
+          "description": "Actual scored search candidates; excludes validation and refused calls.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "search_status": {
+          "default": "",
+          "description": "Backend stop reason; budget exhaustion does not establish convergence.",
           "type": "string"
         },
         "seats": {
@@ -9039,6 +9072,15 @@
           ],
           "description": "Automatic selection of filter count and optimizer bounds."
         },
+        "bass_management_evaluation_limit": {
+          "description": "Hard search-score cap per bass-management search stage, divided among\nthat stage's groups/sources. Omitted uses `max_iter` objective calls.\nBaseline and selected-candidate validation scores are counted separately.",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "bo_acquisition": {
           "description": "Bayesian optimization acquisition: `\"ei\"`, `\"qei\"`, or `\"thompson\"`.",
           "type": [
@@ -9179,6 +9221,7 @@
             "default_input_peak": 1.0,
             "input_peak_limits": {},
             "max_attenuation_db": 12.0,
+            "max_correlated_bass_regression_db": 3.0,
             "max_useful_output_loss_db": 3.0,
             "min_improvement_lower_bound_db": 0.0,
             "min_primary_improvement_db": 0.25,
@@ -9243,6 +9286,15 @@
             }
           ],
           "description": "Inter-channel timbre matching configuration."
+        },
+        "joint_sub_evaluation_limit": {
+          "description": "Optional hard objective-call cap for each joint sub-array search.\nIndependent of the backend's generation/iteration limit in `max_iter`.",
+          "format": "uint",
+          "minimum": 1,
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "local_algo": {
           "default": "cobyla",
@@ -12020,6 +12072,7 @@
               "default_input_peak": 1.0,
               "input_peak_limits": {},
               "max_attenuation_db": 12.0,
+              "max_correlated_bass_regression_db": 3.0,
               "max_useful_output_loss_db": 3.0,
               "min_improvement_lower_bound_db": 0.0,
               "min_primary_improvement_db": 0.25,

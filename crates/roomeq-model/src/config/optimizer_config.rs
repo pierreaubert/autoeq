@@ -169,6 +169,15 @@ pub struct OptimizerConfig {
     /// Maximum number of iterations
     #[serde(default = "default_max_iter")]
     pub max_iter: usize,
+    /// Optional hard objective-call cap for each joint sub-array search.
+    /// Independent of the backend's generation/iteration limit in `max_iter`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub joint_sub_evaluation_limit: Option<std::num::NonZeroUsize>,
+    /// Hard search-score cap per bass-management search stage, divided among
+    /// that stage's groups/sources. Omitted uses `max_iter` objective calls.
+    /// Baseline and selected-candidate validation scores are counted separately.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bass_management_evaluation_limit: Option<std::num::NonZeroUsize>,
     /// Population size for population-based optimizers
     #[serde(default = "default_population")]
     pub population: usize,
@@ -367,6 +376,8 @@ impl Default for OptimizerConfig {
             min_freq: default_min_freq(),
             max_freq: default_max_freq(),
             max_iter: default_max_iter(),
+            joint_sub_evaluation_limit: None,
+            bass_management_evaluation_limit: None,
             population: default_population(),
             peq_model: default_peq_model(),
             processing_mode: ProcessingMode::LowLatency,

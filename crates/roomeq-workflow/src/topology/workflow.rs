@@ -47,3 +47,23 @@ pub(crate) fn workflow_progress_stopped(
     }
     Ok(())
 }
+
+/// Preserve both observer stop returns and its shared cancellation flag.
+pub(crate) fn workflow_search_callback(
+    mut progress: WorkflowProgressCallback,
+) -> roomeq_engine::OptimProgressCallback {
+    Box::new(move |iteration, loss, preference| {
+        if progress.stopped.load(Ordering::Relaxed) {
+            return roomeq_engine::CallbackAction::Stop;
+        }
+        let action = (progress.callback)(iteration, loss, preference);
+        if matches!(action, roomeq_engine::CallbackAction::Stop) {
+            progress.stopped.store(true, Ordering::Relaxed);
+        }
+        if progress.stopped.load(Ordering::Relaxed) {
+            roomeq_engine::CallbackAction::Stop
+        } else {
+            action
+        }
+    })
+}

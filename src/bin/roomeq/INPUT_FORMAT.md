@@ -366,6 +366,34 @@ In routed systems, select subwoofer strategy `mso`; combining explicit joint
 mode with the independent `single` strategy is rejected instead of silently
 running independent processing.
 
+Joint mode uses `optimizer.multi_seat.primary_seat` for its coherent main/sub
+reference and rejects an unavailable index. Relative target shapes are centered
+over the active correction band and anchored to the uncontrolled combined array
+level. Every sub can receive 0–20 ms delay; the emitted delays have a common
+minimum of zero, so reordering subs does not exclude an earlier arrival from
+alignment. Sub 0 remains the 0 dB gain reference.
+
+`optimizer.joint_sub_evaluation_limit` is an optional positive integer imposing
+a strict objective-call cap independently of the backend's `max_iter` semantics
+(DE generations, evaluation limits for evaluation-based backends).
+`optimizer.bass_management_evaluation_limit` is an optional positive integer
+budget for each bass-management search stage; omitted uses `max_iter` objective
+calls. A source-route stage divides this quota across its groups and sources;
+stereo topology candidates share the stage quota. Baseline and final acoustic
+checks remain outside the search quota. Small budgets score a partial initial
+population rather than being raised to a population or generation minimum.
+Joint diagnostics include `search_evaluations`, `search_evaluation_limit`,
+`search_elapsed_ms`, and `search_status`. Budget exhaustion is best effort,
+independent of convergence and acoustic acceptance. Observer cancellation
+refuses emission of a search result and does not commit partial route controls.
+
+For a DBA with several physical output declarations referencing one group,
+declare all front drivers followed by all rear drivers. Each output retains its
+own measured response and inherits its array's gain, delay, and rear inversion.
+The output count must equal `front.len() + rear.len()`. A lone legacy group
+declaration continues to name the owning channel; additional driver outputs
+retain their generated identities.
+
 Joint output includes optional `channels.<channel>.joint_sub` diagnostics:
 array gains/delays, objective components, physical driver IDs, gain-stage
 applications, and every seat before control, after array control, and after
@@ -450,6 +478,17 @@ Reported acoustic curves are small-signal responses, not predictions of gain
 reduction during loud programme material. This is sample-peak protection, not a
 true-peak or driver-excursion guarantee. Updated native playback is required;
 unsupported external exports fail rather than dropping the limiter.
+
+`optimizer.finalization.max_correlated_bass_regression_db` (default `3.0`, finite
+range 0–60 dB) limits the worst frequency-bin loss of coherent/RSS bass efficiency
+relative to fixed configured routes. Final serialized replay checks L=R, L=C=R,
+and shared-bus/declared route groups at every training and supplied held-out seat
+through 300 Hz of supported data. Physical array controls and output safety stay
+fixed on the reference. Common group gain and phase changes cancel in the ratio.
+Failing route steering is restored to configured routes before fallback replay.
+Unknown timing is recorded as `correlated_bass_unassessed` in both stage evidence
+and acceptance observations; it cannot produce a passed correlated-bass check.
+Electrical peak/drive checks remain independent.
 
 `optimizer.finalization.max_useful_output_loss_db` sets the permitted unexplained
 acoustic output loss for mains, surrounds, and heights over the usable playback

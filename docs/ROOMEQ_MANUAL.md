@@ -581,6 +581,47 @@ Measurement-backed all-pass MSO similarly requires labeled stationary captures
 with matching timing references at each seat; phase arrays alone do not authorize
 it. Low-level numerical APIs remain separate from measurement-backed admission.
 
+Joint mode preserves the configured primary seat's complex response for coherent
+main/sub alignment. Relative target tilt is anchored to the measured combined
+array level over the active band. All sub delays may vary within 0–20 ms, then a
+common minimum is removed from the emitted controls. The earliest measured sub
+can therefore be delayed even when it appears first in the configuration.
+
+For physical DBA outputs, declare every front driver followed by every rear
+driver. Array optimization still has front/rear control sets, but each set is
+expanded onto its individual measured physical outputs. Baseline prediction,
+routing, and export retain those output identities and do not sum the entire
+array again under each output name. The single legacy group-channel shorthand
+keeps generated identities for its additional physical branches.
+
+`optimizer.joint_sub_evaluation_limit` optionally caps actual joint-array
+objective calls, separately from the backend's generation/iteration limit.
+`optimizer.bass_management_evaluation_limit` optionally caps each bass-management
+search stage; its default is `max_iter` objective calls. Source groups and stereo
+topology candidates divide a shared stage quota. A small quota does not grow to
+fit the DE population. Baseline/selected-candidate safety and acoustic validation
+remain outside the search cap. Joint reports retain actual call count, cap,
+elapsed search time, and termination status. Exhausting a quota does not establish
+convergence. Progress observers can stop joint preprocessing and route search;
+stopped route searches commit none of their proposed controls.
+
+Final correlated-bass acceptance replays the serialized graph at every retained
+training and supplied held-out seat. It checks stereo/front-stage program and
+shared bass groups against fixed configured routes, retaining the same physical
+array controls and electrical safety. The worst per-frequency decrease in
+coherent/RSS efficiency through 300 Hz must fit
+`optimizer.finalization.max_correlated_bass_regression_db` (default 3 dB; range
+0–60 dB). This ratio preserves common gain/phase changes and exposes narrow
+correlated cancellations that peak buildup misses. Failed automatic route
+steering is reverted before fallback replay. Missing verified timing is explicitly
+unassessed in the final stage and acceptance observations; electrical headroom
+and physical-drive checks retain their own limits.
+During refinement, each physical array also retains its baseline-relative
+coherent efficiency for every actual routing-matrix input column with multiple
+active branches. Independently routed stereo outputs are assessed on their own
+input columns. Complete source groups are checked again before route controls
+are committed.
+
 Home-cinema level calibration is independent of the EQ frequency limits. It
 uses the shared measured main-speaker passband above crossover transitions,
 preferring 500–2,000 Hz with at least one supported octave. Surround and height

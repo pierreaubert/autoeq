@@ -46,3 +46,7 @@ criterion = { workspace = true }
 [[bench]]
 name = "end_to_end_scaling"
 harness = false
+
+[[bench]]
+name = "subwoofer_scaling"
+harness = false

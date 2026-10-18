@@ -52,6 +52,12 @@ impl Default for ScalarOptimConfig {
 /// Result of a bounded scalar minimization.
 #[derive(Debug, Clone)]
 pub struct ScalarOptimResult {
+    /// Actual objective calls, excluding refused attempts and later validation.
+    pub evaluation_count: usize,
+    /// Hard search cap when a run control was supplied.
+    pub evaluation_limit: Option<usize>,
+    /// Elapsed search time in milliseconds, excluding caller-side validation.
+    pub elapsed_ms: f64,
     /// Best parameter vector found.
     pub x: Vec<f64>,
     /// Objective value at [`Self::x`].
@@ -91,27 +97,83 @@ pub fn optimize_bounded_scalar_with_callback<F>(
 where
     F: Fn(&[f64]) -> f64 + Sync,
 {
+    if callback.is_some()
+        && registry::resolve(&config.algorithm).is_some_and(|backend| {
+            !matches!(
+                backend.name(),
+                "autoeq:cmaes" | "autoeq:de" | "autoeq:cobra"
+            )
+        })
+    {
+        return Err(format!(
+            "native scalar cancellation is not supported by {}",
+            config.algorithm
+        ));
+    }
+    optimize_bounded_scalar_with_control(bounds, initial, config, objective, callback, None)
+}
+
+/// Minimize a scalar objective with shared strict budgets and cancellation.
+///
+/// Backend iteration/generation limits retain their existing interpretation.
+/// The optional control imposes a separate hard cap on actual objective calls.
+/// Budget exhaustion returns the best finite scored candidate as best effort;
+/// user cancellation or deadline expiry never returns a deliverable candidate.
+///
+/// # Errors
+///
+/// Returns an error for invalid problems, unsupported dispatch/callbacks,
+/// cancellation, deadlines, or a run without a finite scored candidate.
+pub fn optimize_bounded_scalar_with_control<F>(
+    bounds: &[(f64, f64)],
+    initial: &[f64],
+    config: &ScalarOptimConfig,
+    objective: F,
+    mut callback: Option<super::OptimProgressCallback>,
+    control: Option<&super::run_control::OptimizerRunControl>,
+) -> Result<ScalarOptimResult, String>
+where
+    F: Fn(&[f64]) -> f64 + Sync,
+{
+    use std::sync::{
+        Mutex,
+        atomic::{AtomicUsize, Ordering},
+    };
     validate_problem(bounds, initial)?;
 
     let backend = registry::resolve(&config.algorithm)
         .ok_or_else(|| format!("Unknown algorithm: {}", config.algorithm))?;
     let canonical = backend.name().to_string();
 
-    if callback.is_some()
-        && !matches!(
-            canonical.as_str(),
-            "autoeq:cmaes" | "autoeq:de" | "autoeq:cobra"
-        )
-    {
-        return Err(format!(
-            "native scalar cancellation is not supported by {canonical}"
-        ));
-    }
     let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let callback = callback.map(|mut callback| {
+    let native_callback = matches!(
+        canonical.as_str(),
+        "autoeq:cmaes" | "autoeq:de" | "autoeq:cobra"
+    );
+    // Backends without native task callbacks still poll an observer after each
+    // admitted objective. Once stopped, no further expensive score is computed.
+    let evaluation_callback = if native_callback {
+        None
+    } else {
+        callback.take().map(Mutex::new)
+    };
+    let callback = (callback.is_some() || (control.is_some() && native_callback)).then(|| {
         let stopped = stopped.clone();
+        let control = control.cloned();
         Box::new(move |iteration, loss, preference| {
-            let action = callback(iteration, loss, preference);
+            if control.as_ref().is_some_and(|control| {
+                let snapshot = control.snapshot();
+                snapshot.cancellation_requested
+                    || snapshot.deadline_reached
+                    || control.remaining_evaluations() == 0
+            }) {
+                return crate::de::CallbackAction::Stop;
+            }
+            let action = callback
+                .as_mut()
+                .map_or(crate::de::CallbackAction::Continue, |callback| {
+                    callback(iteration, loss, preference)
+                });
             if matches!(action, crate::de::CallbackAction::Stop) {
                 stopped.store(true, std::sync::atomic::Ordering::Relaxed);
             }
@@ -119,7 +181,43 @@ where
         }) as super::OptimProgressCallback
     });
 
-    let f = |x: &Array1<f64>| objective(x.as_slice().unwrap());
+    let evaluation_limit = control.map(|control| control.remaining_evaluations());
+    let evaluations = AtomicUsize::new(0);
+    let best = Mutex::new(None::<(Vec<f64>, f64)>);
+    let start = std::time::Instant::now();
+    let f = |x: &Array1<f64>| {
+        if stopped.load(Ordering::Relaxed) {
+            return f64::INFINITY;
+        }
+        let score = || {
+            let evaluation = evaluations.fetch_add(1, Ordering::Relaxed) + 1;
+            let value = objective(x.as_slice().unwrap());
+            if control.is_some() && value.is_finite() {
+                let mut best = best
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                if best.as_ref().is_none_or(|(_, previous)| value < *previous) {
+                    *best = Some((x.to_vec(), value));
+                }
+            }
+            if let Some(callback) = &evaluation_callback {
+                let action = callback
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)(
+                    evaluation, value, None
+                );
+                if matches!(action, crate::de::CallbackAction::Stop) {
+                    stopped.store(true, Ordering::Relaxed);
+                }
+            }
+            value
+        };
+        control.map_or_else(score, |control| {
+            control
+                .evaluate(super::run_control::EvaluationStage::Search, 1, score)
+                .unwrap_or(f64::INFINITY)
+        })
+    };
     let x0 = || clamp_initial(initial, bounds);
 
     let result = match canonical.as_str() {
@@ -136,7 +234,37 @@ where
     if stopped.load(std::sync::atomic::Ordering::Relaxed) {
         return Err(format!("{canonical} scalar optimization stopped by user"));
     }
-    result
+    if control.is_some_and(|control| {
+        let snapshot = control.snapshot();
+        snapshot.cancellation_requested || snapshot.deadline_reached
+    }) {
+        return Err(format!(
+            "{canonical} scalar optimization cancelled or deadline reached"
+        ));
+    }
+    let capped = control.is_some_and(|control| control.remaining_evaluations() == 0);
+    let mut result = if capped {
+        let (x, fun) = best
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .ok_or_else(|| format!("{canonical} evaluation budget has no finite candidate"))?;
+        ScalarOptimResult {
+            x,
+            fun,
+            algorithm: canonical,
+            success: false,
+            message: "strict objective evaluation budget exhausted".into(),
+            evaluation_count: 0,
+            evaluation_limit: None,
+            elapsed_ms: 0.0,
+        }
+    } else {
+        result?
+    };
+    result.evaluation_count = evaluations.load(Ordering::Relaxed);
+    result.evaluation_limit = evaluation_limit;
+    result.elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    Ok(result)
 }
 
 fn validate_problem(bounds: &[(f64, f64)], initial: &[f64]) -> Result<(), String> {
@@ -208,6 +336,9 @@ where
     .map_err(|e| format!("CMA-ES failed: {e:?}"))?;
 
     Ok(ScalarOptimResult {
+        evaluation_count: 0,
+        evaluation_limit: None,
+        elapsed_ms: 0.0,
         x: report.x.to_vec(),
         fun: report.fun,
         algorithm: canonical.to_string(),
@@ -252,6 +383,9 @@ where
         differential_evolution(f, bounds, de_config).map_err(|e| format!("DE failed: {e:?}"))?;
 
     Ok(ScalarOptimResult {
+        evaluation_count: 0,
+        evaluation_limit: None,
+        elapsed_ms: 0.0,
         x: report.x.to_vec(),
         fun: report.fun,
         algorithm: canonical.to_string(),
@@ -299,6 +433,9 @@ where
         return Err("COBRA returned no finite scalar candidate".to_string());
     }
     Ok(ScalarOptimResult {
+        evaluation_count: 0,
+        evaluation_limit: None,
+        elapsed_ms: 0.0,
         x: report.x.to_vec(),
         fun: report.fun,
         algorithm: canonical.to_string(),
@@ -336,6 +473,9 @@ where
     .map_err(|e| format!("COBYLA failed: {e:?}"))?;
 
     Ok(ScalarOptimResult {
+        evaluation_count: 0,
+        evaluation_limit: None,
+        elapsed_ms: 0.0,
         x: report.x.to_vec(),
         fun: report.fun,
         algorithm: canonical.to_string(),
@@ -372,6 +512,9 @@ where
     .map_err(|e| format!("ISRES failed: {e:?}"))?;
 
     Ok(ScalarOptimResult {
+        evaluation_count: 0,
+        evaluation_limit: None,
+        elapsed_ms: 0.0,
         x: report.x.to_vec(),
         fun: report.fun,
         algorithm: canonical.to_string(),
@@ -383,6 +526,115 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strict_scalar_evaluation_caps_are_independent_of_backend_population_floors() {
+        use super::super::run_control::OptimizerRunControl;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        for algorithm in ["autoeq:de", "autoeq:cmaes", "autoeq:cobyla", "autoeq:isres"] {
+            let control = OptimizerRunControl::new(std::num::NonZeroUsize::new(3).unwrap());
+            let calls = AtomicUsize::new(0);
+            let config = ScalarOptimConfig {
+                algorithm: algorithm.into(),
+                max_iter: 20,
+                population: 20,
+                ..Default::default()
+            };
+            let result = optimize_bounded_scalar_with_control(
+                &[(-1.0, 1.0)],
+                &[0.8],
+                &config,
+                |candidate| {
+                    calls.fetch_add(1, Ordering::Relaxed);
+                    (candidate[0] - 0.25).powi(2)
+                },
+                None,
+                Some(&control),
+            )
+            .unwrap();
+            assert!(calls.load(Ordering::Relaxed) <= 3, "{algorithm}");
+            assert_eq!(result.evaluation_count, calls.load(Ordering::Relaxed));
+            assert_eq!(result.evaluation_limit, Some(3));
+            assert_eq!(
+                control.snapshot().evaluations_completed,
+                result.evaluation_count
+            );
+            assert!(result.fun.is_finite());
+            assert!(!result.success);
+        }
+    }
+
+    #[test]
+    fn scalar_telemetry_reports_remaining_stage_quota() {
+        use super::super::run_control::{EvaluationStage, OptimizerRunControl};
+        let root = OptimizerRunControl::new(std::num::NonZeroUsize::new(100).unwrap());
+        let stage = root.with_stage_budget(std::num::NonZeroUsize::new(5).unwrap());
+        for _ in 0..2 {
+            stage.evaluate(EvaluationStage::Search, 1, || 0.0).unwrap();
+        }
+        let result = optimize_bounded_scalar_with_control(
+            &[(-1.0, 1.0)],
+            &[0.5],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:de".into(),
+                max_iter: 20,
+                ..Default::default()
+            },
+            |x| x[0].powi(2),
+            None,
+            Some(&stage),
+        )
+        .unwrap();
+        assert_eq!(result.evaluation_count, 3);
+        assert_eq!(result.evaluation_limit, Some(3));
+        assert_eq!(root.snapshot().evaluations_completed, 5);
+    }
+
+    #[test]
+    fn controlled_scalar_cancellation_emits_no_candidate() {
+        use super::super::run_control::OptimizerRunControl;
+        let control = OptimizerRunControl::new(std::num::NonZeroUsize::new(100).unwrap());
+        control.request_cancel();
+        let error = optimize_bounded_scalar_with_control(
+            &[(-1.0, 1.0)],
+            &[0.8],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:de".into(),
+                max_iter: 20,
+                ..Default::default()
+            },
+            |_| panic!("cancelled run must not score"),
+            None,
+            Some(&control),
+        )
+        .unwrap_err();
+        assert!(error.contains("cancelled"), "{error}");
+        assert_eq!(control.snapshot().evaluations_completed, 0);
+    }
+
+    #[test]
+    fn controlled_cobyla_observer_stops_before_another_objective() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = AtomicUsize::new(0);
+        let error = optimize_bounded_scalar_with_control(
+            &[(-1.0, 1.0)],
+            &[0.8],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:cobyla".into(),
+                max_iter: 100,
+                ..Default::default()
+            },
+            |candidate| {
+                calls.fetch_add(1, Ordering::Relaxed);
+                candidate[0].powi(2)
+            },
+            Some(Box::new(|_, _, _| crate::de::CallbackAction::Stop)),
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("stopped by user"));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
 
     #[test]
     fn native_scalar_stop_is_not_a_successful_candidate() {

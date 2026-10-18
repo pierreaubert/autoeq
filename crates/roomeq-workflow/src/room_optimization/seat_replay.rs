@@ -10,6 +10,18 @@ use std::path::Path;
 mod asymmetric;
 mod bounded_sum;
 mod configured_reference;
+mod correlated_bass;
+
+pub(super) fn validate_final_correlated_bass(
+    result: &mut RoomOptimizationResult,
+    captures: &[Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> Result<()> {
+    correlated_bass::validate(result, captures, held_out, config, fs, dir)
+}
 pub(super) use configured_reference::ConfiguredComparison;
 pub(super) use configured_reference::attach_configured_comparison;
 pub(super) use configured_reference::configured_selection_metrics;
@@ -479,6 +491,34 @@ pub(super) fn restore_structural_baseline(result: &mut RoomOptimizationResult) {
     // Retain search history and counts, but do not bind discarded parameters
     // to the structural playback graph or retain its old confidence summary.
     super::room_optimization_result::refresh_optimizer_evidence(result);
+}
+
+/// Roll back automatic route steering while retaining physical array controls.
+pub(super) fn restore_configured_bass_routes(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+) -> Result<()> {
+    for chain in result.channels.values_mut() {
+        // Configured per-sub low-passes are now represented in the route graph.
+        // Retaining the optimized branch copies would apply a second low-pass.
+        let keep = |plugin: &PluginConfigWrapper| {
+            !(plugin.plugin_type == "crossover"
+                && (plugin.parameters["room_eq_stage"] == "route_owned"
+                    || (plugin.parameters["room_eq_stage"] == "post_route"
+                        && plugin.parameters["output"] == "low")))
+        };
+        chain.plugins.retain(keep);
+        for driver in chain.drivers.iter_mut().flatten() {
+            driver.plugins.retain(keep);
+        }
+    }
+    let physical_per_sub = configured_reference::restore_physical_sub_crossovers(result, config)?;
+    let graph = configured_reference::configured_bass_graph(config, physical_per_sub)?;
+    if let Some(bass) = result.metadata.bass_management.as_mut() {
+        bass.routing_graph = Some(graph);
+        bass.optimization = None;
+    }
+    Ok(())
 }
 
 fn apply(
@@ -2664,6 +2704,7 @@ fn validate_final_seats_body(
         .metadata
         .stage_outcomes
         .push(concealment_stage(concealment));
+    correlated_bass::validate(result, captures, held_out, config, fs, dir)?;
     Ok(())
 }
 

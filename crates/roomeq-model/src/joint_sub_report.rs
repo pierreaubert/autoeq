@@ -56,6 +56,18 @@ pub struct JointSubGainApplication {
 /// Joint-array and shared-EQ stage diagnostics, not a playback acceptance verdict.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct JointSubDiagnostics {
+    /// Actual scored search candidates; excludes validation and refused calls.
+    #[serde(default)]
+    pub search_evaluations: usize,
+    /// Explicit hard objective-call cap, independent of generation limits.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_evaluation_limit: Option<usize>,
+    /// Elapsed scalar search time, excluding shared EQ and later validation.
+    #[serde(default)]
+    pub search_elapsed_ms: f64,
+    /// Backend stop reason; budget exhaustion does not establish convergence.
+    #[serde(default)]
+    pub search_status: String,
     /// Shared-EQ rejection reason before later trims and routing; not final-chain acceptance.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shared_eq_rejection_reason: Option<String>,

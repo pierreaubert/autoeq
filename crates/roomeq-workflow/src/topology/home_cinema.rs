@@ -5,8 +5,8 @@ use super::run::run_channel_via_generic_path_with_frequency_samples;
 use super::run::{run_post_eq, run_routed_training_post_eq};
 use super::supporting_source::process_supporting_source_channels_with_frequency_samples;
 use super::types::{WorkflowAssembly, WorkflowExecutor};
-use super::workflow::workflow_progress_callback;
 use super::workflow::workflow_stage_event;
+use super::workflow::{workflow_progress_callback, workflow_search_callback};
 use crate::measurement::{
     load_source_individual_with_frequency_samples, load_source_with_frequency_samples,
 };
@@ -2379,18 +2379,56 @@ fn capture_crossover_cancellation_baseline(
     };
     let mut outputs = HashMap::new();
     for output in &subs.outputs {
+        let grouped_outputs: Vec<_> = subs
+            .outputs
+            .iter()
+            .filter(|candidate| candidate.speaker == output.speaker)
+            .collect();
+        let branch_index = (grouped_outputs.len() > 1).then(|| {
+            grouped_outputs
+                .iter()
+                .position(|candidate| candidate.id == output.id)
+                .expect("current output is in its own speaker group")
+        });
         if let Some(SpeakerConfig::Cardioid(c)) = config.speakers.get(&output.speaker) {
-            outputs.insert(
-                output.id.clone(),
-                preprocess_cardioid_with_frequency_samples(c, frequency_samples, primary_seat)?
-                    .combined_curve,
-            );
+            let preprocessed =
+                preprocess_cardioid_with_frequency_samples(c, frequency_samples, primary_seat)?;
+            if let Some(index) = branch_index {
+                let driver = preprocessed
+                    .drivers
+                    .as_ref()
+                    .and_then(|drivers| drivers.get(index))
+                    .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                        message: format!(
+                            "physical output '{}' has no cardioid branch {index}",
+                            output.id
+                        ),
+                    })?;
+                let mut curve = apply_delay_and_polarity_to_curve(
+                    driver
+                        .initial_curve
+                        .as_ref()
+                        .expect("cardioid driver retains measurement"),
+                    driver.delay,
+                    driver.inverted,
+                );
+                curve.spl.mapv_inplace(|level| level + driver.gain);
+                outputs.insert(output.id.clone(), curve);
+                continue;
+            }
+            outputs.insert(output.id.clone(), preprocessed.combined_curve);
             continue;
         }
         if let Some(SpeakerConfig::Dba(d)) = config.speakers.get(&output.speaker) {
             let mut branches = Vec::new();
+            let mut physical_index = 0;
             for (sources, rear) in [(&d.front, false), (&d.rear, true)] {
                 for source in sources {
+                    let keep = branch_index.is_none_or(|index| index == physical_index);
+                    physical_index += 1;
+                    if !keep {
+                        continue;
+                    }
                     let raw = load_primary_crossover_curve(
                         source,
                         primary_seat,
@@ -2425,13 +2463,24 @@ fn capture_crossover_cancellation_baseline(
             }
             continue;
         }
-        let sources: Vec<&MeasurementSource> = match config.speakers.get(&output.speaker) {
+        let mut sources: Vec<&MeasurementSource> = match config.speakers.get(&output.speaker) {
             Some(SpeakerConfig::Single(s)) => vec![s],
             Some(SpeakerConfig::MultiSub(group)) => group.subwoofers.iter().collect(),
             // These layouts require their own structural array controls. Do not
             // substitute an optimized response or assume identity controls.
             _ => continue,
         };
+        if let Some(index) = branch_index {
+            let source = *sources
+                .get(index)
+                .ok_or_else(|| AutoeqError::InvalidConfiguration {
+                    message: format!(
+                        "physical output '{}' has no measurement branch {index}",
+                        output.id
+                    ),
+                })?;
+            sources = vec![source];
+        }
         let raw: Vec<Curve> = sources
             .into_iter()
             .map(|source| {
@@ -2646,7 +2695,15 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                         sub_role
                     ),
                 })?;
-            let mut sp = preprocess_sub_with_frequency_samples(
+            let sub_callback = workflow_progress_callback(
+                &assembly.progress_factory,
+                &sub_role,
+                single_roles.len(),
+                single_roles.len() + 1,
+                config.optimizer.max_iter,
+            )
+            .map(workflow_search_callback);
+            let mut sp = preprocess_sub_with_callback(
                 physical_sub_config
                     .as_ref()
                     .expect("has_sub proves physical sub configuration exists"),
@@ -2654,8 +2711,22 @@ impl WorkflowExecutor for HomeCinemaExecutor {
                 &config.optimizer,
                 sample_rate,
                 assembly.frequency_samples,
+                sub_callback,
             )?;
             if let Some(drivers) = sp.drivers.as_mut() {
+                // A lone legacy declaration names the owning group channel;
+                // additional physical branches keep their generated driver IDs.
+                // Multiple declarations instead enumerate physical outputs and
+                // must cover every branch exactly once.
+                if sub_sys.outputs.len() > 1 && drivers.len() != sub_sys.outputs.len() {
+                    return Err(AutoeqError::InvalidConfiguration {
+                        message: format!(
+                            "preprocessed sub group has {} physical drivers but {} outputs were declared",
+                            drivers.len(),
+                            sub_sys.outputs.len()
+                        ),
+                    });
+                }
                 for (driver, output) in drivers.iter_mut().zip(&sub_sys.outputs) {
                     driver.name = output.id.clone();
                 }
@@ -3985,6 +4056,13 @@ fn optimize_home_cinema_with_sub(
             .drivers
             .as_ref()
             .is_some_and(|drivers| drivers.len() == 2);
+    let route_budget = config
+        .optimizer
+        .bass_management_evaluation_limit
+        .unwrap_or_else(|| {
+            std::num::NonZeroUsize::new(config.optimizer.max_iter.max(1)).expect("positive budget")
+        });
+    let route_control = roomeq_engine::OptimizerRunControl::new(route_budget);
     let sub_output_advisories = if optimize_source_routes && is_stereo_pair {
         let candidate_specs = [
             (
@@ -4005,21 +4083,36 @@ fn optimize_home_cinema_with_sub(
             let mut candidate_groups = group_results_by_id.clone();
             let mut candidate_sources = source_results.clone();
             let mut candidate_outputs = sub_output_results.clone();
-            let advisories = optimize_bass_management_joint_solution_with_matrix(
-                config,
-                main_roles,
-                &aligned_curves,
-                &aligned_pre_eq_curves,
-                Some(&optimizer_source_pre_route_transfers),
-                bass_management_target_curves.as_ref(),
-                &mut candidate_groups,
-                &mut candidate_sources,
-                &mut candidate_outputs,
-                sub_preprocess.drivers.as_deref(),
-                &sub_role,
-                sample_rate,
-                Some(&matrix),
+            let candidate_control = route_control.with_stage_budget(
+                std::num::NonZeroUsize::new((route_budget.get() / 3).max(1))
+                    .expect("positive quota"),
             );
+            let route_callback = workflow_progress_callback(
+                &progress_factory,
+                &sub_role,
+                main_roles.len(),
+                total_channels,
+                route_budget.get(),
+            )
+            .map(workflow_search_callback);
+            let advisories =
+                engine_bass_management::optimize_bass_management_joint_solution_controlled(
+                    config,
+                    main_roles,
+                    &aligned_curves,
+                    &aligned_pre_eq_curves,
+                    Some(&optimizer_source_pre_route_transfers),
+                    bass_management_target_curves.as_ref(),
+                    &mut candidate_groups,
+                    &mut candidate_sources,
+                    &mut candidate_outputs,
+                    sub_preprocess.drivers.as_deref(),
+                    &sub_role,
+                    sample_rate,
+                    Some(&matrix),
+                    &candidate_control,
+                    route_callback,
+                )?;
             let objective = stereo_route_objective(&candidate_sources);
             let headroom_margin_db =
                 stereo_route_headroom_margin_db(config, &matrix, &candidate_outputs);
@@ -4113,7 +4206,15 @@ fn optimize_home_cinema_with_sub(
         });
         advisories
     } else if optimize_source_routes {
-        optimize_bass_management_joint_solution(
+        let route_callback = workflow_progress_callback(
+            &progress_factory,
+            &sub_role,
+            main_roles.len(),
+            total_channels,
+            route_budget.get(),
+        )
+        .map(workflow_search_callback);
+        engine_bass_management::optimize_bass_management_joint_solution_controlled(
             config,
             main_roles,
             &aligned_curves,
@@ -4126,7 +4227,10 @@ fn optimize_home_cinema_with_sub(
             sub_preprocess.drivers.as_deref(),
             &sub_role,
             sample_rate,
-        )
+            None,
+            &route_control,
+            route_callback,
+        )?
     } else {
         vec![baseline_reason.to_string()]
     };

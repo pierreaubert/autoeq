@@ -1082,6 +1082,23 @@ pub fn process_multisub_group_with_callback(
         });
     }
     let joint_scope_ready = group.joint_optimization && prepared.seat_measurements.is_some();
+    let (joint_callback, callback) = if joint_scope_ready {
+        match callback {
+            Some(callback) => {
+                let shared = std::sync::Arc::new(std::sync::Mutex::new(callback));
+                let wrap = |shared: std::sync::Arc<std::sync::Mutex<OptimProgressCallback>>| -> OptimProgressCallback {
+                    Box::new(move |iteration, loss, preference| {
+                        let mut callback = shared.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                        callback(iteration, loss, preference)
+                    })
+                };
+                (Some(wrap(shared.clone())), Some(wrap(shared)))
+            }
+            None => (None, None),
+        }
+    } else {
+        (None, callback)
+    };
     let mut joint_details = None;
     let (result, combined_response, allpass_filters) = if joint_scope_ready {
         // Joint coherent optimization over the transfer matrix; the
@@ -1089,13 +1106,14 @@ pub fn process_multisub_group_with_callback(
         // unverified timing scope refuses the coherent result before any
         // array search runs, including searches by alternate optimizers.
         info!("  Using joint coherent multi-sub optimization");
-        match multisub::process_joint_sub_group_detailed(
+        match multisub::process_joint_sub_group_detailed_with_callback(
             channel_name,
             group,
             room_config,
             sample_rate,
             prepared,
             prepared.reference_scope.clone(),
+            joint_callback,
         ) {
             Ok((base, combined, details)) => {
                 joint_details = Some(details);

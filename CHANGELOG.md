@@ -343,6 +343,11 @@
   draw a divergent target line per speaker (the 5.0.4 Genelec targets sat
   8.5–17.4 dB below their corrected curves; now within ~1 dB).
 
+- Plot the measured 1–8 kHz envelope behind the early-reflection
+  candidate stems (the stems alone looked like an empty chart), and
+  derive predicted-after-EQ candidate figures from the saved predicted
+  post-EQ IR when one exists.
+
 # 0.5.76
 
 <<<<<<< HEAD

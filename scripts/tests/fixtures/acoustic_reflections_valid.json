@@ -176,26 +176,26 @@
       "level_db": -8.0,
       "upper_bound": false
     },
-    "early_reflection_level_cell": "<td style=\"background:#f1c40f33\" title=\"strongest emitted post-correction 1–8 kHz reflection, dB relative to direct\">-8.0</td>",
+    "early_reflection_level_cell": "<td style=\"background:#f1c40f33\" title=\"strongest emitted post-correction 1\u20138 kHz reflection, dB relative to direct\">-8.0</td>",
     "early_late_ratio_db": 4.5,
-    "early_late_ratio_cell": "<td style=\"background:#2ecc7133\" title=\"arithmetic mean of early minus late dB at emitted 1–8 kHz third-octave centers\">+4.5</td>",
-    "html": "<div class=\"filters-section\"><h3>1–8 kHz early reflections: &lt;Left&gt;</h3><p>Candidate search: first 15 ms after the filtered direct peak, at or above −15 dB relative to direct sound. Before uses the measured room IR; after is predicted through the saved DSP chain, not a new measurement. Reference: filtered direct peak.</p><p>The exported data contains candidate peaks, not a continuous 1–8 kHz energy-time curve. Two-path first-dip and ripple values are estimates, not confirmed acoustic nulls.</p><h4>Before (2 candidates)</h4><table class=\"epa-table\"><thead><tr><th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th><th>Extra path (cm)</th><th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr></thead><tbody><tr><td>1</td><td>-12.00</td><td>5.00</td><td>171.5</td><td>100.0</td><td>4.00</td></tr><tr><td>2</td><td>-7.00</td><td>9.00</td><td>308.7</td><td>55.6</td><td>unbounded</td></tr></tbody></table><h4>Predicted after EQ (2 candidates)</h4><table class=\"epa-table\"><thead><tr><th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th><th>Extra path (cm)</th><th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr></thead><tbody><tr><td>1</td><td>-8.00</td><td>3.00</td><td>102.9</td><td>166.7</td><td>7.30</td></tr><tr><td>2</td><td>-11.00</td><td>6.00</td><td>205.8</td><td>83.3</td><td>5.00</td></tr></tbody></table></div>",
+    "early_late_ratio_cell": "<td style=\"background:#2ecc7133\" title=\"arithmetic mean of early minus late dB at emitted 1\u20138 kHz third-octave centers\">+4.5</td>",
+    "html": "<div class=\"filters-section\"><h3>1\u20138 kHz early reflections: &lt;Left&gt;</h3><p>Candidate search: first 15 ms after the filtered direct peak, at or above \u221215 dB relative to direct sound. Before uses the measured room IR; after is predicted through the saved DSP chain, not a new measurement. Reference: filtered direct peak.</p><p>Candidate peaks are drawn over the measured 1\u20138 kHz energy-time envelope when the saved impulse response is available. Two-path first-dip and ripple values are estimates, not confirmed acoustic nulls.</p><h4>Before (2 candidates)</h4><table class=\"epa-table\"><thead><tr><th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th><th>Extra path (cm)</th><th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr></thead><tbody><tr><td>1</td><td>-12.00</td><td>5.00</td><td>171.5</td><td>100.0</td><td>4.00</td></tr><tr><td>2</td><td>-7.00</td><td>9.00</td><td>308.7</td><td>55.6</td><td>unbounded</td></tr></tbody></table><h4>Predicted after EQ (2 candidates)</h4><table class=\"epa-table\"><thead><tr><th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th><th>Extra path (cm)</th><th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr></thead><tbody><tr><td>1</td><td>-8.00</td><td>3.00</td><td>102.9</td><td>166.7</td><td>7.30</td></tr><tr><td>2</td><td>-11.00</td><td>6.00</td><td>205.8</td><td>83.3</td><td>5.00</td></tr></tbody></table></div>",
     "figures": [
       {
         "kind": "figure",
         "figure": {
-          "title": "<Left>: Before — early-reflection candidates (not a continuous ETC)",
+          "title": "<Left>: Before \u2014 early-reflection candidates over the 1\u20138 kHz envelope",
           "x": {
             "label": "Time after direct peak (ms)",
             "scale": "linear",
-            "min": 0,
-            "max": 15
+            "min": 0.0,
+            "max": 15.0
           },
           "y": {
             "label": "Level relative to direct sound (dB)",
             "scale": "linear",
-            "min": -40,
-            "max": 3
+            "min": -40.0,
+            "max": 3.0
           },
           "y2": null,
           "series": [
@@ -240,7 +240,7 @@
               "y_axis": 0
             },
             {
-              "name": "Detection threshold (−15 dB)",
+              "name": "Detection threshold (\u221215 dB)",
               "x": [
                 0.0,
                 15.0
@@ -278,18 +278,18 @@
       {
         "kind": "figure",
         "figure": {
-          "title": "<Left>: Predicted after EQ — early-reflection candidates (not a continuous ETC)",
+          "title": "<Left>: Predicted after EQ \u2014 early-reflection candidates over the 1\u20138 kHz envelope",
           "x": {
             "label": "Time after direct peak (ms)",
             "scale": "linear",
-            "min": 0,
-            "max": 15
+            "min": 0.0,
+            "max": 15.0
           },
           "y": {
             "label": "Level relative to direct sound (dB)",
             "scale": "linear",
-            "min": -40,
-            "max": 3
+            "min": -40.0,
+            "max": 3.0
           },
           "y2": null,
           "series": [
@@ -334,7 +334,7 @@
               "y_axis": 0
             },
             {
-              "name": "Detection threshold (−15 dB)",
+              "name": "Detection threshold (\u221215 dB)",
               "x": [
                 0.0,
                 15.0
@@ -376,14 +376,14 @@
           "x": {
             "label": "Frequency (Hz)",
             "scale": "log",
-            "min": 20,
-            "max": 20000
+            "min": 20.0,
+            "max": 20000.0
           },
           "y": {
             "label": "SPL (dB)",
             "scale": "linear",
             "min": 20.0,
-            "max": 70
+            "max": 70.0
           },
           "y2": null,
           "series": [

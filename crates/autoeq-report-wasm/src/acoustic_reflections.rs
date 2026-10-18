@@ -143,7 +143,7 @@ fn reflections_html(report: Option<&Value>, label: &str) -> String {
                 report.get("direct_reference").and_then(Value::as_str).unwrap_or("")
             )
         ),
-        "<p>The exported data contains candidate peaks, not a continuous 1–8 kHz energy-time curve. Two-path first-dip and ripple values are estimates, not confirmed acoustic nulls.</p>".to_string(),
+        "<p>Candidate peaks are drawn over the measured 1–8 kHz energy-time envelope when the saved impulse response is available. Two-path first-dip and ripple values are estimates, not confirmed acoustic nulls.</p>".to_string(),
     ];
     for (side, title) in [("pre", "Before"), ("post", "Predicted after EQ")] {
         let events = array(report.get(side));
@@ -283,9 +283,9 @@ fn reflection_figures(
         return Vec::new();
     };
     let mut figures = Vec::new();
-    for (side, title, color) in [
-        ("pre", "Before", "#2864b4"),
-        ("post", "Predicted after EQ", "#c56816"),
+    for (side, title, color, waveform_key) in [
+        ("pre", "Before", "#2864b4", "pre_ir"),
+        ("post", "Predicted after EQ", "#c56816", "post_ir"),
     ] {
         let events = array(report.get(side));
         if events.is_empty() {
@@ -301,8 +301,27 @@ fn reflection_figures(
             ys.extend([Some(-40.0), Some(gain), None]);
             annotations.push(json!({"x": time, "y": gain + 1.0, "text": (index + 1).to_string()}));
         }
+        let mut figure_series = Vec::new();
+        if let Some(envelope) = etc_series(channel, waveform_key) {
+            figure_series.push(envelope);
+        }
+        figure_series.push(series(title, xs, ys, Some(color), "solid"));
+        figure_series.push(series(
+            "Direct reference",
+            vec![0.0, 0.0],
+            vec![Some(-40.0), Some(0.0)],
+            Some("#555555"),
+            "solid",
+        ));
+        figure_series.push(series(
+            "Detection threshold (−15 dB)",
+            vec![0.0, 15.0],
+            vec![Some(-15.0), Some(-15.0)],
+            Some("#888888"),
+            "dash",
+        ));
         figures.push(figure_section(
-            format!("{label}: {title} — early-reflection candidates (not a continuous ETC)"),
+            format!("{label}: {title} — early-reflection candidates over the 1–8 kHz envelope"),
             axis(
                 "Time after direct peak (ms)",
                 "linear",
@@ -315,23 +334,7 @@ fn reflection_figures(
                 Some(-40.0),
                 Some(3.0),
             ),
-            vec![
-                series(title, xs, ys, Some(color), "solid"),
-                series(
-                    "Direct reference",
-                    vec![0.0, 0.0],
-                    vec![Some(-40.0), Some(0.0)],
-                    Some("#555555"),
-                    "solid",
-                ),
-                series(
-                    "Detection threshold (−15 dB)",
-                    vec![0.0, 15.0],
-                    vec![Some(-15.0), Some(-15.0)],
-                    Some("#888888"),
-                    "dash",
-                ),
-            ],
+            figure_series,
             annotations,
             tab,
         ));
@@ -412,6 +415,118 @@ fn figure_section(
 
 fn axis(label: &str, scale: &str, min: Option<f64>, max: Option<f64>) -> Value {
     json!({"label": label, "scale": scale, "min": min, "max": max})
+}
+
+/// Build the 1–8 kHz energy-time envelope of a saved IR waveform.
+///
+/// Display context for the candidate stems: FFT bandpass (half-octave
+/// raised-cosine edges), Hilbert envelope, 1 ms smoothing, level relative
+/// to the bandpassed direct peak. Returns `None` when the waveform is
+/// missing, irregular, too short, or sampled too slowly for the band.
+fn etc_series(channel: &Value, waveform_key: &str) -> Option<Value> {
+    use rustfft::{FftPlanner, num_complex::Complex};
+    let waveform = channel.get(waveform_key)?.as_object()?;
+    let time_ms = finite_values(waveform.get("time_ms"))?;
+    let amplitude = finite_values(waveform.get("amplitude"))?;
+    let count = time_ms.len();
+    if count < 256 || amplitude.len() != count {
+        return None;
+    }
+    let step_ms = (time_ms[count - 1] - time_ms[0]) / (count - 1) as f64;
+    if !step_ms.is_finite() || step_ms <= 0.0 {
+        return None;
+    }
+    let sample_rate = 1000.0 / step_ms;
+    if sample_rate <= 16_000.0 {
+        return None;
+    }
+    let gain = |frequency: f64| -> f64 {
+        let smoothstep = |edge0: f64, edge1: f64, x: f64| {
+            let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+            t * t * (3.0 - 2.0 * t)
+        };
+        smoothstep(700.0, 1000.0, frequency) * (1.0 - smoothstep(8000.0, 11000.0, frequency))
+    };
+    let mut planner = FftPlanner::<f64>::new();
+    let forward = planner.plan_fft_forward(count);
+    let inverse = planner.plan_fft_inverse(count);
+    let mut spectrum: Vec<Complex<f64>> = amplitude
+        .iter()
+        .map(|&sample| Complex::new(sample, 0.0))
+        .collect();
+    forward.process(&mut spectrum);
+    let mut bandpassed = spectrum.clone();
+    for (index, value) in bandpassed.iter_mut().enumerate() {
+        let frequency = (index.min(count - index)) as f64 * sample_rate / count as f64;
+        *value *= gain(frequency);
+    }
+    let mut time_domain = bandpassed.clone();
+    inverse.process(&mut time_domain);
+    let scale = 1.0 / count as f64;
+    let bandpassed: Vec<f64> = time_domain
+        .iter()
+        .map(|value| value.re * scale)
+        .collect();
+    // Analytic signal: keep DC/Nyquist, double positive frequencies.
+    for (index, value) in spectrum.iter_mut().enumerate() {
+        let frequency_index = index.min(count - index);
+        let factor = if index == 0 || (count % 2 == 0 && index == count / 2) {
+            1.0
+        } else if index == frequency_index {
+            2.0
+        } else {
+            0.0
+        };
+        *value *= gain((frequency_index as f64 * sample_rate) / count as f64) * factor;
+    }
+    inverse.process(&mut spectrum);
+    let envelope: Vec<f64> = spectrum
+        .iter()
+        .map(|value| (value.re * scale).hypot(value.im * scale))
+        .collect();
+    let direct = envelope
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))
+        .map(|(index, _)| index)?;
+    let direct_window = ((sample_rate / 1000.0).round() as usize).max(1);
+    let direct_peak = bandpassed[direct.saturating_sub(direct_window)
+        ..=(direct + direct_window).min(count - 1)]
+        .iter()
+        .map(|sample| sample.abs())
+        .fold(0.0_f64, f64::max);
+    if direct_peak <= 0.0 {
+        return None;
+    }
+    // 1 ms boxcar smoothing of the envelope, via prefix sums.
+    let half = direct_window / 2;
+    let mut prefix = vec![0.0; count + 1];
+    for (index, &value) in envelope.iter().enumerate() {
+        prefix[index + 1] = prefix[index] + value;
+    }
+    let t_direct = time_ms[direct];
+    let mut xs = Vec::new();
+    let mut ys = Vec::new();
+    for (offset, &time) in time_ms[direct..].iter().enumerate() {
+        let index = direct + offset;
+        let x = time - t_direct;
+        if x > 15.0 {
+            break;
+        }
+        let a = index.saturating_sub(half);
+        let b = (index + half + 1).min(count);
+        let smoothed = (prefix[b] - prefix[a]) / (b - a) as f64;
+        xs.push(x);
+        ys.push(Some((20.0 * (smoothed / direct_peak).log10()).clamp(-40.0, 3.0)));
+    }
+    if xs.len() < 16 || *xs.last()? < 5.0 {
+        return None;
+    }
+    // Bound the display payload; the shape is smooth by construction.
+    let stride = (xs.len() / 600).max(1);
+    let xs: Vec<f64> = xs.iter().step_by(stride).copied().collect();
+    let ys: Vec<Option<f64>> = ys.iter().step_by(stride).copied().collect();
+    Some(series("1–8 kHz envelope", xs, ys, Some("#a0a7ad"), "solid"))
 }
 
 fn series(name: &str, x: Vec<f64>, y: Vec<Option<f64>>, color: Option<&str>, dash: &str) -> Value {
@@ -519,6 +634,52 @@ mod tests {
         assert!(output["early_reflection_level_db"].is_null());
         assert!(output["figures"].as_array().unwrap().is_empty());
         assert!(output["html"].as_str().unwrap().contains("pending"));
+    }
+
+    #[test]
+    fn candidate_figure_includes_etc_envelope_when_ir_is_saved() {
+        // Decaying 2 kHz burst IR: direct at ~5 ms, sampled at 48 kHz.
+        let count = 4800;
+        let (time_ms, amplitude): (Vec<f64>, Vec<f64>) = (0..count)
+            .map(|index| {
+                let t = index as f64 / 48000.0;
+                let envelope = if index < 240 {
+                    0.0
+                } else {
+                    (-(t - 0.005) * 300.0).exp()
+                };
+                (
+                    t * 1000.0,
+                    envelope * (2.0 * std::f64::consts::PI * 2000.0 * t).sin(),
+                )
+            })
+            .unzip();
+        let channel = json!({
+            "early_reflections": report(),
+            "pre_ir": {"time_ms": time_ms, "amplitude": amplitude},
+        });
+        let output = reflection_report(&channel, "L", None);
+        let figures = output["figures"].as_array().unwrap();
+        let series = figures[0]["figure"]["series"].as_array().unwrap();
+        assert_eq!(series.len(), 4, "{series:?}");
+        assert_eq!(series[0]["name"], "1–8 kHz envelope");
+        let xs = series[0]["x"].as_array().unwrap();
+        let ys = series[0]["y"].as_array().unwrap();
+        assert!(xs.len() > 16 && xs.len() == ys.len());
+        assert!(
+            xs.iter()
+                .all(|x| (0.0..=15.0).contains(&x.as_f64().unwrap()))
+        );
+        assert!(
+            ys.iter()
+                .all(|y| y.as_f64().is_some_and(|v| (-40.0..=3.0).contains(&v)))
+        );
+        // Without a saved waveform the figure keeps its three series.
+        let bare = reflection_report(&json!({"early_reflections": report()}), "L", None);
+        assert_eq!(
+            bare["figures"][0]["figure"]["series"].as_array().unwrap().len(),
+            3
+        );
     }
 
     #[test]

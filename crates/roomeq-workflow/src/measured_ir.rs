@@ -652,6 +652,15 @@ fn apply_chain_acoustics(
              cell stays pending"
         )),
     }
+    // The predicted after-EQ candidates come from running the same table
+    // on the chain's predicted post-correction IR, when one is saved.
+    if let Some(report) = chain.early_reflections.as_mut()
+        && let Some(post_ir) = chain.post_ir.as_ref()
+        && let Some((post_samples, post_rate_hz)) = waveform_samples(post_ir)
+        && let Some(post_report) = reflection_report(&post_samples, post_rate_hz)
+    {
+        report.post = post_report.pre;
+    }
     match t60_report(samples, sample_rate_hz) {
         Some(report) => chain.t60_octaves = Some(report),
         None => warnings.push(format!(
@@ -676,6 +685,26 @@ fn apply_chain_acoustics(
              cell stays pending"
         )),
     }
+}
+
+/// Extract native-rate samples from a saved IR waveform, when regular.
+fn waveform_samples(waveform: &IrWaveform) -> Option<(Vec<f32>, f64)> {
+    if waveform.time_ms.len() != waveform.amplitude.len() || waveform.time_ms.len() < MIN_SAMPLES {
+        return None;
+    }
+    let step_ms = waveform.time_ms[1] - waveform.time_ms[0];
+    if !step_ms.is_finite() || step_ms <= 0.0 {
+        return None;
+    }
+    let samples: Vec<f32> = waveform
+        .amplitude
+        .iter()
+        .map(|&amplitude| amplitude as f32)
+        .collect();
+    if samples.iter().any(|sample| !sample.is_finite()) {
+        return None;
+    }
+    Some((samples, 1000.0 / step_ms))
 }
 
 /// Maximum capture-derived IR length fed to the acoustic analyses.
@@ -1487,12 +1516,22 @@ mod tests {
         let declared = BTreeMap::from([("L".to_string(), source_for(path))]);
         let mut output = DspGraph::new("1");
         output.add_channel("L", Vec::new());
+        // A saved predicted post-correction IR yields after-EQ candidates.
+        let post_time_ms: Vec<f64> = (0..4800).map(|index| index as f64 / 48.0).collect();
+        let mut post_amplitude = vec![0.0_f64; 4800];
+        post_amplitude[240] = 1.0;
+        post_amplitude[480] = 0.5;
+        output.channels.get_mut("L").unwrap().post_ir = Some(IrWaveform {
+            time_ms: post_time_ms,
+            amplitude: post_amplitude,
+        });
         let warnings =
             attach_measured_acoustics(&mut output, &declared, dir.path()).expect("attach");
         assert!(warnings.is_empty(), "unexpected warnings: {warnings:?}");
         let chain = &output.channels["L"];
         assert!(chain.early_late_curves.is_some());
-        assert!(chain.early_reflections.is_some());
+        let reflections = chain.early_reflections.as_ref().expect("reflections");
+        assert!(!reflections.post.is_empty(), "post-EQ candidates attached");
         assert!(chain.t60_octaves.is_some());
         assert!(chain.waterfall.is_some());
         assert!(chain.resonance_decays.is_some());

@@ -335,6 +335,12 @@
   wrapper now caps dense ringing at the loudest 64 candidates and drops
   individual out-of-window events instead of declining a channel.
 
+- Measured arrival evidence is derived from the same capture takes:
+  energy-based arrival candidates are listed per speaker from the
+  four-microphone line, and plane-wave directions are only reported
+  when the microphone spread geometry supports them; otherwise the
+  report states that limitation instead of inventing directions.
+
 - Publish one shared target for all main channels in topology (stereo /
   home-cinema) results, mirroring the generic assembly: after final level
   alignment every final shares one level basis, so serialized per-channel
@@ -348,9 +354,22 @@
   derive predicted-after-EQ candidate figures from the saved predicted
   post-EQ IR when one exists.
 
+- Runs that generate a CTC artifact no longer forfeit RoomEQ delivery:
+  finalization used to force `ctc_final_seat_evidence_insufficient` (and
+  seat replay refused) whenever CTC metadata existed, even when the same
+  run captured room seats. Seat replay now certifies the per-channel
+  RoomEQ correction at the seat microphones (the global CTC stage
+  targets ears and keeps its own report/electrical bound), the CTC
+  shortcut only remains for runs with no seat captures at all, and the
+  configured-reference comparison no longer voids its frozen-grid
+  evidence for CTC runs. All four 5.0.4 Genelec modes now deliver a DSP
+  chain (`safe_fallback`: no candidate passed the electrical/acoustic
+  seat gates, so the structural baseline is delivered) instead of a
+  diagnostic-only error; their measured-suite expectations are updated
+  accordingly.
+
 # 0.5.76
 
-<<<<<<< HEAD
 - Fix report graph decimation on log-frequency axes: the WASM renderer
   bucketed traces on linear Hz, starving low frequencies of vertices
   (faceted Before-EQ mains next to full-resolution subs). Buckets now

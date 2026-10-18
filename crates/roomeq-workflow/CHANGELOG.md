@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- CTC runs with room-seat captures now go through ordinary final
+  selection: finalization, seat replay, and the configured-reference
+  comparison no longer refuse or void their evidence solely because a
+  CTC artifact exists (the global CTC stage keeps its own report and
+  electrical bound). The 5.0.4 Genelec modes deliver `safe_fallback`
+  DSP chains instead of diagnostic-only errors.
 - Carry each branch's deployed FIR latency prior into acceptance-replay
   scorecards so induced group delay unwraps against the real bulk delay
   instead of a zero prior on sparse grids.

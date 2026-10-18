@@ -1074,7 +1074,11 @@ fn select_inner(
     // proves a RoomEQ correction survived the final graph.  Keep generating
     // the CTC artifact, but do not turn the missing room-seat evidence into an
     // accepted acoustic claim (or fail the entire CTC artifact-producing run).
-    if result.metadata.ctc.is_some() {
+    // When the same run also captured room seats, that evidence is replayable:
+    // fall through to the ordinary selection so the delivered RoomEQ graph is
+    // validated (and electrically attenuated) like any other, with the CTC
+    // artifact retained alongside it.
+    if result.metadata.ctc.is_some() && captures.is_empty() && held_out.is_empty() {
         finish_ctc_without_room_seat_evidence(
             result,
             initial_safety_budget_checks,
@@ -4916,6 +4920,72 @@ mod tests {
         assert_eq!(
             report.metrics.improvement_db,
             scorecard.training.improvement_median_db
+        );
+    }
+
+    #[test]
+    fn ctc_with_room_seat_captures_goes_through_final_seat_selection() {
+        // A run that generated a CTC artifact and also captured room seats
+        // has replayable seat evidence: selection must validate the delivered
+        // RoomEQ graph instead of forcing insufficient evidence.
+        let (mut result, config) = fixture();
+        result.metadata.ctc = Some(roomeq_model::CtcReport {
+            enabled: true,
+            source: "synthetic-test".into(),
+            artifact: "ctc-test.json".into(),
+            speakers: vec!["L".into()],
+            ears: vec!["left".into(), "right".into()],
+            head_positions: 1,
+            fir_taps: 64,
+            latency_samples: 32,
+            latency_ms: 32.0 / 48.0,
+            max_filter_gain_db: 0.0,
+            max_condition_number: 1.0,
+            mean_reconstruction_error: 0.0,
+            worst_position_error: 0.0,
+            mean_crosstalk_residual_db: 0.0,
+            max_electrical_sum_gain_db: 0.0,
+            driver_headroom_limited: false,
+            room_eq_correction_applied: true,
+            room_eq_correction_channels: vec!["L".into()],
+            delivered_response: None,
+            binaural_diagnostics: None,
+        });
+        let captures = seat_replay::capture_training(&config).unwrap();
+        assert!(!captures.is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+
+        select(
+            &mut result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48_000.0,
+            dir.path(),
+            &store,
+        )
+        .expect("CTC with seat captures should complete final seat selection");
+
+        let report = result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .expect("selection should retain correction acceptance");
+        assert!(
+            !report
+                .violations
+                .iter()
+                .any(|violation| violation == "ctc_final_seat_evidence_insufficient"),
+            "seat captures must not be discarded as CTC-only evidence: {:?}",
+            report.violations
+        );
+        assert!(
+            report
+                .acoustic_quality
+                .as_ref()
+                .is_some_and(|scorecard| !scorecard.final_seats.is_empty()),
+            "final seat replay evidence must be retained"
         );
     }
 

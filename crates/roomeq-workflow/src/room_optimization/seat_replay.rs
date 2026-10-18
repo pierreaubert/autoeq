@@ -719,11 +719,10 @@ pub fn replay_final_physical_seat(
     partition: &str,
 ) -> Result<FinalPhysicalSeatPlayback> {
     crate::export::validate_final_routed_stage_ownership(result)?;
-    if result.metadata.ctc.is_some() {
-        return Err(invalid(
-            "final-seat replay requires ear-identified CTC transfer measurements",
-        ));
-    }
+    // Seat replay evaluates the per-channel RoomEQ chains at seat
+    // microphones. A global CTC stage targets ears, is not part of that
+    // path, and carries its own report and electrical bound; its presence
+    // must not block validating the RoomEQ correction delivered with it.
     if !matches!(partition, "training" | "held_out") {
         return Err(invalid("unknown physical capture partition"));
     }
@@ -2004,11 +2003,6 @@ fn validate_final_seats_body(
     }) {
         return Err(invalid(
             "final-seat replay of legacy driver groups requires explicit topology IDs",
-        ));
-    }
-    if result.metadata.ctc.is_some() {
-        return Err(invalid(
-            "final-seat replay requires ear-identified CTC transfer measurements",
         ));
     }
     let training = physical_captures(captures, result)?;

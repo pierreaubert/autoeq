@@ -680,9 +680,14 @@ reported band; the aggregate reports the union and common overlap separately.
 The runtime worst-position budget is enforced after post-processing;
 a regression or missing required replay evidence fails the run, rather than
 certifying only an averaged channel. The comparison removes EQ/convolution correction
-while retaining the final structural routing for its baseline. Ear-identified CTC
-replay and ambiguous multi-seat legacy driver groups are not certified; use explicit
+while retaining the final structural routing for its baseline. Ambiguous
+multi-seat legacy driver groups are not certified; use explicit
 driver topology IDs for the latter. Missing phase cannot establish a coherent sum.
+When a run also generates a CTC (crosstalk-cancellation) artifact, final-seat
+replay still certifies the per-channel RoomEQ correction at the seat
+microphones; the global CTC stage targets ears, is not part of that replay,
+and carries its own report and electrical bound. Only a CTC run with no
+room-seat captures at all reports insufficient seat evidence instead.
 Supporting-source outputs use their separate reference-seat acoustic contract;
 they are not certified by the ordinary multi-position correction scorecard.
 

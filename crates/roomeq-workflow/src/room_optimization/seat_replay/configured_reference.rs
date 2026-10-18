@@ -8,17 +8,17 @@ fn reference_graph(
     result: &RoomOptimizationResult,
     config: &RoomConfig,
 ) -> Result<RoomOptimizationResult> {
-    if result.metadata.ctc.is_some()
-        || config.speakers.values().any(|speaker| {
-            !matches!(
-                speaker,
-                SpeakerConfig::Single(_)
-                    | SpeakerConfig::Group(_)
-                    | SpeakerConfig::MultiSub(_)
-                    | SpeakerConfig::Topology(_)
-            )
-        })
-    {
+    // The configured reference replays per-channel chains only; a global
+    // CTC stage is not part of that comparison and must not void it.
+    if config.speakers.values().any(|speaker| {
+        !matches!(
+            speaker,
+            SpeakerConfig::Single(_)
+                | SpeakerConfig::Group(_)
+                | SpeakerConfig::MultiSub(_)
+                | SpeakerConfig::Topology(_)
+        )
+    }) {
         return Err(invalid(
             "configured comparison requires explicit Single/Group/MultiSub/Topology physical topology",
         ));

@@ -532,7 +532,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "sotf-gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-gpui-toolkit-gpui",
  "sotf-gpui-toolkit-gpui-web",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -1699,9 +1699,9 @@ dependencies = [
 
 [[package]]
 name = "fontdue"
-version = "0.9.4"
+version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7894823fa221401399e2598f8b63f81ac77ff5c63248b7656779bff1632d7d3d"
+checksum = "e796cb6894e6418daacea84b28dd4f98d3b32c74d5bb452ba1ecfbf5ad8e84ca"
 dependencies = [
  "hashbrown 0.15.5",
  "ttf-parser",
@@ -2025,7 +2025,7 @@ dependencies = [
 [[package]]
 name = "gpui-d3rs"
 version = "0.10.44"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#dfe8bbc5ebb6945338f29c156c9b685a248ee89b"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#f556d489c6b78ff3c41d1b858ad44f76b59d2916"
 dependencies = [
  "delaunator",
  "fontdue",
@@ -2038,7 +2038,7 @@ dependencies = [
  "serde_json",
  "smallvec",
  "smol",
- "sotf-gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
+ "sotf-gpui-toolkit-gpui",
  "thiserror",
  "wasm-bindgen-futures",
  "web-time",
@@ -2047,16 +2047,16 @@ dependencies = [
 [[package]]
 name = "gpui-design"
 version = "0.10.44"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#dfe8bbc5ebb6945338f29c156c9b685a248ee89b"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#f556d489c6b78ff3c41d1b858ad44f76b59d2916"
 dependencies = [
  "serde",
- "sotf-gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
+ "sotf-gpui-toolkit-gpui",
 ]
 
 [[package]]
 name = "gpui-profiler"
 version = "0.10.44"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#dfe8bbc5ebb6945338f29c156c9b685a248ee89b"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#f556d489c6b78ff3c41d1b858ad44f76b59d2916"
 
 [[package]]
 name = "h2"
@@ -2907,7 +2907,7 @@ dependencies = [
 
 [[package]]
 name = "math-dsp"
-version = "0.5.34"
+version = "0.5.35"
 dependencies = [
  "clap",
  "hound",
@@ -2928,7 +2928,7 @@ dependencies = [
 
 [[package]]
 name = "math-iir-fir"
-version = "0.5.26"
+version = "0.5.27"
 dependencies = [
  "base64",
  "byteorder",
@@ -2962,7 +2962,7 @@ dependencies = [
 
 [[package]]
 name = "math-rir"
-version = "0.5.12"
+version = "0.5.13"
 dependencies = [
  "math-iir-fir",
  "rayon",
@@ -4908,21 +4908,11 @@ dependencies = [
 [[package]]
 name = "sotf-collections"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "indexmap",
- "rustc-hash 2.1.3",
- "sotf-gpui_util 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
-]
-
-[[package]]
-name = "sotf-collections"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
  "indexmap",
  "rustc-hash 2.1.3",
- "sotf-gpui_util 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-gpui_util",
 ]
 
 [[package]]
@@ -4951,30 +4941,9 @@ dependencies = [
 [[package]]
 name = "sotf-derive_more"
 version = "2.1.2"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "sotf-derive_more-impl 2.1.2 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
-]
-
-[[package]]
-name = "sotf-derive_more"
-version = "2.1.2"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
- "sotf-derive_more-impl 2.1.2 (git+https://github.com/pierreaubert/sotf-3rdparties)",
-]
-
-[[package]]
-name = "sotf-derive_more-impl"
-version = "2.1.2"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "convert_case",
- "proc-macro2",
- "quote",
- "rustc_version",
- "syn 2.0.119",
- "unicode-xid",
+ "sotf-derive_more-impl",
 ]
 
 [[package]]
@@ -4993,96 +4962,11 @@ dependencies = [
 [[package]]
 name = "sotf-derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "sotf-derive_refineable"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-gpui"
-version = "0.2.3"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "accesskit",
- "anyhow",
- "async-channel",
- "async-task",
- "block",
- "cbindgen",
- "chrono",
- "cocoa",
- "cocoa-foundation",
- "core-foundation 0.10.1",
- "core-foundation-sys",
- "core-graphics",
- "core-text",
- "core-video",
- "ctor",
- "etagere",
- "foreign-types",
- "futures",
- "futures-concurrency",
- "getrandom 0.3.4",
- "heapless",
- "image",
- "inventory",
- "itertools 0.15.0",
- "log",
- "lyon",
- "mach2",
- "metal",
- "num_cpus",
- "objc",
- "parking",
- "parking_lot",
- "pathfinder_geometry",
- "pin-project",
- "pollster",
- "profiling",
- "rand 0.9.5",
- "raw-window-handle",
- "regex",
- "resvg",
- "schemars",
- "seahash",
- "serde",
- "serde_json",
- "slotmap",
- "smallvec",
- "sotf-collections 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-derive_more 2.1.2 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui-toolkit-gpui-macros 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui-toolkit-http-client 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui-toolkit-scheduler 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui-toolkit-sum-tree 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui-toolkit-util-macros 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui_shared_string 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-gpui_util 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-media 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "sotf-refineable 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "stacksafe",
- "strum",
- "taffy",
- "thiserror",
- "ttf-parser",
- "url",
- "usvg",
- "uuid",
- "waker-fn",
- "web-time",
- "windows",
 ]
 
 [[package]]
@@ -5136,17 +5020,17 @@ dependencies = [
  "serde_json",
  "slotmap",
  "smallvec",
- "sotf-collections 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-derive_more 2.1.2 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui-toolkit-gpui-macros 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui-toolkit-http-client 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui-toolkit-scheduler 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui-toolkit-sum-tree 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui-toolkit-util-macros 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui_shared_string 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui_util 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-media 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-refineable 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-collections",
+ "sotf-derive_more",
+ "sotf-gpui-toolkit-gpui-macros",
+ "sotf-gpui-toolkit-http-client",
+ "sotf-gpui-toolkit-scheduler",
+ "sotf-gpui-toolkit-sum-tree",
+ "sotf-gpui-toolkit-util-macros",
+ "sotf-gpui_shared_string",
+ "sotf-gpui_util",
+ "sotf-media",
+ "sotf-refineable",
  "stacksafe",
  "strum",
  "taffy",
@@ -5158,17 +5042,6 @@ dependencies = [
  "waker-fn",
  "web-time",
  "windows",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-gpui-macros"
-version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 3.0.9",
 ]
 
 [[package]]
@@ -5195,9 +5068,9 @@ dependencies = [
  "parking_lot",
  "raw-window-handle",
  "smallvec",
- "sotf-gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-gpui-toolkit-gpui",
  "sotf-gpui-toolkit-gpui-wgpu",
- "sotf-gpui-toolkit-http-client 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-gpui-toolkit-http-client",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5222,10 +5095,10 @@ dependencies = [
  "profiling",
  "raw-window-handle",
  "smallvec",
- "sotf-collections 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-collections",
  "sotf-cosmic-text",
- "sotf-gpui-toolkit-gpui 0.2.3 (git+https://github.com/pierreaubert/sotf-3rdparties)",
- "sotf-gpui_util 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-gpui-toolkit-gpui",
+ "sotf-gpui_util",
  "sotf-wgpu",
  "swash",
  "wasm-bindgen",
@@ -5236,26 +5109,6 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-http-client"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "anyhow",
- "async-compression",
- "bytes",
- "futures",
- "http",
- "http-body",
- "log",
- "parking_lot",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "sotf-derive_more 2.1.2 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "url",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-http-client"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
  "anyhow",
@@ -5269,18 +5122,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_urlencoded",
- "sotf-derive_more 2.1.2 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-derive_more",
  "url",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-perf"
-version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "serde",
- "serde_json",
- "sotf-collections 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
 ]
 
 [[package]]
@@ -5290,21 +5133,7 @@ source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4
 dependencies = [
  "serde",
  "serde_json",
- "sotf-collections 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-scheduler"
-version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "async-task",
- "backtrace",
- "chrono",
- "futures",
- "parking_lot",
- "rand 0.9.5",
- "web-time",
+ "sotf-collections",
 ]
 
 [[package]]
@@ -5324,17 +5153,6 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-sum-tree"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "heapless",
- "log",
- "rayon",
- "tracing",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-sum-tree"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
  "heapless",
@@ -5346,31 +5164,11 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-util-macros"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "quote",
- "sotf-gpui-toolkit-perf 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
- "syn 3.0.9",
-]
-
-[[package]]
-name = "sotf-gpui-toolkit-util-macros"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
  "quote",
- "sotf-gpui-toolkit-perf 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-gpui-toolkit-perf",
  "syn 3.0.9",
-]
-
-[[package]]
-name = "sotf-gpui_shared_string"
-version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "schemars",
- "serde",
- "smol_str",
 ]
 
 [[package]]
@@ -5386,36 +5184,11 @@ dependencies = [
 [[package]]
 name = "sotf-gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "anyhow",
- "log",
- "which",
-]
-
-[[package]]
-name = "sotf-gpui_util"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
  "anyhow",
  "log",
  "which",
-]
-
-[[package]]
-name = "sotf-media"
-version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "anyhow",
- "bindgen",
- "core-foundation 0.10.1",
- "core-video",
- "ctor",
- "foreign-types",
- "metal",
- "objc",
 ]
 
 [[package]]
@@ -5489,17 +5262,9 @@ dependencies = [
 [[package]]
 name = "sotf-refineable"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux#5d2df203404e0db80ec25548b9296fc4a071fbca"
-dependencies = [
- "sotf-derive_refineable 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties?branch=foreign-parent-win-linux)",
-]
-
-[[package]]
-name = "sotf-refineable"
-version = "0.1.0"
 source = "git+https://github.com/pierreaubert/sotf-3rdparties#d476ae9bc3165145d4a8e43b6bafbef11b196a04"
 dependencies = [
- "sotf-derive_refineable 0.1.0 (git+https://github.com/pierreaubert/sotf-3rdparties)",
+ "sotf-derive_refineable",
 ]
 
 [[package]]

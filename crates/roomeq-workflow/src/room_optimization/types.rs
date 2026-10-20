@@ -268,16 +268,9 @@ pub(super) fn collect_generic_channel_results(
 
         if let Some(generated) = post_generated_fir {
             if let Some(chain) = channel_chains.get_mut(&channel_name) {
-                chain.plugins.push(
-                    if let Some(report) = generated.mixed_phase_report.as_ref() {
-                        roomeq_engine::output::create_mixed_phase_convolution_plugin(
-                            &generated.filename,
-                            report,
-                        )
-                    } else {
-                        roomeq_engine::output::create_convolution_plugin(&generated.filename)
-                    },
-                );
+                chain
+                    .plugins
+                    .push(generated.convolution_plugin(&config.optimizer, sample_rate));
             }
             sync_reported_fir_adjustment(
                 &channel_name,

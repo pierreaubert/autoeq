@@ -54,6 +54,29 @@ fn benchmark_verified_home_cinema(criterion: &mut Criterion) {
     group.sample_size(10);
     group.warm_up_time(Duration::from_secs(1));
     group.measurement_time(Duration::from_secs(3));
+    let correctable = fixtures::correctable_home_cinema(48_000.0);
+    group.bench_function("accepted_2subs_2seats_48000hz", |bencher| {
+        bencher.iter(|| {
+            let result =
+                roomeq_workflow::optimize_room(black_box(&correctable), 48_000.0, None, None)
+                    .unwrap();
+            let acceptance = result.metadata.correction_acceptance.as_ref().unwrap();
+            assert!(acceptance.accepted);
+            assert_eq!(
+                acceptance.decision,
+                roomeq_model::CorrectionDecision::Accepted
+            );
+            let seats = &acceptance.acoustic_quality.as_ref().unwrap().final_seats;
+            assert!(!seats.is_empty());
+            assert!(
+                seats
+                    .iter()
+                    .filter(|seat| seat.partition == "training")
+                    .all(|seat| seat.improvement_lower_bound_db > 0.0)
+            );
+            black_box(result)
+        });
+    });
     for (subs, seats, fs) in [(2, 2, 44_100.0), (4, 3, 48_000.0), (8, 4, 96_000.0)] {
         let config = fixtures::home_cinema_joint(subs, seats);
         group.bench_function(

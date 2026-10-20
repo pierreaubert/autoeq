@@ -29,7 +29,7 @@ use std::collections::{BTreeMap, HashMap};
 const ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB: f64 = 1.0;
 // Cover validated LFE low-passes through 250 Hz with the same margin as final
 // correlated replay. Only bins inside common measured support are scored.
-const CORRELATED_BASS_MAX_HZ: f64 = 300.0;
+pub(super) const CORRELATED_BASS_MAX_HZ: f64 = 300.0;
 
 fn cancellation_penalty_excess(evidence: &roomeq_model::CrossoverCancellationEvidence) -> f64 {
     if !evidence.final_db.is_finite() || !evidence.limit_db.is_finite() {
@@ -2011,6 +2011,7 @@ fn optimize_bass_management_joint_solution_impl(
         .fold(f64::NEG_INFINITY, f64::max);
     let max_route_trim = headroom_budget.max_route_trim_up_db;
     let mut optimized_sources = Vec::new();
+    let mut correlated_alternatives = Vec::new();
     let mut overall_advisories = Vec::new();
     overall_advisories.extend(apply_per_sub_splice_selection(
         config,
@@ -2401,6 +2402,7 @@ fn optimize_bass_management_joint_solution_impl(
         // cannot perturb L's route delay, polarity, or trim.
         let source_max_iter =
             per_group_max_iter.saturating_sub(shared_max_iter) / sources.len().max(1);
+        let mut source_families = Vec::with_capacity(sources.len());
         for (source_index, (source_channel, source_curve)) in sources.iter().enumerate() {
             let base = 2 + source_index * 4;
             let mut route_initial = initial[base..base + 4].to_vec();
@@ -2452,9 +2454,12 @@ fn optimize_bass_management_joint_solution_impl(
                     true,
                 )
             };
+            // Retain only two already-scored alternatives, without expanding
+            // the search quota or rendering unrelated sources inside the loop.
+            let families = std::cell::RefCell::new([None::<(f64, [f64; 4])>; 2]);
             let route_score = |route: &[f64]| {
                 evaluate_source(source_index, &main_base, &bass_base, frequency, route)
-                    .map(|(loss, underfill, _, _, _, _)| {
+                    .map(|(loss, underfill, _, evidence, _, _)| {
                         let excess = (correctable_dip_depth_db(underfill)
                             - ROUTE_OPTIMIZER_UNDERFILL_LIMIT_DB
                                 .min(config.optimizer.max_crossover_cancellation_db))
@@ -2472,7 +2477,17 @@ fn optimize_bass_management_joint_solution_impl(
                             frequency,
                             headroom_budget.joint_route_trim_up_db(applied_mso_boost_db),
                         );
-                        loss + 1_000.0 * excess * excess + penalty
+                        let score = loss + 1_000.0 * excess * excess + penalty;
+                        let polarity = usize::from(route[2].round().clamp(0.0, 1.0) >= 0.5);
+                        let mut families = families.borrow_mut();
+                        if evidence.accepted
+                            && score.is_finite()
+                            && families[polarity].is_none_or(|(previous, _)| score < previous)
+                        {
+                            families[polarity] =
+                                Some((score, [route[0], route[1], route[2], route[3]]));
+                        }
+                        score
                     })
                     .unwrap_or(1.0e12)
             };
@@ -2498,6 +2513,7 @@ fn optimize_bass_management_joint_solution_impl(
             if best_route_score < initial_score {
                 refined[base..base + 4].copy_from_slice(&best_route);
             }
+            source_families.push(families.into_inner());
         }
 
         let candidate = validate(&refined);
@@ -2630,8 +2646,9 @@ fn optimize_bass_management_joint_solution_impl(
             && candidate
                 .as_ref()
                 .is_some_and(|(_, _, _, evidence, _)| candidate_restores_hard_safety(evidence));
+        let cached_crossover = [refined[0], refined[1]];
         let chosen = if accepted { refined } else { initial.clone() };
-        let Some((_, chosen_losses, _, _, _)) = validate(&chosen) else {
+        let Some((chosen_score, chosen_losses, _, _, chosen_responses)) = validate(&chosen) else {
             break;
         };
         let chosen_frequency = chosen[0].clamp(minimum_frequency, maximum_frequency);
@@ -2721,10 +2738,137 @@ fn optimize_bass_management_joint_solution_impl(
         } else {
             "per_source_route_optimizer_no_improvement".to_string()
         });
+        // A group can be coherent on its own while cancelling another group.
+        // Validate two combinations of the cached source polarity families on
+        // this same crossover, preserving the existing source acceptance rule.
+        let mut reference_params = chosen.clone();
+        for route in reference_params[2..].as_chunks_mut::<4>().0 {
+            route.fill(0.0);
+        }
+        if let Some((_, _, _, _, reference_fields)) = validate(&reference_params) {
+            let pair_fields = |fields: Vec<Curve>| {
+                sources
+                    .iter()
+                    .map(|(name, _)| name.clone())
+                    .zip(fields)
+                    .collect::<Vec<_>>()
+            };
+            let current = super::correlated_routes::GroupCandidate {
+                group: updated_group.clone(),
+                sources: group_source_reports.clone(),
+                responses: pair_fields(chosen_responses),
+                score: chosen_score,
+            };
+            let mut common_polarity = [None, None];
+            // The cached routes were scored at `refined`'s crossover. Never
+            // transplant them onto a different restored crossover or type.
+            if chosen[..2] == cached_crossover {
+                for (polarity, slot) in common_polarity.iter_mut().enumerate() {
+                    let mut params = chosen.clone();
+                    let mut complete = true;
+                    for (index, families) in source_families.iter().enumerate() {
+                        if let Some((_, route)) = families[polarity] {
+                            params[2 + index * 4..6 + index * 4].copy_from_slice(&route);
+                        } else {
+                            complete = false;
+                            break;
+                        }
+                    }
+                    if !complete {
+                        continue;
+                    }
+                    let Some((score, losses, _, evidence, responses)) = validate(&params) else {
+                        continue;
+                    };
+                    let regressed = losses.iter().zip(&baseline_losses).enumerate().any(
+                        |(index, (after, before))| {
+                            *after > *before + (before.abs() * 0.01).max(1e-9)
+                                && !candidate_restores_hard_safety(std::slice::from_ref(
+                                    &evidence[index],
+                                ))
+                        },
+                    );
+                    if regressed {
+                        continue;
+                    }
+                    if !should_accept_route_candidate(score, baseline_score, regressed, &evidence) {
+                        continue;
+                    }
+                    if sources.len() >= 2
+                        && roomeq_quality::correlated_bass_efficiency_regression(
+                            &baseline_sources,
+                            &responses,
+                            CORRELATED_BASS_MAX_HZ,
+                        )
+                        .map_or(true, |(loss, _)| {
+                            loss > config
+                                .optimizer
+                                .finalization
+                                .max_correlated_bass_regression_db
+                                + 1e-6
+                        })
+                    {
+                        continue;
+                    }
+                    let mut alternative = current.clone();
+                    alternative.score = score;
+                    alternative.responses = pair_fields(responses);
+                    for (index, source) in alternative.sources.iter_mut().enumerate() {
+                        let base = 2 + index * 4;
+                        (source.main_delay_ms, source.bass_route_delay_ms) =
+                            normalize_crossover_delays(
+                                params[base].clamp(0.0, 20.0),
+                                params[base + 1].clamp(0.0, 20.0),
+                            );
+                        source.polarity_inverted = polarity == 1;
+                        source.trim_db = params[base + 3]
+                            .clamp(headroom_budget.max_route_trim_down_db, max_route_trim);
+                        source.objective_after = Some(losses[index]);
+                        source.accepted = true;
+                        source.safety_restored =
+                            candidate_restores_hard_safety(std::slice::from_ref(&evidence[index]));
+                        source.advisories =
+                            vec!["cached_correlated_route_candidate_verified".into()];
+                    }
+                    if let Some(first) = alternative.sources.first() {
+                        alternative.group.main_delay_ms = first.main_delay_ms;
+                        alternative.group.bass_route_delay_ms = first.bass_route_delay_ms;
+                        alternative.group.polarity_inverted = first.polarity_inverted;
+                        alternative.group.trim_db = first.trim_db;
+                    }
+                    alternative.group.objective_after = Some(score);
+                    alternative
+                        .group
+                        .advisories
+                        .push("cached_correlated_route_candidate_verified".into());
+                    *slot = Some(alternative);
+                }
+            }
+            correlated_alternatives.push(super::correlated_routes::GroupAlternatives {
+                reference: pair_fields(reference_fields),
+                current,
+                common_polarity,
+            });
+        }
         group_results.insert(group_id, updated_group);
         optimized_sources.extend(group_source_reports);
     }
 
+    if let Some(selected) = super::correlated_routes::select(
+        &correlated_alternatives,
+        main_roles,
+        config
+            .optimizer
+            .finalization
+            .max_correlated_bass_regression_db,
+    ) {
+        optimized_sources.clear();
+        for candidate in selected {
+            group_results.insert(candidate.group.group_id.clone(), candidate.group);
+            optimized_sources.extend(candidate.sources);
+        }
+        overall_advisories.push("cross_group_correlated_route_candidates_selected".into());
+    }
     if !optimized_sources.is_empty() {
         for optimized in optimized_sources {
             if let Some(existing) = source_results.iter_mut().find(|source| {

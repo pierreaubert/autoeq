@@ -1,4 +1,4 @@
-use super::dsp_response_cache::apply_room_eq_dsp_to_spectrum;
+use super::dsp_response_cache::{apply_room_eq_dsp_to_spectrum, room_eq_channel};
 use super::load::load_hrtf_spectrum;
 use super::load::load_measured_spectrum;
 use super::load::load_raw_sweep_spectrum;
@@ -111,11 +111,8 @@ pub fn maybe_generate_recommended_xtc(
                 .speakers
                 .iter()
                 .filter_map(|speaker| {
-                    let channel_name = sys.speakers.get(speaker)?;
-                    channels
-                        .get(channel_name)
-                        .is_some_and(|chain| !chain.plugins.is_empty())
-                        .then(|| channel_name.clone())
+                    let (name, chain) = room_eq_channel(speaker, sys, channels)?;
+                    (!chain.plugins.is_empty()).then(|| name.to_owned())
                 })
                 .collect()
         } else {

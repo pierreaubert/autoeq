@@ -8,6 +8,24 @@ use roomeq_model::{ChannelDspChain, SystemConfig};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Resolve physical output roles before measurement source identities.
+pub(super) fn room_eq_channel<'a>(
+    speaker: &str,
+    sys: &SystemConfig,
+    channels: &'a HashMap<String, ChannelDspChain>,
+) -> Option<(&'a str, &'a ChannelDspChain)> {
+    // Full workflows emit role-keyed chains. Standalone CTC callers can
+    // still supply the original measurement-keyed channel dictionary.
+    channels
+        .get_key_value(speaker)
+        .or_else(|| {
+            sys.speakers
+                .get(speaker)
+                .and_then(|name| channels.get_key_value(name))
+        })
+        .map(|(name, chain)| (name.as_str(), chain))
+}
+
 pub(super) fn apply_room_eq_dsp_to_spectrum(
     spectrum: &mut MatrixSpectrum,
     sys: &SystemConfig,
@@ -22,11 +40,7 @@ pub(super) fn apply_room_eq_dsp_to_spectrum(
     let mut responses_by_speaker = Vec::with_capacity(speakers);
 
     for speaker in &spectrum.speakers {
-        let Some(channel_name) = sys.speakers.get(speaker) else {
-            responses_by_speaker.push(vec![Complex64::new(1.0, 0.0); spectrum.bins.len()]);
-            continue;
-        };
-        let Some(chain) = channels.get(channel_name) else {
+        let Some((_, chain)) = room_eq_channel(speaker, sys, channels) else {
             responses_by_speaker.push(vec![Complex64::new(1.0, 0.0); spectrum.bins.len()]);
             continue;
         };

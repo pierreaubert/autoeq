@@ -33,6 +33,14 @@ fn home_cinema_retains_every_dba_driver_in_graph_and_export() {
         let output_ids: Vec<_> = (0..front_count + rear_count)
             .map(|index| format!("Sub{}", index + 1))
             .collect();
+        // Distinct physical transfers expose identity swaps and accidental
+        // reuse of an already-summed front/rear measurement after composition.
+        let physical_source = |index: usize| {
+            let mut curve = sub.clone();
+            curve.spl.fill(80.0 + index as f64);
+            curve.phase.as_mut().unwrap().fill(index as f64 * 10.0);
+            MeasurementSource::InMemory(curve)
+        };
         let config = RoomConfig {
             speakers: [
                 (
@@ -48,8 +56,10 @@ fn home_cinema_retains_every_dba_driver_in_graph_and_export() {
                     SpeakerConfig::Dba(DBAConfig {
                         name: "array".into(),
                         speaker_name: None,
-                        front: vec![MeasurementSource::InMemory(sub.clone()); front_count],
-                        rear: vec![MeasurementSource::InMemory(sub); rear_count],
+                        front: (0..front_count).map(physical_source).collect(),
+                        rear: (front_count..front_count + rear_count)
+                            .map(physical_source)
+                            .collect(),
                     }),
                 ),
             ]
@@ -112,6 +122,13 @@ fn home_cinema_retains_every_dba_driver_in_graph_and_export() {
                 routing
                     .routes
                     .iter()
+                    .any(|route| route.source_channel == "LFE" && route.destination == *id),
+                "missing LFE branch to {id}"
+            );
+            assert!(
+                routing
+                    .routes
+                    .iter()
                     .any(|route| route.source_channel == "L" && route.destination == *id)
             );
             assert!(
@@ -138,6 +155,35 @@ fn home_cinema_retains_every_dba_driver_in_graph_and_export() {
             .collect();
         for id in &output_ids {
             assert_eq!(physical.iter().filter(|name| *name == id).count(), 1);
+        }
+        for (index, id) in output_ids.iter().enumerate() {
+            let driver = roundtrip
+                .channels
+                .values()
+                .flat_map(|chain| chain.drivers.iter().flatten())
+                .find(|driver| driver.name == *id)
+                .unwrap();
+            let measured = driver
+                .initial_curve
+                .as_ref()
+                .expect("physical measurement must survive serialization");
+            assert!(!measured.spl.is_empty());
+            assert!(
+                measured
+                    .spl
+                    .iter()
+                    .all(|level| (level - (80.0 + index as f64)).abs() < 1e-7),
+                "{id} lost its own measured level"
+            );
+            assert!(
+                measured
+                    .phase
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .all(|phase| (phase - index as f64 * 10.0).abs() < 1e-7),
+                "{id} lost its own measured phase"
+            );
         }
         let yaml = roomeq_export::render_dsp_graph(
             &roundtrip,

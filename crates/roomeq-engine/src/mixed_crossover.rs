@@ -169,10 +169,19 @@ pub fn process_mixed_crossover(
         max_freq: fir_max_freq,
         ..request.optimizer.clone()
     };
-    let fir_coefficients = crate::fir::generate_fir_correction_with_resources(
+    // Splitting the realization must not recalibrate the target from only
+    // the FIR band's samples. Freeze its level on the complete channel,
+    // then interpolate that same absolute target onto the design band.
+    let full_target = crate::fir::prepared_fir_target_curve(
+        &optimization_curve,
+        request.optimizer,
+        request.eq_resources,
+    );
+    let fir_target = autoeq_core::interpolate_log_space(&fir_curve.freq, &full_target);
+    let fir_coefficients = crate::fir::generate_fir_correction_prepared(
         fir_curve,
         &fir_config,
-        request.eq_resources,
+        &fir_target,
         request.sample_rate,
     )
     .map_err(|error| AutoeqError::OptimizationFailed {
@@ -214,16 +223,22 @@ pub fn process_mixed_crossover(
             output::create_labeled_eq_plugin(request.excursion_filters, "excursion_protection"),
         );
     }
-    // Kirkeby centers its inverse IFFT at taps/2, regardless of requested
-    // excess phase. Preserve that reference for correction-strength blending.
+    // Preserve the designer's delay for correction-strength blending on the
+    // FIR branch. The opposite band retains its serialized alignment delay.
     if let Some(fir) = fir_config.fir.as_ref()
-        && fir.phase.eq_ignore_ascii_case("kirkeby")
         && fir.pre_ringing.is_none()
     {
-        for plugin in &mut channel.plugins {
-            if plugin.plugin_type == "convolution" {
-                plugin.parameters["correction_design_delay_ms"] =
-                    serde_json::json!((fir.taps / 2) as f64 * 1000.0 / request.sample_rate);
+        let samples = match fir.phase.to_ascii_lowercase().as_str() {
+            "linear" | "kirkeby" => Some(fir.taps / 2),
+            "minimum" => Some(0),
+            _ => None,
+        };
+        if let Some(samples) = samples {
+            for plugin in &mut channel.plugins {
+                if plugin.plugin_type == "convolution" {
+                    plugin.parameters["correction_design_delay_ms"] =
+                        serde_json::json!(samples as f64 * 1000.0 / request.sample_rate);
+                }
             }
         }
     }
@@ -460,6 +475,73 @@ mod tests {
     }
 
     #[test]
+    fn split_fir_preserves_the_full_channel_level_reference() {
+        let freq = Array1::logspace(10.0, 20.0_f64.log10(), 20_000.0_f64.log10(), 128);
+        let measurement = Curve {
+            spl: freq.mapv(|f| if f < 300.0 { 80.0 } else { 90.0 }),
+            phase: Some(Array1::zeros(freq.len())),
+            freq,
+            ..Default::default()
+        };
+        let level = measurement.spl.sum() / measurement.spl.len() as f64;
+        let optimizer = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            num_filters: 0,
+            fir: Some(FirConfig {
+                taps: 8192,
+                phase: "linear".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let target = TargetContext {
+            target_tilt_curve: None,
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            mean_spl: level,
+            pre_score: 1.0,
+            cea2034_active: false,
+        };
+        let mixed = MixedModeConfig {
+            crossover_freq: 300.0,
+            fir_band: "high".into(),
+            ..Default::default()
+        };
+        let result = process_mixed_crossover(MixedCrossoverRequest {
+            channel_name: "L",
+            prepared: None,
+            curve: &measurement,
+            target: &target,
+            preference_filters: &[],
+            excursion_filters: &[],
+            mixed_config: &mixed,
+            optimizer: &optimizer,
+            eq_resources: &EqResources::default(),
+            sample_rate: 48_000.0,
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            mean_spl: level,
+            pre_score: 1.0,
+            arrival_time_ms: None,
+            sidecar_reference: ConvolutionSidecarReference::new("level.wav").unwrap(),
+            callback: None,
+        })
+        .unwrap();
+        let response = response::compute_fir_complex_response(
+            result.fir_coeffs.as_ref().unwrap(),
+            &ndarray::array![2000.0],
+            48_000.0,
+        );
+        let correction_db = 20.0 * response[0].norm().log10();
+        assert!(
+            (correction_db - (level - 90.0)).abs() < 0.05,
+            "full-channel reference requires {:.3} dB, got {correction_db:.3}",
+            level - 90.0
+        );
+    }
+
+    #[test]
     fn mixed_crossover_returns_required_path_free_sidecar() {
         for phase in ["linear", "kirkeby"] {
             // Analytic zero-phase fixture for the requested excess-phase design;
@@ -545,7 +627,7 @@ mod tests {
                 "band_merge"
             );
 
-            if phase == "kirkeby" {
+            if matches!(phase, "linear" | "kirkeby" | "minimum") {
                 let plugin = result
                     .channel
                     .plugins
@@ -554,7 +636,11 @@ mod tests {
                     .unwrap();
                 assert_eq!(
                     plugin.parameters["correction_design_delay_ms"],
-                    serde_json::json!(32.0 * 1000.0 / 48000.0)
+                    serde_json::json!(if phase == "minimum" {
+                        0.0
+                    } else {
+                        32.0 * 1000.0 / 48000.0
+                    })
                 );
             }
         }

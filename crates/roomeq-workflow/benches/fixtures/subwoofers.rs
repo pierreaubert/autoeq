@@ -144,3 +144,102 @@ pub fn home_cinema_joint(subs: usize, seats: usize) -> RoomConfig {
         ..Default::default()
     }
 }
+
+/// A known-solvable resonance fixture that must deliver accepted correction.
+pub fn correctable_home_cinema(sample_rate: f64) -> RoomConfig {
+    // Coherent subs and mains have exactly invertible resonances. Every
+    // training input, including LFE, must demonstrate delivered improvement.
+    let mut value = serde_json::to_value(home_cinema_joint(2, 2)).unwrap();
+    for name in ["left", "right"] {
+        for (seat, measurement) in value["speakers"][name]["measurements"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .enumerate()
+        {
+            let frequencies = ndarray::Array1::from_iter(
+                measurement["frequencies"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|frequency| frequency.as_f64().unwrap()),
+            );
+            let peak = math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Peak,
+                700.0,
+                sample_rate,
+                0.7,
+                12.0,
+            );
+            let response = autoeq_core::response::compute_peq_complex_response(
+                &[peak],
+                &frequencies,
+                sample_rate,
+            );
+            measurement["magnitude_db"] = serde_json::json!(
+                response
+                    .iter()
+                    .map(|value| 80.0
+                        + 20.0 * 2.0_f64.log10()
+                        + seat as f64
+                        + 20.0 * value.norm().log10())
+                    .collect::<Vec<_>>()
+            );
+            measurement["phase_deg"] = serde_json::json!(
+                response
+                    .iter()
+                    .map(|value| seat as f64 * 45.0 + value.arg().to_degrees())
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+    for sub in value["speakers"]["array"]["subwoofers"]
+        .as_array_mut()
+        .unwrap()
+    {
+        for measurement in sub["measurements"].as_array_mut().unwrap() {
+            let frequencies = ndarray::Array1::from_iter(
+                measurement["frequencies"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|frequency| frequency.as_f64().unwrap()),
+            );
+            let peak = math_audio_iir_fir::Biquad::new(
+                math_audio_iir_fir::BiquadFilterType::Peak,
+                55.0,
+                sample_rate,
+                1.0,
+                6.0,
+            );
+            let response = autoeq_core::response::compute_peq_complex_response(
+                &[peak],
+                &frequencies,
+                sample_rate,
+            );
+            for (level, h) in measurement["magnitude_db"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .zip(response.iter())
+            {
+                *level = serde_json::json!(level.as_f64().unwrap() + 20.0 * h.norm().log10());
+            }
+            for (phase, h) in measurement["phase_deg"]
+                .as_array_mut()
+                .unwrap()
+                .iter_mut()
+                .zip(response.iter())
+            {
+                *phase = serde_json::json!(phase.as_f64().unwrap() + h.arg().to_degrees());
+            }
+        }
+    }
+    value["optimizer"]["num_filters"] = serde_json::json!(2);
+    value["optimizer"]["max_iter"] = serde_json::json!(1000);
+    value["optimizer"]["max_freq"] = serde_json::json!(4000.0);
+    value["optimizer"]["population"] = serde_json::json!(20);
+    value["optimizer"]["bass_management_evaluation_limit"] = serde_json::json!(300);
+    value["system"]["bass_management"] = serde_json::json!({"max_sub_boost_db":0.0});
+    serde_json::from_value(value).unwrap()
+}

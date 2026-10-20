@@ -1970,11 +1970,19 @@ fn evaluate_prepared_trial(
         .as_ref()
         .map(|value| value.result.clone())
         .unwrap_or_else(|_| original.clone());
+    let diagnostic_strength = match diagnostic_trial {
+        Some(crate::pipeline::FinalizationDiagnosticTrial::ZeroStrengthOutput) => Some(0.0),
+        Some(crate::pipeline::FinalizationDiagnosticTrial::FullStrengthOutput) => Some(1.0),
+        None => None,
+    };
+    let diagnostic_prefix = if diagnostic_strength == Some(1.0) {
+        "full-strength-output"
+    } else {
+        "zero-strength-output"
+    };
     let capture_target = diagnostics.is_some()
-        && diagnostic_trial
-            == Some(crate::pipeline::FinalizationDiagnosticTrial::ZeroStrengthOutput)
-        && strength == 0.0
-        && sub_strength == 0.0
+        && diagnostic_strength == Some(strength)
+        && diagnostic_strength == Some(sub_strength)
         && attenuation_mode == "output"
         && drive_cut_db == 0.0
         && joint_trial.is_none()
@@ -1982,7 +1990,7 @@ fn evaluate_prepared_trial(
     let trial_descriptor = capture_target.then(|| {
         serde_json::json!({
             "schema_version": 1,
-            "trial": "zero_strength_output",
+            "trial": if diagnostic_strength == Some(1.0) { "full_strength_output" } else { "zero_strength_output" },
             "correction_strength": strength,
             "sub_correction_strength": sub_strength,
             "attenuation_mode": attenuation_mode,
@@ -2000,10 +2008,10 @@ fn evaluate_prepared_trial(
     {
         let graph_hashes = diagnostic_graph_hashes(&prepared.result)?;
         capture.write(
-            "zero-strength-output-prepared",
+            &format!("{diagnostic_prefix}-prepared"),
             serde_json::json!({
                 "schema_version": 1,
-                "event": "zero-strength-output-prepared",
+                "event": &format!("{diagnostic_prefix}-prepared"),
                 "trial_descriptor": trial_descriptor.as_ref(),
                 "serialized_dsp_graph_projection_sha256":
                     graph_hashes.serialized_projection_sha256,
@@ -2059,10 +2067,10 @@ fn evaluate_prepared_trial(
         if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
             let graph_hashes = diagnostic_graph_hashes(&candidate)?;
             capture.write(
-                "zero-strength-output-required-attenuation",
+                &format!("{diagnostic_prefix}-required-attenuation"),
                 serde_json::json!({
                     "schema_version": 1,
-                    "event": "zero-strength-output-required-attenuation",
+                    "event": &format!("{diagnostic_prefix}-required-attenuation"),
                     "trial_descriptor": trial_descriptor.as_ref(),
                     "serialized_dsp_graph_projection_sha256":
                         graph_hashes.serialized_projection_sha256,
@@ -2097,10 +2105,10 @@ fn evaluate_prepared_trial(
         if capture_target && let Some(capture) = diagnostics.as_deref_mut() {
             let graph_hashes = diagnostic_graph_hashes(&candidate)?;
             capture.write(
-                "zero-strength-output-post-safety-pre-alignment",
+                &format!("{diagnostic_prefix}-post-safety-pre-alignment"),
                 serde_json::json!({
                     "schema_version": 1,
-                    "event": "zero-strength-output-post-safety-pre-alignment",
+                    "event": &format!("{diagnostic_prefix}-post-safety-pre-alignment"),
                     "trial_descriptor": trial_descriptor.as_ref(),
                     "serialized_dsp_graph_projection_sha256":
                         graph_hashes.serialized_projection_sha256,
@@ -2216,10 +2224,10 @@ fn evaluate_prepared_trial(
                 })
                 .collect::<std::collections::BTreeMap<_, _>>();
             capture.write(
-                "zero-strength-output-post-alignment",
+                &format!("{diagnostic_prefix}-post-alignment"),
                 serde_json::json!({
                     "schema_version": 1,
-                    "event": "zero-strength-output-post-alignment",
+                    "event": &format!("{diagnostic_prefix}-post-alignment"),
                     "trial_descriptor": trial_descriptor.as_ref(),
                     "serialized_dsp_graph_projection_sha256": post_alignment_hashes
                         .as_ref()
@@ -2259,10 +2267,10 @@ fn evaluate_prepared_trial(
             }
             if let Some(capture) = diagnostics.as_deref_mut() {
                 capture.write(
-                    "zero-strength-output-useful-output-replay",
+                    &format!("{diagnostic_prefix}-useful-output-replay"),
                     serde_json::json!({
                         "schema_version": 1,
-                        "event": "zero-strength-output-useful-output-replay",
+                        "event": &format!("{diagnostic_prefix}-useful-output-replay"),
                         "trial_descriptor": trial_descriptor.as_ref(),
                         "replayed_serialized_dsp_graph_projection_sha256": post_alignment_hashes
                             .as_ref()
@@ -2950,6 +2958,19 @@ pub(super) fn publish_baseline(
                 .find(|stage| stage.stage == "configured_fallback_crossover_validation")).map(|stage| &stage.checks),
         }).to_string()),
     };
+    let source_refusals: Vec<_> = if choose_configured {
+        structural
+            .metadata
+            .stage_outcomes
+            .iter()
+            .filter(|stage| stage.stage == "final_correction_selection")
+            .flat_map(|stage| &stage.advisories)
+            .filter(|reason| reason.starts_with("baseline_quality_limit"))
+            .map(|reason| format!("source_candidate=optimized_structural_controls; {reason}"))
+            .collect()
+    } else {
+        Vec::new()
+    };
     if choose_configured {
         *result = configured?;
     } else {
@@ -2963,6 +2984,13 @@ pub(super) fn publish_baseline(
         .rev()
         .find(|stage| stage.stage == "final_correction_selection")
     {
+        // The selected configured fallback must not erase the native refusal
+        // of the structural candidate. Keep its explicit scope and budget.
+        for refusal in source_refusals {
+            if !stage.advisories.contains(&refusal) {
+                stage.advisories.push(refusal);
+            }
+        }
         stage.checks.push(check);
         stage.advisories.push(format!(
             "fallback_controls={}",
@@ -3826,10 +3854,29 @@ pub(super) fn refresh_configured_native_acceptance(
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
     );
-    if configured_acceptance_graph(&replay) != before {
-        return Err(failed(
-            "fresh configured acceptance would change the candidate graph",
-        ));
+    let after = configured_acceptance_graph(&replay);
+    if after != before {
+        let changed_channels: Vec<_> = before[0]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, chain)| {
+                let fields: Vec<_> = chain
+                    .as_object()
+                    .into_iter()
+                    .flatten()
+                    .filter(|(field, value)| after[0][name][field] != **value)
+                    .map(|(field, _)| field.as_str())
+                    .collect();
+                (!fields.is_empty()).then_some((name, fields))
+            })
+            .collect();
+        return Err(failed(format!(
+            "fresh configured acceptance would change the candidate graph: channels={changed_channels:?}; routing_changed={}; sources_changed={}; coefficients_changed={}",
+            before[2] != after[2],
+            before[4] != after[4],
+            before[5] != after[5]
+        )));
     }
     let mut report = replay
         .metadata
@@ -5063,6 +5110,7 @@ mod tests {
             )];
         uninstrumented.channel_results.get_mut("L").unwrap().biquads = vec![correction];
         let mut instrumented = uninstrumented.clone();
+        let mut full_instrumented = uninstrumented.clone();
         let captures = seat_replay::capture_training(&config).unwrap();
         let held_out = HashMap::new();
         let plain_store = autoeq_artifacts::MemoryArtifactStore::new();
@@ -5101,6 +5149,41 @@ mod tests {
             diagnostic_result_value(&instrumented).unwrap(),
             diagnostic_result_value(&uninstrumented).unwrap(),
             "enabling capture must not alter the serialized graph/result projection"
+        );
+
+        let full_sink = MemorySink::default();
+        let full_store = autoeq_artifacts::MemoryArtifactStore::new();
+        let full_dir = tempfile::tempdir().unwrap();
+        select_with_diagnostic_sink(
+            &mut full_instrumented,
+            &captures,
+            &held_out,
+            &config,
+            48_000.0,
+            full_dir.path(),
+            &full_store,
+            Some((
+                crate::FinalizationDiagnosticTrial::FullStrengthOutput,
+                &full_sink,
+            )),
+        )
+        .unwrap();
+        assert_eq!(
+            diagnostic_result_value(&full_instrumented).unwrap(),
+            diagnostic_result_value(&uninstrumented).unwrap()
+        );
+        let full_events = full_sink.0.lock().unwrap();
+        let full_prepared: serde_json::Value =
+            serde_json::from_slice(full_events.get("full-strength-output-prepared").unwrap())
+                .unwrap();
+        assert_eq!(
+            full_prepared["trial_descriptor"]["correction_strength"],
+            1.0
+        );
+        assert!(
+            !full_events
+                .keys()
+                .any(|name| name.starts_with("zero-strength-output"))
         );
 
         let events = sink.0.lock().unwrap();

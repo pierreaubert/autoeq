@@ -166,6 +166,8 @@ fn score(result: &RoomOptimizationResult) -> Option<(f64, serde_json::Value)> {
         post += residual.score.post_weighted_rms_db?;
         residual.score.post_weighted_rms_db = None;
         residual.score.improvement_db = None;
+        // This is an assessed candidate level match, not reference identity.
+        residual.score.post_reference_gain_db = 0.0;
         // Delivered membership and support describe the candidate, not its
         // fixed reference. Every candidate already passed native replay.
         residual.delivered_physical_outputs.clear();
@@ -182,11 +184,34 @@ fn score(result: &RoomOptimizationResult) -> Option<(f64, serde_json::Value)> {
     ))
 }
 
-pub(super) fn select(
+#[cfg(test)]
+fn select(
+    result: &mut RoomOptimizationResult,
+    evaluate: impl FnMut(ProcessingMode) -> Result<RoomOptimizationResult>,
+) -> bool {
+    select_using_scores(result, evaluate, score)
+}
+
+pub(super) fn select_with_reference(
+    result: &mut RoomOptimizationResult,
+    evaluate: impl FnMut(ProcessingMode) -> Result<RoomOptimizationResult>,
+    reference: &seat_replay::ConfiguredComparison<'_>,
+) -> bool {
+    select_using_scores(result, evaluate, |candidate| {
+        // Ranking does not rewrite a candidate's independently assessed native
+        // acceptance. Re-evaluate only a clone on one frozen comparison plane.
+        let mut ranking = candidate.clone();
+        reference.attach(&mut ranking);
+        score(&ranking)
+    })
+}
+
+fn select_using_scores(
     result: &mut RoomOptimizationResult,
     mut evaluate: impl FnMut(ProcessingMode) -> Result<RoomOptimizationResult>,
+    mut candidate_score: impl FnMut(&RoomOptimizationResult) -> Option<(f64, serde_json::Value)>,
 ) -> bool {
-    let Some((hybrid_score, basis)) = score(result) else {
+    let Some((hybrid_score, basis)) = candidate_score(result) else {
         result.metadata.stage_outcomes.push(StageOutcome {
             stage: "hybrid_best_part_selection".into(),
             status: StageStatus::Degraded,
@@ -233,7 +258,7 @@ pub(super) fn select(
         let mut check =
             StageCheck::pass(format!("hybrid_best_part_{name}"), StageCheckKind::Quality);
         match evaluated {
-            Ok(candidate) => match score(&candidate) {
+            Ok(candidate) => match candidate_score(&candidate) {
                 Some((post, candidate_basis)) if candidate_basis == basis => {
                     check.observed = Some(hybrid_score - post);
                     check.limit = Some(TIE_DB);
@@ -246,11 +271,39 @@ pub(super) fn select(
                         best = Some((name, candidate));
                     }
                 }
-                _ => {
+                Some((_, candidate_basis)) => {
                     complete = false;
                     check.passed = false;
-                    check.diagnostic =
-                        Some("standalone configured-reference comparison unavailable".into());
+                    check.diagnostic = Some(
+                        serde_json::json!({
+                            "reason": "standalone configured-reference identity differs",
+                            "hybrid_reference": basis,
+                            "part_reference": candidate_basis,
+                        })
+                        .to_string(),
+                    );
+                }
+                None => {
+                    complete = false;
+                    check.passed = false;
+                    check.diagnostic = Some(format!(
+                        "standalone configured-reference comparison unavailable: decision={:?}; violations={:?}; comparison_error={:?}",
+                        candidate
+                            .metadata
+                            .correction_acceptance
+                            .as_ref()
+                            .map(|report| &report.decision),
+                        candidate
+                            .metadata
+                            .correction_acceptance
+                            .as_ref()
+                            .map(|report| &report.violations),
+                        candidate
+                            .metadata
+                            .correction_acceptance
+                            .as_ref()
+                            .map(|report| seat_replay::configured_selection_metrics(report).err()),
+                    ));
                 }
             },
             Err(error) => {
@@ -346,6 +399,46 @@ mod tests {
             checks: vec![],
         });
         result
+    }
+
+    #[test]
+    fn candidate_level_match_is_not_configured_reference_identity() {
+        let first = candidate(0.5, "first");
+        let mut second = first.clone();
+        let rows = &mut second
+            .metadata
+            .correction_acceptance
+            .as_mut()
+            .unwrap()
+            .acoustic_quality
+            .as_mut()
+            .unwrap()
+            .training
+            .configured_baseline
+            .as_mut()
+            .unwrap()
+            .residuals;
+        for row in rows {
+            row.score.post_reference_gain_db += 3.0;
+        }
+        assert_eq!(score(&first), score(&second));
+        let rows = &mut second
+            .metadata
+            .correction_acceptance
+            .as_mut()
+            .unwrap()
+            .acoustic_quality
+            .as_mut()
+            .unwrap()
+            .training
+            .configured_baseline
+            .as_mut()
+            .unwrap()
+            .residuals;
+        for row in rows {
+            row.score.pre_weighted_rms_db += 1.0;
+        }
+        assert_ne!(score(&first).unwrap().1, score(&second).unwrap().1);
     }
 
     #[test]

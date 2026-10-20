@@ -49,7 +49,7 @@ jobs:
           repository: ${{ github.repository_owner }}/math-audio
           github-server-url: ${{ github.server_url }}
           token: ${{ secrets.WORKSPACE_READ_TOKEN || github.token }}
-          ref: 748192f93ddf66b063893c9d69333c1a09c117af
+          ref: d2907882a52adbbeaf9f9749e8a6cd12b0847c22
           path: math-audio
       - uses: actions/checkout@v4
         with:

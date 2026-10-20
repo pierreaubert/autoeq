@@ -35,6 +35,7 @@ use roomeq_model::{
     StereoBassRoutingReport, StereoBassTopology, SystemConfig, SystemModel,
 };
 use std::collections::HashMap;
+mod fir_latency;
 
 /// Apply one serialized chain using frozen caller-owned IR evidence when present.
 /// The injected-provider path never derives a filesystem path or embedded-FIR association.
@@ -3409,9 +3410,22 @@ fn optimize_home_cinema_with_sub(
             let mut sub_config = config.clone();
             if sub_preprocess.common_eq_complete {
                 // The dedicated engine already applied the configured spatial
-                // PEQ/global-EQ policy. Do not replace it with a primary-only fit.
+                // PEQ/global-EQ policy. Keep its IIR result, but realize a
+                // requested residual FIR before crossover search, not in the
+                // generic post-workflow upgrade after routes have been chosen.
                 sub_config.optimizer.num_filters = 0;
-                sub_config.optimizer.processing_mode = roomeq_model::ProcessingMode::LowLatency;
+                sub_config.optimizer.processing_mode = if matches!(
+                    config.optimizer.processing_mode,
+                    roomeq_model::ProcessingMode::PhaseLinear
+                        | roomeq_model::ProcessingMode::Hybrid
+                ) {
+                    // A main's high/low hybrid split is not a subwoofer band.
+                    // The completed shared IIR leaves only its residual FIR.
+                    sub_config.optimizer.mixed_config = None;
+                    roomeq_model::ProcessingMode::PhaseLinear
+                } else {
+                    roomeq_model::ProcessingMode::LowLatency
+                };
                 sub_config.optimizer.phase_correction = None;
             }
             if max_xo > sub_config.optimizer.min_freq {
@@ -3506,6 +3520,7 @@ fn optimize_home_cinema_with_sub(
         sub_evidence.extend(ch_result.optimizer_evidence);
         optimizer_evidence_by_channel.insert(sub_role.clone(), sub_evidence);
     }
+    let fir_output_alignment = fir_latency::align(&mut pre_eq_plugins, sample_rate);
     workflow_stage_event(
         &mut assembly.stage_callback,
         PipelineStepId::GenericChannelOptimization,
@@ -3583,6 +3598,13 @@ fn optimize_home_cinema_with_sub(
         &sub_embedded_irs,
     )?;
     aligned_pre_eq_curves.insert(sub_role.clone(), realized_sub);
+
+    // Interpolate residual acoustic phase, not aliased rotations from a long
+    // FIR scheduling delay common to every output. Emitted/replayed curves
+    // retain the complete delay; only relative-phase optimization uses this gauge.
+    let optimizer_pre_eq_curves =
+        fir_latency::optimizer_curves(&aligned_pre_eq_curves, &pre_eq_plugins, sample_rate)
+            .unwrap_or_else(|| aligned_pre_eq_curves.clone());
 
     let optimizer_source_pre_route_transfers = main_roles
         .iter()
@@ -3852,7 +3874,7 @@ fn optimize_home_cinema_with_sub(
             config,
             main_roles,
             &aligned_curves,
-            &aligned_pre_eq_curves,
+            &optimizer_pre_eq_curves,
             &sub_role,
             xover_config,
             sample_rate,
@@ -4023,7 +4045,7 @@ fn optimize_home_cinema_with_sub(
     };
     let mut source_results = engine_bass_management::baseline_bass_management_source_reports(
         main_roles,
-        &aligned_pre_eq_curves,
+        &optimizer_pre_eq_curves,
         &group_results_by_id,
         &sub_output_results,
         sub_preprocess.drivers.as_deref(),
@@ -4100,7 +4122,7 @@ fn optimize_home_cinema_with_sub(
                     config,
                     main_roles,
                     &aligned_curves,
-                    &aligned_pre_eq_curves,
+                    &optimizer_pre_eq_curves,
                     Some(&optimizer_source_pre_route_transfers),
                     bass_management_target_curves.as_ref(),
                     &mut candidate_groups,
@@ -4218,7 +4240,7 @@ fn optimize_home_cinema_with_sub(
             config,
             main_roles,
             &aligned_curves,
-            &aligned_pre_eq_curves,
+            &optimizer_pre_eq_curves,
             Some(&optimizer_source_pre_route_transfers),
             bass_management_target_curves.as_ref(),
             &mut group_results_by_id,
@@ -6183,6 +6205,28 @@ fn optimize_home_cinema_with_sub(
             optimizer_evidence: None,
             stage_outcomes: {
                 let mut outcomes = post_eq_main_preservation;
+                if let Some(alignment) = fir_output_alignment {
+                    if !alignment.is_empty() {
+                        outcomes.push(StageOutcome {
+                            stage: "routed_fir_output_latency_alignment".into(),
+                            status: StageStatus::Applied,
+                            checks: Vec::new(),
+                            advisories: alignment
+                                .into_iter()
+                                .map(|(name, delay)| {
+                                    format!("{name}:added_design_delay_ms={delay:.9}")
+                                })
+                                .collect(),
+                        });
+                    }
+                } else {
+                    outcomes.push(StageOutcome {
+                        stage: "routed_fir_output_latency_alignment".into(),
+                        status: StageStatus::Skipped,
+                        checks: Vec::new(),
+                        advisories: vec!["unknown_or_unsupported_fir_delay; no_delay_inferred; final_native_validation_required".into()],
+                    });
+                }
                 for (channel, loss) in post_eq_output_rejections {
                     outcomes.push(StageOutcome {
                         stage: format!("post_eq_useful_output_{channel}"),
@@ -9171,11 +9215,17 @@ mod post_dsp_level_tests {
         .expect("structural fallback must follow the production publication policy");
         let report = result.metadata.correction_acceptance.as_ref().unwrap();
         assert!(!report.accepted);
-        assert!(matches!(
+        assert!(
+            matches!(
+                report.decision,
+                roomeq_model::CorrectionDecision::IdentityFallback
+                    | roomeq_model::CorrectionDecision::SafeFallback
+                    | roomeq_model::CorrectionDecision::Rejected
+            ),
+            "decision={:?}; violations={:?}",
             report.decision,
-            roomeq_model::CorrectionDecision::IdentityFallback
-                | roomeq_model::CorrectionDecision::Rejected
-        ));
+            report.violations
+        );
         assert!(
             report
                 .violations
@@ -9259,9 +9309,13 @@ mod post_dsp_level_tests {
             .unwrap();
         let fallback_graph = fallback_report.routing_graph.as_ref().unwrap();
         assert!(
-            (fallback_graph.input_trim_db["L"] + 2.0).abs() < 1.0e-5,
-            "fallback routing graph retained stale L trim {} instead of the structural graph's recalculated trim",
-            fallback_graph.input_trim_db["L"]
+            fallback_graph
+                .input_trim_db
+                .get("L")
+                .is_some_and(|gain| (gain + 2.0).abs() < 1.0e-5),
+            "fallback routing graph lost recalculated L trim: trims={:?}; plugins={:?}",
+            fallback_graph.input_trim_db,
+            published_fallback.channels["L"].plugins
         );
         assert_eq!(
             fallback_graph.post_dsp_main_alignment_band_hz,

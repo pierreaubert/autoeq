@@ -1,7 +1,22 @@
 use anyhow::Result;
 use std::path::Path;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) fn delivered_quality_improved(
+    qa_passed: bool,
+    accepted: bool,
+    reverted: bool,
+    improvements: impl Iterator<Item = f64>,
+) -> bool {
+    let mut improvements = improvements.peekable();
+    qa_passed
+        && accepted
+        && !reverted
+        && improvements.peek().is_some()
+        && improvements.all(|value| value.is_finite() && value > 0.0)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub(super) enum QaOutcome {
     Passed,
     Reverted,
@@ -18,7 +33,7 @@ impl QaOutcome {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[allow(dead_code)]
 pub(super) struct TestResult {
     pub(super) name: String,
@@ -32,6 +47,14 @@ pub(super) struct TestResult {
     pub(super) outcome: QaOutcome,
     pub(super) error: Option<String>,
     pub(super) duration_ms: u64,
+    /// Final runtime verdict, independent of whether the QA safety case passed.
+    pub(super) correction_decision: Option<roomeq_model::CorrectionDecision>,
+    /// True only with accepted, unreverted improvement at every delivered seat/input.
+    pub(super) quality_improved: bool,
+    /// Retain applied, skipped, reverted and unassessed stage evidence separately.
+    pub(super) stage_outcomes: Vec<roomeq_model::StageOutcome>,
+    /// Delivered input/seat metrics used to establish the improvement claim.
+    pub(super) final_seats: Vec<roomeq_model::FinalSeatEvaluation>,
 }
 
 impl TestResult {
@@ -73,6 +96,10 @@ impl TestResult {
             outcome,
             error,
             duration_ms: dur,
+            correction_decision: None,
+            quality_improved: false,
+            stage_outcomes: Vec::new(),
+            final_seats: Vec::new(),
         }
     }
 
@@ -96,6 +123,10 @@ impl TestResult {
             outcome: QaOutcome::Failed,
             error: Some(err),
             duration_ms: dur,
+            correction_decision: None,
+            quality_improved: false,
+            stage_outcomes: Vec::new(),
+            final_seats: Vec::new(),
         }
     }
 
@@ -160,4 +191,78 @@ pub(super) fn write_junit_xml(results: &[TestResult], output: &Path) -> Result<(
 
     std::fs::write(output, xml)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delivered_quality_requires_every_seat_and_cannot_be_established_by_safe_revert() {
+        assert!(delivered_quality_improved(
+            true,
+            true,
+            false,
+            [0.1, 2.0].into_iter()
+        ));
+        for values in [
+            vec![],
+            vec![1.0, 0.0],
+            vec![1.0, -0.1],
+            vec![f64::NAN],
+            vec![f64::INFINITY],
+        ] {
+            assert!(!delivered_quality_improved(
+                true,
+                true,
+                false,
+                values.into_iter()
+            ));
+        }
+        for (passed, accepted, reverted) in [
+            (false, true, false),
+            (true, false, false),
+            (true, true, true),
+        ] {
+            assert!(!delivered_quality_improved(
+                passed,
+                accepted,
+                reverted,
+                [1.0].into_iter()
+            ));
+        }
+    }
+
+    #[test]
+    fn json_preserves_safe_reversion_and_skipped_assessment_without_claiming_improvement() {
+        let mut result = TestResult::success(
+            "safety",
+            "room",
+            "fem",
+            "iir",
+            1.0,
+            1.0,
+            None,
+            vec![],
+            true,
+            1,
+        );
+        result.correction_decision = Some(roomeq_model::CorrectionDecision::IdentityFallback);
+        result.stage_outcomes.push(roomeq_model::StageOutcome {
+            stage: "final_correlated_bass_acceptance".into(),
+            status: roomeq_model::StageStatus::Skipped,
+            checks: vec![],
+            advisories: vec!["correlated_bass_unassessed:missing_timing".into()],
+        });
+        let json = serde_json::to_value(result).unwrap();
+        assert_eq!(json["passed"], true);
+        assert_eq!(json["outcome"], "reverted");
+        assert_eq!(json["quality_improved"], false);
+        assert_eq!(json["correction_decision"], "identity_fallback");
+        assert_eq!(json["stage_outcomes"][0]["status"], "skipped");
+        assert_eq!(
+            json["stage_outcomes"][0]["advisories"][0],
+            "correlated_bass_unassessed:missing_timing"
+        );
+    }
 }

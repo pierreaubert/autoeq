@@ -188,18 +188,24 @@ fn assemble_dsp_chain(
             }
         }
     }
-    // Kirkeby centers its inverse IFFT at taps/2 regardless of excess phase.
-    // Keep that known scheduling delay separate from correction
-    // so a routed rollback does not move only one branch in time.
+    // Linear and Kirkeby designers center their IFFT at taps/2. Minimum
+    // phase starts at zero. Keep that scheduling delay separate from
+    // correction so refinement and rollback preserve branch timing.
     if !matches!(optimizer_output, FirOptimizerOutput::MixedPhase { .. })
         && let Some(fir) = request.optimizer.fir.as_ref()
-        && fir.phase.eq_ignore_ascii_case("kirkeby")
         && fir.pre_ringing.is_none()
     {
-        for plugin in &mut plugins {
-            if plugin.plugin_type == "convolution" {
-                plugin.parameters["correction_design_delay_ms"] =
-                    serde_json::json!((fir.taps / 2) as f64 * 1000.0 / request.sample_rate);
+        let delay_samples = match fir.phase.to_ascii_lowercase().as_str() {
+            "linear" | "kirkeby" => Some(fir.taps / 2),
+            "minimum" => Some(0),
+            _ => None,
+        };
+        if let Some(delay_samples) = delay_samples {
+            for plugin in &mut plugins {
+                if plugin.plugin_type == "convolution" {
+                    plugin.parameters["correction_design_delay_ms"] =
+                        serde_json::json!(delay_samples as f64 * 1000.0 / request.sample_rate);
+                }
             }
         }
     }

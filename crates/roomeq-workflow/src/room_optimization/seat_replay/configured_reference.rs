@@ -1,5 +1,7 @@
 //! Whole-playback scores use configured controls, never optimized baseline controls.
 use super::*;
+mod lfe_target;
+pub(super) use lfe_target::LfeTargetReference;
 use roomeq_model::{ConfiguredBaselineComparison, ConfiguredBaselineResidual};
 
 const METHOD: &str = "configured_routing_unprocessed_captures_v1";
@@ -75,6 +77,11 @@ pub(super) fn restore_physical_sub_crossovers(
     let Some(roomeq_model::SubwooferCrossoverRef::PerSub(keys)) = &subs.crossover else {
         return Ok(false);
     };
+    // The engine treats one-element lists as the legacy shared crossover,
+    // not a physical-output filter. The frozen graph must use the same rule.
+    if keys.len() < 2 {
+        return Ok(false);
+    }
     let Some(graph) = result
         .metadata
         .bass_management
@@ -162,7 +169,16 @@ fn reference_graph(
     }
     let mut reference = result.clone();
     for chain in reference.channels.values_mut() {
-        chain.plugins.clear();
+        // Explicit physical calibration is configuration, not an optimized
+        // correction or derived channel alignment. A reference that discards
+        // it cannot be published as a configured fallback on the same plane.
+        chain.plugins.retain(|plugin| {
+            matches!(plugin.plugin_type.as_str(), "gain" | "delay")
+                && matches!(
+                    plugin.parameters["label"].as_str(),
+                    Some("speaker_calibration" | "configured_sub_gain")
+                )
+        });
         if let Some(drivers) = &mut chain.drivers {
             // Joint array steering is structural for this comparison: the
             // finalization candidates being judged never scale the plain
@@ -207,7 +223,26 @@ fn reference_graph(
     if let Some(bass) = reference.metadata.bass_management.as_mut()
         && bass.routing_graph.is_some()
     {
-        let graph = configured_bass_graph(config, physical_per_sub)?;
+        let mut graph = configured_bass_graph(config, physical_per_sub)?;
+        graph.post_dsp_main_alignment_band_hz = bass
+            .routing_graph
+            .as_ref()
+            .and_then(|previous| previous.post_dsp_main_alignment_band_hz)
+            .or(graph.post_dsp_main_alignment_band_hz);
+        if bass.routing_graph.as_ref().is_some_and(|previous| {
+            previous
+                .advisories
+                .iter()
+                .any(|value| value == "post_dsp_input_levels_aligned_down")
+        }) && !graph
+            .advisories
+            .iter()
+            .any(|value| value == "post_dsp_input_levels_aligned_down")
+        {
+            graph
+                .advisories
+                .push("post_dsp_input_levels_aligned_down".into());
+        }
         let effective = roomeq_engine::home_cinema::effective_bass_management(config);
         let physical_lfe_gain = effective
             .as_ref()
@@ -510,6 +545,7 @@ pub(in super::super) struct ConfiguredComparison<'a> {
     fs: f64,
     dir: &'a Path,
     reference: std::result::Result<RoomOptimizationResult, String>,
+    lfe_target: Option<LfeTargetReference>,
     excursion: BTreeMap<String, Vec<math_audio_iir_fir::Biquad>>,
     digest: Option<String>,
     training: std::result::Result<BTreeMap<String, Vec<Curve>>, String>,
@@ -542,11 +578,16 @@ impl<'a> ConfiguredComparison<'a> {
             .as_ref()
             .ok()
             .and_then(|reference| graph_hash(reference).ok());
+        let lfe_target = reference
+            .as_ref()
+            .ok()
+            .and_then(|reference| LfeTargetReference::from_configured(reference, config));
         Self {
             config,
             fs,
             dir,
             reference,
+            lfe_target,
             excursion,
             digest,
             training: physical_captures(captures, result).map_err(|error| error.to_string()),
@@ -714,14 +755,23 @@ impl<'a> ConfiguredComparison<'a> {
                         .and_then(|chain| chain.physical_correction_target.as_ref())
                 })
                 .flatten();
-            let normalize_level = direct_physical_target.is_none();
+            let mut normalize_level = direct_physical_target.is_none();
             let target_measurement = if self.excursion.contains_key(input) {
                 measured(physical, input, seat)?
             } else {
                 &pre.curve
             };
-            let target = direct_physical_target
-                .map(|target| Curve::from(target.curve.clone()))
+            let lfe_target = self
+                .lfe_target
+                .as_ref()
+                .map(|reference| reference.target(physical, input, seat, &context, resources))
+                .transpose()?
+                .flatten();
+            if lfe_target.is_some() {
+                normalize_level = false;
+            }
+            let target = lfe_target
+                .or_else(|| direct_physical_target.map(|target| Curve::from(target.curve.clone())))
                 .unwrap_or_else(|| {
                     let target = roomeq_engine::fir::prepared_fir_target_curve(
                         target_measurement,

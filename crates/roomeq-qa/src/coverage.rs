@@ -55,6 +55,9 @@ pub fn run() -> Result<bool> {
     let args = Args::parse();
     let project_root = find_project_root()?;
     std::env::set_current_dir(&project_root)?;
+    if !args.list && !args.matrix {
+        invalidate_json_report(args.json.as_deref())?;
+    }
 
     // List scenarios
     if args.list {
@@ -125,8 +128,7 @@ pub fn run() -> Result<bool> {
     };
 
     if test_cases.is_empty() {
-        println!("No test cases to run.");
-        return Ok(false);
+        anyhow::bail!("No test cases match the requested QA selection");
     }
 
     println!("=== RoomEQ Full QA ===");
@@ -199,6 +201,10 @@ pub fn run() -> Result<bool> {
     );
 
     // JUnit output
+    if let Some(path) = &args.json {
+        std::fs::write(path, serde_json::to_vec_pretty(&results)?)?;
+        println!("QA evidence JSON written to: {}", path.display());
+    }
     if let Some(ref junit_path) = args.junit {
         write_junit_xml(&results, junit_path)?;
         println!("JUnit XML written to: {}", junit_path.display());
@@ -206,4 +212,38 @@ pub fn run() -> Result<bool> {
 
     // Exit code
     Ok(args.fail && failed > 0)
+}
+
+fn invalidate_json_report(path: Option<&std::path::Path>) -> Result<()> {
+    if let Some(path) = path {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod evidence_tests {
+    use super::invalidate_json_report;
+
+    #[test]
+    fn starting_a_run_discards_stale_success_even_if_selection_later_fails() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("evidence.json");
+        std::fs::write(&path, r#"[{"passed":true,"quality_improved":true}]"#).unwrap();
+        invalidate_json_report(Some(&path)).unwrap();
+        assert!(!path.exists());
+        invalidate_json_report(Some(&path)).unwrap();
+        invalidate_json_report(None).unwrap();
+    }
+
+    #[test]
+    fn an_invalid_report_destination_cannot_start_a_run() {
+        let directory = tempfile::tempdir().unwrap();
+        assert!(invalidate_json_report(Some(directory.path())).is_err());
+        assert!(directory.path().is_dir());
+    }
 }

@@ -30,6 +30,8 @@ pub trait FinalizationDiagnosticSink {
 pub enum FinalizationDiagnosticTrial {
     /// Capture the unmodified-strength, output-safety candidate before fallback selection.
     ZeroStrengthOutput,
+    /// Capture the full-strength output-safety candidate before fallback selection.
+    FullStrengthOutput,
 }
 
 /// Application-owned data accompanying an in-memory engine request.
@@ -81,7 +83,7 @@ impl<'a> RoomPipeline<'a> {
 
     /// Attach a sink for opt-in finalization candidate diagnostics.
     ///
-    /// The trace is restricted to the zero-strength output candidate. Normal
+    /// The trace is restricted to the selected output candidate. Normal
     /// runs perform no diagnostic writes when no sink is attached.
     pub fn with_finalization_diagnostic_sink(
         mut self,

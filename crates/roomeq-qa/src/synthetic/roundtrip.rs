@@ -16,6 +16,7 @@
 //! prints stage outcomes, acceptance, published keys, DSP chains, and
 //! per-channel biquads; `ROUNDTRIP_SPLICE=1` prints deployed-vs-ideal curves
 //! across 40-150 Hz; `ROUNDTRIP_GRADE=1` prints grading band statistics.
+//! `ROUNDTRIP_DIAGNOSTICS=<directory>` retains the production finalization trace.
 
 // Rust guideline compliant 2026-02-21
 
@@ -310,8 +311,39 @@ fn run_once(config: &RoomConfig) -> anyhow::Result<RoomOptimizationResult> {
     let temp_dir =
         std::env::temp_dir().join(format!("roomeq_qa_roundtrip_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    let result = roomeq_workflow::optimize_room(config, SAMPLE_RATE, None, Some(&temp_dir))
-        .map_err(|error| anyhow::anyhow!(error.to_string()));
+    let result = if let Some(root) = std::env::var_os("ROUNDTRIP_DIAGNOSTICS") {
+        struct Trace(std::path::PathBuf);
+        impl roomeq_workflow::pipeline::FinalizationDiagnosticSink for Trace {
+            fn write_event(&self, name: &str, json: &[u8]) -> std::io::Result<()> {
+                let mut file = tempfile::NamedTempFile::new_in(&self.0)?;
+                std::io::Write::write_all(&mut file, json)?;
+                file.as_file().sync_all()?;
+                file.persist_noclobber(self.0.join(format!("{name}.json")))
+                    .map_err(|error| error.error)?;
+                Ok(())
+            }
+        }
+        let directory =
+            std::path::PathBuf::from(root).join(format!("run-{}-{id}", std::process::id()));
+        std::fs::create_dir_all(&directory)?;
+        let trace = Trace(directory);
+        roomeq_workflow::pipeline::RoomPipeline::new(
+            roomeq_workflow::pipeline::RoomPipelineRequest {
+                config,
+                sample_rate: SAMPLE_RATE,
+                output_dir: Some(&temp_dir),
+                probe_arrival_overrides: None,
+            },
+        )
+        .with_finalization_diagnostic_sink(
+            roomeq_workflow::pipeline::FinalizationDiagnosticTrial::ZeroStrengthOutput,
+            &trace,
+        )
+        .run(None)
+    } else {
+        roomeq_workflow::optimize_room(config, SAMPLE_RATE, None, Some(&temp_dir))
+    }
+    .map_err(|error| anyhow::anyhow!(error.to_string()));
     let _ = std::fs::remove_dir_all(&temp_dir);
     result
 }

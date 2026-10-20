@@ -32,6 +32,10 @@ pub(super) struct Args {
     #[arg(long)]
     pub(super) junit: Option<PathBuf>,
 
+    /// Output machine-readable QA verdicts and delivered stage evidence
+    #[arg(long)]
+    pub(super) json: Option<PathBuf>,
+
     /// Filter by scenario name (substring match)
     #[arg(long)]
     pub(super) scenario: Option<String>,

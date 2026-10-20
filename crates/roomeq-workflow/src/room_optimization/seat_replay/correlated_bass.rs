@@ -189,6 +189,22 @@ pub(super) fn validate(
     if rejected {
         outcome.status = StageStatus::Failed;
     }
+    let failed_checks = outcome
+        .checks
+        .iter()
+        .filter(|check| !check.passed)
+        .take(8)
+        .map(|check| {
+            format!(
+                "{}: loss_db={:?}, limit_db={:?}, {}",
+                check.id,
+                check.observed,
+                check.limit,
+                check.diagnostic.as_deref().unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
     result.metadata.stage_outcomes.push(outcome);
     if rejected {
         if let Some(report) = result.metadata.correction_acceptance.as_mut() {
@@ -200,7 +216,9 @@ pub(super) fn validate(
             report.refresh_outcome();
         }
         return Err(roomeq_model::AutoeqError::OptimizationFailed {
-            message: "final correlated-bass efficiency regressed against configured routes".into(),
+            message: format!(
+                "final correlated-bass efficiency regressed against configured routes: {failed_checks}"
+            ),
         });
     }
     Ok(())

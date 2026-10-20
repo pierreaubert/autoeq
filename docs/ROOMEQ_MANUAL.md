@@ -2608,6 +2608,62 @@ production implementation boundary.
 
 ### QA tiers and scenario registry
 
+`just qa-roomeq-audit-20261018` runs the audit's physical-output and accepted
+joint-cinema composition contracts, primary-seat/target/delay invariants,
+physical low-pass ownership, and serialized correlated-bass rejection. Accepted
+cinema cases include 8,192-tap split-band Hybrid and 16,384-tap FIR processing;
+the Hybrid case must retain its split/merge stages. It is part of PR QA. The two composition
+integration targets also contribute to production and subsystem coverage.
+
+`just qa-roomeq-audit-mutants` reintroduces C1–C5 in an isolated source snapshot.
+Each exact regression must pass without the mutation, then execute and fail with
+it; a build error, ignored test, zero-test run, timeout or surviving mutant fails
+the gate. Source and log hashes are retained with the results. Mutations build
+under the report directory in their own Cargo target, so they cannot replace
+ordinary test executables while another QA command is running.
+
+`just qa-roomeq-audit-resources` records three fresh-process samples per
+representative array/cinema/DBA/FIR workload; pass `1` for one sample each. The
+report at `target/qa/subwoofer-resources.json` includes Rust allocation counts
+and cumulative allocated bytes, process CPU time/peak RSS, search effort and
+acoustic outcomes. Cumulative allocated bytes are neither peak heap nor resident
+memory. The operation allocation counter excludes fixture construction and report
+serialization; process CPU/RSS includes them and native allocations. Allocation
+instrumentation adds overhead, so these timings characterize the instrumented
+workloads and do not establish an uninstrumented production speedup. Default
+per-sample limits are 900 seconds and 4 GiB peak RSS; the Python runner accepts
+explicit overrides. Nightly QA runs one resource sample and all five mutations;
+weekly QA runs three resource samples and all five mutations. These are model
+and export checks, not hardware or audibility certification.
+
+Operation and process times include all finalization and standalone-part trials.
+The search receipts describe the returned array and its own search quota.
+
+Every full resource workload validates the canonical JSON roundtrip and physical
+output identities. CamillaDSP checks remain required for serial chains. The
+existing CamillaDSP exporter explicitly rejects split/merge plugins, so the
+retained split-band Hybrid workload records that limitation instead of silently
+dropping the branches or changing the selected processing mode. The resource
+report distinguishes native acceptance from external-format support.
+
+For failure diagnosis, `ROOMEQ_RESOURCE_TRACE=<directory>` records the existing
+pipeline's full-strength candidate, including both logical-sum quality inputs
+and isolated-main useful-output inputs. Tracing is opt-in and uses fresh
+no-overwrite process directories; leave it unset for resource measurements.
+
+The coverage CLI's `--json <path>` retains each QA verdict, runtime correction
+decision, `quality_improved` flag, final input/seat metrics and stage outcomes. Safety cases can pass with
+a reported reversion; quality improvement requires an accepted correction and
+positive finite improvement lower bounds for every assessed input/seat. Skipped
+or unassessed stages retain their diagnostic reasons.
+Execution invalidates a previous JSON report before selecting cases. An empty
+selection fails even with `--no-fail`, so it cannot publish stale success evidence.
+
+CTC integration resolves requested RoomEQ processing from emitted output roles
+such as `L`/`R`, with support for standalone measurement-keyed dictionaries. Its
+artifact reports the actual applied chain keys. Supplied room-seat captures are
+validated separately from the CTC ear-matrix diagnostics.
+
 Escaped-defect ownership checking now requires a regression identity object with
 `package`, library `target`, and fully qualified `name`, resolved against nextest
 JSON discovery. Ignored or zero-selected inventories cannot establish ownership.

@@ -382,18 +382,33 @@ fn optimize_room_with_ctc_writes_metadata_and_artifact() {
 
     let result =
         optimize_room(&config, 48_000.0, None, Some(dir.path())).expect("room optimization");
-    assert!(result.metadata.stage_outcomes.iter().any(|stage| {
-        stage.stage == "final_correction_selection"
-            && stage
-                .advisories
-                .iter()
-                .any(|advisory| advisory == "final_seat_evidence=insufficient_evidence")
-    }));
+    let acceptance = result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .expect("room-seat assessment");
+    assert!(
+        acceptance.accepted,
+        "final selection evidence: {:?}; acceptance={:?}",
+        result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .filter(|stage| stage.stage.starts_with("final_"))
+            .map(|stage| (&stage.stage, &stage.status, &stage.advisories))
+            .collect::<Vec<_>>(),
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .map(|report| (&report.decision, &report.outcome, &report.violations))
+    );
     let ctc = result.metadata.ctc.expect("ctc metadata");
     assert_eq!(ctc.source, "measured");
     assert_eq!(ctc.speakers, vec!["L", "R"]);
     assert_eq!(ctc.head_positions, 1);
-    assert!(ctc.room_eq_correction_channels.is_empty());
+    assert!(ctc.room_eq_correction_applied);
+    assert_eq!(ctc.room_eq_correction_channels, ["L", "R"]);
     assert!(ctc.delivered_response.is_some());
     assert!(Path::new(&ctc.artifact).exists());
 
@@ -401,7 +416,11 @@ fn optimize_room_with_ctc_writes_metadata_and_artifact() {
         serde_json::from_slice(&std::fs::read(&ctc.artifact).unwrap()).unwrap();
     assert_eq!(artifact["version"], "ctc-recommended-v1");
     assert_eq!(artifact["filters"].as_array().unwrap().len(), 4);
-    assert!(artifact["room_eq_correction_applied"].is_boolean());
+    assert_eq!(artifact["room_eq_correction_applied"], true);
+    assert_eq!(
+        artifact["room_eq_correction_channels"],
+        serde_json::json!(["L", "R"])
+    );
     assert!(artifact["delivered_response"]["mean_crosstalk_db"].is_number());
 }
 

@@ -28,6 +28,11 @@ pub struct FinalizationConfig {
     /// Maximum unexplained useful-output loss for mains, surrounds, and heights, in dB.
     /// Subwoofers are exempt. This is not input attenuation or PEQ boost.
     pub max_useful_output_loss_db: f64,
+    /// Maximum baseline-relative loss of coherent/RSS bass efficiency, in dB.
+    /// Checked per frequency and seat for correlated mains through final routes.
+    /// The default 3 dB is an engineering non-regression budget, not a hearing
+    /// threshold. A common gain/EQ applied to the whole group cancels in the ratio.
+    pub max_correlated_bass_regression_db: f64,
     /// Optional cumulative additional static safety attenuation limits by physical output, in dB.
     /// Only serial `room_eq_safety_gain` gains count; common pre-route cuts count for every
     /// affected output. Baseline calibration and untagged trims remain separate. This is an
@@ -72,6 +77,7 @@ impl Default for FinalizationConfig {
             output_ceiling_dbfs: 0.0,
             max_attenuation_db: 12.0,
             max_useful_output_loss_db: 3.0,
+            max_correlated_bass_regression_db: 3.0,
             max_output_safety_attenuation_db: BTreeMap::new(),
             subwoofer_limiter: false,
             min_primary_improvement_db: 0.25,
@@ -82,6 +88,11 @@ impl Default for FinalizationConfig {
 
 impl FinalizationConfig {
     pub fn validate(&self) -> Result<(), String> {
+        if !self.max_correlated_bass_regression_db.is_finite()
+            || !(0.0..=60.0).contains(&self.max_correlated_bass_regression_db)
+        {
+            return Err("finalization.max_correlated_bass_regression_db must be in 0..=60".into());
+        }
         if !self.physical_drive_weight.is_finite() || self.physical_drive_weight < 0.0 {
             return Err("finalization.physical_drive_weight must be finite and nonnegative".into());
         }
@@ -169,6 +180,20 @@ mod tests {
         assert_eq!(config.physical_drive_weight, 0.0);
         for weight in [1.0, -1.0, f64::NAN, f64::INFINITY] {
             config.physical_drive_weight = weight;
+            assert!(config.validate().is_err());
+        }
+    }
+
+    #[test]
+    fn correlated_bass_regression_budget_is_finite_nonnegative_and_independent() {
+        let mut config: FinalizationConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.max_correlated_bass_regression_db, 3.0);
+        for value in [0.0, 1.0, 60.0] {
+            config.max_correlated_bass_regression_db = value;
+            assert!(config.validate().is_ok());
+        }
+        for value in [-1.0, 61.0, f64::NAN, f64::INFINITY] {
+            config.max_correlated_bass_regression_db = value;
             assert!(config.validate().is_err());
         }
     }

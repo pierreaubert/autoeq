@@ -9,6 +9,7 @@ alias qa-roomeq := qa-roomeq-all
 [group('qa-roomeq')]
 qa-roomeq-pr:
 	just qa-roomeq-roundtrip
+	just qa-roomeq-audit-20261018
 	{{cargo}} run --features qa --bin roomeq-qa-coverage --release -- --tier pr
 	{{cargo}} run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --pr
 	{{cargo}} run --features qa --bin roomeq-qa-acoustic --release -- --tier pr
@@ -25,6 +26,28 @@ qa-roomeq-pr:
 qa-roomeq-roundtrip:
 	{{cargo}} test --release -p roomeq-synthetic roundtrip --lib
 	{{cargo}} test --release -p roomeq-qa synthetic::roundtrip --lib
+
+# Audit composition contracts: a safe fallback cannot satisfy the accepted
+# correction fixture. Both physical DBA cardinalities survive serialized export.
+[group('qa-roomeq')]
+qa-roomeq-audit-20261018:
+	{{cargo}} nextest run --release -p roomeq-workflow --test joint_home_cinema --test dba_physical_outputs --no-tests fail
+	{{cargo}} nextest run --release -p roomeq-engine --lib --no-tests fail -E 'test(/joint_dispatch_uses_and_validates_configured_primary_seat|joint_dispatch_preserves_aligned_arrays_with_flat_and_zero_slope_targets|joint_dispatch_tilt_is_invariant_to_common_spl_calibration|broadband_alignment_is_feasible_for_every_sub_order|complex_renderer_matches_independent_polar_sum_on_irregular_grid|joint_budget_and_array_cancellation_are_enforced_before_shared_eq|strict_search_budgets_do_not_grow_to_fit_a_population|shared_search_control_stops_between_objectives/)'
+	{{cargo}} nextest run --release -p autoeq-optim --lib --no-tests fail -E 'test(/scalar_telemetry_reports_remaining_stage_quota/)'
+	{{cargo}} nextest run --release -p roomeq-engine --lib --no-tests fail -E 'test(/correlated_routes::tests|magnitude_fir_modes_export_their_designer_delay|mixed_crossover_returns_required_path_free_sidecar|split_fir_preserves_the_full_channel_level_reference/)'
+	{{cargo}} nextest run --release -p roomeq-quality --lib --no-tests fail -E 'test(/induced_group_delay|unresolved_phase_intervals/)'
+	{{cargo}} nextest run --release -p roomeq-workflow --lib --no-tests fail -E 'test(/final_serialized_routes_reject_opposed_correlated_bass_at_every_seat|lfe_target::tests|fir_latency::tests|native_lfe_detects_correction_changes|replay_scorecard_temporal_carries_branch_fir_latency_prior|opt_in_zero_strength_capture|redirected_physical_lowpass_does_not_add_the_compatibility_lfe_filter|hybrid_parts::tests|joint_room_eq_path_folds_channel_gain_into_ctc_solve|ctc_with_room_seat_captures_goes_through_final_seat_selection/)'
+	{{cargo}} nextest run --release -p roomeq-qa --lib --no-tests fail -E 'test(/coverage::evidence_tests|coverage::test_result::tests|safe_adjusted_baseline_is_reported_as_reverted|safe_fallback_needs_no_stage_reversion/)'
+	python3 -m unittest scripts.test_measure_subwoofer_resources scripts.test_audit_oct18_mutations
+
+# Scheduled audit evidence; each resource sample uses a fresh OS process.
+[group('qa-roomeq')]
+qa-roomeq-audit-resources samples="3":
+	python3 scripts/measure_subwoofer_resources.py --samples {{samples}}
+
+[group('qa-roomeq')]
+qa-roomeq-audit-mutants:
+	python3 scripts/audit_oct18_mutations.py
 
 qa-roomeq-stage-contracts:
 	just qa-roomeq-pruning-conditions
@@ -69,6 +92,8 @@ qa-roomeq-nightly:
 	{{cargo}} run --features qa --bin roomeq-qa-features --no-default-features --release
 	{{cargo}} run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
 	{{cargo}} run --bin roomeq-fuzzer --release --features=qa -- -n 200 --seed 42 --skip-kautz-modal
+	just qa-roomeq-audit-mutants
+	just qa-roomeq-audit-resources 1
 
 [group('qa-roomeq')]
 qa-roomeq-weekly:
@@ -79,6 +104,8 @@ qa-roomeq-weekly:
         {{cargo}} run --features qa --bin roomeq-qa-features --no-default-features --release
         {{cargo}} run --features qa --bin roomeq-qa-acoustic --release -- --tier nightly
         {{cargo}} run --bin roomeq-fuzzer --release --features=qa -- -n 1000 --seed 42 --skip-kautz-modal
+        just qa-roomeq-audit-mutants
+        just qa-roomeq-audit-resources
 
 [group('qa-roomeq')]
 qa-roomeq-all: qa-roomeq-weekly
@@ -226,6 +253,7 @@ qa-roomeq-coverage: prod-autoeq
 [group('qa-roomeq')]
 qa-roomeq-coverage-gate:
 	{{cargo}} llvm-cov --package roomeq-model --package roomeq-analysis --package roomeq-quality --package roomeq-engine --package roomeq-export --package roomeq-workflow --lib --no-report --release
+	{{cargo}} llvm-cov --no-clean --package roomeq-workflow --test dba_physical_outputs --test joint_home_cinema --summary-only --release
 	{{cargo}} llvm-cov --no-clean --package autoeq --features cli --test roomeq_integration_test --summary-only --release
 	{{cargo}} llvm-cov --no-clean --package autoeq --features cli --test roomeq_pipeline_test --summary-only --release
 	{{cargo}} llvm-cov --no-clean --package autoeq --features cli --test system_config_test --summary-only --release
@@ -386,6 +414,7 @@ qa-roomeq-subsystem-coverage:
 	{{cargo}} llvm-cov test --release --package roomeq-quality --lib --no-report
 	{{cargo}} llvm-cov test --release --package roomeq-engine --lib --no-report
 	{{cargo}} llvm-cov test --release --package roomeq-workflow --lib --no-report
+	{{cargo}} llvm-cov test --release --package roomeq-workflow --test dba_physical_outputs --test joint_home_cinema --no-report
 	mkdir -p target/qa
 	{{cargo}} llvm-cov report --release --package roomeq-quality --package roomeq-engine --package roomeq-workflow --json --summary-only --skip-functions --output-path target/qa/roomeq-coverage.json
 	python3 scripts/check_roomeq_subsystem_coverage.py target/qa/roomeq-coverage.json

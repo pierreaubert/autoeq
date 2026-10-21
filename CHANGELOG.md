@@ -1,3 +1,43 @@
+# Unreleased
+
+- Apply requested RoomEQ processing to CTC's emitted physical output roles,
+  retain measurement-keyed standalone dictionaries, and report the chains
+  actually used by the CTC design.
+- Preserve physical low-pass ownership during native bass replay: redirected
+  per-output crossovers no longer receive the compatibility LFE cutoff again.
+  Freeze LFE target calibration independently of its observation band, and retain
+  physical FIR latency evidence for logical LFE inputs.
+- Realize joint-sub residual FIRs before crossover search, retain design-delay
+  metadata for linear/minimum-phase and split-band FIRs, and freeze split-band
+  FIR target levels on the complete input channel. Exclude only roundoff-sized
+  intervals from phase differentiation while retaining every spectral bin.
+- Keep explicit calibration and measured alignment support in configured
+  fallbacks, recompute their trims, and retain native refusal receipts when
+  another fallback is selected. Add observational full-strength replay capture.
+- Classify correction-free safe fallbacks separately from delivered correction in
+  RoomEQ QA. Add JSON verdicts with per-stage assessment and per-seat improvement
+  evidence, and require an explicit accepted decision in the solvable cinema benchmark.
+  Empty QA selections fail and execution invalidates previous JSON evidence.
+- Gate the October 18 composition regressions in PR QA and coverage. Add isolated
+  C1–C5 defect mutations and fresh-process allocation, CPU and peak-RSS measurement
+  for joint arrays, verified cinema, asymmetric DBA, and long FIR workloads.
+- Preserve every physical DBA driver through home-cinema preprocessing, baseline
+  prediction, routing, JSON round-trip, and CamillaDSP export. Front/rear controls
+  are expanded across their measured drivers in declaration order.
+- Honor the configured joint-array primary seat, anchor relative targets to the
+  combined measured level, and allow alignment when the first sub arrives early.
+  Emitted causal delays remove a common minimum while retaining relative timing.
+- Enforce final correlated-bass efficiency against fixed configured routes at
+  each measured seat. Record missing timing evidence explicitly; revert automatic
+  route steering when it introduces cancellation beyond the configured budget.
+- Cache joint gain/delay complex multipliers across seats and evaluate only the
+  active source during independent route searches. Add fixed-score array scaling,
+  verified multi-seat home-cinema, DBA, and long residual-FIR benchmarks.
+- Add separate objective-call caps for joint arrays and bass-management stages,
+  retain actual search effort/timing, and propagate stop requests through joint
+  preprocessing and per-source route optimization. Small budgets no longer grow
+  to fit a minimum DE population or four-generation floor.
+
 # 0.5.77
 
 - Preserve native DE convergence, generations, and fitness counts through the

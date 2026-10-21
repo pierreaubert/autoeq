@@ -717,7 +717,11 @@ pub(super) fn validate_home_cinema_result(
     let safely_reverted = expectations.allow_safe_revert
         && matches!(
             correction_decision,
-            Some(CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback)
+            Some(
+                CorrectionDecision::RevertedStage
+                    | CorrectionDecision::IdentityFallback
+                    | CorrectionDecision::SafeFallback
+            )
         );
 
     if let Some(expected_phase) = expectations.fir_phase {
@@ -759,7 +763,7 @@ pub(super) fn validate_home_cinema_result(
 
     match result.metadata.correction_acceptance.as_ref() {
         Some(acceptance) => {
-            if !acceptance.accepted && !partially_reverted {
+            if !acceptance.accepted && !partially_reverted && !safely_reverted {
                 if expectations.allow_safe_revert {
                     if acceptance.reverted_stages.is_empty() {
                         failures.push(format!(
@@ -1023,6 +1027,86 @@ mod tests {
     use crate::registry::QaTier;
     use roomeq_model::home_cinema::logical_channel_names;
     use roomeq_model::{SpeakerConfig, StageOutcome, StageStatus};
+
+    #[test]
+    fn safe_fallback_needs_no_stage_reversion_but_keeps_required_stage_failures() {
+        let curve = roomeq_model::Curve {
+            freq: ndarray::array![20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0, 2560.0],
+            spl: ndarray::Array1::zeros(8),
+            ..Default::default()
+        };
+        let mut acceptance = roomeq_engine::quality::evaluate_correction_acceptance(
+            &curve,
+            &curve,
+            &curve,
+            None,
+            roomeq_model::CorrectionAcceptancePolicy::RuntimeSafety,
+        )
+        .unwrap();
+        acceptance.accepted = false;
+        acceptance.decision = roomeq_model::CorrectionDecision::SafeFallback;
+        acceptance.reverted_stages.clear();
+        acceptance.refresh_outcome();
+        let mut result = roomeq_engine::room_result::RoomOptimizationResult {
+            finalized_decisions: None,
+            channels: Default::default(),
+            channel_results: Default::default(),
+            deployed_source_curves: Default::default(),
+            combined_pre_score: 0.0,
+            combined_post_score: 0.0,
+            metadata: serde_json::from_value(serde_json::json!({
+                "pre_score": 0.0,
+                "post_score": 0.0,
+                "algorithm": "qa-fixture",
+                "iterations": 0,
+                "timestamp": "2026-10-20T00:00:00Z"
+            }))
+            .unwrap(),
+        };
+        result.metadata.correction_acceptance = Some(acceptance);
+        let config = roomeq_model::RoomConfig::default();
+        let expectations = super::HomeCinemaExpectations {
+            allow_safe_revert: true,
+            ..Default::default()
+        };
+        let validate = |result: &roomeq_engine::room_result::RoomOptimizationResult| {
+            super::validate_home_cinema_result(
+                result,
+                &config,
+                super::ProcessingMethod::Iir,
+                expectations.clone(),
+            )
+        };
+        assert!(validate(&result).is_empty());
+        let strict = super::validate_home_cinema_result(
+            &result,
+            &config,
+            super::ProcessingMethod::Iir,
+            super::HomeCinemaExpectations::default(),
+        );
+        assert!(
+            strict
+                .iter()
+                .any(|failure| failure.contains("acceptance rejected"))
+        );
+        result.metadata.stage_outcomes.push(StageOutcome {
+            stage: "routed_common_eq_timing_L".into(),
+            status: StageStatus::Degraded,
+            advisories: vec!["unverified timing".into()],
+            checks: vec![],
+        });
+        let failures = validate(&result);
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.contains("ended Degraded"))
+        );
+        assert!(
+            !failures
+                .iter()
+                .any(|failure| failure.contains("without reverting"))
+        );
+    }
 
     #[test]
     fn qa_rejects_lfe_route_using_the_speaker_crossover() {

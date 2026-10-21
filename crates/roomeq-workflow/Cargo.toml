@@ -42,7 +42,12 @@ tokio = { workspace = true }
 
 [dev-dependencies]
 criterion = { workspace = true }
+stats_alloc = "0.1.10"
 
 [[bench]]
 name = "end_to_end_scaling"
+harness = false
+
+[[bench]]
+name = "subwoofer_scaling"
 harness = false

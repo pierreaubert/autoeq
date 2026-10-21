@@ -112,17 +112,21 @@ fn validate_metamorphic_optimization(
     failures
 }
 
+fn reverted_decision(decision: CorrectionDecision) -> bool {
+    matches!(
+        decision,
+        CorrectionDecision::RevertedStage
+            | CorrectionDecision::IdentityFallback
+            | CorrectionDecision::SafeFallback
+    )
+}
+
 fn correction_reverted(result: &RoomOptimizationResult) -> bool {
     result
         .metadata
         .correction_acceptance
         .as_ref()
-        .is_some_and(|report| {
-            matches!(
-                report.decision,
-                CorrectionDecision::RevertedStage | CorrectionDecision::IdentityFallback
-            )
-        })
+        .is_some_and(|report| reverted_decision(report.decision))
 }
 
 fn optimizer_runs_converged(result: &RoomOptimizationResult) -> bool {
@@ -238,7 +242,12 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         .metadata
         .correction_acceptance
         .as_ref()
-        .is_some_and(|report| report.decision == CorrectionDecision::IdentityFallback);
+        .is_some_and(|report| {
+            matches!(
+                report.decision,
+                CorrectionDecision::IdentityFallback | CorrectionDecision::SafeFallback
+            )
+        });
     let allow_reverted = tc.expect.accepts_safe_revert()
         || tc
             .home_cinema_expectations
@@ -289,7 +298,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
 
     let _ = std::fs::remove_dir_all(temp_dir);
 
-    TestResult::success(
+    let mut qa_result = TestResult::success(
         &name,
         &scenario,
         &solver,
@@ -300,7 +309,26 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         validation_failures,
         reverted,
         dur,
-    )
+    );
+    if let Some(acceptance) = &result.metadata.correction_acceptance {
+        qa_result.correction_decision = Some(acceptance.decision);
+        if let Some(quality) = &acceptance.acoustic_quality {
+            qa_result.final_seats = quality.final_seats.clone();
+        }
+        qa_result.quality_improved = acceptance.acoustic_quality.as_ref().is_some_and(|quality| {
+            super::test_result::delivered_quality_improved(
+                qa_result.passed,
+                acceptance.accepted && acceptance.decision == CorrectionDecision::Accepted,
+                reverted,
+                quality
+                    .final_seats
+                    .iter()
+                    .map(|seat| seat.improvement_lower_bound_db),
+            )
+        });
+    }
+    qa_result.stage_outcomes = result.metadata.stage_outcomes;
+    qa_result
 }
 
 pub(super) fn run_parallel(
@@ -387,6 +415,20 @@ pub fn run_regression_case(
 #[cfg(test)]
 mod tests {
     use super::{rejected_identity_fallback, should_validate_generic_acoustics};
+
+    #[test]
+    fn safe_adjusted_baseline_is_reported_as_reverted_instead_of_corrected() {
+        use roomeq_model::CorrectionDecision;
+        for decision in [
+            CorrectionDecision::SafeFallback,
+            CorrectionDecision::IdentityFallback,
+            CorrectionDecision::RevertedStage,
+        ] {
+            assert!(super::reverted_decision(decision));
+        }
+        assert!(!super::reverted_decision(CorrectionDecision::Accepted));
+        assert!(!super::reverted_decision(CorrectionDecision::Rejected));
+    }
 
     #[test]
     fn safe_revert_skips_only_generic_acoustic_gate_when_explicitly_allowed() {

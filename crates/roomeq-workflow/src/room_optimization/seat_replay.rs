@@ -4,12 +4,24 @@ use roomeq_model::{
     AutoeqError, ChannelDspChain, CoherentTimingEvidence, Curve, FinalSeatEvaluation,
     MeasurementSource, PluginConfigWrapper, Result, RoomConfig, SpeakerConfig,
 };
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 #[cfg(test)]
 mod asymmetric;
 mod bounded_sum;
 mod configured_reference;
+mod correlated_bass;
+
+pub(super) fn validate_final_correlated_bass(
+    result: &mut RoomOptimizationResult,
+    captures: &[Capture],
+    held_out: &HashMap<String, Vec<Curve>>,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> Result<()> {
+    correlated_bass::validate(result, captures, held_out, config, fs, dir)
+}
 pub(super) use configured_reference::ConfiguredComparison;
 pub(super) use configured_reference::attach_configured_comparison;
 pub(super) use configured_reference::configured_selection_metrics;
@@ -332,24 +344,65 @@ fn is_level_alignment(plugin: &PluginConfigWrapper) -> bool {
     )
 }
 
+fn input_chain_owners(result: &RoomOptimizationResult, input: &str) -> BTreeSet<String> {
+    let mut owners = BTreeSet::new();
+    if result.channels.contains_key(input) {
+        owners.insert(input.to_owned());
+    }
+    if let Some(graph) = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+    {
+        for route in graph
+            .routes
+            .iter()
+            .filter(|route| route.source_channel == input)
+        {
+            for owner in route
+                .pre_chain_channel
+                .iter()
+                .chain(route.post_chain_channel.iter())
+                .chain(std::iter::once(&route.destination))
+            {
+                if result.channels.contains_key(owner) {
+                    owners.insert(owner.clone());
+                }
+            }
+        }
+    }
+    owners
+}
+
 fn correction_differs(
     candidate: &RoomOptimizationResult,
     baseline: &RoomOptimizationResult,
     input: &str,
 ) -> bool {
-    let stages = |result: &RoomOptimizationResult| -> Vec<String> {
-        let mut plugins = Vec::new();
-        if let Some(chain) = result.channels.get(input) {
-            plugins.extend(chain.plugins.iter());
-            if let Some(drivers) = &chain.drivers {
-                plugins.extend(drivers.iter().flat_map(|driver| driver.plugins.iter()));
+    let stages = |result: &RoomOptimizationResult| {
+        let mut stages = Vec::new();
+        for owner in input_chain_owners(result, input) {
+            if let Some(chain) = result.channels.get(&owner) {
+                let mut append = |driver: &str, plugins: &[PluginConfigWrapper]| {
+                    stages.extend(
+                        plugins
+                            .iter()
+                            .filter(|plugin| correction(plugin) && !is_level_alignment(plugin))
+                            .map(|plugin| {
+                                format!(
+                                    "{owner}/{driver}:{}:{}",
+                                    plugin.plugin_type, plugin.parameters
+                                )
+                            }),
+                    );
+                };
+                append("", &chain.plugins);
+                for driver in chain.drivers.iter().flatten() {
+                    append(&driver.name, &driver.plugins);
+                }
             }
         }
-        let mut stages: Vec<String> = plugins
-            .into_iter()
-            .filter(|plugin| correction(plugin) && !is_level_alignment(plugin))
-            .map(|plugin| format!("{}:{}", plugin.plugin_type, plugin.parameters))
-            .collect();
         stages.sort();
         stages
     };
@@ -370,6 +423,15 @@ fn replay_scorecard_temporal(
     sample_rate: f64,
     processing_mode: roomeq_model::ProcessingMode,
 ) -> roomeq_model::TemporalQualityEvidence {
+    // Native LFE is a logical input; its FIR and measured temporal receipt
+    // belong to the physical sub chain. A unique route owner establishes that
+    // identity without borrowing an unrelated channel's latency prior.
+    let owners = input_chain_owners(result, input);
+    let input = if !result.channel_results.contains_key(input) && owners.len() == 1 {
+        owners.iter().next().map(String::as_str).unwrap_or(input)
+    } else {
+        input
+    };
     if !result.channel_results.contains_key(input) {
         let Some(chain) = result.channels.get(input) else {
             return roomeq_model::TemporalQualityEvidence::default();
@@ -479,6 +541,63 @@ pub(super) fn restore_structural_baseline(result: &mut RoomOptimizationResult) {
     // Retain search history and counts, but do not bind discarded parameters
     // to the structural playback graph or retain its old confidence summary.
     super::room_optimization_result::refresh_optimizer_evidence(result);
+}
+
+/// Roll back automatic route steering while retaining physical array controls.
+pub(super) fn restore_configured_bass_routes(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+) -> Result<()> {
+    for chain in result.channels.values_mut() {
+        // Configured per-sub low-passes are now represented in the route graph.
+        // Retaining the optimized branch copies would apply a second low-pass.
+        let keep = |plugin: &PluginConfigWrapper| {
+            !(plugin.plugin_type == "crossover"
+                && (plugin.parameters["room_eq_stage"] == "route_owned"
+                    || (plugin.parameters["room_eq_stage"] == "post_route"
+                        && plugin.parameters["output"] == "low")))
+        };
+        chain.plugins.retain(keep);
+        for driver in chain.drivers.iter_mut().flatten() {
+            driver.plugins.retain(keep);
+        }
+    }
+    let physical_per_sub = configured_reference::restore_physical_sub_crossovers(result, config)?;
+    let mut graph = configured_reference::configured_bass_graph(config, physical_per_sub)?;
+    // The measured alignment band is fixed observation support, not an
+    // optimized route control. Retain it so publication can recompute trims.
+    graph.post_dsp_main_alignment_band_hz = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+        .and_then(|previous| previous.post_dsp_main_alignment_band_hz)
+        .or(graph.post_dsp_main_alignment_band_hz);
+    if result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+        .is_some_and(|previous| {
+            previous
+                .advisories
+                .iter()
+                .any(|value| value == "post_dsp_input_levels_aligned_down")
+        })
+        && !graph
+            .advisories
+            .iter()
+            .any(|value| value == "post_dsp_input_levels_aligned_down")
+    {
+        graph
+            .advisories
+            .push("post_dsp_input_levels_aligned_down".into());
+    }
+    if let Some(bass) = result.metadata.bass_management.as_mut() {
+        bass.routing_graph = Some(graph);
+        bass.optimization = None;
+    }
+    Ok(())
 }
 
 fn apply(
@@ -1198,6 +1317,24 @@ fn replay_output(
                 route.gain_db,
                 route.polarity_inverted,
             )];
+            let physical_low_pass = matches!(
+                route.route_kind.as_str(),
+                "redirected_bass_lowpass_to_sub" | "lfe_lowpass_to_sub"
+            ) && post
+                .plugins
+                .iter()
+                .chain(
+                    post.drivers
+                        .iter()
+                        .flatten()
+                        .filter(|driver| driver.name == route.destination)
+                        .flat_map(|driver| &driver.plugins),
+                )
+                .any(|plugin| {
+                    plugin.plugin_type == "crossover"
+                        && plugin.parameters["output"] == "low"
+                        && plugin.parameters["room_eq_stage"] == "post_route"
+                });
             if let Some(f) = route.high_pass_hz.or(route.low_pass_hz) {
                 route_plugins.push(roomeq_engine::output::create_crossover_plugin(
                     &route.crossover_type,
@@ -1208,12 +1345,13 @@ fn replay_output(
                         "low"
                     },
                 ));
-            } else {
+            } else if !physical_low_pass {
                 // The routing graph omits the crossover when the physical
                 // destination chain carries it as a route-owned plugin (the
                 // serialized driver's own low-pass). Apply that serialized
-                // filter so replay matches the delivered graph instead of
-                // summing the destination's full-range capture.
+                // filter only when there is no physical post-route low-pass.
+                // A common route-owned compatibility LP can represent LFE;
+                // adding it to a per-output bass path applies a second cutoff.
                 route_plugins.extend(
                     post.plugins
                         .iter()
@@ -1706,7 +1844,8 @@ fn physical_main_quality(
             partition: context.partition.to_string(),
             seat_index: seat,
             sample_rate_hz: context.fs,
-            baseline_kind: "pre_finalization_optimized_graph_without_eq_correction".into(),
+            baseline_kind: "pre_finalization_optimized_graph_without_eq_correction_isolated_main"
+                .into(),
             replayed_serialized_dsp_graph_projection_sha256: None,
             replayed_playback_graph_sha256: None,
             baseline_measurement_contributors: capture_measurement_contributors(
@@ -2075,6 +2214,13 @@ fn validate_final_seats_body(
                 });
         }
     }
+    let lfe_target_reference =
+        configured_reference::LfeTargetReference::new(baseline.unwrap_or(result), config)?;
+    let lfe_resources = lfe_target_reference
+        .as_ref()
+        .map(|_| crate::prepare_eq_resources(&config.optimizer, config.target_curve.as_ref()))
+        .transpose()
+        .map_err(|error| invalid(error.to_string()))?;
     for (partition, physical) in [("training", &training), ("held_out", &held)] {
         if physical.is_empty() {
             continue;
@@ -2182,18 +2328,27 @@ fn validate_final_seats_body(
                             && phase.iter().all(|value| value.is_finite())
                     })
                 });
-                let target = result
+                let mut target = result
                     .channels
                     .get(input)
                     .and_then(|c| c.target_curve.clone())
                     .map(Curve::from);
+                let mut calibrated_lfe_target = false;
+                if let (Some(reference), Some(resources)) = (&lfe_target_reference, &lfe_resources)
+                    && let Some(lfe_target) =
+                        reference.target(physical, input, seat, &context, resources)?
+                {
+                    target = Some(lfe_target);
+                    calibrated_lfe_target = true;
+                }
                 // A physical carrier authenticates the coherent target's
                 // calibrated level; relative targets use the frozen pre offset.
-                let normalize_level = target.is_none()
-                    || result
-                        .channels
-                        .get(input)
-                        .is_none_or(|chain| chain.physical_correction_target.is_none());
+                let normalize_level = !calibrated_lfe_target
+                    && (target.is_none()
+                        || result
+                            .channels
+                            .get(input)
+                            .is_none_or(|chain| chain.physical_correction_target.is_none()));
                 let schroeder_hz =
                     roomeq_model::auto_tune::resolved_schroeder_hz(&config.optimizer);
                 let lo = config
@@ -2312,7 +2467,6 @@ fn validate_final_seats_body(
                     reference.logical_input = Some(input.clone());
                 }
                 score.correction_band_hz = Some(correction_band);
-                let replay_count_before = replay_trace.as_ref().map_or(0, |trace| trace.len());
                 if let Some(main_score) = physical_main_quality(
                     result,
                     baseline.unwrap_or(result),
@@ -2329,14 +2483,10 @@ fn validate_final_seats_body(
                     // shape, uncertainty, and crossover quality stay intact.
                     score.useful_output = main_score.useful_output;
                 }
-                // A logical output without a routed physical-main branch is
-                // scored directly from these same pre/post curves. Retain
-                // those inputs too; otherwise an opt-in diagnostic could
-                // claim the replay was visited while losing its actual score
-                // basis merely because this graph has no bass route.
-                if let Some(replay_trace) = replay_trace.as_deref_mut()
-                    && replay_trace.len() == replay_count_before
-                {
+                // Retain the logical quality scorer as well as the isolated
+                // Main useful-output scorer. They grade different transfers;
+                // one must not stand in for the other's numeric evidence.
+                if let Some(replay_trace) = replay_trace.as_deref_mut() {
                     replay_trace.push(UsefulOutputReplayCapture {
                         logical_input: input.clone(),
                         partition: partition.into(),
@@ -2664,6 +2814,7 @@ fn validate_final_seats_body(
         .metadata
         .stage_outcomes
         .push(concealment_stage(concealment));
+    correlated_bass::validate(result, captures, held_out, config, fs, dir)?;
     Ok(())
 }
 
@@ -2813,6 +2964,23 @@ mod tests {
         // not a zero prior that reads ~10 ms of spurious dispersion.
         assert_eq!(temporal.latency_ms, Some(42.666666666666664));
         assert!(temporal.temporal_evidence_available);
+        let (mut routed, _, _, _) = lfe_to_sub_fixture(false);
+        routed
+            .channels
+            .get_mut("Sub1")
+            .unwrap()
+            .fir_temporal_masking = result.channels["L"].fir_temporal_masking.clone();
+        routed.channel_results.get_mut("Sub1").unwrap().fir_coeffs = Some(vec![0.0; 4096]);
+        let lfe_temporal = super::replay_scorecard_temporal(
+            &routed,
+            "LFE",
+            &curve,
+            &curve,
+            48_000.0,
+            roomeq_model::ProcessingMode::Hybrid,
+        );
+        assert_eq!(lfe_temporal.latency_ms, temporal.latency_ms);
+        assert!(lfe_temporal.temporal_evidence_available);
         // Inputs without optimizer evidence keep the zero prior.
         let missing = super::replay_scorecard_temporal(
             &result,
@@ -2823,6 +2991,29 @@ mod tests {
             roomeq_model::ProcessingMode::Hybrid,
         );
         assert_eq!(missing, roomeq_model::TemporalQualityEvidence::default());
+    }
+
+    #[test]
+    fn native_lfe_detects_correction_changes_on_its_physical_owner() {
+        let (mut result, _, _, _) = lfe_to_sub_fixture(false);
+        let baseline = result.clone();
+        assert!(!super::correction_differs(&result, &baseline, "LFE"));
+        let filter = math_audio_iir_fir::Biquad::new(
+            math_audio_iir_fir::BiquadFilterType::Peak,
+            55.0,
+            48_000.0,
+            1.0,
+            -6.0,
+        );
+        result.channels.get_mut("Sub1").unwrap().plugins.push(
+            roomeq_engine::output::create_labeled_eq_plugin(&[filter], "room_eq_correction"),
+        );
+        assert!(super::correction_differs(&result, &baseline, "LFE"));
+        assert!(!super::correction_differs(
+            &result,
+            &baseline,
+            "unrouted_input"
+        ));
     }
 
     #[test]
@@ -5040,6 +5231,93 @@ mod tests {
             "diagnostic tracing changed score or acceptance evidence"
         );
         (traced, trace)
+    }
+
+    #[test]
+    fn redirected_physical_lowpass_does_not_add_the_compatibility_lfe_filter() {
+        for driver_owned in [false, true] {
+            let (mut result, mut config, _) = routed_fixture();
+            config.optimizer.min_freq = 20.0;
+            config.optimizer.max_freq = 300.0;
+            let raw = Curve {
+                freq: ndarray::array![20.0, 40.0, 80.0, 120.0, 300.0],
+                spl: ndarray::Array1::from_elem(5, 80.0),
+                phase: Some(ndarray::Array1::zeros(5)),
+                ..Default::default()
+            };
+            let mut physical_lp =
+                roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "low");
+            physical_lp.parameters["room_eq_stage"] = serde_json::json!("post_route");
+            let compatibility_lp = roomeq_engine::topology::mark_route_owned_plugin(
+                roomeq_engine::output::create_crossover_plugin("LR24", 120.0, "low"),
+            );
+            let destination = if driver_owned { "physical" } else { "sub" };
+            let chain = result.channels.get_mut("sub").unwrap();
+            chain.plugins = vec![compatibility_lp];
+            if driver_owned {
+                chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+                    name: destination.into(),
+                    index: 0,
+                    plugins: vec![physical_lp],
+                    initial_curve: Some((&raw).into()),
+                    measured_band_hz: Some([20.0, 300.0]),
+                    measured_acoustics: None,
+                }]);
+            } else {
+                chain.plugins.push(physical_lp);
+            }
+            let graph = result
+                .metadata
+                .bass_management
+                .as_mut()
+                .unwrap()
+                .routing_graph
+                .as_mut()
+                .unwrap();
+            graph.routes[1].destination = destination.into();
+            graph.routes[1].low_pass_hz = None;
+            graph.output_channels = vec!["left".into(), destination.into()];
+            graph.physical_sub_outputs = vec![destination.into()];
+            let physical = BTreeMap::from([
+                ("left".into(), vec![raw.clone()]),
+                (destination.into(), vec![raw]),
+            ]);
+            let dir = tempfile::tempdir().unwrap();
+            let context = ReplayContext {
+                config: &config,
+                partition: "training",
+                fs: 48_000.0,
+                dir: dir.path(),
+            };
+            let (replayed, outputs) = replay_output(
+                &result,
+                &physical,
+                "left",
+                0,
+                false,
+                &context,
+                Some(destination),
+            )
+            .unwrap();
+            assert_eq!(outputs, vec![destination]);
+            let index = replayed
+                .curve
+                .freq
+                .iter()
+                .position(|f| (*f - 80.0).abs() < 1e-9)
+                .unwrap();
+            assert!(
+                (replayed.curve.spl[index] - (80.0 - 6.0 - 20.0 * 2.0_f64.log10())).abs() < 1e-7
+            );
+            let expected = -180.0 - 360.0 * 80.0 * 0.002;
+            let phase_error = (replayed.curve.phase.as_ref().unwrap()[index] - expected + 180.0)
+                .rem_euclid(360.0)
+                - 180.0;
+            assert!(
+                phase_error.abs() < 1e-7,
+                "driver_owned={driver_owned}: phase error {phase_error}"
+            );
+        }
     }
 
     #[test]

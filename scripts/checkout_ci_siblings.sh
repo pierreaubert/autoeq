@@ -21,7 +21,8 @@ else
         exit 1
     fi
     sibling_remote_base=${ci_server%/}/$ci_owner
-    math_revision=748192f93ddf66b063893c9d69333c1a09c117af
+    # Includes the reusable FIR designer API required by RoomEQ.
+    math_revision=d2907882a52adbbeaf9f9749e8a6cd12b0847c22
     sofa_revision=9b290c6b9384831bf2e6b76e005beff755fe32ca
     toolkit_revision=a1989afc2b070081763f9f888735ec51ee8a82b0
 fi

@@ -146,6 +146,45 @@ fn external_target_keeps_pre_score_identical_across_fir_modes() {
 }
 
 #[test]
+fn magnitude_fir_modes_export_their_designer_delay() {
+    let measurement = curve(true);
+    let prepared = prepared(measurement.clone());
+    let features = preprocessed(&measurement);
+    for mode in [FirChannelMode::PhaseLinear, FirChannelMode::Hybrid] {
+        for (phase, delay_samples) in [("linear", 32), ("minimum", 0)] {
+            let mut room = config();
+            room.optimizer.fir.as_mut().unwrap().phase = phase.into();
+            let target = build_target_context("left", &room, &measurement, None);
+            let result = process_fir_channel(FirChannelRequest {
+                mode,
+                channel_name: "left",
+                prepared: &prepared,
+                room_config: &room,
+                sample_rate: 48_000.0,
+                target: &target,
+                preprocessed: &features,
+                optimizer: &room.optimizer,
+                eq_resources: &EqResources::default(),
+                sidecar_reference: reference("left.wav"),
+                callback: None,
+            })
+            .unwrap();
+            let convolution = result
+                .channel
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_type == "convolution")
+                .unwrap();
+            assert_eq!(
+                convolution.parameters["correction_design_delay_ms"],
+                serde_json::json!(delay_samples as f64 * 1000.0 / 48_000.0)
+            );
+            assert_eq!(result.fir_coeffs.as_ref().unwrap().len(), 64);
+        }
+    }
+}
+
+#[test]
 fn kirkeby_excess_phase_request_exports_causal_design_delay() {
     let curve = curve(true);
     let prepared = prepared(curve.clone());

@@ -3,6 +3,13 @@ use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
 use std::collections::BTreeMap;
 
+pub(super) fn bass_stage_evaluation_limit(config: &roomeq_model::RoomConfig) -> usize {
+    config
+        .optimizer
+        .bass_management_evaluation_limit
+        .map_or(config.optimizer.max_iter, std::num::NonZeroUsize::get)
+}
+
 pub(super) fn grouped_home_cinema_roles(main_roles: &[String]) -> BTreeMap<String, Vec<String>> {
     let mut groups: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for role in main_roles {
@@ -27,11 +34,63 @@ pub(super) fn differential_evolution_minimize<F>(
 where
     F: Fn(&[f64]) -> f64,
 {
+    differential_evolution_minimize_with_control(
+        lower_bounds,
+        upper_bounds,
+        initial,
+        objective,
+        requested_population,
+        requested_evals,
+        seed,
+        None,
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "bounded search keeps existing limits and an optional shared control explicit"
+)]
+pub(super) fn differential_evolution_minimize_with_control<F>(
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    initial: &[f64],
+    objective: &F,
+    requested_population: usize,
+    requested_evals: usize,
+    seed: u64,
+    control: Option<&autoeq_optim::optim::run_control::OptimizerRunControl>,
+) -> (Vec<f64>, f64)
+where
+    F: Fn(&[f64]) -> f64,
+{
+    let start = std::time::Instant::now();
     let dims = initial.len();
-    let population_size = requested_population.max(dims * 4).clamp(12, 96);
-    let max_evals = requested_evals
-        .max(population_size * 4)
-        .clamp(population_size, 2_000);
+    let max_evals = control.map_or(requested_evals, |control| {
+        requested_evals.min(control.remaining_evaluations())
+    });
+    if max_evals == 0 {
+        return (initial.to_vec(), f64::INFINITY);
+    }
+    // Never inflate a caller's score cap to fit DE. Small caps score a partial
+    // initial population; mutation only starts once four distinct donors fit.
+    let population_size = requested_population
+        .max(dims * 4)
+        .clamp(4, 96)
+        .min(max_evals);
+    let objective = |candidate: &[f64]| {
+        control.map_or_else(
+            || objective(candidate),
+            |control| {
+                control
+                    .evaluate(
+                        autoeq_optim::optim::run_control::EvaluationStage::Search,
+                        1,
+                        || objective(candidate),
+                    )
+                    .unwrap_or(f64::INFINITY)
+            },
+        )
+    };
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     let mut population = Vec::with_capacity(population_size);
     population.push(initial.to_vec());
@@ -70,6 +129,14 @@ where
         .unwrap_or(0);
 
     while evals < max_evals {
+        if control.is_some_and(|control| {
+            let snapshot = control.snapshot();
+            snapshot.cancellation_requested
+                || snapshot.deadline_reached
+                || control.remaining_evaluations() == 0
+        }) {
+            break;
+        }
         for target_idx in 0..population_size {
             if evals >= max_evals {
                 break;
@@ -121,6 +188,7 @@ where
         }
     }
 
+    log::debug!(target: "roomeq_engine::search", "bass_de objective_evaluations={evals} evaluation_limit={max_evals} elapsed_ms={:.3} stop=budget_or_control", start.elapsed().as_secs_f64() * 1000.0);
     (population[best_idx].clone(), scores[best_idx])
 }
 
@@ -252,6 +320,44 @@ mod tests {
             delay_ms: 0.0,
             polarity_inverted: false,
         }
+    }
+
+    #[test]
+    fn strict_search_budgets_do_not_grow_to_fit_a_population() {
+        for budget in [0, 1, 3, 12, 97, 2_100] {
+            let calls = std::cell::Cell::new(0);
+            let objective = |candidate: &[f64]| {
+                calls.set(calls.get() + 1);
+                (candidate[0] - 0.25).powi(2)
+            };
+            let _ =
+                differential_evolution_minimize(&[-1.0], &[1.0], &[0.0], &objective, 96, budget, 7);
+            assert_eq!(calls.get(), budget, "budget {budget}");
+        }
+    }
+
+    #[test]
+    fn shared_search_control_stops_between_objectives() {
+        use autoeq_optim::optim::run_control::OptimizerRunControl;
+        let control = OptimizerRunControl::new(std::num::NonZeroUsize::new(100).unwrap());
+        let calls = std::cell::Cell::new(0);
+        let objective = |candidate: &[f64]| {
+            calls.set(calls.get() + 1);
+            control.request_cancel();
+            candidate[0] * candidate[0]
+        };
+        let _ = differential_evolution_minimize_with_control(
+            &[-1.0],
+            &[1.0],
+            &[0.5],
+            &objective,
+            20,
+            100,
+            7,
+            Some(&control),
+        );
+        assert_eq!(calls.get(), 1);
+        assert_eq!(control.snapshot().evaluations_completed, 1);
     }
 
     #[test]

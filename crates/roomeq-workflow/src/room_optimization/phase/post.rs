@@ -402,6 +402,12 @@ mod tests {
         );
         let generated = result.unwrap();
         assert!(!generated.coeffs.is_empty());
+        let plugin = generated.convolution_plugin(&config, 48_000.0);
+        assert_eq!(plugin.parameters["ir_file"], generated.filename);
+        assert_eq!(
+            plugin.parameters["correction_design_delay_ms"],
+            serde_json::json!(32.0 * 1000.0 / 48_000.0)
+        );
     }
 
     #[test]

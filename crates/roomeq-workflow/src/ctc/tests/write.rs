@@ -184,6 +184,46 @@ fn joint_room_eq_path_folds_channel_gain_into_ctc_solve() {
         serde_json::from_slice(&std::fs::read(&joint.artifact).unwrap()).unwrap();
     assert_eq!(artifact["room_eq_correction_applied"], true);
     assert_eq!(artifact["room_eq_correction_channels"][0], "left");
+
+    for with_source_aliases in [false, true] {
+        let mut emitted = HashMap::from([
+            ("L".to_string(), channels["left"].clone()),
+            ("R".to_string(), channels["right"].clone()),
+        ]);
+        if with_source_aliases {
+            // The emitted physical chain must win over a measurement alias.
+            for name in ["left", "right"] {
+                emitted.insert(
+                    name.to_string(),
+                    roomeq_engine::output::build_channel_dsp_chain(
+                        name,
+                        Some(12.0),
+                        Vec::new(),
+                        &[],
+                    ),
+                );
+            }
+        }
+        let physical = maybe_generate_recommended_xtc(
+            &cfg,
+            &sys,
+            48_000.0,
+            &dir.path().join(format!("physical-{with_source_aliases}")),
+            Some(&emitted),
+        )
+        .unwrap()
+        .expect("physical CTC report");
+        assert!(physical.room_eq_correction_applied);
+        assert_eq!(physical.room_eq_correction_channels, ["L", "R"]);
+        assert!((physical.max_filter_gain_db - joint.max_filter_gain_db).abs() < 1e-12);
+        let physical_artifact: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&physical.artifact).unwrap()).unwrap();
+        assert_eq!(physical_artifact["filters"], artifact["filters"]);
+        assert_eq!(
+            physical_artifact["room_eq_correction_channels"],
+            serde_json::json!(["L", "R"])
+        );
+    }
 }
 
 #[test]

@@ -180,7 +180,7 @@ pub fn refine_bass_management_sub_outputs(
         &initial,
         &objective,
         config.optimizer.population,
-        config.optimizer.max_iter,
+        super::misc::bass_stage_evaluation_limit(config),
         config.optimizer.seed.unwrap_or(0x5ab_014),
     );
     if best_score >= baseline - 1.0e-6 {

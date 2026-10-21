@@ -334,6 +334,20 @@ impl OptimizerRunControl {
         snapshot(self.inner.budget.get(), &state)
     }
 
+    /// Evaluate one candidate after admitting it through the shared budget gate.
+    ///
+    /// Returns `None` without calling `objective` when cancellation, a deadline,
+    /// or the search quota closes the gate. Validation is counted separately.
+    pub fn evaluate<T>(
+        &self,
+        stage: EvaluationStage,
+        objective_components: usize,
+        objective: impl FnOnce() -> T,
+    ) -> Option<T> {
+        let _guard = self.begin_evaluation(stage, objective_components)?;
+        Some(objective())
+    }
+
     pub(crate) fn begin_evaluation(
         &self,
         stage: EvaluationStage,

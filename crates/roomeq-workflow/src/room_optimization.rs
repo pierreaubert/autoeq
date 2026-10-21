@@ -306,68 +306,77 @@ fn optimize_room_pipeline_impl_with_optional_recovery(
         finalization_diagnostic,
         replay,
     )?;
-    if request.config.optimizer.processing_mode == ProcessingMode::Hybrid
-        && recovery.is_none()
-        && finalization_diagnostic.is_none()
-    {
-        let comparison_complete = hybrid_parts::select(&mut result, |mode| {
-            let mut search_config = request.config.clone();
-            search_config.optimizer.processing_mode = mode.clone();
-            search_config.optimizer.mixed_config = None;
-            let part_dir = context
-                .output_dir
-                .unwrap_or_else(|| Path::new("."))
-                .join("hybrid-parts")
-                .join(match mode {
-                    ProcessingMode::LowLatency => "iir",
-                    _ => "fir",
-                });
-            if observers.stopped() {
-                return Err(AutoeqError::OptimizationFailed {
-                    message: "hybrid part comparison stopped".into(),
-                });
-            }
-            info!(
-                "Hybrid comparison: evaluating standalone {:?} under requested Hybrid safety budgets",
-                mode
-            );
-            context.artifact_store.create_dir_all(&part_dir)?;
-            let part_context = crate::WorkflowContext {
-                output_dir: Some(&part_dir),
-                artifact_store: context.artifact_store,
-                validation_measurements: context.validation_measurements,
-            };
-            if observers.stopped() {
-                return Err(AutoeqError::OptimizationFailed {
-                    message: "hybrid part comparison stopped".into(),
-                });
-            }
-            let mut candidate = optimize_room_candidate(
-                request,
-                &part_context,
-                observers.observer(),
-                frequency_samples,
-                None,
-                None,
-                FrozenCandidateReplay {
-                    search_config: &search_config,
-                    ..replay
-                },
-            )?;
-            hybrid_parts::relocate_resources(
-                &mut candidate,
-                Path::new("hybrid-parts")
+    if request.config.optimizer.processing_mode == ProcessingMode::Hybrid && recovery.is_none() {
+        let comparison = seat_replay::ConfiguredComparison::new(
+            &result,
+            &seat_captures,
+            context.validation_measurements,
+            request.config,
+            request.sample_rate,
+            context.output_dir.unwrap_or_else(|| Path::new(".")),
+        );
+        let comparison_complete = hybrid_parts::select_with_reference(
+            &mut result,
+            |mode| {
+                let mut search_config = request.config.clone();
+                search_config.optimizer.processing_mode = mode.clone();
+                search_config.optimizer.mixed_config = None;
+                let part_dir = context
+                    .output_dir
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("hybrid-parts")
                     .join(match mode {
                         ProcessingMode::LowLatency => "iir",
                         _ => "fir",
-                    })
-                    .as_path(),
-                context.output_dir.unwrap_or_else(|| Path::new(".")),
-                context.artifact_store,
-                request.sample_rate,
-            )?;
-            Ok(candidate)
-        });
+                    });
+                if observers.stopped() {
+                    return Err(AutoeqError::OptimizationFailed {
+                        message: "hybrid part comparison stopped".into(),
+                    });
+                }
+                info!(
+                    "Hybrid comparison: evaluating standalone {:?} under requested Hybrid safety budgets",
+                    mode
+                );
+                context.artifact_store.create_dir_all(&part_dir)?;
+                let part_context = crate::WorkflowContext {
+                    output_dir: Some(&part_dir),
+                    artifact_store: context.artifact_store,
+                    validation_measurements: context.validation_measurements,
+                };
+                if observers.stopped() {
+                    return Err(AutoeqError::OptimizationFailed {
+                        message: "hybrid part comparison stopped".into(),
+                    });
+                }
+                let mut candidate = optimize_room_candidate(
+                    request,
+                    &part_context,
+                    observers.observer(),
+                    frequency_samples,
+                    None,
+                    None,
+                    FrozenCandidateReplay {
+                        search_config: &search_config,
+                        ..replay
+                    },
+                )?;
+                hybrid_parts::relocate_resources(
+                    &mut candidate,
+                    Path::new("hybrid-parts")
+                        .join(match mode {
+                            ProcessingMode::LowLatency => "iir",
+                            _ => "fir",
+                        })
+                        .as_path(),
+                    context.output_dir.unwrap_or_else(|| Path::new(".")),
+                    context.artifact_store,
+                    request.sample_rate,
+                )?;
+                Ok(candidate)
+            },
+            &comparison,
+        );
         let processing = crate::final_ledger::processing_snapshot(&result)
             .map_err(|message| AutoeqError::OptimizationFailed { message })?;
         if !comparison_complete {
@@ -2300,9 +2309,7 @@ fn assemble_workflow_result_with_frequency_samples(
             if let Some(chain) = result.channels.get_mut(&name) {
                 chain
                     .plugins
-                    .push(roomeq_engine::output::create_convolution_plugin(
-                        &generated.filename,
-                    ));
+                    .push(generated.convolution_plugin(&config.optimizer, sample_rate));
             }
             sync_reported_fir_adjustment(
                 &name,

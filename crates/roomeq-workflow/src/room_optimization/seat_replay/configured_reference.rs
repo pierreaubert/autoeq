@@ -1,8 +1,152 @@
 //! Whole-playback scores use configured controls, never optimized baseline controls.
 use super::*;
+mod lfe_target;
+pub(super) use lfe_target::LfeTargetReference;
 use roomeq_model::{ConfiguredBaselineComparison, ConfiguredBaselineResidual};
 
 const METHOD: &str = "configured_routing_unprocessed_captures_v1";
+
+/// Build fixed configured routes, including per-physical-sub crossover references.
+pub(super) fn configured_bass_graph(
+    config: &RoomConfig,
+    physical_per_sub: bool,
+) -> Result<roomeq_model::BassManagementRoutingGraph> {
+    let mut configured = config.clone();
+    if let Some(crossovers) = configured.crossovers.as_mut() {
+        for crossover in crossovers.values_mut() {
+            if crossover.frequency.is_none() {
+                crossover.frequency = crossover
+                    .frequency_range
+                    .map(|(low, high)| (low * high).sqrt());
+            }
+            crossover.crossover_type =
+                roomeq_engine::topology::bass_management_crossover_type_candidates(
+                    &crossover.crossover_type,
+                )
+                .first()
+                .cloned()
+                .ok_or_else(|| invalid("configured crossover family unavailable"))?;
+        }
+    }
+    let mut graph = roomeq_engine::home_cinema::bass_management_routing_graph(&configured, None)
+        .ok_or_else(|| invalid("configured routing graph unavailable"))?;
+    // Per-sub LP references must use each declared crossover, rather than
+    // the optimized asymmetric values or the first shared LP for all subs.
+    if let Some(subs) = configured
+        .system
+        .as_ref()
+        .and_then(|system| system.subwoofers.as_ref())
+        && let Some(roomeq_model::SubwooferCrossoverRef::PerSub(keys)) = &subs.crossover
+    {
+        for route in &mut graph.routes {
+            if route.route_kind != "redirected_bass_lowpass_to_sub" {
+                continue;
+            }
+            if let Some(index) = subs
+                .outputs
+                .iter()
+                .position(|output| output.id == route.destination)
+                && let Some(crossover) = keys
+                    .get(index)
+                    .and_then(|key| configured.crossovers.as_ref()?.get(key))
+            {
+                route.low_pass_hz = if physical_per_sub {
+                    None
+                } else {
+                    crossover.frequency
+                };
+                route.crossover_type = crossover.crossover_type.clone();
+            }
+        }
+    }
+    Ok(graph)
+}
+
+/// Restore configured physical low-passes for every input, including LFE.
+pub(super) fn restore_physical_sub_crossovers(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+) -> Result<bool> {
+    let Some(subs) = config
+        .system
+        .as_ref()
+        .and_then(|system| system.subwoofers.as_ref())
+    else {
+        return Ok(false);
+    };
+    let Some(roomeq_model::SubwooferCrossoverRef::PerSub(keys)) = &subs.crossover else {
+        return Ok(false);
+    };
+    // The engine treats one-element lists as the legacy shared crossover,
+    // not a physical-output filter. The frozen graph must use the same rule.
+    if keys.len() < 2 {
+        return Ok(false);
+    }
+    let Some(graph) = result
+        .metadata
+        .bass_management
+        .as_ref()
+        .and_then(|bass| bass.routing_graph.as_ref())
+    else {
+        return Ok(false);
+    };
+    // A legacy group alias does not enumerate physical outputs; that path
+    // retains the configured route-owned crossover rather than inventing IDs.
+    if graph.physical_sub_outputs.len() != subs.outputs.len()
+        || !subs
+            .outputs
+            .iter()
+            .all(|output| graph.physical_sub_outputs.contains(&output.id))
+    {
+        return Ok(false);
+    }
+    for (index, output) in subs.outputs.iter().enumerate() {
+        let crossover = keys
+            .get(index)
+            .and_then(|key| config.crossovers.as_ref()?.get(key))
+            .ok_or_else(|| invalid("configured physical sub crossover unavailable"))?;
+        let frequency = crossover
+            .frequency
+            .or_else(|| crossover.frequency_range.map(|(lo, hi)| (lo * hi).sqrt()))
+            .ok_or_else(|| invalid("configured physical sub crossover frequency unavailable"))?;
+        let kind = roomeq_engine::topology::bass_management_crossover_type_candidates(
+            &crossover.crossover_type,
+        )
+        .into_iter()
+        .next()
+        .ok_or_else(|| invalid("configured physical sub crossover family unavailable"))?;
+        let plugin = PluginConfigWrapper {
+            plugin_type: "crossover".into(),
+            parameters: serde_json::json!({
+                "type":kind,"frequency":frequency,"output":"low","room_eq_stage":"post_route"
+            }),
+        };
+        let mut installed = false;
+        for (owner, chain) in &mut result.channels {
+            if let Some(driver) = chain
+                .drivers
+                .as_mut()
+                .and_then(|drivers| drivers.iter_mut().find(|driver| driver.name == output.id))
+            {
+                driver.plugins.push(plugin.clone());
+                installed = true;
+                break;
+            }
+            if *owner == output.id && chain.drivers.is_none() {
+                chain.plugins.push(plugin.clone());
+                installed = true;
+                break;
+            }
+        }
+        if !installed {
+            return Err(invalid(format!(
+                "configured physical sub '{}' has no output owner",
+                output.id
+            )));
+        }
+    }
+    Ok(true)
+}
 
 fn reference_graph(
     result: &RoomOptimizationResult,
@@ -25,7 +169,16 @@ fn reference_graph(
     }
     let mut reference = result.clone();
     for chain in reference.channels.values_mut() {
-        chain.plugins.clear();
+        // Explicit physical calibration is configuration, not an optimized
+        // correction or derived channel alignment. A reference that discards
+        // it cannot be published as a configured fallback on the same plane.
+        chain.plugins.retain(|plugin| {
+            matches!(plugin.plugin_type.as_str(), "gain" | "delay")
+                && matches!(
+                    plugin.parameters["label"].as_str(),
+                    Some("speaker_calibration" | "configured_sub_gain")
+                )
+        });
         if let Some(drivers) = &mut chain.drivers {
             // Joint array steering is structural for this comparison: the
             // finalization candidates being judged never scale the plain
@@ -66,55 +219,31 @@ fn reference_graph(
         channel.fir_coeffs = None;
     }
     restore_configured_driver_crossovers(&mut reference, config)?;
+    let physical_per_sub = restore_physical_sub_crossovers(&mut reference, config)?;
     if let Some(bass) = reference.metadata.bass_management.as_mut()
         && bass.routing_graph.is_some()
     {
-        let mut configured = config.clone();
-        if let Some(crossovers) = configured.crossovers.as_mut() {
-            for crossover in crossovers.values_mut() {
-                if crossover.frequency.is_none() {
-                    crossover.frequency = crossover
-                        .frequency_range
-                        .map(|(low, high)| (low * high).sqrt());
-                }
-                crossover.crossover_type =
-                    roomeq_engine::topology::bass_management_crossover_type_candidates(
-                        &crossover.crossover_type,
-                    )
-                    .first()
-                    .cloned()
-                    .ok_or_else(|| invalid("configured crossover family unavailable"))?;
-            }
-        }
-        let mut graph =
-            roomeq_engine::home_cinema::bass_management_routing_graph(&configured, None)
-                .ok_or_else(|| invalid("configured routing graph unavailable"))?;
-        // Per-sub LP references must use each declared crossover, rather than
-        // the optimized asymmetric values or the first shared LP for all subs.
-        if let Some(subs) = configured
-            .system
+        let mut graph = configured_bass_graph(config, physical_per_sub)?;
+        graph.post_dsp_main_alignment_band_hz = bass
+            .routing_graph
             .as_ref()
-            .and_then(|system| system.subwoofers.as_ref())
-            && let Some(roomeq_model::SubwooferCrossoverRef::PerSub(keys)) = &subs.crossover
+            .and_then(|previous| previous.post_dsp_main_alignment_band_hz)
+            .or(graph.post_dsp_main_alignment_band_hz);
+        if bass.routing_graph.as_ref().is_some_and(|previous| {
+            previous
+                .advisories
+                .iter()
+                .any(|value| value == "post_dsp_input_levels_aligned_down")
+        }) && !graph
+            .advisories
+            .iter()
+            .any(|value| value == "post_dsp_input_levels_aligned_down")
         {
-            for route in &mut graph.routes {
-                if route.route_kind != "redirected_bass_lowpass_to_sub" {
-                    continue;
-                }
-                if let Some(index) = subs
-                    .outputs
-                    .iter()
-                    .position(|output| output.id == route.destination)
-                    && let Some(crossover) = keys
-                        .get(index)
-                        .and_then(|key| configured.crossovers.as_ref()?.get(key))
-                {
-                    route.low_pass_hz = crossover.frequency;
-                    route.crossover_type = crossover.crossover_type.clone();
-                }
-            }
+            graph
+                .advisories
+                .push("post_dsp_input_levels_aligned_down".into());
         }
-        let effective = roomeq_engine::home_cinema::effective_bass_management(&configured);
+        let effective = roomeq_engine::home_cinema::effective_bass_management(config);
         let physical_lfe_gain = effective
             .as_ref()
             .filter(|management| management.config.apply_lfe_gain_to_chain)
@@ -416,6 +545,7 @@ pub(in super::super) struct ConfiguredComparison<'a> {
     fs: f64,
     dir: &'a Path,
     reference: std::result::Result<RoomOptimizationResult, String>,
+    lfe_target: Option<LfeTargetReference>,
     excursion: BTreeMap<String, Vec<math_audio_iir_fir::Biquad>>,
     digest: Option<String>,
     training: std::result::Result<BTreeMap<String, Vec<Curve>>, String>,
@@ -448,11 +578,16 @@ impl<'a> ConfiguredComparison<'a> {
             .as_ref()
             .ok()
             .and_then(|reference| graph_hash(reference).ok());
+        let lfe_target = reference
+            .as_ref()
+            .ok()
+            .and_then(|reference| LfeTargetReference::from_configured(reference, config));
         Self {
             config,
             fs,
             dir,
             reference,
+            lfe_target,
             excursion,
             digest,
             training: physical_captures(captures, result).map_err(|error| error.to_string()),
@@ -620,14 +755,23 @@ impl<'a> ConfiguredComparison<'a> {
                         .and_then(|chain| chain.physical_correction_target.as_ref())
                 })
                 .flatten();
-            let normalize_level = direct_physical_target.is_none();
+            let mut normalize_level = direct_physical_target.is_none();
             let target_measurement = if self.excursion.contains_key(input) {
                 measured(physical, input, seat)?
             } else {
                 &pre.curve
             };
-            let target = direct_physical_target
-                .map(|target| Curve::from(target.curve.clone()))
+            let lfe_target = self
+                .lfe_target
+                .as_ref()
+                .map(|reference| reference.target(physical, input, seat, &context, resources))
+                .transpose()?
+                .flatten();
+            if lfe_target.is_some() {
+                normalize_level = false;
+            }
+            let target = lfe_target
+                .or_else(|| direct_physical_target.map(|target| Curve::from(target.curve.clone())))
                 .unwrap_or_else(|| {
                     let target = roomeq_engine::fir::prepared_fir_target_curve(
                         target_measurement,
@@ -1200,13 +1344,47 @@ mod tests {
                 assert!(graph.routes.iter().any(|route| {
                     route.destination == output
                         && route.route_kind == "redirected_bass_lowpass_to_sub"
-                        && route.low_pass_hz == Some(frequency)
+                        && route.low_pass_hz.is_none()
                 }));
+                let physical = &reference.channels[output].plugins;
+                assert!(
+                    physical
+                        .iter()
+                        .any(|plugin| plugin.plugin_type == "crossover"
+                            && plugin.parameters["room_eq_stage"] == "post_route"
+                            && plugin.parameters["frequency"].as_f64() == Some(frequency))
+                );
             }
             let (baseline, _) = replay(&reference, &physical, "L", 0, false, &context).unwrap();
             references.push((graph_hash(&reference).unwrap(), baseline.curve.spl));
         }
         assert_eq!(references[0], references[1]);
+        // Stereo has no LFE input. On the same physical topology in home
+        // cinema, LFE must traverse both its program low-pass and the physical
+        // output's configured low-pass.
+        let mut cinema = config.clone();
+        cinema.system.as_mut().unwrap().model = roomeq_model::SystemModel::HomeCinema;
+        let reference = reference_graph(&result, &cinema).unwrap();
+        let graph = reference
+            .metadata
+            .bass_management
+            .as_ref()
+            .unwrap()
+            .routing_graph
+            .as_ref()
+            .unwrap();
+        for (output, frequency) in [("Sub1", 80.0), ("Sub2", 120.0)] {
+            assert!(
+                reference.channels[output]
+                    .plugins
+                    .iter()
+                    .any(|plugin| plugin.plugin_type == "crossover"
+                        && plugin.parameters["frequency"].as_f64() == Some(frequency))
+            );
+            assert!(graph.routes.iter().any(|route| route.destination == output
+                && route.route_kind == "lfe_lowpass_to_sub"
+                && route.low_pass_hz == Some(120.0)));
+        }
         // Genelec's optimized FIR routing drives both declared subs from each
         // main, while the configured reference uses stereo branch membership.
         for (key, output) in [

@@ -1109,7 +1109,9 @@ fn induced_group_delay_rms_ms(
     // ripple; scoring that inverse alone rejects the very timing improvement
     // the filter is designed to make. Keep the safety metric one-sided: a
     // correction that reduces existing dispersion induces no regression.
-    Ok(Some((post_ripple_ms - pre_ripple_ms).max(0.0)))
+    Ok(pre_ripple_ms
+        .zip(post_ripple_ms)
+        .map(|(pre, post)| (post - pre).max(0.0)))
 }
 
 fn group_delay_ripple_rms_ms(
@@ -1117,7 +1119,7 @@ fn group_delay_ripple_rms_ms(
     phase_deg: &ndarray::Array1<f64>,
     frequencies: &[f64],
     bulk_latency_ms: f64,
-) -> f64 {
+) -> Option<f64> {
     let mut phase: Vec<f64> = frequencies
         .iter()
         .map(|frequency| {
@@ -1141,10 +1143,21 @@ fn group_delay_ripple_rms_ms(
         .windows(2)
         .zip(phase.windows(2))
         .filter_map(|(frequency, phase)| {
-            let delta_omega = 2.0 * std::f64::consts::PI * (frequency[1] - frequency[0]);
-            (delta_omega > 0.0).then_some(-(phase[1] - phase[0]) / delta_omega * 1000.0)
+            let gap = frequency[1] - frequency[0];
+            // A measured bin and an inserted band edge can differ by only
+            // an ULP. Their phase difference cannot support a derivative:
+            // roundoff divided by that gap fabricates large dispersion.
+            // Retain both observations for every spectral/quality metric.
+            let resolution = 64.0 * f64::EPSILON * frequency[1].abs().max(1.0);
+            if gap <= resolution {
+                return None;
+            }
+            Some(-(phase[1] - phase[0]) / (2.0 * std::f64::consts::PI * gap) * 1000.0)
         })
         .collect();
+    if delay_ms.len() < 2 {
+        return None;
+    }
     // A constant group delay is bulk latency, which is reported and limited
     // separately by TemporalQualityEvidence. Remove the best-fit constant
     // delay before taking the dispersion RMS.
@@ -1153,7 +1166,7 @@ fn group_delay_ripple_rms_ms(
         .iter()
         .map(|delay_ms| delay_ms - bulk_delay_ms)
         .collect();
-    rms(&delay_ripple_ms)
+    Some(rms(&delay_ripple_ms))
 }
 
 fn sample_log(curve: &Curve, frequency: f64, values: &ndarray::Array1<f64>) -> f64 {
@@ -2192,6 +2205,52 @@ mod tests {
             .expect("phase evidence");
 
         assert!(observed.abs() < 1e-12);
+    }
+
+    #[test]
+    fn induced_group_delay_does_not_differentiate_roundoff_separated_band_edges() {
+        let frequencies = [
+            20.0,
+            f64::from_bits(20.0_f64.to_bits() + 1),
+            40.0,
+            80.0,
+            160.0,
+        ];
+        let mut pre = curve(&frequencies, &[0.0; 5]);
+        pre.phase = Some(Array1::zeros(5));
+        let mut post = pre.clone();
+        let latency_ms = 85.33333333333333;
+        post.phase = Some(Array1::from_iter(frequencies.iter().map(|frequency| {
+            (-360.0 * frequency * latency_ms / 1000.0 + 180.0).rem_euclid(360.0) - 180.0
+        })));
+        post.phase.as_mut().unwrap()[1] += 1e-10;
+        let observed = induced_group_delay_rms_ms(&pre, &post, config(), latency_ms)
+            .unwrap()
+            .unwrap();
+        assert!(
+            observed < 1e-7,
+            "pure bulk delay acquired {observed} ms dispersion"
+        );
+        assert_eq!(
+            post.freq.len(),
+            5,
+            "spectral observation bins must remain intact"
+        );
+    }
+
+    #[test]
+    fn unresolved_phase_intervals_are_unassessed_instead_of_zero_dispersion() {
+        let frequencies = [
+            20.0,
+            f64::from_bits(20.0_f64.to_bits() + 1),
+            f64::from_bits(20.0_f64.to_bits() + 2),
+        ];
+        let mut input = curve(&frequencies, &[0.0; 3]);
+        input.phase = Some(Array1::zeros(3));
+        assert_eq!(
+            induced_group_delay_rms_ms(&input, &input, config(), 0.0).unwrap(),
+            None
+        );
     }
 
     #[test]

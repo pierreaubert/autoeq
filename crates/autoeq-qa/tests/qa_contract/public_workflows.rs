@@ -537,15 +537,44 @@ fn execute_ctc_positive(
         crosstalk.is_finite(),
         "CTC delivered response contains non-finite crosstalk",
     )?;
+    let acceptance = result
+        .metadata
+        .correction_acceptance
+        .as_ref()
+        .ok_or_else(|| "CTC workflow with room captures lost its room assessment".to_string())?;
     require(
-        result.metadata.stage_outcomes.iter().any(|stage| {
-            stage.stage == "final_correction_selection"
-                && stage
-                    .advisories
-                    .iter()
-                    .any(|advisory| advisory == "final_seat_evidence=insufficient_evidence")
+        !acceptance
+            .violations
+            .iter()
+            .any(|violation| violation == "ctc_final_seat_evidence_insufficient"),
+        "provided room captures must not be classified as absent CTC-only evidence",
+    )?;
+    let final_seats = acceptance
+        .acoustic_quality
+        .as_ref()
+        .map(|quality| quality.final_seats.as_slice())
+        .unwrap_or_default();
+    require(
+        ["L", "R"].iter().all(|input| {
+            final_seats
+                .iter()
+                .any(|seat| seat.partition == "training" && seat.logical_input == *input)
         }),
-        "synthetic CTC workflow must preserve its insufficient measured-seat evidence status",
+        "CTC workflow must retain replay evidence for both supplied room inputs",
+    )?;
+    require(
+        artifact["room_eq_correction_applied"] == json!(ctc.room_eq_correction_applied)
+            && artifact["room_eq_correction_channels"] == json!(ctc.room_eq_correction_channels),
+        "CTC artifact and report disagree about applied room correction",
+    )?;
+    require(
+        ctc.room_eq_correction_channels.iter().all(|name| {
+            result
+                .channels
+                .get(name)
+                .is_some_and(|chain| !chain.plugins.is_empty())
+        }),
+        "CTC correction references an absent physical output chain",
     )?;
     let output = result.to_dsp_chain_output();
     let graph_bytes = serde_json::to_vec(&output).map_err(|error| error.to_string())?;
@@ -562,7 +591,11 @@ fn execute_ctc_positive(
             "sample_rate_hz": spec.sample_rate_hz,
             "optimizer": serde_json::to_value(config.optimizer).unwrap_or(Value::Null),
             "ctc_controls": serde_json::to_value(config.ctc).unwrap_or(Value::Null),
-            "final_seat_evidence": "insufficient_evidence"
+            "final_seat_evidence": "provided_room_captures_replayed",
+            "room_eq_correction_decision": acceptance.decision,
+            "room_eq_final_seat_count": final_seats.len(),
+            "room_eq_correction_applied": ctc.room_eq_correction_applied,
+            "room_eq_correction_channels": ctc.room_eq_correction_channels
         }),
     })
 }

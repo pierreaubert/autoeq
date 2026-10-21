@@ -14,7 +14,11 @@ use super::seat_response::render_mso_seat_responses;
 use crate::Curve;
 use crate::error::{AutoeqError, Result};
 use autoeq_optim::loss::{JointSubComponents, JointSubWeights, joint_multisub_loss};
-use autoeq_optim::optim::scalar::{ScalarOptimConfig, optimize_bounded_scalar};
+use autoeq_optim::optim::OptimProgressCallback;
+use autoeq_optim::optim::run_control::OptimizerRunControl;
+use autoeq_optim::optim::scalar::{
+    ScalarOptimConfig, ScalarOptimResult, optimize_bounded_scalar_with_control,
+};
 use ndarray::Array1;
 use num_complex::Complex64;
 use roomeq_model::OptimizerConfig;
@@ -137,6 +141,8 @@ pub struct UnnormalizedOutputView {
 /// Joint transfer-matrix optimization result.
 #[derive(Debug, Clone)]
 pub struct JointSubResult {
+    /// Exact scalar search effort and termination, before array acceptance.
+    pub search: ScalarOptimResult,
     /// Why the proposed array was rejected; absent is not final-chain approval.
     pub array_rejection_reason: Option<String>,
     /// Physical output identities in the same order as array controls.
@@ -145,7 +151,7 @@ pub struct JointSubResult {
     pub per_seat_pre: Vec<Curve>,
     /// Optimized per-sub gains in dB (sub 0 is the fixed reference at 0 dB).
     pub gains_db: Vec<f64>,
-    /// Optimized per-sub delays in ms (sub 0 is the fixed reference at 0 ms).
+    /// Causal per-sub delays in ms, normalized so the smallest delay is zero.
     pub delays_ms: Vec<f64>,
     /// Controlled per-seat combined responses, retained per seat.
     pub per_seat_post: Vec<Curve>,
@@ -184,23 +190,33 @@ fn render_combined_field(
     gains_db: &[f64],
     delays_ms: &[f64],
 ) -> Vec<Vec<Complex64>> {
+    // A candidate has one control transfer per sub, shared by every seat.
+    // Keep measured H complex: decomposing it into norm/argument in this hot
+    // loop adds square roots and trigonometry without changing the field.
+    let controls: Vec<Vec<Complex64>> = gains_db
+        .iter()
+        .zip(delays_ms)
+        .map(|(&gain, &delay)| {
+            let magnitude = 10.0_f64.powf(gain / 20.0);
+            freqs
+                .iter()
+                .map(|&frequency| {
+                    Complex64::from_polar(magnitude, -2.0 * PI * frequency * delay / 1000.0)
+                })
+                .collect()
+        })
+        .collect();
     matrix
         .iter()
         .map(|seat| {
             freqs
                 .iter()
                 .enumerate()
-                .map(|(bin, frequency)| {
+                .map(|(bin, _)| {
                     seat.subs
                         .iter()
                         .enumerate()
-                        .map(|(sub, response)| {
-                            let magnitude =
-                                10.0_f64.powf(gains_db[sub] / 20.0) * response[bin].norm();
-                            let angle = response[bin].arg()
-                                - 2.0 * PI * frequency * delays_ms[sub] / 1000.0;
-                            Complex64::from_polar(magnitude, angle)
-                        })
+                        .map(|(sub, response)| response[bin] * controls[sub][bin])
                         .sum()
                 })
                 .collect()
@@ -292,10 +308,12 @@ pub struct JointSubRequest {
 
 /// Optimize sub gains and delays jointly over the transfer matrix.
 ///
-/// Sub 0 is the fixed array reference (0 dB, 0 ms); common gain and level
+/// Sub 0 is the fixed gain reference (0 dB); common gain and level
 /// matching belong to the later shared-EQ stage, which owns the residual
 /// only. LFE and redirected gains are traced in the returned ledger, never
-/// folded into the optimized array gains.
+/// folded into the optimized array gains. Every sub can be delayed; a common
+/// minimum is removed from the emitted delays without changing their relative
+/// alignment. The measured earliest arrival need not be the first sub.
 ///
 /// # Errors
 ///
@@ -311,6 +329,29 @@ pub fn optimize_joint_sub_array(
     config: &OptimizerConfig,
     sample_rate: f64,
 ) -> Result<JointSubResult> {
+    optimize_joint_sub_array_with_control(request, config, sample_rate, None, None)
+}
+
+/// Optimize a joint array with shared evaluation caps and cooperative cancellation.
+///
+/// A supplied control shares its quota and stop state with other stages. Without
+/// one, `joint_sub_evaluation_limit` creates a stage-local strict search quota.
+///
+/// # Errors
+///
+/// Returns measurement/optimizer errors, or an error on cancellation/deadline.
+/// No best-effort acoustic result is emitted after a stop request.
+pub fn optimize_joint_sub_array_with_control(
+    request: &JointSubRequest,
+    config: &OptimizerConfig,
+    sample_rate: f64,
+    control: Option<&OptimizerRunControl>,
+    callback: Option<OptimProgressCallback>,
+) -> Result<JointSubResult> {
+    let local_control = config
+        .joint_sub_evaluation_limit
+        .map(OptimizerRunControl::new);
+    let control = control.or(local_control.as_ref());
     let invalid = |message: &str| AutoeqError::InvalidMeasurement {
         message: format!("joint multi-sub optimization: {message}"),
     };
@@ -469,11 +510,26 @@ pub fn optimize_joint_sub_array(
             .unwrap_or(f64::INFINITY)
     };
 
-    // Fix the reference sub; shared EQ owns common gain while this stage
-    // controls relative array alignment.
+    let validate_components = |gains: &[f64], delays: &[f64]| {
+        control.map_or_else(
+            || evaluate_components(gains, delays),
+            |control| {
+                control
+                    .evaluate(
+                        autoeq_optim::optim::run_control::EvaluationStage::Validation,
+                        seats,
+                        || evaluate_components(gains, delays),
+                    )
+                    .unwrap_or_else(|| Err("joint validation cancelled or deadline reached".into()))
+            },
+        )
+    };
+
+    // Shared EQ owns common gain; no physical sub is privileged as the latest
+    // arrival. Fixing its delay would exclude valid alignments of earlier subs.
     let initial_gains = vec![0.0; subs];
     let initial_delays = vec![0.0; subs];
-    let pre_components = evaluate_components(&initial_gains, &initial_delays)
+    let pre_components = validate_components(&initial_gains, &initial_delays)
         .map_err(|message| invalid(&message))?;
 
     let mut lower = Vec::with_capacity(2 * subs);
@@ -490,8 +546,6 @@ pub fn optimize_joint_sub_array(
     }
     lower[0] = 0.0;
     upper[0] = 0.0;
-    lower[subs] = 0.0;
-    upper[subs] = 0.0;
     let bounds: Vec<(f64, f64)> = lower
         .iter()
         .zip(upper.iter())
@@ -502,7 +556,7 @@ pub fn optimize_joint_sub_array(
         .chain(initial_delays.iter())
         .copied()
         .collect();
-    let report = optimize_bounded_scalar(
+    let report = optimize_bounded_scalar_with_control(
         &bounds,
         &initial,
         &ScalarOptimConfig {
@@ -515,14 +569,20 @@ pub fn optimize_joint_sub_array(
             seed: config.seed,
         },
         move |params| evaluate(&params[0..subs], &params[subs..2 * subs]),
+        callback,
+        control,
     )
     .map_err(|e| invalid(&format!("joint array optimization failed: {e}")))?;
 
     let (mut gains_db, mut delays_ms, mut post_components, converged) =
         if report.fun.is_finite() && report.fun <= pre_components.total {
             let gains = report.x[0..subs].to_vec();
-            let delays = report.x[subs..2 * subs].to_vec();
-            let post = evaluate_components(&gains, &delays).map_err(|message| invalid(&message))?;
+            let mut delays = report.x[subs..2 * subs].to_vec();
+            let common = delays.iter().copied().fold(f64::INFINITY, f64::min);
+            for delay in &mut delays {
+                *delay -= common;
+            }
+            let post = validate_components(&gains, &delays).map_err(|message| invalid(&message))?;
             (gains, delays, post, report.success)
         } else {
             (
@@ -621,6 +681,7 @@ pub fn optimize_joint_sub_array(
     let coherent_scope_validated =
         super::types::timing_scopes_are_shared(request.reference_scope.as_deref(), subs, seats);
     Ok(JointSubResult {
+        search: report,
         array_rejection_reason,
         physical_outputs: request.physical_outputs.clone(),
         per_seat_pre,
@@ -751,6 +812,31 @@ pub(crate) fn process_joint_sub_group_detailed(
     super::types::MultiSubCombinedResponse,
     JointSubResult,
 )> {
+    process_joint_sub_group_detailed_with_callback(
+        channel_name,
+        group,
+        room_config,
+        sample_rate,
+        prepared,
+        reference_scope,
+        None,
+    )
+}
+
+/// Preserve progress/cancellation through the joint array stage and its dispatch.
+pub(crate) fn process_joint_sub_group_detailed_with_callback(
+    channel_name: &str,
+    group: &roomeq_model::MultiSubGroup,
+    room_config: &roomeq_model::RoomConfig,
+    sample_rate: f64,
+    prepared: &crate::group_processing::PreparedMultiSubGroup,
+    reference_scope: Option<Vec<Vec<String>>>,
+    callback: Option<OptimProgressCallback>,
+) -> Result<(
+    autoeq_optim::DriverOptimizationResult,
+    super::types::MultiSubCombinedResponse,
+    JointSubResult,
+)> {
     let invalid = |message: &str| AutoeqError::InvalidMeasurement {
         message: format!("joint multi-sub dispatch for '{channel_name}': {message}"),
     };
@@ -812,12 +898,50 @@ pub(crate) fn process_joint_sub_group_detailed(
         }
     }
     // The workflow loader and joint objective both use [sub][seat].
-    let measurements = seats.clone();
-    // Absolute target from the configured neutral tilt curve. Without one
-    // the stage preserves the pre-optimization mean level; the shared
-    // residual EQ owns absolutes downstream.
+    // Remove one common calibration offset before pressure conversion. The
+    // acoustic task is unchanged, and search decisions no longer depend on
+    // rounding at arbitrary absolute measurement levels. Restore it on every
+    // retained prediction before returning to the physical workflow.
+    let level_reference = seats[0][0]
+        .spl
+        .first()
+        .copied()
+        .filter(|level| level.is_finite())
+        .ok_or_else(|| invalid("joint calibration reference needs a finite measured level"))?;
+    let mut measurements = seats.clone();
+    for curve in measurements.iter_mut().flatten() {
+        curve.spl.mapv_inplace(|level| level - level_reference);
+    }
+    let primary_seat = room_config
+        .optimizer
+        .multi_seat
+        .as_ref()
+        .map_or(0, |config| config.primary_seat);
+    if primary_seat >= seat_count {
+        return Err(invalid(&format!(
+            "primary seat {primary_seat} unavailable for {seat_count} seats"
+        )));
+    }
+    // Target voicing is a relative shape. Anchor it to the uncontrolled
+    // coherent array, not the level of one driver or a zero-dB tilt curve.
+    // Center both over the actual correction band so a common calibration
+    // offset cannot change the optimization task.
     let bins = grid.len();
-    let target_db = match crate::channel_target::build_target_tilt_curve(
+    let zeros = vec![0.0; sub_count];
+    let baseline = render_mso_seat_responses(&measurements, &zeros, &zeros)?;
+    let [min_freq, max_freq] = room_config.optimizer.active_correction_band();
+    let freqs = grid.to_vec();
+    let baseline_level = baseline
+        .iter()
+        .map(|curve| mean_band_level(&curve.spl.to_vec(), &freqs, min_freq, max_freq))
+        .sum::<f64>()
+        / seat_count as f64;
+    if !baseline_level.is_finite() {
+        return Err(invalid(
+            "correction band has no finite combined array level",
+        ));
+    }
+    let shape = match crate::channel_target::build_target_tilt_curve(
         channel_name,
         room_config,
         &measurements[0][0],
@@ -829,19 +953,14 @@ pub(crate) fn process_joint_sub_group_detailed(
                 "neutral tilt curve does not cover the seat matrix grid",
             ));
         }
-        None => {
-            let mut level = vec![0.0; bins];
-            for curve in measurements.iter().flatten() {
-                for (bin, value) in level.iter_mut().enumerate() {
-                    *value += curve.spl[bin];
-                }
-            }
-            let count = (sub_count * seat_count) as f64;
-            level.iter().map(|value| value / count).collect()
-        }
+        None => vec![0.0; bins],
     };
+    let shape_level = mean_band_level(&shape, &freqs, min_freq, max_freq);
+    let target_db = shape
+        .iter()
+        .map(|value| baseline_level + value - shape_level)
+        .collect();
     let weights = JointSubWeights::default();
-    let zeros = vec![0.0; sub_count];
     let physical_outputs: Vec<String> = group
         .subwoofers
         .iter()
@@ -859,7 +978,24 @@ pub(crate) fn process_joint_sub_group_detailed(
         physical_outputs,
         reference_scope: Some(reference_scope),
     };
-    let result = optimize_joint_sub_array(&request, &room_config.optimizer, sample_rate)?;
+    let mut result = optimize_joint_sub_array_with_control(
+        &request,
+        &room_config.optimizer,
+        sample_rate,
+        None,
+        callback,
+    )?;
+    for curve in result
+        .per_seat_pre
+        .iter_mut()
+        .chain(&mut result.per_seat_post)
+    {
+        curve.spl.mapv_inplace(|level| level + level_reference);
+    }
+    for view in &mut result.output_views {
+        view.pre_level_db += level_reference;
+        view.post_level_db += level_reference;
+    }
     if !result.coherent_scope_validated {
         return Err(AutoeqError::InvalidConfiguration {
             message: format!(
@@ -871,8 +1007,8 @@ pub(crate) fn process_joint_sub_group_detailed(
         });
     }
     // The downstream shared EQ consumes the same combined shape as the
-    // detailed mode: mean magnitude across seats plus the seat-0 complex
-    // response the coherent stage was built on.
+    // detailed mode: mean magnitude across seats plus the configured primary
+    // seat's complex response for same-position main/sub crossover alignment.
     let mut mean_spl = vec![0.0; bins];
     for seat_curve in &result.per_seat_post {
         for (bin, value) in mean_spl.iter_mut().enumerate() {
@@ -885,7 +1021,7 @@ pub(crate) fn process_joint_sub_group_detailed(
     }
     let resolution =
         autoeq_core::resolution::MeasurementResolution::combine(seats.iter().flatten());
-    let mut primary_seat_complex = result.per_seat_post.first().cloned();
+    let mut primary_seat_complex = result.per_seat_post.get(primary_seat).cloned();
     if let Some(curve) = primary_seat_complex.as_mut() {
         curve.resolution = resolution.clone();
     }
@@ -970,6 +1106,10 @@ pub(crate) fn joint_sub_diagnostics(
             }
         })?;
     Ok(JointSubDiagnostics {
+        search_evaluations: result.search.evaluation_count,
+        search_evaluation_limit: result.search.evaluation_limit,
+        search_elapsed_ms: result.search.elapsed_ms,
+        search_status: result.search.message.clone(),
         shared_eq_rejection_reason: None,
         array_rejection_reason: result.array_rejection_reason.clone(),
         scope: "joint array and shared-EQ stage prediction; objective restricted to level_band_hz; full measured responses retained for protected-seat checks; measurement-relative levels; excludes later trims, global routing, physical output safety, and recorded playback".into(),
@@ -1035,6 +1175,381 @@ mod tests {
             max_db: 12.0,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn complex_renderer_matches_independent_polar_sum_on_irregular_grid() {
+        let freqs = [21.0, 38.5, 79.0, 133.0];
+        let gains = [-3.0, 2.5, 0.0];
+        let delays = [4.0, 0.0, 12.7];
+        let matrix: Vec<_> = (0..3)
+            .map(|seat| SeatRow {
+                subs: (0..3)
+                    .map(|sub| {
+                        freqs
+                            .iter()
+                            .enumerate()
+                            .map(|(bin, _)| {
+                                Complex64::from_polar(
+                                    1.0 + (seat + sub + bin) as f64,
+                                    (seat as f64 * 1.7 - sub as f64 * 2.3 + bin as f64 * 0.4) * PI,
+                                )
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            })
+            .collect();
+        let rendered = render_combined_field(&matrix, &freqs, &gains, &delays);
+        for (seat_index, seat) in matrix.iter().enumerate() {
+            for (bin, frequency) in freqs.iter().enumerate() {
+                let expected: Complex64 = seat
+                    .subs
+                    .iter()
+                    .enumerate()
+                    .map(|(sub, response)| {
+                        Complex64::from_polar(
+                            response[bin].norm() * 10.0_f64.powf(gains[sub] / 20.0),
+                            response[bin].arg() - 2.0 * PI * frequency * delays[sub] / 1000.0,
+                        )
+                    })
+                    .sum();
+                assert!((rendered[seat_index][bin] - expected).norm() < 1e-12);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "release-only renderer microbenchmark; prints timings without a flaky speed assertion"]
+    fn joint_renderer_microbenchmark() {
+        use std::hint::black_box;
+        for (subs, seats, bins) in [(2, 1, 128), (4, 4, 512), (8, 8, 1024)] {
+            let frequencies: Vec<_> = (0..bins)
+                .map(|bin| 20.0 * 8.0_f64.powf(bin as f64 / (bins - 1) as f64))
+                .collect();
+            let matrix: Vec<_> = (0..seats)
+                .map(|seat| SeatRow {
+                    subs: (0..subs)
+                        .map(|sub| {
+                            frequencies
+                                .iter()
+                                .map(|frequency| {
+                                    Complex64::from_polar(
+                                        10_000.0 + sub as f64 * 100.0,
+                                        frequency * 0.003 + seat as f64 * 0.5 - sub as f64 * 0.7,
+                                    )
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                })
+                .collect();
+            let gains = vec![-1.5; subs];
+            let delays: Vec<_> = (0..subs).map(|sub| sub as f64 * 0.5).collect();
+            // Frozen pre-audit algorithm, retained solely as a timing/control
+            // oracle. Production uses cached complex measurements directly.
+            let legacy = || -> Vec<Vec<Complex64>> {
+                let matrix = black_box(&matrix);
+                let frequencies = black_box(&frequencies);
+                let gains = black_box(&gains);
+                let delays = black_box(&delays);
+                matrix
+                    .iter()
+                    .map(|seat| {
+                        frequencies
+                            .iter()
+                            .enumerate()
+                            .map(|(bin, frequency)| {
+                                seat.subs
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(sub, response)| {
+                                        Complex64::from_polar(
+                                            10.0_f64.powf(gains[sub] / 20.0) * response[bin].norm(),
+                                            response[bin].arg()
+                                                - 2.0 * PI * frequency * delays[sub] / 1000.0,
+                                        )
+                                    })
+                                    .sum()
+                            })
+                            .collect()
+                    })
+                    .collect()
+            };
+            let iterations = 200;
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                black_box(legacy());
+            }
+            let legacy_us = start.elapsed().as_secs_f64() * 1e6 / iterations as f64;
+            let start = std::time::Instant::now();
+            for _ in 0..iterations {
+                black_box(render_combined_field(
+                    black_box(&matrix),
+                    black_box(&frequencies),
+                    black_box(&gains),
+                    black_box(&delays),
+                ));
+            }
+            let optimized_us = start.elapsed().as_secs_f64() * 1e6 / iterations as f64;
+            println!(
+                "renderer subs={subs} seats={seats} bins={bins} legacy_us={legacy_us:.3} optimized_us={optimized_us:.3}"
+            );
+        }
+    }
+
+    fn broadband_delayed_curve(level: f64, delay_ms: f64) -> Curve {
+        let freq = Array1::from_iter((0..128).map(|bin| 20.0 * 8.0_f64.powf(bin as f64 / 127.0)));
+        Curve {
+            spl: Array1::from_elem(freq.len(), level),
+            phase: Some(freq.mapv(|frequency| -360.0 * frequency * delay_ms / 1000.0)),
+            freq,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn broadband_alignment_is_feasible_for_every_sub_order() {
+        let config = OptimizerConfig {
+            min_freq: 20.0,
+            max_freq: 160.0,
+            min_db: 0.0,
+            max_db: 0.0,
+            max_iter: 300,
+            population: 30,
+            ..tiny_config()
+        };
+        for arrivals in [
+            vec![0.0, 4.0],
+            vec![4.0, 0.0],
+            vec![1.0, 4.0, 2.0],
+            vec![2.0, 4.0, 1.0],
+        ] {
+            let subs = arrivals.len();
+            let target = 80.0 + 20.0 * (subs as f64).log10();
+            let request = JointSubRequest {
+                measurements: arrivals
+                    .iter()
+                    .map(|&delay| vec![broadband_delayed_curve(80.0, delay); 2])
+                    .collect(),
+                target_db: vec![target; 128],
+                weights: JointSubWeights::default(),
+                lfe_gain_db: vec![0.0; subs],
+                redirected_gain_db: vec![0.0; subs],
+                physical_outputs: (0..subs).map(|index| format!("sub-{index}")).collect(),
+                reference_scope: Some(vec![vec!["clock".into(); 2]; subs]),
+            };
+            let result = optimize_joint_sub_array(&request, &config, 48_000.0).unwrap();
+            assert!(result.array_rejection_reason.is_none(), "{arrivals:?}");
+            assert!(
+                result.post_components.total < 1e-4,
+                "{arrivals:?}: {}",
+                result.post_components.total
+            );
+            let latest = arrivals.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+            for (&arrival, &delay) in arrivals.iter().zip(&result.delays_ms) {
+                assert!(
+                    (arrival + delay - latest).abs() < 0.05,
+                    "{arrivals:?}: {:?}",
+                    result.delays_ms
+                );
+                assert!((0.0..=20.0).contains(&delay));
+            }
+            assert_eq!(
+                result
+                    .delays_ms
+                    .iter()
+                    .copied()
+                    .fold(f64::INFINITY, f64::min),
+                0.0
+            );
+        }
+    }
+
+    #[test]
+    fn joint_dispatch_uses_and_validates_configured_primary_seat() {
+        let mut prepared = dispatch_prepared();
+        prepared.seat_measurements =
+            Some(vec![vec![sub_curve(80.0, 0.0), sub_curve(90.0, 90.0)]; 2]);
+        let mut room = dispatch_room_config();
+        room.optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+            enabled: true,
+            primary_seat: 1,
+            ..Default::default()
+        });
+        let scope = Some(vec![vec!["clock".into(); 2]; 2]);
+        let (_, combined, result) = process_joint_sub_group_detailed(
+            "subs",
+            &dispatch_group(),
+            &room,
+            48_000.0,
+            &prepared,
+            scope.clone(),
+        )
+        .unwrap();
+        let primary = combined.primary_seat_complex.unwrap();
+        assert_eq!(primary.spl, result.per_seat_post[1].spl);
+        assert_eq!(primary.phase, result.per_seat_post[1].phase);
+        for sub in prepared.seat_measurements.as_mut().unwrap() {
+            sub.swap(0, 1);
+        }
+        room.optimizer.multi_seat.as_mut().unwrap().primary_seat = 0;
+        let (_, reordered) = process_joint_sub_group(
+            "subs",
+            &dispatch_group(),
+            &room,
+            48_000.0,
+            &prepared,
+            scope.clone(),
+        )
+        .unwrap();
+        assert_eq!(primary.spl, reordered.primary_seat_complex.unwrap().spl);
+        room.optimizer.multi_seat.as_mut().unwrap().primary_seat = 2;
+        room.optimizer.algorithm = "must-not-run".into();
+        let error =
+            process_joint_sub_group("subs", &dispatch_group(), &room, 48_000.0, &prepared, scope)
+                .unwrap_err();
+        assert!(error.to_string().contains("primary seat 2"), "{error}");
+        room.optimizer.multi_seat.as_mut().unwrap().primary_seat = 0;
+        prepared.seat_measurements.as_mut().unwrap()[0][0].spl = Array1::zeros(0);
+        let error = process_joint_sub_group(
+            "subs",
+            &dispatch_group(),
+            &room,
+            48_000.0,
+            &prepared,
+            Some(vec![vec!["clock".into(); 2]; 2]),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("finite measured level"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn joint_dispatch_preserves_aligned_arrays_with_flat_and_zero_slope_targets() {
+        for subs in [2, 4] {
+            for level in [-20.0, 80.0] {
+                let curve = broadband_delayed_curve(level, 0.0);
+                let mut group = dispatch_group();
+                group.subwoofers =
+                    vec![roomeq_model::MeasurementSource::InMemory(curve.clone()); subs];
+                let prepared = crate::group_processing::PreparedMultiSubGroup {
+                    subwoofers: vec![curve.clone(); subs],
+                    seat_measurements: Some(vec![vec![curve; 2]; subs]),
+                    reference_scope: None,
+                };
+                for custom in [false, true] {
+                    let mut room = dispatch_room_config();
+                    room.optimizer.min_freq = 20.0;
+                    room.optimizer.max_freq = 160.0;
+                    room.optimizer.target_response =
+                        custom.then_some(roomeq_model::TargetResponseConfig {
+                            shape: roomeq_model::TargetShape::Custom,
+                            slope_db_per_octave: 0.0,
+                            ..Default::default()
+                        });
+                    let (_, combined, result) = process_joint_sub_group_detailed(
+                        "subs",
+                        &group,
+                        &room,
+                        48_000.0,
+                        &prepared,
+                        Some(vec![vec!["clock".into(); 2]; subs]),
+                    )
+                    .unwrap();
+                    let expected = level + 20.0 * (subs as f64).log10();
+                    assert!(
+                        combined
+                            .spatial_magnitude
+                            .spl
+                            .iter()
+                            .all(|value| (value - expected).abs() < 1e-8)
+                    );
+                    assert!(result.pre_components.target_error < 1e-20);
+                    assert!(
+                        result
+                            .output_views
+                            .iter()
+                            .all(|view| view.delta_db.abs() < 1e-8)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn joint_dispatch_tilt_is_invariant_to_common_spl_calibration() {
+        let mut results = Vec::new();
+        for level in [20.0, 100.0] {
+            let curve = broadband_delayed_curve(level, 0.0);
+            let prepared = crate::group_processing::PreparedMultiSubGroup {
+                subwoofers: vec![curve.clone(); 2],
+                seat_measurements: Some(vec![vec![curve; 2]; 2]),
+                reference_scope: None,
+            };
+            let mut room = dispatch_room_config();
+            room.optimizer.min_freq = 20.0;
+            room.optimizer.max_freq = 160.0;
+            room.optimizer.target_response = Some(roomeq_model::TargetResponseConfig {
+                shape: roomeq_model::TargetShape::Custom,
+                slope_db_per_octave: -0.5,
+                ..Default::default()
+            });
+            let (_, _, result) = process_joint_sub_group_detailed(
+                "subs",
+                &dispatch_group(),
+                &room,
+                48_000.0,
+                &prepared,
+                Some(vec![vec!["clock".into(); 2]; 2]),
+            )
+            .unwrap();
+            results.push(result);
+        }
+        assert!(
+            (results[0].pre_components.target_error - results[1].pre_components.target_error).abs()
+                < 1e-10
+        );
+        assert!((results[0].post_components.total - results[1].post_components.total).abs() < 1e-8);
+        for (first, second) in results[0].gains_db.iter().zip(&results[1].gains_db) {
+            assert!((first - second).abs() < 1e-7);
+        }
+        for (first, second) in results[0].delays_ms.iter().zip(&results[1].delays_ms) {
+            assert!((first - second).abs() < 1e-7);
+        }
+    }
+
+    #[test]
+    fn joint_budget_and_array_cancellation_are_enforced_before_shared_eq() {
+        let mut config = tiny_config();
+        config.joint_sub_evaluation_limit = std::num::NonZeroUsize::new(3);
+        let result =
+            optimize_joint_sub_array(&two_sub_two_seat_request(), &config, 48_000.0).unwrap();
+        assert!(result.search.evaluation_count <= 3);
+        assert_eq!(result.search.evaluation_limit, Some(3));
+        let mut prepared = dispatch_prepared();
+        prepared.reference_scope = Some(vec![vec!["clock".into()]; 2]);
+        let resources = crate::eq::EqResources::default();
+        let error = crate::group_processing::process_multisub_group_with_callback(
+            "subs",
+            &dispatch_group(),
+            &dispatch_room_config(),
+            48_000.0,
+            &prepared,
+            &resources,
+            &resources,
+            Some(Box::new(|_, _, _| autoeq_optim::de::CallbackAction::Stop)),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("joint array optimization failed"),
+            "{error}"
+        );
+        assert!(error.to_string().contains("stopped by user"), "{error}");
     }
 
     #[test]
@@ -1205,7 +1720,14 @@ mod tests {
         );
         // Gains stay finite and the reference sub stays fixed.
         assert_eq!(result.gains_db[0], 0.0);
-        assert_eq!(result.delays_ms[0], 0.0);
+        assert_eq!(
+            result
+                .delays_ms
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min),
+            0.0
+        );
         assert!(result.post_components.total <= result.pre_components.total + 1e-9);
     }
 

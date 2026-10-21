@@ -7,6 +7,7 @@ pub use autoeq_core::{
     smooth_one_over_n_octave,
 };
 pub use autoeq_optim::de::CallbackAction;
+pub use autoeq_optim::optim::run_control::OptimizerRunControl;
 pub use autoeq_optim::optim::{OptimProgressCallback, OptimizerConfidence, OptimizerRunEvidence};
 /// Acoustic analysis used by engine and workflow orchestration without adding
 /// parallel ownership of the underlying implementations.

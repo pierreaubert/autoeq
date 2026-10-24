@@ -95,10 +95,15 @@ qa-roomeq-nightly:
 	just qa-roomeq-audit-mutants
 	just qa-roomeq-audit-resources 1
 
+# Weekly keeps the full five-seed distribution and metamorphic replays.
+# Case-level parallelism defaults to 2: each case pins its optimizer to a
+# single thread, so jobs add throughput without rayon oversubscription,
+# while the large multi-seat cases still bound peak memory. Override
+# with `just qa-roomeq-weekly jobs=N` on larger machines.
 [group('qa-roomeq')]
-qa-roomeq-weekly:
-        {{cargo}} run --features qa --bin roomeq-qa-coverage --release -- --tier weekly --jobs 1
-        {{cargo}} run --features qa --bin roomeq-qa-quality --release -- --jobs 1
+qa-roomeq-weekly jobs="2":
+        {{cargo}} run --features qa --bin roomeq-qa-coverage --release -- --tier weekly --jobs {{jobs}}
+        {{cargo}} run --features qa --bin roomeq-qa-quality --release -- --jobs {{jobs}}
         {{cargo}} test --release -p autoeq --features qa --test roomeq_generated_data_test -- --ignored --test-threads=1
         {{cargo}} run --features qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix
         {{cargo}} run --features qa --bin roomeq-qa-features --no-default-features --release
@@ -266,6 +271,18 @@ qa-roomeq-coverage-gate:
 qa-roomeq-quick: prod-autoeq
 	# Bounded smoke suite; strict registry quality gates run in qa-roomeq-pr/nightly.
 	{{cargo}} run --features qa --bin roomeq-qa-coverage --release -- --quick --maxeval 200
+	python3 -m unittest scripts.test_dsp
+
+# Fast iteration lane for local development: fail-fast round-trips, then
+# the PR coverage tier in its deterministic single-seed form (no
+# median-of-five search, no metamorphic replays) with streamed evidence.
+# This is a development loop, not a release gate: nightly and weekly
+# retain the full convergence distribution. Reproduce one case with
+# `roomeq-qa-coverage --tier pr --case <substring> --jobs 1`.
+[group('qa-roomeq')]
+qa-roomeq-fast jobs="4":
+	just qa-roomeq-roundtrip
+	{{cargo}} run --features qa --bin roomeq-qa-coverage --release -- --tier pr --jobs {{jobs}} --json target/qa/roomeq-coverage-pr.json --junit target/qa/roomeq-coverage-pr.xml
 	python3 -m unittest scripts.test_dsp
 
 [group('qa-roomeq')]

@@ -26,24 +26,63 @@
   "speakers": {
     "lfe": {
       "measurements": [
-        "subwoofer_lp0.csv",
-        "subwoofer_lp1.csv",
-        "subwoofer_lp2.csv"
-      ]
+        {
+          "path": "subwoofer_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "subwoofer_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "subwoofer_lp2.csv",
+          "name": "lp2"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_seat_2_1"
+      }
     },
     "right": {
       "measurements": [
-        "right_lp0.csv",
-        "right_lp1.csv",
-        "right_lp2.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "right_lp2.csv",
+          "name": "lp2"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_seat_2_1"
+      }
     },
     "left": {
       "measurements": [
-        "left_lp0.csv",
-        "left_lp1.csv",
-        "left_lp2.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "left_lp2.csv",
+          "name": "lp2"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_seat_2_1"
+      }
     }
   },
   "crossovers": {

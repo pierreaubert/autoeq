@@ -1256,6 +1256,9 @@ fn select_inner(
                 &original.channels,
                 routes,
                 policy.max_boost_db + 0.5,
+                crate::delay_compile::applied_lfe_playback_gain_db(
+                    original.metadata.bass_management.as_ref(),
+                ),
             )
         })
         .filter(|strength| *strength > 0.0 && *strength < 1.0);

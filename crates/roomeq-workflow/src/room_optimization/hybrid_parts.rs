@@ -366,6 +366,7 @@ mod tests {
             &config,
             48000.0,
             dir.path(),
+            
         )
         .unwrap();
         seat_replay::attach_configured_comparison(

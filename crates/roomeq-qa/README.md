@@ -45,6 +45,21 @@ contracts. The randomized five-seed quality fuzzer is intentionally scheduled
 only in nightly/weekly QA, where its runtime and convergence distribution do
 not make blocking PR feedback slow or stochastic.
 
+The coverage runner applies the same split: on the PR tier each case runs
+one deterministic seed (`--seed-runs 1`) without the metamorphic
+doubled-budget/added-filter replays, while nightly and weekly tiers keep
+the median-of-five seed distribution and the replays. `--seed-runs {1,5}`,
+`--metamorphic`, and `--no-metamorphic` override the tier defaults, and
+`--fail-fast` stops scheduling after the first failure. Verdicts print as
+cases finish and `--json`/`--junit` evidence is rewritten after every
+case, so an interrupted matrix keeps its completed verdicts.
+`just qa-roomeq-fast` is the local iteration lane (roundtrips, then fast
+PR coverage); it is a development loop, not a release gate. There is no
+hard per-case timeout yet: worker threads cannot be killed safely
+in-process, so streamed evidence plus CI job timeouts bound a hung case.
+Current failure triage and per-bucket owners live in
+`docs/QA_TRIAGE_20261022.md`.
+
 Nightly and weekly runs retain the larger convergence budget and broad scenario
 matrix. They measure optimizer quality and stochastic robustness; they do not
 replace deterministic correctness contracts. The reachability test fails when

@@ -608,17 +608,21 @@ stopped route searches commit none of their proposed controls.
 Final correlated-bass acceptance replays the serialized graph at every retained
 training and supplied held-out seat. It checks stereo/front-stage program and
 shared bass groups against fixed configured routes, retaining the same physical
-array controls and electrical safety. The worst per-frequency decrease in
+array controls and electrical safety. The band-integrated decrease in
 coherent/RSS efficiency through 300 Hz must fit
 `optimizer.finalization.max_correlated_bass_regression_db` (default 3 dB; range
-0–60 dB). This ratio preserves common gain/phase changes and exposes narrow
-correlated cancellations that peak buildup misses. Failed automatic route
+0–60 dB). This ratio preserves common gain/phase changes and exposes broadband
+correlated decorrelation (for example an opposed sub polarity) that peak buildup
+misses, without vetoing the single-bin summation-null shifts that legitimate
+per-source delay alignment necessarily causes between program channels; the
+worst single-bin frequency is retained as a diagnostic. Failed automatic route
 steering is reverted before fallback replay. Missing verified timing is explicitly
 unassessed in the final stage and acceptance observations; electrical headroom
 and physical-drive checks retain their own limits.
 During refinement, each physical array also retains its baseline-relative
-coherent efficiency for every actual routing-matrix input column with multiple
-active branches. Independently routed stereo outputs are assessed on their own
+worst-bin coherent efficiency for every actual routing-matrix input column with multiple
+active branches: on that plane every output carries the same signal, so a
+worst-bin null is a real array defect. Independently routed stereo outputs are assessed on their own
 input columns. Complete source groups are checked again before route controls
 are committed.
 

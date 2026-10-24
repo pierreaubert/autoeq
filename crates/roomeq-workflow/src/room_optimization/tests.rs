@@ -48,9 +48,9 @@ fn mixed_phase_missing_fir_is_scoped_degradation() {
             acceptance.refresh_outcome();
             result.metadata.correction_acceptance = Some(acceptance);
             let before_channels = serde_json::to_value(&result.channels).unwrap();
-            record_missing_mixed_phase_fir_reversions(&mut result, ProcessingMode::LowLatency);
+            record_missing_fir_reversions(&mut result, ProcessingMode::LowLatency, false);
             assert!(result.metadata.stage_outcomes.is_empty());
-            record_missing_mixed_phase_fir_reversions(&mut result, ProcessingMode::MixedPhase);
+            record_missing_fir_reversions(&mut result, ProcessingMode::MixedPhase, false);
             let report = result.metadata.correction_acceptance.as_ref().unwrap();
             let missing = taps.as_ref().is_none_or(Vec::is_empty);
             assert_eq!(report.accepted, !missing);
@@ -78,6 +78,55 @@ fn mixed_phase_missing_fir_is_scoped_degradation() {
             );
         }
     }
+}
+
+#[test]
+fn hybrid_missing_fir_is_scoped_degradation_only_when_fir_requested() {
+    // Regression: Hybrid accepted an IIR-only result with no recorded FIR
+    // stage (medium_stereo_2_0 mixed coverage case).
+    let mut result = crate::test_fixtures::single_channel_room_result("left");
+    result.channel_results.get_mut("left").unwrap().fir_coeffs = None;
+    let curve = result.channel_results["left"].initial_curve.clone();
+    let mut acceptance = roomeq_engine::quality::evaluate_correction_acceptance(
+        &curve,
+        &curve,
+        &curve,
+        None,
+        roomeq_model::CorrectionAcceptancePolicy::RuntimeSafety,
+    )
+    .unwrap();
+    acceptance.accepted = true;
+    acceptance.decision = roomeq_model::CorrectionDecision::Accepted;
+    acceptance.refresh_outcome();
+    result.metadata.correction_acceptance = Some(acceptance);
+
+    record_missing_fir_reversions(&mut result, ProcessingMode::Hybrid, false);
+    assert!(result.metadata.stage_outcomes.is_empty());
+    assert!(
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .unwrap()
+            .accepted
+    );
+
+    record_missing_fir_reversions(&mut result, ProcessingMode::Hybrid, true);
+    let report = result.metadata.correction_acceptance.as_ref().unwrap();
+    assert!(!report.accepted);
+    assert_eq!(
+        report.decision,
+        roomeq_model::CorrectionDecision::RevertedStage
+    );
+    assert_eq!(report.reverted_stages, vec!["left:fir"]);
+    assert!(
+        report
+            .violations
+            .contains(&"hybrid_fir_safety_reverted".into())
+    );
+    let stage = result.metadata.stage_outcomes.last().unwrap();
+    assert_eq!(stage.stage, "hybrid_fir_generation");
+    assert_eq!(stage.status, roomeq_model::StageStatus::Degraded);
 }
 
 #[test]

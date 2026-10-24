@@ -238,18 +238,37 @@ impl Branch {
 /// overlap inflates the bound above the realized peak, which is the safe
 /// direction for a backstop: the acceptance gate enforces this bound and
 /// fails closed when it is unevaluable.
+///
+/// `lfe_playback_gain_db` is the standardized LFE playback calibration
+/// baked into LFE route gains (zero when not applied to the chain). It is
+/// structural level calibration with its own headroom accounting, not
+/// correction filter boost, so it is excluded from the bound; counting
+/// it makes every standard +10 dB LFE configuration exceed the backstop
+/// before any correction exists.
+/// Applied LFE playback calibration baked into LFE route gains (0 when the
+/// recorded report says the gain is metadata only or no report exists).
+pub(crate) fn applied_lfe_playback_gain_db(
+    report: Option<&roomeq_model::BassManagementReport>,
+) -> f64 {
+    report
+        .and_then(|bass| bass.lfe.as_ref())
+        .filter(|lfe| lfe.gain_applied_to_chain)
+        .map_or(0.0, |lfe| lfe.playback_gain_db)
+}
+
 pub(crate) fn correction_strength_for_electrical_ceiling(
     channels: &HashMap<String, ChannelDspChain>,
     routes: Option<&[BassManagementRoute]>,
     ceiling_db: f64,
+    lfe_playback_gain_db: f64,
 ) -> Option<f64> {
-    if !ceiling_db.is_finite() || ceiling_db < 0.0 {
+    if !ceiling_db.is_finite() || ceiling_db < 0.0 || !lfe_playback_gain_db.is_finite() {
         return None;
     }
     let bound_at = |strength| {
         let mut scaled = channels.clone();
         scale_eq_gains_for_bound(&mut scaled, strength)?;
-        electrical_boost_bound_db(&scaled, routes)
+        electrical_boost_bound_db(&scaled, routes, lfe_playback_gain_db)
     };
     let zero = bound_at(0.0)?;
     if zero > ceiling_db {
@@ -343,7 +362,11 @@ fn scale_eq_gains_for_bound(
 pub(crate) fn electrical_boost_bound_db(
     channels: &HashMap<String, ChannelDspChain>,
     routes: Option<&[BassManagementRoute]>,
+    lfe_playback_gain_db: f64,
 ) -> Option<f64> {
+    if !lfe_playback_gain_db.is_finite() {
+        return None;
+    }
     let mut best: Option<f64> = None;
     let mut consider = |bound: Option<f64>| {
         if let Some(bound) = bound {
@@ -353,9 +376,17 @@ pub(crate) fn electrical_boost_bound_db(
     match routes {
         Some(routes) => {
             for route in routes {
+                // LFE routes bake the standardized playback calibration
+                // into their route gain; it is structural level, not
+                // correction boost, so only the remainder counts.
+                let route_gain_db = if route.route_kind == "lfe_lowpass_to_sub" {
+                    route.gain_db - lfe_playback_gain_db
+                } else {
+                    route.gain_db
+                };
                 consider(
                     resolve_branch_endpoints(channels, route).and_then(|endpoints| {
-                        branch_gain_bound(channels, &endpoints, route.gain_db)
+                        branch_gain_bound(channels, &endpoints, route_gain_db)
                     }),
                 );
             }
@@ -1286,7 +1317,7 @@ mod tests {
         let routes = vec![route("L", "L-sub", 0.0)];
         let mut routes = routes;
         routes[0].gain_db = 2.0;
-        let bound = electrical_boost_bound_db(&channels, Some(&routes)).unwrap();
+        let bound = electrical_boost_bound_db(&channels, Some(&routes), 0.0).unwrap();
         assert!((bound - 7.5).abs() < 1e-9, "bound was {bound}");
     }
 
@@ -1315,18 +1346,18 @@ mod tests {
         // L allows (8 - fixed 2) / scaled 11 = 6/11. R's larger fixed
         // route trim allows only (8 - fixed 7) / scaled 11 = 1/11.
         let strength =
-            correction_strength_for_electrical_ceiling(&channels, Some(&routes), 8.0).unwrap();
+            correction_strength_for_electrical_ceiling(&channels, Some(&routes), 8.0, 0.0).unwrap();
         assert!(
             (strength - (1.0 / 11.0)).abs() < 1e-14,
             "strength was {strength}"
         );
         let mut candidate = channels.clone();
         scale_eq_gains_for_bound(&mut candidate, strength).unwrap();
-        assert!(electrical_boost_bound_db(&candidate, Some(&routes)).unwrap() <= 8.0);
+        assert!(electrical_boost_bound_db(&candidate, Some(&routes), 0.0).unwrap() <= 8.0);
 
         let mut above = channels.clone();
         scale_eq_gains_for_bound(&mut above, strength.next_up()).unwrap();
-        assert!(electrical_boost_bound_db(&above, Some(&routes)).unwrap() > 8.0);
+        assert!(electrical_boost_bound_db(&above, Some(&routes), 0.0).unwrap() > 8.0);
     }
 
     #[test]
@@ -1343,7 +1374,7 @@ mod tests {
         );
         chain.channel = "L".into();
         let channels = HashMap::from([("L".to_string(), chain)]);
-        let bound = electrical_boost_bound_db(&channels, Some(&[route("L", "L", 0.0)]))
+        let bound = electrical_boost_bound_db(&channels, Some(&[route("L", "L", 0.0)]), 0.0)
             .expect("tagged route bound");
         assert!((bound - 5.75).abs() < 1e-9, "bound was {bound}");
     }
@@ -1372,8 +1403,39 @@ mod tests {
         let mut redirected = route("L", "Sub", 0.0);
         redirected.gain_db = 1.25;
         let bound =
-            electrical_boost_bound_db(&channels, Some(&[redirected])).expect("tagged route bound");
+            electrical_boost_bound_db(&channels, Some(&[redirected]), 0.0).expect("tagged route bound");
         assert!((bound - 7.25).abs() < 1e-9, "bound was {bound}");
+    }
+
+    #[test]
+    fn electrical_bound_excludes_applied_lfe_playback_calibration() {
+        // LFE route gain 13 = +10 dB standardized playback calibration
+        // (opted into the chain) + 3 dB sub output gain. Only the
+        // non-calibration remainder counts toward the correction boost
+        // backstop; redirected-bass routes keep counting their full gain.
+        let mut input = chain_with_gains(
+            vec![stage_plugin(eq_plugin(&[1.0]), "pre_route")],
+            &[],
+        );
+        input.channel = "LFE".into();
+        let mut output = chain_with_gains(
+            vec![stage_plugin(eq_plugin(&[2.0]), "post_route")],
+            &[],
+        );
+        output.channel = "Sub".into();
+        let channels = HashMap::from([("LFE".to_string(), input), ("Sub".to_string(), output)]);
+        let mut lfe = route("LFE", "Sub", 0.0);
+        lfe.route_kind = "lfe_lowpass_to_sub".into();
+        lfe.gain_db = 13.0;
+        let with_calibration =
+            electrical_boost_bound_db(&channels, Some(std::slice::from_ref(&lfe)), 10.0)
+                .expect("lfe bound");
+        assert!(
+            (with_calibration - 6.0).abs() < 1e-9,
+            "bound was {with_calibration}"
+        );
+        let without = electrical_boost_bound_db(&channels, Some(&[lfe]), 0.0).expect("lfe bound");
+        assert!((without - 16.0).abs() < 1e-9, "bound was {without}");
     }
 
     #[test]
@@ -1384,7 +1446,7 @@ mod tests {
         output.channel = "Sub".into();
         let channels = HashMap::from([("L".to_string(), input), ("Sub".to_string(), output)]);
         assert_eq!(
-            electrical_boost_bound_db(&channels, Some(&[route("L", "Sub", 0.0)])),
+            electrical_boost_bound_db(&channels, Some(&[route("L", "Sub", 0.0)]), 0.0),
             None
         );
     }
@@ -1396,7 +1458,7 @@ mod tests {
             chain_with_gains(vec![gain_plugin(9.0), eq_plugin(&[2.0])], &[]),
         )]);
         assert_eq!(
-            correction_strength_for_electrical_ceiling(&fixed_overage, None, 8.0),
+            correction_strength_for_electrical_ceiling(&fixed_overage, None, 8.0, 0.0),
             None
         );
 
@@ -1405,7 +1467,7 @@ mod tests {
             chain_with_gains(vec![gain_plugin(1.0), eq_plugin(&[2.0, -5.0])], &[]),
         )]);
         assert_eq!(
-            correction_strength_for_electrical_ceiling(&already_safe, None, 8.0),
+            correction_strength_for_electrical_ceiling(&already_safe, None, 8.0, 0.0),
             Some(1.0)
         );
     }
@@ -1423,14 +1485,14 @@ mod tests {
             ),
         ]);
         // L unevaluable (taps), R bounds 4.0.
-        let bound = electrical_boost_bound_db(&channels, None).unwrap();
+        let bound = electrical_boost_bound_db(&channels, None, 0.0).unwrap();
         assert!((bound - 4.0).abs() < 1e-9, "bound was {bound}");
         // All-convolution graphs report None rather than zero.
         let fir_only = HashMap::from([(
             "L".to_string(),
             chain_with_gains(vec![convolution_plugin()], &[]),
         )]);
-        assert_eq!(electrical_boost_bound_db(&fir_only, None), None);
+        assert_eq!(electrical_boost_bound_db(&fir_only, None, 0.0), None);
     }
 
     #[test]
@@ -1445,7 +1507,7 @@ mod tests {
                 chain_with_gains(vec![gain_plugin(6.0)], &[]),
             ),
         ]);
-        let bound = electrical_boost_bound_db(&channels, None).unwrap();
+        let bound = electrical_boost_bound_db(&channels, None, 0.0).unwrap();
         assert!((bound - 6.0).abs() < 1e-9, "bound was {bound}");
     }
 }

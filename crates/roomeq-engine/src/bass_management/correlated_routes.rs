@@ -63,7 +63,7 @@ fn passes(
         .all(|group| {
             let before: Vec<_> = group.iter().map(|name| reference[name].clone()).collect();
             let after: Vec<_> = group.iter().map(|name| delivered[name].clone()).collect();
-            roomeq_quality::correlated_bass_efficiency_regression(
+            roomeq_quality::correlated_bass_band_efficiency_regression(
                 &before,
                 &after,
                 super::optimize::CORRELATED_BASS_MAX_HZ,

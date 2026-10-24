@@ -171,6 +171,18 @@ fn correction_stage_was_reverted(
         })
 }
 
+/// Whether hybrid best-part selection recorded the given standalone part.
+///
+/// Part selection replaces the whole result with the winning standalone
+/// graph, so its stage outcome is the delivered graph's own record of
+/// why the split Hybrid stages are absent.
+fn hybrid_part_selected(stage_outcomes: &[roomeq_model::StageOutcome], selected: &str) -> bool {
+    stage_outcomes
+        .iter()
+        .filter(|stage| stage.stage == "hybrid_best_part_selection")
+        .any(|stage| stage.advisories.iter().any(|value| value == selected))
+}
+
 fn required_stage_missing(
     improved: bool,
     has_stage: bool,
@@ -249,6 +261,13 @@ pub(super) fn validate_result(
             || channel_has_plugin_type(chain, "convolution");
         let peq_reverted = correction_stage_was_reverted(result, name, "peq");
         let fir_reverted = correction_stage_was_reverted(result, name, "fir");
+        // Hybrid best-part selection may legitimately replace the split
+        // Hybrid graph with the better standalone IIR graph. That recorded
+        // selection waives the retained-FIR requirement: the delivered
+        // graph is the standalone IIR part by recorded choice, not a
+        // silently lost FIR stage. A selected FIR part must still retain
+        // its FIR stage below.
+        let fir_stage_owed = !hybrid_part_selected(&result.metadata.stage_outcomes, "selected=iir");
 
         match method {
             ProcessingMethod::Iir => {
@@ -284,12 +303,14 @@ pub(super) fn validate_result(
                         name
                     ));
                 }
-                if required_stage_missing(
-                    improved,
-                    has_fir,
-                    fir_reverted,
-                    expect.accepts_safe_revert(),
-                ) {
+                if fir_stage_owed
+                    && required_stage_missing(
+                        improved,
+                        has_fir,
+                        fir_reverted,
+                        expect.accepts_safe_revert(),
+                    )
+                {
                     failures.push(format!(
                         "channel '{}': Mixed mode but no retained FIR stage",
                         name
@@ -397,7 +418,7 @@ pub(super) fn validate_result(
 mod tests {
     use super::{
         ProcessingMethod, build_quick_test_matrix, build_test_matrix_for_tier,
-        required_stage_missing,
+        hybrid_part_selected, required_stage_missing,
     };
     use crate::registry::QaTier;
 
@@ -441,6 +462,23 @@ mod tests {
             iir.expect.gate_purpose,
             crate::registry::QaGatePurpose::Quality
         );
+    }
+
+    #[test]
+    fn hybrid_part_selection_reads_only_the_selection_stage() {
+        // Regression: medium_stereo_2_0 mixed delivered the standalone IIR
+        // part (selected=iir) and QA reported a silently missing FIR stage.
+        let mut outcomes: Vec<roomeq_model::StageOutcome> = Vec::new();
+        assert!(!hybrid_part_selected(&outcomes, "selected=iir"));
+        outcomes.push(roomeq_model::StageOutcome {
+            checks: Vec::new(),
+            stage: "hybrid_best_part_selection".into(),
+            status: roomeq_model::StageStatus::Applied,
+            advisories: vec!["selected=iir".into()],
+        });
+        assert!(hybrid_part_selected(&outcomes, "selected=iir"));
+        assert!(!hybrid_part_selected(&outcomes, "selected=fir"));
+        assert!(!hybrid_part_selected(&outcomes, "selected=hybrid"));
     }
 
     #[test]

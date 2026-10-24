@@ -2473,6 +2473,15 @@ pub(super) fn is_baseline_correction(plugin: &roomeq_model::PluginConfigWrapper)
             .get("label")
             .and_then(serde_json::Value::as_str)
             == Some(crate::delay_compile::COMPILE_PADDING_LABEL)
+        // FIR bulk-delay plugins exist only to compensate convolution
+        // latency (cross-branch alignment) or to preserve it across a
+        // stage reversion. The baseline drops convolutions, so retaining
+        // their compensation would shift the baseline splice by the full
+        // design delay and charge that shift to the correction. Every
+        // branch loses the same aligned bulk, preserving relative timing.
+        // Stage classification stays separate: `remove_correction_stage`
+        // converts convolutions into bulk delays that must survive it.
+        || is_fir_bulk_delay_plugin(plugin)
 }
 
 /// Release temporal masking when no FIR bulk survives on the branch.

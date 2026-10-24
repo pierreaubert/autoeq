@@ -10,13 +10,27 @@
   "speakers": {
     "right": {
       "measurements": [
-        "right_lp0.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-medium_stereo_2_0"
+      }
     },
     "left": {
       "measurements": [
-        "left_lp0.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-medium_stereo_2_0"
+      }
     }
   },
   "optimizer": {

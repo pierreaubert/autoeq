@@ -38,8 +38,8 @@ use misc::find_project_root;
 use misc::scenario_description;
 pub use processing_method::ProcessingMethod;
 use processing_method::{build_quick_test_matrix, build_test_matrix_for_tier};
-use run::run_parallel;
 pub use run::run_regression_case;
+use run::{CaseOptions, run_parallel};
 use test_case::TestCase;
 use test_case::print_matrix;
 use test_result::{QaOutcome, write_junit_xml};
@@ -131,11 +131,18 @@ pub fn run() -> Result<bool> {
         anyhow::bail!("No test cases match the requested QA selection");
     }
 
+    let selected = test_cases.len();
+    let options = CaseOptions {
+        seed_runs: args.seed_runs(),
+        metamorphic: args.metamorphic(),
+    };
     println!("=== RoomEQ Full QA ===");
     println!(
-        "Running {} test cases with {} parallel jobs",
-        test_cases.len(),
-        args.jobs()
+        "Running {} test cases with {} parallel jobs (seed-runs {}, metamorphic {})",
+        selected,
+        args.jobs(),
+        options.seed_runs,
+        if options.metamorphic { "on" } else { "off" },
     );
     if args.quick {
         println!(
@@ -144,46 +151,60 @@ pub fn run() -> Result<bool> {
     }
     println!();
 
-    // Run tests
-    let results = run_parallel(test_cases, args.maxeval(), args.jobs());
+    // Run tests, printing and persisting each verdict as it lands so an
+    // interrupted matrix still leaves usable evidence behind.
+    let mut streamed: Vec<test_result::TestResult> = Vec::new();
+    let mut stream_error: Option<String> = None;
+    let results = run_parallel(
+        test_cases,
+        args.maxeval(),
+        args.jobs(),
+        options,
+        args.fail_fast,
+        &mut |result| {
+            print_result(result, selected, streamed.len() + 1);
+            streamed.push(result.clone());
+            if stream_error.is_none()
+                && let Some(path) = &args.json
+                && let Err(error) = serde_json::to_vec_pretty(&streamed)
+                    .map_err(anyhow::Error::from)
+                    .and_then(|bytes| std::fs::write(path, bytes).map_err(anyhow::Error::from))
+            {
+                stream_error = Some(format!("streaming QA evidence JSON: {error:#}"));
+            }
+            if stream_error.is_none()
+                && let Some(path) = &args.junit
+                && let Err(error) = write_junit_xml(&streamed, path)
+            {
+                stream_error = Some(format!("streaming QA JUnit XML: {error:#}"));
+            }
+        },
+    );
+    if let Some(error) = stream_error {
+        anyhow::bail!(error);
+    }
+    if results.len() < selected {
+        println!(
+            "Fail-fast: {} of {} selected cases did not run",
+            selected - results.len(),
+            selected
+        );
+    }
 
-    // Print results
+    // Tally results
     let mut passed = 0;
     let mut reverted = 0;
     let mut failed = 0;
 
     for result in &results {
-        let status = result.outcome.label();
-        let epa_str = match result.epa_preference {
-            Some(v) => format!("epa={:.3}", v),
-            None => "epa=n/a".to_string(),
-        };
         if result.passed {
             match result.outcome {
                 QaOutcome::Passed => passed += 1,
                 QaOutcome::Reverted => reverted += 1,
                 QaOutcome::Failed => unreachable!("failed outcome cannot have passed=true"),
             }
-            println!(
-                "[{}] {} ({}ms): {:.4} -> {:.4} ({:.1}% improvement) {}",
-                status,
-                result.name,
-                result.duration_ms,
-                result.pre_score,
-                result.post_score,
-                (1.0 - result.post_score / result.pre_score.max(0.001)) * 100.0,
-                epa_str,
-            );
         } else {
             failed += 1;
-            if let Some(ref err) = result.error {
-                eprintln!("[{}] {} {}: {}", status, result.name, epa_str, err);
-            } else {
-                eprintln!(
-                    "[{}] {}: pre={:.4}, post={:.4} {}",
-                    status, result.name, result.pre_score, result.post_score, epa_str,
-                );
-            }
         }
     }
 
@@ -212,6 +233,38 @@ pub fn run() -> Result<bool> {
 
     // Exit code
     Ok(args.fail && failed > 0)
+}
+
+fn print_result(result: &test_result::TestResult, selected: usize, completed: usize) {
+    let status = result.outcome.label();
+    let epa_str = match result.epa_preference {
+        Some(v) => format!("epa={:.3}", v),
+        None => "epa=n/a".to_string(),
+    };
+    if result.passed {
+        println!(
+            "[{}] ({}/{}) {} ({}ms): {:.4} -> {:.4} ({:.1}% improvement) {}",
+            status,
+            completed,
+            selected,
+            result.name,
+            result.duration_ms,
+            result.pre_score,
+            result.post_score,
+            (1.0 - result.post_score / result.pre_score.max(0.001)) * 100.0,
+            epa_str,
+        );
+    } else if let Some(ref err) = result.error {
+        eprintln!(
+            "[{}] ({}/{}) {} {}: {}",
+            status, completed, selected, result.name, epa_str, err
+        );
+    } else {
+        eprintln!(
+            "[{}] ({}/{}) {}: pre={:.4}, post={:.4} {}",
+            status, completed, selected, result.name, result.pre_score, result.post_score, epa_str,
+        );
+    }
 }
 
 fn invalidate_json_report(path: Option<&std::path::Path>) -> Result<()> {

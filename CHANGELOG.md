@@ -1,5 +1,58 @@
 # Unreleased
 
+- Add a fast RoomEQ QA iteration lane: coverage runs one deterministic seed
+  without metamorphic replays on the PR tier (nightly/weekly keep the
+  median-of-five distribution), gains `--seed-runs`, `--metamorphic`,
+  `--no-metamorphic`, and `--fail-fast`, streams verdicts and evidence files
+  as cases finish, and stops seed selection after two identical
+  deterministic failures. PR-tier verdicts are unchanged (20/20) at 6.5x
+  less summed case time. `just qa` now reports every domain before failing.
+  Triage of the remaining product failures: `docs/QA_TRIAGE_20261022.md`.
+- Score the forwarded LFE target on the relative level plane like every
+  other bass-managed input: bass management's applied sub gain is structural
+  level, not LFE target error. This restores correction delivery for the
+  synthetic 5.1 round-trip, which absolute LFE scoring rejected wholesale.
+- Clamp floating-point epsilon overshoots at optimizer bounds during
+  finalization instead of refusing the candidate, and name the first
+  violating parameter in spacing-repair refusals. Record an explicit
+  hybrid FIR degradation when configured Hybrid processing delivers no FIR
+  taps, mirroring the existing mixed-phase guard.
+- Arm the per-sub splice correlated-array gate only when the incoming
+  splice is itself feasible: worst-bin efficiency regression against a
+  broken incoming array forbade the delay repair the stage exists to make
+  (MSO joint selection again finds the pre-regression controls). Coverage
+  QA now recognizes recorded Hybrid best-part selection (`selected=iir`)
+  as waiving the retained-FIR requirement instead of a silent FIR loss.
+- Realize routed per-output gain, delay, and polarity exactly once in
+  final seat replay: routes already carry the folded per-output
+  controls, so untagged driver gain/delay plugins are no longer applied
+  a second time on routed branches (the double application cancelled
+  the selected sub polarity and forced MSO results onto the configured
+  fallback). Correction-tagged driver plugins remain applied, matching
+  physical-routing and deployed-reconstruction ownership.
+- Judge programme-plane correlated-bass coherence by band-integrated
+  coherent power instead of the worst single bin: per-source delay
+  repair necessarily shifts summation nulls between programme channels,
+  so the worst-bin verdict vetoed the alignment the source-route stage
+  exists to find and forced MSO delivery onto the structural fallback.
+  The physical sub array keeps the worst-bin measure. FEM QA fixtures
+  now declare their simulation provenance (stationary captures on one
+  solver clock, named seats) so coherent-timing gates test the
+  optimizer instead of stopping at unknown acquisition metadata.
+- Restore configured-reference comparison for cardioid and DBA systems:
+  the reference-graph topology allowlist omitted both, so final
+  candidate selection was unavailable (every strength trial failed
+  with a graph-identity error) and cardioid correction could never be
+  delivered.
+- Keep trial seat replay splice-consistent: the replay baseline now
+  drops FIR bulk-compensation delays together with the convolutions
+  they compensate. Zero-strength trials previously exceeded the
+  acoustic boost backstop from the baseline splice shift alone.
+- Exclude the standardized LFE playback calibration (+10 dB when
+  applied to the chain) from the electrical correction-boost bound: it
+  is structural level calibration with its own headroom accounting, and
+  counting it made every standard LFE configuration exceed the
+  backstop before any correction existed.
 - Apply requested RoomEQ processing to CTC's emitted physical output roles,
   retain measurement-keyed standalone dictionaries, and report the chains
   actually used by the CTC design.

@@ -10,10 +10,23 @@ use std::path::Path;
 
 const STAGE: &str = "final_correlated_bass_acceptance";
 
-/// Worst decrease in coherent-to-power-sum efficiency, independent of common gain.
+/// Band-integrated decrease in coherent-to-power-sum efficiency.
+///
+/// Programme channels reach a seat through different mains, so legitimate
+/// per-source splice alignment shifts single-bin summation nulls between
+/// channels: a worst-bin verdict vetoes the delay alignment correction
+/// exists to apply, while band-integrated coherent power still collapses
+/// under systematic decorrelation (for example an opposed sub polarity).
+/// The worst single-bin frequency is retained in the returned pair for
+/// diagnostics. The physical sub array, where every output carries the
+/// same signal, keeps the worst-bin measure in the optimizer.
 fn efficiency_regression(before: &[Curve], after: &[Curve]) -> Result<(f64, f64)> {
-    roomeq_quality::correlated_bass_efficiency_regression(before, after, super::MONO_BASS_MAX_HZ)
-        .map_err(invalid)
+    roomeq_quality::correlated_bass_band_efficiency_regression(
+        before,
+        after,
+        super::MONO_BASS_MAX_HZ,
+    )
+    .map_err(invalid)
 }
 
 fn groups(graph: &roomeq_model::BassManagementRoutingGraph) -> Vec<Vec<String>> {
@@ -236,19 +249,27 @@ mod tests {
         }
     }
     #[test]
-    fn a_narrow_correlated_null_cannot_hide_behind_peak_buildup() {
+    fn opposed_correlated_polarity_cannot_hide_behind_peak_buildup() {
         let before = vec![response(0.0); 2];
-        let mut after = before.clone();
-        after[1].phase.as_mut().unwrap()[2] = 180.0;
-        let (loss, frequency) = efficiency_regression(&before, &after).unwrap();
-        assert!(loss > 200.0);
-        assert_eq!(frequency, 80.0);
+        // A single-bin null still shows peak buildup elsewhere; the
+        // band-integrated programme verdict below targets the systematic
+        // decorrelation a polarity opposition causes at every bin.
+        let mut narrow = before.clone();
+        narrow[1].phase.as_mut().unwrap()[2] = 180.0;
         assert!(
-            super::super::assess_mono_bass_sums(&after, 300.0)
+            super::super::assess_mono_bass_sums(&narrow, 300.0)
                 .unwrap()
                 .max_buildup_db
                 > 3.0
         );
+        let mut after = before.clone();
+        after[1]
+            .phase
+            .as_mut()
+            .unwrap()
+            .mapv_inplace(|phase| phase + 180.0);
+        let (loss, _frequency) = efficiency_regression(&before, &after).unwrap();
+        assert!(loss > 200.0, "band loss {loss}");
     }
     #[test]
     fn common_gain_and_phase_changes_preserve_efficiency() {

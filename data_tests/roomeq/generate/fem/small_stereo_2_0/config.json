@@ -10,21 +10,59 @@
   "speakers": {
     "left": {
       "measurements": [
-        "left_lp0.csv",
-        "left_lp1.csv",
-        "left_lp2.csv",
-        "left_lp3.csv",
-        "left_lp4.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-small_stereo_2_0"
+      }
     },
     "right": {
       "measurements": [
-        "right_lp0.csv",
-        "right_lp1.csv",
-        "right_lp2.csv",
-        "right_lp3.csv",
-        "right_lp4.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-small_stereo_2_0"
+      }
     }
   },
   "optimizer": {

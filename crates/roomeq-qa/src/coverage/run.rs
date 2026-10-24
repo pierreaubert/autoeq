@@ -15,7 +15,7 @@ use roomeq_model::{ChannelDspChain, CorrectionDecision, PluginConfigWrapper, Roo
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::thread;
 
@@ -24,13 +24,39 @@ use std::thread;
 // enough to catch material regressions while tolerating that residual noise.
 const METAMORPHIC_SCORE_TOLERANCE_FRACTION: f64 = 0.02;
 
+/// Per-case execution options resolved from the CLI tier and flags.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CaseOptions {
+    /// Optimizer seeds per case: 1 (deterministic contract) or 5
+    /// (median-of-five convergence distribution).
+    pub(super) seed_runs: usize,
+    /// Run the doubled-budget and added-filter metamorphic replays.
+    pub(super) metamorphic: bool,
+}
+
 pub(super) fn run_optimization(
     config: &RoomConfig,
+    seed_runs: usize,
 ) -> Result<(RoomOptimizationResult, PathBuf, u64)> {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
     let temp_dir = std::env::temp_dir().join(format!("roomeq_qa_{}_{}", std::process::id(), id));
     std::fs::create_dir_all(&temp_dir)?;
-    match crate::optimize_room_with_selected_seed(config, SAMPLE_RATE, Some(&temp_dir)) {
+    // Mirror the quality runner: a single-seed contract runs the production
+    // workflow once with the configured seed, while the convergence
+    // distribution keeps the median-of-five seed selection.
+    let outcome = match seed_runs {
+        1 => {
+            let seed = config.optimizer.seed.unwrap_or(super::consts::SEED);
+            let mut seeded = config.clone();
+            seeded.optimizer.seed = Some(seed);
+            roomeq_workflow::optimize_room(&seeded, SAMPLE_RATE, None, Some(&temp_dir))
+                .map(|result| (result, seed))
+                .map_err(|error| anyhow::anyhow!(error.to_string()))
+        }
+        5 => crate::optimize_room_with_selected_seed(config, SAMPLE_RATE, Some(&temp_dir)),
+        other => panic!("unsupported QA seed_runs {other}: expected 1 or 5"),
+    };
+    match outcome {
         Ok((result, selected_seed)) => Ok((result, temp_dir, selected_seed)),
         Err(error) => {
             let _ = std::fs::remove_dir_all(&temp_dir);
@@ -152,7 +178,7 @@ fn rejected_identity_fallback(identity_fallback: bool, allow_reverted: bool) -> 
     identity_fallback && !allow_reverted
 }
 
-pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
+pub(super) fn run_test_case(tc: &TestCase, maxeval: usize, options: CaseOptions) -> TestResult {
     let start = std::time::Instant::now();
 
     let name = tc.name();
@@ -204,7 +230,7 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     }
 
     // Run optimization
-    let (mut result, temp_dir, selected_seed) = match run_optimization(&config) {
+    let (mut result, temp_dir, selected_seed) = match run_optimization(&config, options.seed_runs) {
         Ok(r) => r,
         Err(e) => {
             return TestResult::failure(
@@ -276,11 +302,13 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
         ));
     }
     validation_failures.extend(crate::registry::verify_result_claims(&result, &tc.claims));
-    validation_failures.extend(validate_metamorphic_optimization(
-        &config,
-        &result,
-        selected_seed,
-    ));
+    if options.metamorphic {
+        validation_failures.extend(validate_metamorphic_optimization(
+            &config,
+            &result,
+            selected_seed,
+        ));
+    }
     if rejected_identity_fallback(identity_fallback, allow_reverted) {
         let acceptance = result.metadata.correction_acceptance.as_ref();
         let violations = acceptance
@@ -331,28 +359,47 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize) -> TestResult {
     qa_result
 }
 
+/// Run cases on a bounded worker pool, reporting each result as it lands.
+///
+/// `on_result` runs on the receiver thread for every finished case so the
+/// caller can print progress and persist evidence incrementally: a long
+/// matrix that is interrupted still leaves the completed verdicts behind.
+/// When `fail_fast` is set, the first failed case stops further pulls
+/// while in-flight cases still complete and report, mirroring the
+/// synthetic runner.
 pub(super) fn run_parallel(
     test_cases: Vec<TestCase>,
     maxeval: usize,
     num_jobs: usize,
+    options: CaseOptions,
+    fail_fast: bool,
+    on_result: &mut dyn FnMut(&TestResult),
 ) -> Vec<TestResult> {
     let (tx, rx) = channel::<TestResult>();
     let worker_count = num_jobs.max(1).min(test_cases.len());
     let test_cases = Arc::new(test_cases);
     let next_case = Arc::new(AtomicUsize::new(0));
+    let stop = Arc::new(AtomicBool::new(false));
     let mut handles = Vec::with_capacity(worker_count);
 
     for _ in 0..worker_count {
         let tx = tx.clone();
         let test_cases = Arc::clone(&test_cases);
         let next_case = Arc::clone(&next_case);
+        let stop = Arc::clone(&stop);
         let handle = thread::spawn(move || {
             loop {
+                if fail_fast && stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 let index = next_case.fetch_add(1, Ordering::Relaxed);
                 let Some(test_case) = test_cases.get(index) else {
                     break;
                 };
-                let result = run_test_case(test_case, maxeval);
+                let result = run_test_case(test_case, maxeval, options);
+                if fail_fast && !result.passed {
+                    stop.store(true, Ordering::Relaxed);
+                }
                 if tx.send(result).is_err() {
                     break;
                 }
@@ -365,6 +412,7 @@ pub(super) fn run_parallel(
 
     let mut results = Vec::new();
     while let Ok(result) = rx.recv() {
+        on_result(&result);
         results.push(result);
     }
 
@@ -402,7 +450,16 @@ pub fn run_regression_case(
             gate_purpose: crate::registry::QaGatePurpose::Quality,
         },
     };
-    let result = run_test_case(&test_case, maxeval);
+    // Regression callers keep the full convergence distribution and the
+    // metamorphic replays; only the CLI tiers opt into the fast lane.
+    let result = run_test_case(
+        &test_case,
+        maxeval,
+        CaseOptions {
+            seed_runs: 5,
+            metamorphic: true,
+        },
+    );
     if result.passed {
         Ok(())
     } else {
@@ -443,5 +500,66 @@ mod tests {
         assert!(!rejected_identity_fallback(false, false));
         assert!(rejected_identity_fallback(true, false));
         assert!(!rejected_identity_fallback(true, true));
+    }
+
+    fn missing_config_case(index: usize) -> super::super::test_case::TestCase {
+        super::super::test_case::TestCase {
+            registry_id: format!("adhoc/missing-{index}"),
+            scenario: format!("missing_scenario_{index}"),
+            description: "missing fixture".to_string(),
+            solver: super::super::solver::Solver::Fem,
+            method: super::ProcessingMethod::Iir,
+            case_name: None,
+            override_file: None,
+            home_cinema_expectations: None,
+            claims: Vec::new(),
+            expect: crate::registry::ScenarioExpect {
+                improvement_min_pct: 10.0,
+                max_post_score: 12.0,
+                max_boost_db: 12.0,
+                allow_safe_revert: false,
+                gate_purpose: crate::registry::QaGatePurpose::Quality,
+            },
+        }
+    }
+
+    #[test]
+    fn run_parallel_reports_every_result_through_the_callback() {
+        let cases: Vec<_> = (0..4).map(missing_config_case).collect();
+        let mut reported = Vec::new();
+        let results = super::run_parallel(
+            cases,
+            1,
+            2,
+            super::CaseOptions {
+                seed_runs: 1,
+                metamorphic: false,
+            },
+            false,
+            &mut |result| reported.push(result.name.clone()),
+        );
+        assert_eq!(results.len(), 4);
+        assert_eq!(reported.len(), 4);
+        assert!(results.iter().all(|result| !result.passed));
+    }
+
+    #[test]
+    fn run_parallel_fail_fast_stops_scheduling_after_first_failure() {
+        let cases: Vec<_> = (0..8).map(missing_config_case).collect();
+        let mut reported = 0usize;
+        let results = super::run_parallel(
+            cases,
+            1,
+            1,
+            super::CaseOptions {
+                seed_runs: 1,
+                metamorphic: false,
+            },
+            true,
+            &mut |_| reported += 1,
+        );
+        assert_eq!(results.len(), 1);
+        assert_eq!(reported, 1);
+        assert!(!results[0].passed);
     }
 }

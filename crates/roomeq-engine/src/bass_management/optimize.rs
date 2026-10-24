@@ -1500,6 +1500,16 @@ fn apply_per_sub_splice_selection(
     else {
         return vec!["per_sub_splice_skipped_missing_physical_phase".into()];
     };
+    // The correlated-array gate below protects the incoming array's
+    // coherence. It is only armed when the incoming splice itself is
+    // feasible: worst-bin efficiency regression against a broken
+    // incoming splice explodes for almost any relative-delay change
+    // (a shifted summation null reads as near-total loss at that bin),
+    // which would forbid the repair this stage exists to make. The
+    // flag is set from the baseline evaluation before the search runs;
+    // final correlated acceptance against configured routes still
+    // judges the delivered array downstream.
+    let correlated_active = std::cell::Cell::new(true);
     let evaluate = |params: &[f64]| -> Option<(f64, Vec<f64>, bool)> {
         let outputs = decode(params);
         let frequencies: Vec<_> = outputs
@@ -1542,7 +1552,7 @@ fn apply_per_sub_splice_selection(
             };
             let before = weighted(&reference_physical);
             let after = weighted(&candidate_physical);
-            if before.len() >= 2 {
+            if correlated_active.get() && before.len() >= 2 {
                 let (loss, _) = roomeq_quality::correlated_bass_efficiency_regression(
                     &before,
                     &after,
@@ -1665,9 +1675,10 @@ fn apply_per_sub_splice_selection(
             },
         )
     };
-    let Some((baseline, baseline_losses, _)) = validate(&initial) else {
+    let Some((baseline, baseline_losses, baseline_cancellation)) = validate(&initial) else {
         return vec!["per_sub_splice_skipped_missing_phase_or_correction".into()];
     };
+    correlated_active.set(baseline_cancellation);
     let feasible = |losses: &[f64], cancellation_passed: bool| {
         cancellation_passed
             && losses
@@ -2609,11 +2620,17 @@ fn optimize_bass_management_joint_solution_impl(
                     .iter()
                     .any(|e| e.accepted && e.final_db > limit + tolerance)
             });
+        // Programme-plane coherence protection uses the band-integrated
+        // measure: per-source delay repair necessarily shifts single-bin
+        // summation nulls between programme channels, so the worst-bin
+        // measure vetoes the alignment this stage exists to find. The
+        // worst-bin measure remains in force on the physical sub array,
+        // where every output carries the same signal.
         let correlated_regression = candidate.as_ref().is_some_and(|(_, _, _, _, responses)| {
             if responses.len() < 2 {
                 return false;
             }
-            roomeq_quality::correlated_bass_efficiency_regression(
+            roomeq_quality::correlated_bass_band_efficiency_regression(
                 &baseline_sources,
                 responses,
                 CORRELATED_BASS_MAX_HZ,
@@ -2795,7 +2812,7 @@ fn optimize_bass_management_joint_solution_impl(
                         continue;
                     }
                     if sources.len() >= 2
-                        && roomeq_quality::correlated_bass_efficiency_regression(
+                        && roomeq_quality::correlated_bass_band_efficiency_regression(
                             &baseline_sources,
                             &responses,
                             CORRELATED_BASS_MAX_HZ,

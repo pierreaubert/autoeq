@@ -38,33 +38,75 @@
   "speakers": {
     "left": {
       "measurements": [
-        "left_lp0.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_sub_4"
+      }
     },
     "right": {
       "measurements": [
-        "right_lp0.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_sub_4"
+      }
     },
     "lfe_1": {
       "measurements": [
-        "sub1_lp0.csv"
-      ]
+        {
+          "path": "sub1_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_sub_4"
+      }
     },
     "lfe_2": {
       "measurements": [
-        "sub2_lp0.csv"
-      ]
+        {
+          "path": "sub2_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_sub_4"
+      }
     },
     "lfe_3": {
       "measurements": [
-        "sub3_lp0.csv"
-      ]
+        {
+          "path": "sub3_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_sub_4"
+      }
     },
     "lfe_4": {
       "measurements": [
-        "sub4_lp0.csv"
-      ]
+        {
+          "path": "sub4_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_multi_sub_4"
+      }
     }
   },
   "crossovers": {

@@ -260,7 +260,18 @@ demo-headphone-loss:
 # QA
 # ----------------------------------------------------------------------
 
-qa : qa-autoeq-all qa-roomeq-all qa-export-all qa-wolfram-validation
+# Run every QA domain and report all of them: a red domain must not hide
+# the evidence of the others. The aggregate exit code still fails when
+# any domain fails.
+qa:
+	#!/usr/bin/env bash
+	set -u
+	status=0
+	just qa-autoeq-all || status=1
+	just qa-roomeq-all || status=1
+	just qa-export-all || status=1
+	just qa-wolfram-validation || status=1
+	exit $status
 
 # ----------------------------------------------------------------------
 # utils

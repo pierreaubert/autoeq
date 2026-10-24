@@ -1193,6 +1193,7 @@ fn transplantable_trial_safety(plugin: &PluginConfigWrapper, physical_driver: bo
 /// strength. Transplanting makes pre/post deployment-identical, leaving pure
 /// correction-marginal judgment. Unmatched chains/drivers keep baseline
 /// values (fail-closed: unmatched trial safety stays charged).
+///
 fn transplant_trial_safety(
     baseline: &RoomOptimizationResult,
     trial: &RoomOptimizationResult,
@@ -1437,10 +1438,39 @@ fn replay_output(
                             .iter()
                             .find(|driver| driver.name == route.destination)
                     }) {
+                        // Route plugins above already realize this output's
+                        // gain, delay, and polarity: the routing graph folds
+                        // the per-output settings into every route
+                        // (`trim + output.gain`, `bass_route_delay +
+                        // output.delay`, `source_pol ^ output_pol`). The
+                        // serialized driver chain carries the same controls
+                        // for non-routed consumers, so applying them again
+                        // here would double-apply gain/delay and cancel the
+                        // selected polarity. Mirror the physical-routing
+                        // ownership contract: only correction-tagged driver
+                        // gain/delay plugins are realized on top of a route.
+                        let driver_plugins = driver
+                            .plugins
+                            .iter()
+                            .filter(|plugin| match plugin.plugin_type.as_str() {
+                                "gain" => plugin
+                                    .parameters
+                                    .get("room_eq_correction_gain")
+                                    .and_then(serde_json::Value::as_bool)
+                                    == Some(true),
+                                "delay" => plugin
+                                    .parameters
+                                    .get("room_eq_correction_delay")
+                                    .and_then(serde_json::Value::as_bool)
+                                    == Some(true),
+                                _ => true,
+                            })
+                            .cloned()
+                            .collect::<Vec<_>>();
                         curve = apply(
                             result,
                             post_owner,
-                            driver.plugins.clone(),
+                            driver_plugins,
                             &curve,
                             baseline,
                             fs,
@@ -1584,6 +1614,7 @@ pub(super) fn validate_candidate_final_seats(
         },
     )
 }
+
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn validate_candidate_final_seats_with_diagnostic_trace(
@@ -2642,6 +2673,9 @@ fn validate_final_seats_body(
             .as_ref()
             .and_then(|bass| bass.routing_graph.as_ref())
             .map(|graph| graph.routes.as_slice()),
+        crate::delay_compile::applied_lfe_playback_gain_db(
+            result.metadata.bass_management.as_ref(),
+        ),
     );
     if score.temporal.phase_evidence_available {
         let only_phase_missing = report.violations.as_slice() == ["phase_evidence_missing"];
@@ -2886,6 +2920,7 @@ fn concealment_stage(findings: Vec<String>) -> roomeq_model::StageOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     #[test]
     fn transplant_matches_post_route_safety_but_not_common_input_safety() {
@@ -5074,7 +5109,7 @@ mod tests {
                     &context,
                     PhysicalMainReplayContext {
                         target: Some(&coherent_target),
-                        trace: None
+                        trace: None,
                     }
                 )
                 .is_err()
@@ -5099,7 +5134,7 @@ mod tests {
                     &context,
                     PhysicalMainReplayContext {
                         target: Some(&coherent_target),
-                        trace: None
+                        trace: None,
                     }
                 )
                 .unwrap_err()
@@ -5316,6 +5351,112 @@ mod tests {
             assert!(
                 phase_error.abs() < 1e-7,
                 "driver_owned={driver_owned}: phase error {phase_error}"
+            );
+        }
+    }
+
+    #[test]
+    fn routed_replay_realizes_driver_gain_delay_polarity_once_via_route() {
+        // The routing graph folds per-output gain, delay, and polarity into
+        // every route. The serialized driver chain repeats the same controls
+        // for non-routed consumers, so replay must not apply untagged driver
+        // gain/delay plugins a second time (that cancels the selected
+        // polarity and doubles the delay). Correction-tagged driver plugins
+        // are residual processing and stay applied.
+        for correction_tagged in [false, true] {
+            let (mut result, mut config, _) = routed_fixture();
+            config.optimizer.min_freq = 20.0;
+            config.optimizer.max_freq = 300.0;
+            let raw = Curve {
+                freq: ndarray::array![20.0, 40.0, 80.0, 120.0, 300.0],
+                spl: ndarray::Array1::from_elem(5, 80.0),
+                phase: Some(ndarray::Array1::zeros(5)),
+                ..Default::default()
+            };
+            let mut driver_gain =
+                roomeq_engine::output::create_gain_plugin_with_invert(3.0, true);
+            driver_gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
+            let mut driver_delay = roomeq_engine::output::create_delay_plugin(5.0);
+            driver_delay.parameters["room_eq_stage"] = serde_json::json!("post_route");
+            if correction_tagged {
+                driver_gain.parameters["room_eq_correction_gain"] = serde_json::json!(true);
+                driver_delay.parameters["room_eq_correction_delay"] = serde_json::json!(true);
+            }
+            let mut physical_lp =
+                roomeq_engine::output::create_crossover_plugin("LR24", 80.0, "low");
+            physical_lp.parameters["room_eq_stage"] = serde_json::json!("post_route");
+            let chain = result.channels.get_mut("sub").unwrap();
+            chain.plugins = Vec::new();
+            chain.drivers = Some(vec![roomeq_model::DriverDspChain {
+                name: "physical".into(),
+                index: 0,
+                plugins: vec![driver_gain, driver_delay, physical_lp],
+                initial_curve: Some((&raw).into()),
+                measured_band_hz: Some([20.0, 300.0]),
+                measured_acoustics: None,
+            }]);
+            let graph = result
+                .metadata
+                .bass_management
+                .as_mut()
+                .unwrap()
+                .routing_graph
+                .as_mut()
+                .unwrap();
+            graph.routes[1].destination = "physical".into();
+            graph.routes[1].low_pass_hz = None;
+            graph.routes[1].polarity_inverted = true;
+            graph.output_channels = vec!["left".into(), "physical".into()];
+            graph.physical_sub_outputs = vec!["physical".into()];
+            let physical = BTreeMap::from([
+                ("left".into(), vec![raw.clone()]),
+                ("physical".into(), vec![raw]),
+            ]);
+            let dir = tempfile::tempdir().unwrap();
+            let context = ReplayContext {
+                config: &config,
+                partition: "training",
+                fs: 48_000.0,
+                dir: dir.path(),
+            };
+            let (replayed, outputs) = replay_output(
+                &result,
+                &physical,
+                "left",
+                0,
+                false,
+                &context,
+                Some("physical"),
+            )
+            .unwrap();
+            assert_eq!(outputs, vec!["physical"]);
+            let index = replayed
+                .curve
+                .freq
+                .iter()
+                .position(|f| (*f - 80.0).abs() < 1e-9)
+                .unwrap();
+            // Route: -6 dB, 2 ms, inverted. Driver LP at its corner: -6.02 dB
+            // and -180 degrees. Untagged driver controls (+3 dB, 5 ms,
+            // inverted) must not reappear; tagged ones must.
+            let driver_gain_db = if correction_tagged { 3.0 } else { 0.0 };
+            let expected_spl = 80.0 - 6.0 - 20.0 * 2.0_f64.log10() + driver_gain_db;
+            assert!(
+                (replayed.curve.spl[index] - expected_spl).abs() < 1e-7,
+                "correction_tagged={correction_tagged}: spl {} vs {expected_spl}",
+                replayed.curve.spl[index]
+            );
+            let driver_delay_ms = if correction_tagged { 0.005 } else { 0.0 };
+            let driver_polarity = if correction_tagged { 180.0 } else { 0.0 };
+            let expected_phase = -180.0 + 180.0 - 360.0 * 80.0 * (0.002 + driver_delay_ms)
+                + driver_polarity;
+            let phase_error = (replayed.curve.phase.as_ref().unwrap()[index] - expected_phase
+                + 180.0)
+                .rem_euclid(360.0)
+                - 180.0;
+            assert!(
+                phase_error.abs() < 1e-7,
+                "correction_tagged={correction_tagged}: phase error {phase_error}"
             );
         }
     }

@@ -30,53 +30,123 @@
   "speakers": {
     "top_rear_right": {
       "measurements": [
-        "top_rear_right_lp0.csv"
-      ]
+        {
+          "path": "top_rear_right_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "top_rear_left": {
       "measurements": [
-        "top_rear_left_lp0.csv"
-      ]
+        {
+          "path": "top_rear_left_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "right": {
       "measurements": [
-        "right_lp0.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "top_front_left": {
       "measurements": [
-        "top_front_left_lp0.csv"
-      ]
+        {
+          "path": "top_front_left_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "lfe": {
       "measurements": [
-        "subwoofer_lp0.csv"
-      ]
+        {
+          "path": "subwoofer_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "center": {
       "measurements": [
-        "center_lp0.csv"
-      ]
+        {
+          "path": "center_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "surround_right": {
       "measurements": [
-        "surround_right_lp0.csv"
-      ]
+        {
+          "path": "surround_right_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "top_front_right": {
       "measurements": [
-        "top_front_right_lp0.csv"
-      ]
+        {
+          "path": "top_front_right_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "left": {
       "measurements": [
-        "left_lp0.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     },
     "surround_left": {
       "measurements": [
-        "surround_left_lp0.csv"
-      ]
+        {
+          "path": "surround_left_lp0.csv",
+          "name": "lp0"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_5_1_4"
+      }
     }
   },
   "crossovers": {

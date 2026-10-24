@@ -1,5 +1,6 @@
 use super::super::room_optimization_result::RoomOptimizationResult;
 use super::super::*;
+#[cfg(test)]
 use roomeq_model::SpeakerConfig;
 use super::build::build_bootstrap_uncertainty_report;
 use super::build::build_perceptual_policy_report;
@@ -396,9 +397,10 @@ pub(in super::super) fn refresh_temporal_ir_evidence(
         .channel_results
         .keys()
         .filter_map(|name| {
-            let Some(SpeakerConfig::Single(source)) = config.speakers.get(name) else {
-                return None;
-            };
+            // Channel results are keyed by role ("L"), speaker configs by
+            // speaker key ("left"): resolve through the system mapping or
+            // every mapped config silently loses its waveform basis.
+            let source = crate::evidence_intake::resolve_channel_source(config, name)?;
             waveform_basis_curve(source).map(|curve| (name.clone(), curve))
         })
         .collect();
@@ -981,6 +983,32 @@ mod tests {
             .find(|check| check.id == "post_ir:L")
             .unwrap();
         assert!(post.passed, "{post:?}");
+    }
+
+    #[test]
+    fn temporal_ir_resolves_waveform_basis_through_system_speaker_mapping() {
+        let mut result = single_channel_room_result("L");
+        assert!(result.channel_results["L"].initial_curve.phase.is_none());
+        let mut primary = result.channel_results["L"].initial_curve.clone();
+        primary.phase = Some(ndarray::Array1::zeros(primary.freq.len()));
+        let secondary = result.channel_results["L"].initial_curve.clone();
+        let mut config = RoomConfig::default();
+        // Channel results are keyed by role; the speaker config lives
+        // under its speaker key and is reachable only via system mapping.
+        config.speakers.insert(
+            "left".into(),
+            SpeakerConfig::Single(autoeq_measurements::MeasurementSource::InMemoryMultiple(
+                vec![primary, secondary],
+            )),
+        );
+        config.system = Some(roomeq_model::SystemConfig {
+            model: roomeq_model::SystemModel::Stereo,
+            speakers: [("L".into(), "left".into())].into(),
+            ..Default::default()
+        });
+        refresh_temporal_ir_evidence(&mut result, &config, 48_000.0, Path::new("."));
+        assert!(result.channels["L"].pre_ir.is_some());
+        assert!(result.channels["L"].post_ir.is_some());
     }
 
     #[test]

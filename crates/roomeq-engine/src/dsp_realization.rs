@@ -189,6 +189,45 @@ mod tests {
     }
 
     #[test]
+    fn lr24_lowpass_rotates_phase_180_at_crossover() {
+        // Two cascaded Butterworth-2 low-pass sections: at the corner each
+        // contributes -90 degrees and 1/sqrt(2) magnitude, so the cascade
+        // sits at |H| = 0.5 with a half-turn of phase. Routed-bass splice
+        // accounting depends on this rotation being realized exactly.
+        let chain = chain(vec![create_crossover_plugin("LR24", 80.0, "low")]);
+        let mut provider = NoConvolutionIr;
+        let resp = RealizedDsp::new(&chain, 48_000.0, &mut provider)
+            .unwrap()
+            .response_at(80.0)
+            .unwrap();
+        assert!((resp.norm() - 0.5).abs() < 0.01, "|H|={}", resp.norm());
+        assert!(
+            (resp.arg().to_degrees().abs() - 180.0).abs() < 1.0,
+            "arg={}",
+            resp.arg().to_degrees()
+        );
+        let curve = crate::Curve {
+            freq: ndarray::array![40.0, 80.0],
+            spl: ndarray::array![0.0, 0.0],
+            phase: Some(ndarray::array![-181.0, -181.0]),
+            ..Default::default()
+        };
+        let mut provider = NoConvolutionIr;
+        let out = RealizedDsp::new(&chain, 48_000.0, &mut provider)
+            .unwrap()
+            .apply_to_curve(&curve)
+            .unwrap();
+        assert!(
+            (out.spl[1] + 20.0 * 2.0_f64.log10()).abs() < 0.05,
+            "spl={}",
+            out.spl[1]
+        );
+        let phase = out.phase.as_ref().unwrap()[1];
+        let wrapped = (phase + 1.0 + 180.0).rem_euclid(360.0) - 180.0;
+        assert!(wrapped.abs() < 1.0, "phase={phase}");
+    }
+
+    #[test]
     fn realization_honors_configured_crossover_family() {
         let make = |kind| chain(vec![create_crossover_plugin(kind, 80.0, "high")]);
         let lr24 = make("LR24");

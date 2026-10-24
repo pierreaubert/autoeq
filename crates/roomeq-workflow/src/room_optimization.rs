@@ -2836,9 +2836,10 @@ fn assemble_workflow_result_with_frequency_samples(
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
     )?;
-    record_missing_mixed_phase_fir_reversions(
+    record_missing_fir_reversions(
         &mut result,
         config.optimizer.processing_mode.clone(),
+        config.optimizer.fir.is_some(),
     );
     let level_alignment =
         prepare_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir);
@@ -3266,13 +3267,31 @@ fn apply_final_correction_safety_gate_preserving_routed_crossover(
     Ok(())
 }
 
-fn record_missing_mixed_phase_fir_reversions(
+/// Record an explicit degradation when a FIR-bearing mode delivers no FIR.
+///
+/// MixedPhase always owes its excess-phase FIR; Hybrid owes its residual
+/// FIR only when FIR processing was configured. Accepting an IIR-only
+/// result under either label would misstate the delivered processing,
+/// so missing taps revert the affected stage instead of passing silent.
+fn record_missing_fir_reversions(
     result: &mut RoomOptimizationResult,
     processing_mode: ProcessingMode,
+    fir_requested: bool,
 ) {
-    if processing_mode != ProcessingMode::MixedPhase {
-        return;
-    }
+    let (violation, stage_name) = match processing_mode {
+        ProcessingMode::MixedPhase => (
+            "mixed_phase_fir_safety_reverted",
+            "mixed_phase_fir_generation",
+        ),
+        ProcessingMode::Hybrid if fir_requested => {
+            ("hybrid_fir_safety_reverted", "hybrid_fir_generation")
+        }
+        ProcessingMode::Hybrid
+        | ProcessingMode::LowLatency
+        | ProcessingMode::PhaseLinear
+        | ProcessingMode::WarpedIir
+        | ProcessingMode::KautzModal => return,
+    };
 
     let mut reverted_stages = result
         .channel_results
@@ -3289,9 +3308,7 @@ fn record_missing_mixed_phase_fir_reversions(
     if let Some(report) = result.metadata.correction_acceptance.as_mut() {
         report.accepted = false;
         report.decision = roomeq_model::CorrectionDecision::RevertedStage;
-        report
-            .violations
-            .push("mixed_phase_fir_safety_reverted".to_string());
+        report.violations.push(violation.to_string());
         report
             .reverted_stages
             .extend(reverted_stages.iter().cloned());
@@ -3307,7 +3324,7 @@ fn record_missing_mixed_phase_fir_reversions(
         .stage_outcomes
         .push(roomeq_model::StageOutcome {
             checks: Vec::new(),
-            stage: "mixed_phase_fir_generation".to_string(),
+            stage: stage_name.to_string(),
             status: roomeq_model::StageStatus::Degraded,
             advisories: reverted_stages
                 .into_iter()
@@ -4899,9 +4916,10 @@ fn assemble_generic_result_with_frequency_samples(
         config.optimizer.processing_mode.clone(),
         group_delay_budget_ms(config),
     )?;
-    record_missing_mixed_phase_fir_reversions(
+    record_missing_fir_reversions(
         &mut result,
         config.optimizer.processing_mode.clone(),
+        config.optimizer.fir.is_some(),
     );
     let level_alignment =
         prepare_final_channel_level_alignment(&mut result, config, sample_rate, sidecar_dir);

@@ -61,14 +61,27 @@ where
     E: FnMut(&serde_json::Value) -> anyhow::Result<()>,
 {
     let mut scores = Vec::with_capacity(QA_SEED_OFFSETS.len());
-    let mut errors = Vec::new();
+    let mut errors: Vec<serde_json::Value> = Vec::new();
+    let mut skipped_remaining = false;
     for seed in qa_seed_values(config) {
         let mut seeded = config.clone();
         seeded.optimizer.seed = Some(seed);
         let result = match run(&seeded) {
             Ok(result) => result,
             Err(error) => {
-                errors.push(serde_json::json!({"seed": seed, "error": format!("{error:#}")}));
+                let message = format!("{error:#}");
+                // Two seeds failing with the identical error is a
+                // deterministic configuration or fixture rejection, not a
+                // convergence signal: re-running the remaining seeds only
+                // re-proves the same refusal at full optimizer cost.
+                let repeated = errors
+                    .iter()
+                    .any(|entry| entry["error"].as_str() == Some(message.as_str()));
+                errors.push(serde_json::json!({"seed": seed, "error": message}));
+                if repeated {
+                    skipped_remaining = true;
+                    break;
+                }
                 continue;
             }
         };
@@ -169,8 +182,13 @@ where
             })
             .collect::<Vec<_>>()
             .join("; ");
+        let skipped_note = if skipped_remaining {
+            "; remaining seeds skipped after identical deterministic failure"
+        } else {
+            ""
+        };
         anyhow::bail!(
-            "{} of {} QA seeds failed; reliability evidence recorded; causes: {causes}",
+            "{} of {} QA seeds failed; reliability evidence recorded; causes: {causes}{skipped_note}",
             errors.len(),
             QA_SEED_OFFSETS.len()
         );
@@ -623,6 +641,32 @@ mod tests {
             assert_eq!(record["final_artifact_delivered"], false);
             assert!(record["selected_seed"].is_null());
         }
+    }
+
+    #[test]
+    fn identical_seed_errors_skip_the_remaining_seeds() {
+        let mut attempted = Vec::new();
+        let mut records = Vec::new();
+        let error = select_median_seed_recording(
+            &RoomConfig::default(),
+            |seeded| {
+                attempted.push(seeded.optimizer.seed.unwrap());
+                anyhow::bail!("injected deterministic configuration failure");
+            },
+            |record| {
+                records.push(record.clone());
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(attempted.len(), 2);
+        let message = error.to_string();
+        assert!(message.contains("2 of 5 QA seeds failed"));
+        assert!(message.contains("remaining seeds skipped after identical deterministic failure"));
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["errors"].as_array().unwrap().len(), 2);
+        assert_eq!(records[0]["outcomes"].as_array().unwrap().len(), 0);
+        assert_eq!(records[0]["final_artifact_delivered"], false);
     }
 
     #[test]

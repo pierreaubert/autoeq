@@ -66,6 +66,31 @@ fn project_scalar_ceiling(
     Ok(feasible)
 }
 
+/// Clamp parameters that overshoot a bound by floating-point roundoff only.
+///
+/// Finalization round-trips parameters through layout transforms, so a
+/// value can land a few ULPs outside its bound (`0.7000000000000002`
+/// against an upper bound of `0.7`). That is the bound, not an
+/// infeasible candidate. Overshoots beyond the epsilon stay untouched
+/// and refuse in the bounds check. Returns whether anything changed.
+fn clamp_epsilon_overshoot(params: &mut [f64], lower_bounds: &[f64], upper_bounds: &[f64]) -> bool {
+    let mut clamped = false;
+    for (value, (&lower, &upper)) in params.iter_mut().zip(lower_bounds.iter().zip(upper_bounds)) {
+        if !value.is_finite() {
+            continue;
+        }
+        let tolerance = 1e-9 * (1.0 + lower.abs().max(upper.abs()));
+        if *value < lower && lower - *value <= tolerance {
+            *value = lower;
+            clamped = true;
+        } else if *value > upper && *value - upper <= tolerance {
+            *value = upper;
+            clamped = true;
+        }
+    }
+    clamped
+}
+
 /// Finalize one backend winner through the shared envelope choke-point.
 ///
 /// Every optimizer backend funnels through the three dispatchers below, so
@@ -126,7 +151,9 @@ fn finalize_dispatch_winner(
     };
     let adjusted = repaired != x;
     match finalize_candidate(candidate_id, &repaired, data, &owned.as_spec()) {
-        Ok(finalized) => {
+        Ok(mut finalized) => {
+            let clamped =
+                clamp_epsilon_overshoot(&mut finalized.params, lower_bounds, upper_bounds);
             let is_peq = super::constraint_envelope::is_peq_layout_loss(data.loss_type);
             let spacing = if is_peq {
                 crate::constraints::viol_spacing_from_xs(
@@ -157,13 +184,22 @@ fn finalize_dispatch_winner(
             } else {
                 0.0
             };
-            let within_bounds = finalized
+            // A length mismatch must not hide unchecked tail parameters
+            // behind zip truncation.
+            let first_violation = finalized
                 .params
                 .iter()
                 .zip(lower_bounds.iter().zip(upper_bounds))
-                .all(|(&value, (&lower, &upper))| {
-                    value.is_finite() && value >= lower && value <= upper
+                .enumerate()
+                .find(|(_, (value, (lower, upper)))| {
+                    !(value.is_finite() && *value >= *lower && *value <= *upper)
+                })
+                .map(|(index, (value, (lower, upper)))| {
+                    format!("param[{index}]={value} outside [{lower}, {upper}]")
                 });
+            let within_bounds = finalized.params.len() == lower_bounds.len()
+                && finalized.params.len() == upper_bounds.len()
+                && first_violation.is_none();
             if !within_bounds
                 || spacing > 0.0
                 || ceiling > 0.0
@@ -171,11 +207,13 @@ fn finalize_dispatch_winner(
                 || !finalized.loss.is_finite()
             {
                 return failed(format!(
-                    "spacing repair refused: within_bounds={within_bounds}, spacing={spacing}, ceiling={ceiling}, min_gain={min_gain}"
+                    "spacing repair refused: within_bounds={within_bounds}, spacing={spacing}, ceiling={ceiling}, min_gain={min_gain}, loss={}, first_violation={}",
+                    finalized.loss,
+                    first_violation.as_deref().unwrap_or("none")
                 ));
             }
             x.copy_from_slice(&finalized.params);
-            let status = if adjusted {
+            let status = if adjusted || clamped {
                 format!("{algo}; constraint feasibility projection applied")
             } else {
                 algo
@@ -2447,5 +2485,27 @@ mod staged_run_control_tests {
         assert_eq!(run.evidence.evaluation_count, Some(0));
         assert_eq!(run.snapshot.evaluations_started, 0);
         assert_eq!(run.snapshot.validation_evaluations_started, 0);
+    }
+
+    #[test]
+    fn epsilon_overshoot_clamps_to_the_bound() {
+        // Regression: a finalized gain of 0.7000000000000002 against an
+        // upper bound of 0.7 refused an otherwise usable candidate.
+        let mut params = vec![0.7000000000000002, -4.200000000000001, 100.0];
+        let lower = vec![-4.2, -4.2, 20.0];
+        let upper = vec![0.7, 0.7, 20_000.0];
+        assert!(super::clamp_epsilon_overshoot(&mut params, &lower, &upper));
+        assert_eq!(params, vec![0.7, -4.2, 100.0]);
+    }
+
+    #[test]
+    fn real_overshoot_and_nonfinite_stay_untouched() {
+        let mut params = vec![0.71, f64::NAN, 19.0];
+        let lower = vec![-4.2, -4.2, 20.0];
+        let upper = vec![0.7, 0.7, 20_000.0];
+        assert!(!super::clamp_epsilon_overshoot(&mut params, &lower, &upper));
+        assert_eq!(params[0], 0.71);
+        assert!(params[1].is_nan());
+        assert_eq!(params[2], 19.0);
     }
 }

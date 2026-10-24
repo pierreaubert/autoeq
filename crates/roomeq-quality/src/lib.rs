@@ -47,7 +47,9 @@ pub use capture::*;
 pub use chain_constraints::*;
 pub use corpus::*;
 #[doc(inline)]
-pub use correlated_bass::correlated_bass_efficiency_regression;
+pub use correlated_bass::{
+    correlated_bass_band_efficiency_regression, correlated_bass_efficiency_regression,
+};
 pub use final_check::*;
 pub use fixtures::*;
 pub use inversion_support::*;

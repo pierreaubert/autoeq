@@ -71,210 +71,647 @@
   "speakers": {
     "top_middle_left": {
       "measurements": [
-        "top_middle_left_lp0.csv",
-        "top_middle_left_lp1.csv",
-        "top_middle_left_lp2.csv",
-        "top_middle_left_lp3.csv",
-        "top_middle_left_lp4.csv"
-      ]
+        {
+          "path": "top_middle_left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "top_middle_left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "top_middle_left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "top_middle_left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "top_middle_left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "surround_left": {
       "measurements": [
-        "surround_left_lp0.csv",
-        "surround_left_lp1.csv",
-        "surround_left_lp2.csv",
-        "surround_left_lp3.csv",
-        "surround_left_lp4.csv"
-      ]
+        {
+          "path": "surround_left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "surround_left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "surround_left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "surround_left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "surround_left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "wide_left": {
       "measurements": [
-        "wide_left_lp0.csv",
-        "wide_left_lp1.csv",
-        "wide_left_lp2.csv",
-        "wide_left_lp3.csv",
-        "wide_left_lp4.csv"
-      ]
+        {
+          "path": "wide_left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "wide_left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "wide_left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "wide_left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "wide_left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "top_rear_right": {
       "measurements": [
-        "top_rear_right_lp0.csv",
-        "top_rear_right_lp1.csv",
-        "top_rear_right_lp2.csv",
-        "top_rear_right_lp3.csv",
-        "top_rear_right_lp4.csv"
-      ]
+        {
+          "path": "top_rear_right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "top_rear_right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "top_rear_right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "top_rear_right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "top_rear_right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "wide_right": {
       "measurements": [
-        "wide_right_lp0.csv",
-        "wide_right_lp1.csv",
-        "wide_right_lp2.csv",
-        "wide_right_lp3.csv",
-        "wide_right_lp4.csv"
-      ]
+        {
+          "path": "wide_right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "wide_right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "wide_right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "wide_right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "wide_right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "right": {
       "measurements": [
-        "right_lp0.csv",
-        "right_lp1.csv",
-        "right_lp2.csv",
-        "right_lp3.csv",
-        "right_lp4.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "surround_right": {
       "measurements": [
-        "surround_right_lp0.csv",
-        "surround_right_lp1.csv",
-        "surround_right_lp2.csv",
-        "surround_right_lp3.csv",
-        "surround_right_lp4.csv"
-      ]
+        {
+          "path": "surround_right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "surround_right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "surround_right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "surround_right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "surround_right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "surround_back_right": {
       "measurements": [
-        "surround_back_right_lp0.csv",
-        "surround_back_right_lp1.csv",
-        "surround_back_right_lp2.csv",
-        "surround_back_right_lp3.csv",
-        "surround_back_right_lp4.csv"
-      ]
+        {
+          "path": "surround_back_right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "surround_back_right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "surround_back_right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "surround_back_right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "surround_back_right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "top_rear_left": {
       "measurements": [
-        "top_rear_left_lp0.csv",
-        "top_rear_left_lp1.csv",
-        "top_rear_left_lp2.csv",
-        "top_rear_left_lp3.csv",
-        "top_rear_left_lp4.csv"
-      ]
+        {
+          "path": "top_rear_left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "top_rear_left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "top_rear_left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "top_rear_left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "top_rear_left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "left": {
       "measurements": [
-        "left_lp0.csv",
-        "left_lp1.csv",
-        "left_lp2.csv",
-        "left_lp3.csv",
-        "left_lp4.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "top_front_left": {
       "measurements": [
-        "top_front_left_lp0.csv",
-        "top_front_left_lp1.csv",
-        "top_front_left_lp2.csv",
-        "top_front_left_lp3.csv",
-        "top_front_left_lp4.csv"
-      ]
+        {
+          "path": "top_front_left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "top_front_left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "top_front_left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "top_front_left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "top_front_left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "top_front_right": {
       "measurements": [
-        "top_front_right_lp0.csv",
-        "top_front_right_lp1.csv",
-        "top_front_right_lp2.csv",
-        "top_front_right_lp3.csv",
-        "top_front_right_lp4.csv"
-      ]
+        {
+          "path": "top_front_right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "top_front_right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "top_front_right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "top_front_right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "top_front_right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "center": {
       "measurements": [
-        "center_lp0.csv",
-        "center_lp1.csv",
-        "center_lp2.csv",
-        "center_lp3.csv",
-        "center_lp4.csv"
-      ]
+        {
+          "path": "center_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "center_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "center_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "center_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "center_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "top_middle_right": {
       "measurements": [
-        "top_middle_right_lp0.csv",
-        "top_middle_right_lp1.csv",
-        "top_middle_right_lp2.csv",
-        "top_middle_right_lp3.csv",
-        "top_middle_right_lp4.csv"
-      ]
+        {
+          "path": "top_middle_right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "top_middle_right_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "top_middle_right_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "top_middle_right_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "top_middle_right_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "surround_back_left": {
       "measurements": [
-        "surround_back_left_lp0.csv",
-        "surround_back_left_lp1.csv",
-        "surround_back_left_lp2.csv",
-        "surround_back_left_lp3.csv",
-        "surround_back_left_lp4.csv"
-      ]
+        {
+          "path": "surround_back_left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "surround_back_left_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "surround_back_left_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "surround_back_left_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "surround_back_left_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_1": {
       "measurements": [
-        "sub1_lp0.csv",
-        "sub1_lp1.csv",
-        "sub1_lp2.csv",
-        "sub1_lp3.csv",
-        "sub1_lp4.csv"
-      ]
+        {
+          "path": "sub1_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub1_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub1_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub1_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub1_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_2": {
       "measurements": [
-        "sub2_lp0.csv",
-        "sub2_lp1.csv",
-        "sub2_lp2.csv",
-        "sub2_lp3.csv",
-        "sub2_lp4.csv"
-      ]
+        {
+          "path": "sub2_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub2_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub2_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub2_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub2_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_3": {
       "measurements": [
-        "sub3_lp0.csv",
-        "sub3_lp1.csv",
-        "sub3_lp2.csv",
-        "sub3_lp3.csv",
-        "sub3_lp4.csv"
-      ]
+        {
+          "path": "sub3_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub3_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub3_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub3_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub3_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_4": {
       "measurements": [
-        "sub4_lp0.csv",
-        "sub4_lp1.csv",
-        "sub4_lp2.csv",
-        "sub4_lp3.csv",
-        "sub4_lp4.csv"
-      ]
+        {
+          "path": "sub4_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub4_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub4_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub4_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub4_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_5": {
       "measurements": [
-        "sub5_lp0.csv",
-        "sub5_lp1.csv",
-        "sub5_lp2.csv",
-        "sub5_lp3.csv",
-        "sub5_lp4.csv"
-      ]
+        {
+          "path": "sub5_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub5_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub5_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub5_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub5_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_6": {
       "measurements": [
-        "sub6_lp0.csv",
-        "sub6_lp1.csv",
-        "sub6_lp2.csv",
-        "sub6_lp3.csv",
-        "sub6_lp4.csv"
-      ]
+        {
+          "path": "sub6_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub6_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub6_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub6_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub6_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_7": {
       "measurements": [
-        "sub7_lp0.csv",
-        "sub7_lp1.csv",
-        "sub7_lp2.csv",
-        "sub7_lp3.csv",
-        "sub7_lp4.csv"
-      ]
+        {
+          "path": "sub7_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub7_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub7_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub7_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub7_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     },
     "lfe_8": {
       "measurements": [
-        "sub8_lp0.csv",
-        "sub8_lp1.csv",
-        "sub8_lp2.csv",
-        "sub8_lp3.csv",
-        "sub8_lp4.csv"
-      ]
+        {
+          "path": "sub8_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub8_lp1.csv",
+          "name": "lp1"
+        },
+        {
+          "path": "sub8_lp2.csv",
+          "name": "lp2"
+        },
+        {
+          "path": "sub8_lp3.csv",
+          "name": "lp3"
+        },
+        {
+          "path": "sub8_lp4.csv",
+          "name": "lp4"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-large_surround_9_8_6_multi_seat"
+      }
     }
   },
   "crossovers": {

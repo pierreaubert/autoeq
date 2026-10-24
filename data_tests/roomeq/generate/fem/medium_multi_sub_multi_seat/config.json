@@ -28,27 +28,67 @@
   "speakers": {
     "left": {
       "measurements": [
-        "left_lp0.csv",
-        "left_lp1.csv"
-      ]
+        {
+          "path": "left_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "left_lp1.csv",
+          "name": "lp1"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-medium_multi_sub_multi_seat"
+      }
     },
     "right": {
       "measurements": [
-        "right_lp0.csv",
-        "right_lp1.csv"
-      ]
+        {
+          "path": "right_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "right_lp1.csv",
+          "name": "lp1"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-medium_multi_sub_multi_seat"
+      }
     },
     "lfe_1": {
       "measurements": [
-        "sub1_lp0.csv",
-        "sub1_lp1.csv"
-      ]
+        {
+          "path": "sub1_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub1_lp1.csv",
+          "name": "lp1"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-medium_multi_sub_multi_seat"
+      }
     },
     "lfe_2": {
       "measurements": [
-        "sub2_lp0.csv",
-        "sub2_lp1.csv"
-      ]
+        {
+          "path": "sub2_lp0.csv",
+          "name": "lp0"
+        },
+        {
+          "path": "sub2_lp1.csv",
+          "name": "lp1"
+        }
+      ],
+      "provenance": {
+        "capture_kind": "stationary_ir",
+        "timing_reference_id": "fem-simulation-medium_multi_sub_multi_seat"
+      }
     }
   },
   "crossovers": {

@@ -154,6 +154,11 @@ fn reference_graph(
 ) -> Result<RoomOptimizationResult> {
     // The configured reference replays per-channel chains only; a global
     // CTC stage is not part of that comparison and must not void it.
+    // Cardioid and DBA are physical sub-array topologies whose delivered
+    // result is ordinary per-channel driver chains, exactly like MultiSub:
+    // excluding them made the configured comparison (and therefore final
+    // candidate selection) unavailable for every cardioid/DBA system.
+    // SupportingSource keeps its own workflow and stays excluded.
     if config.speakers.values().any(|speaker| {
         !matches!(
             speaker,
@@ -161,10 +166,12 @@ fn reference_graph(
                 | SpeakerConfig::Group(_)
                 | SpeakerConfig::MultiSub(_)
                 | SpeakerConfig::Topology(_)
+                | SpeakerConfig::Dba(_)
+                | SpeakerConfig::Cardioid(_)
         )
     }) {
         return Err(invalid(
-            "configured comparison requires explicit Single/Group/MultiSub/Topology physical topology",
+            "configured comparison requires explicit Single/Group/MultiSub/Topology/Dba/Cardioid physical topology",
         ));
     }
     let mut reference = result.clone();
@@ -755,7 +762,15 @@ impl<'a> ConfiguredComparison<'a> {
                         .and_then(|chain| chain.physical_correction_target.as_ref())
                 })
                 .flatten();
-            let mut normalize_level = direct_physical_target.is_none();
+            // Broadband level is relative unless a direct physical target
+            // already calibrates this complete input. That includes LFE:
+            // its forwarded target freezes the configured structural
+            // shape, while delivered sub level is set by bass management
+            // (applied sub gain), not by the correction under selection.
+            // Scoring LFE absolute would judge that structural gain as
+            // target error on the LFE input alone while seat validation
+            // and the mains paths judge shape on the relative plane.
+            let normalize_level = direct_physical_target.is_none();
             let target_measurement = if self.excursion.contains_key(input) {
                 measured(physical, input, seat)?
             } else {
@@ -767,9 +782,6 @@ impl<'a> ConfiguredComparison<'a> {
                 .map(|reference| reference.target(physical, input, seat, &context, resources))
                 .transpose()?
                 .flatten();
-            if lfe_target.is_some() {
-                normalize_level = false;
-            }
             let target = lfe_target
                 .or_else(|| direct_physical_target.map(|target| Curve::from(target.curve.clone())))
                 .unwrap_or_else(|| {
@@ -1280,6 +1292,43 @@ mod tests {
     }
 
     #[test]
+    fn configured_reference_accepts_cardioid_and_dba_topologies() {
+        // Cardioid/DBA deliver ordinary per-channel driver chains like
+        // MultiSub; excluding them made configured comparison (and final
+        // candidate selection) unavailable for every such system.
+        let raw = Curve {
+            freq: ndarray::array![20.0, 100.0, 1000.0, 20000.0],
+            spl: ndarray::Array1::from_elem(4, 80.0),
+            phase: Some(ndarray::Array1::zeros(4)),
+            ..Curve::default()
+        };
+        let result = crate::test_fixtures::single_channel_room_result("L");
+        let mut cardioid = RoomConfig::default();
+        cardioid.speakers.insert(
+            "subs".into(),
+            SpeakerConfig::Cardioid(Box::new(roomeq_model::CardioidConfig {
+                name: "subs".into(),
+                speaker_name: None,
+                front: MeasurementSource::InMemory(raw.clone()),
+                rear: MeasurementSource::InMemory(raw.clone()),
+                separation_meters: 1.0,
+            })),
+        );
+        assert!(reference_graph(&result, &cardioid).is_ok());
+        let mut dba = RoomConfig::default();
+        dba.speakers.insert(
+            "subs".into(),
+            SpeakerConfig::Dba(roomeq_model::DBAConfig {
+                name: "subs".into(),
+                speaker_name: None,
+                front: vec![MeasurementSource::InMemory(raw.clone())],
+                rear: vec![MeasurementSource::InMemory(raw)],
+            }),
+        );
+        assert!(reference_graph(&result, &dba).is_ok());
+    }
+
+    #[test]
     fn configured_routed_reference_is_independent_of_candidate_controls() {
         let mut config: RoomConfig = serde_json::from_str(include_str!(
             "../../../../../data_tests/roomeq/measured/2.2_genelec/recordings.json"
@@ -1450,6 +1499,7 @@ mod tests {
             &config,
             48000.0,
             directory.path(),
+            
         )
         .unwrap();
         attach_configured_comparison(
@@ -1531,6 +1581,7 @@ mod tests {
                 &config,
                 48000.0,
                 directory.path(),
+            
             )
             .unwrap();
             let before = result.metadata.correction_acceptance.clone().unwrap();

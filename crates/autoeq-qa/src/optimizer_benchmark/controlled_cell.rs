@@ -1780,9 +1780,12 @@ mod tests {
         let second = benchmark_cell_spec_inventory().expect("same fixed inventory");
         assert_eq!(first.expected_cell_count, 841);
         assert_eq!(first.cells.len(), first.expected_cell_count);
+        // Pinned matrix identity. Regenerate with
+        // `optimizer-benchmark --list-cell-specs` after any intentional
+        // spec, fixture, registry, or optimizer-version change.
         assert_eq!(
             first.spec_inventory_sha256,
-            "8b33af02d0e6928c6a0af93d5b7ec103bf8429f95f2beac9b1b6c58329bde3ac"
+            "1ada75a4aec97f878b8e20e86dca43f62d9e8a19ecab8cce13ca98849d0a87bd"
         );
         assert_eq!(first.spec_inventory_sha256, second.spec_inventory_sha256);
         assert_eq!(first.cells, second.cells);

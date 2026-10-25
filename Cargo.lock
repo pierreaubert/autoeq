@@ -452,7 +452,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-optim"
-version = "0.5.63"
+version = "0.5.64"
 dependencies = [
  "autoeq-core",
  "autoeq-measurements",
@@ -493,7 +493,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-qa"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "autoeq-artifacts",
  "autoeq-cli",
@@ -541,7 +541,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-report-wasm"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "autoeq-core",
  "base64",
@@ -4166,7 +4166,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-engine"
-version = "0.5.83"
+version = "0.5.84"
 dependencies = [
  "autoeq-core",
  "autoeq-fir",
@@ -4216,7 +4216,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-model"
-version = "0.5.14"
+version = "0.5.15"
 dependencies = [
  "autoeq-core",
  "clap",
@@ -4231,7 +4231,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-qa"
-version = "0.5.67"
+version = "0.5.68"
 dependencies = [
  "anyhow",
  "autoeq-core",
@@ -4260,7 +4260,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-quality"
-version = "0.5.61"
+version = "0.5.62"
 dependencies = [
  "autoeq-core",
  "hound",
@@ -4288,7 +4288,7 @@ dependencies = [
 
 [[package]]
 name = "roomeq-workflow"
-version = "0.5.35"
+version = "0.5.36"
 dependencies = [
  "anyhow",
  "autoeq-artifacts",

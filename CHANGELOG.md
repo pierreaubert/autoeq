@@ -1,4 +1,4 @@
-# Unreleased
+# 0.5.78
 
 - Add a fast RoomEQ QA iteration lane: coverage runs one deterministic seed
   without metamorphic replays on the PR tier (nightly/weekly keep the

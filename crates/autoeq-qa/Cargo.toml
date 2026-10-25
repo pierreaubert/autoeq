@@ -1,6 +1,6 @@
 [package]
 name = "autoeq-qa"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2024"
 description = "Wolfram Engine cross-validation for AutoEQ / RoomEQ (oracles, goldens, comparison tests)"
 license = "GPL-3.0-or-later"

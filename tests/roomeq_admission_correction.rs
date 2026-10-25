@@ -1926,10 +1926,15 @@ fn roadmap_correction_joint_drive_pair_reaches_public_finalization() {
     config.optimizer.min_db = -4.0;
     config.optimizer.finalization.default_input_peak = 0.1;
     config.optimizer.finalization.physical_drive_weight = 1000.0;
+    // The candidate score penalizes the worst declared utilization only,
+    // so the pair can beat every single trim only when the two
+    // non-reference drivers are tied-worst: cutting one leaves the other
+    // at the worst utilization, cutting both is what lowers it.
     let outputs: serde_json::Map<String, serde_json::Value> = (0..3)
         .map(|index| {
             let name = format!("subs_{}", index + 1);
             let id = serde_json::json!(["driver", "subs", index, name]).to_string();
+            let demand = if index == 0 { 0.01 } else { 2.0 };
             (
                 id,
                 serde_json::json!([{
@@ -1937,7 +1942,7 @@ fn roadmap_correction_joint_drive_pair_reaches_public_finalization() {
                     "reference_conditions_id": "load", "limit_conditions_id": "load",
                     "sine_duration_seconds": 1.0, "reference_output_peak": 0.1,
                     "linear_valid_output_peak": 1.0, "frequencies_hz": [40.0, 80.0],
-                    "demand_at_reference": [0.01, 0.01], "limits": [10.0, 10.0]
+                    "demand_at_reference": [demand, demand], "limits": [10.0, 10.0]
                 }]),
             )
         })
@@ -2508,23 +2513,34 @@ fn roadmap_correction_admission_joint_sub_preserves_seat_diagnostics() {
 #[test]
 fn roadmap_correction_admission_joint_sub_reverts_damaged_seat() {
     let mut group = declared_joint_sub_fixture();
-    group.subwoofers = (0..2).map(|_| {
-        let measurements: Vec<_> = [80.0, 60.0, 60.0].into_iter().enumerate().map(|(seat, level)| {
-            let curve = phased_curve(level, 0.0);
+    // Seat 0 arrives aligned from both subs; seats 1-2 see sub 2 delayed by
+    // 3 ms. Any relative-delay/gain move that improves the band objective at
+    // the majority seats imposes the same comb magnitude on seat 0, whose
+    // full-band target RMS then regresses, so the array stage must revert.
+    group.subwoofers = (0..2)
+        .map(|sub| {
+            let measurements: Vec<_> = (0..3).map(|seat| {
+            let delay_s = if sub == 1 && seat > 0 { 0.003 } else { 0.0 };
+            let curve = phased_curve(80.0, delay_s);
             serde_json::json!({
                 "name": format!("seat-{seat}"), "frequencies": curve.freq.to_vec(),
                 "magnitude_db": curve.spl.to_vec(), "phase_deg": curve.phase.unwrap().to_vec()
             })
         }).collect();
-        serde_json::from_value(serde_json::json!({
+            serde_json::from_value(serde_json::json!({
             "measurements": measurements,
             "speaker_name": "identical-sub-model",
             "provenance": {"capture_kind": "stationary_ir", "timing_reference_id": "fixture-clock"}
         })).unwrap()
-    }).collect();
+        })
+        .collect();
     let mut config = multisub_room_config();
     config.optimizer.min_freq = 30.0;
     config.optimizer.max_freq = 120.0;
+    // The tiny default budget stops at a benign partial move; reach the
+    // damaging joint optimum so the seat-protection gate is what decides.
+    config.optimizer.max_iter = 60;
+    config.optimizer.population = 16;
     config
         .speakers
         .insert("subs".into(), SpeakerConfig::MultiSub(group));

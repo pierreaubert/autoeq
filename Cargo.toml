@@ -77,15 +77,15 @@ autoeq-cli = { path = "crates/autoeq-cli", version = "0.5" }
 autoeq-report-wasm = { path = "crates/autoeq-report-wasm", version = "0.5" }
 autoeq-report-wasm-shell = { path = "crates/autoeq-report-wasm-shell", version = "0.5" }
 autoeq-report-gpui = { path = "crates/autoeq-report-gpui", version = "0.5" }
-roomeq-model = { path = "crates/roomeq-model", version = "0.5.14" }
-roomeq-engine = { path = "crates/roomeq-engine", version = "0.5.83" }
+roomeq-model = { path = "crates/roomeq-model", version = "0.5.15" }
+roomeq-engine = { path = "crates/roomeq-engine", version = "0.5.84" }
 roomeq-export = { path = "crates/roomeq-export", version = "0.5.9" }
 roomeq-quality = { path = "crates/roomeq-quality", version = "0.5" }
 roomeq-qa = { path = "crates/roomeq-qa", version = "0.5" }
 roomeq-cli = { path = "crates/roomeq-cli", version = "0.5.9" }
 roomeq-analysis = { path = "crates/roomeq-analysis", version = "0.5" }
 roomeq-synthetic = { path = "crates/roomeq-synthetic", version = "0.5" }
-roomeq-workflow = { path = "crates/roomeq-workflow", version = "0.5.35" }
+roomeq-workflow = { path = "crates/roomeq-workflow", version = "0.5.36" }
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.23"

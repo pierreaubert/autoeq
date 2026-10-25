@@ -383,7 +383,7 @@ mod tests {
         let mut data = objective();
         data.peq_model = PeqModel::Free;
         // This is dense ORIGINAL support with an explicit half-octave smoother.
-        // A two-octave cut is not realizable by this matched numerator at -3dB.
+        // Both signs must widen to at least the smoothed half-octave width.
         data.peak_resolution_guard.as_mut().unwrap().support =
             Arc::new(MeasurementResolution::from_grid(data.freqs.as_slice().unwrap()).unwrap());
         data.peak_resolution_guard
@@ -459,8 +459,20 @@ mod tests {
 
     #[test]
     fn matched_peak_refuses_unrealizable_numerator_and_unsupported_width() {
+        // Deep matched cuts are realized as the reciprocal of the matching
+        // boost (math-iir-fir minimum-phase design), so the 20 kHz, -12 dB
+        // case that the old clipped numerator could not realize now has the
+        // exact boost feature. Qualification must agree for both signs.
+        let cut = super::super::matched_resolution::feature(20_000.0, 48_000.0, 0.5, -12.0)
+            .expect("reciprocal matched cut must be realizable");
+        let boost_feature =
+            super::super::matched_resolution::feature(20_000.0, 48_000.0, 0.5, 12.0).unwrap();
+        assert!((cut.center_hz - boost_feature.center_hz).abs() < 1e-6);
+        assert!((cut.width_octaves - boost_feature.width_octaves).abs() < 1e-9);
+        // Genuinely unrealizable requests still refuse: no feature exists
+        // at or above Nyquist.
         assert!(
-            super::super::matched_resolution::feature(20_000.0, 48_000.0, 0.5, -12.0).is_none()
+            super::super::matched_resolution::feature(24_000.0, 48_000.0, 0.5, -12.0).is_none()
         );
         let mut data = objective();
         data.peq_model = PeqModel::Free;
@@ -472,11 +484,19 @@ mod tests {
             feature.width_octaves >= 2.0,
             "a supported broad boost must remain available"
         );
+        // The reciprocal cut widens to the same supported width at the same Q.
         let x = [11.0, 60.0_f64.log10(), 6.0, -3.0];
+        let widened_cut = guarded_parameters(&x, &data, |_| {}).unwrap();
         assert!(
-            guarded_parameters(&x, &data, |_| {}).is_err(),
-            "do not invent a two-octave matched cut from a clipped numerator"
+            (widened_cut[2] - widened[2]).abs() <= 1e-9 * widened[2].max(1.0),
+            "matched cut must widen like its reciprocal boost: {} vs {}",
+            widened_cut[2],
+            widened[2]
         );
+        let cut_feature =
+            super::super::matched_resolution::feature(60.0, 48_000.0, widened_cut[2], -3.0)
+                .unwrap();
+        assert!(cut_feature.width_octaves >= 2.0);
         data.peak_resolution_guard.as_mut().unwrap().minimum_q = 2.0;
         assert!(
             guarded_parameters(&x, &data, |_| {})

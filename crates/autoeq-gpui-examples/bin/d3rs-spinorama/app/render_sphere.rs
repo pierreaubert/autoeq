@@ -5,7 +5,7 @@
 
 use super::SpinoramaApp;
 use crate::types::Colormap;
-use autoeq::DirectivityData;
+use autoeq_measurements::cea2034::DirectivityData;
 use d3rs::gpu3d::{
     Colormap as Surface3DColormap, Surface3DConfig, Surface3DElement, SurfaceData as Surface3DData,
     SurfacePlotType,

@@ -1,0 +1,43 @@
+{
+  "status": "source delta audited; affected runtime qualification remains required",
+  "checked_utc": "2026-10-26T07:26:18.234631+00:00",
+  "old_epoch": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261026-resource-fixed",
+  "new_epoch": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261026-advisory-fixed",
+  "delta": {
+    "baseline": {
+      "old_files": 1434,
+      "new_files": 1434,
+      "changes": [
+        {
+          "path": "crates/roomeq-qa/src/coverage/home_cinema.rs",
+          "old_sha256": "ddca2feb4362c0156f4f0cd66b9753ce11362acdff2046577fbdde79a03f0bc4",
+          "new_sha256": "bcdc432d26568933596e8f9a76dab21a37a1a1b1d10e2f0758b70a3de730b819"
+        }
+      ]
+    },
+    "candidate": {
+      "old_files": 1458,
+      "new_files": 1458,
+      "changes": [
+        {
+          "path": "crates/roomeq-qa/src/coverage/home_cinema.rs",
+          "old_sha256": "ddca2feb4362c0156f4f0cd66b9753ce11362acdff2046577fbdde79a03f0bc4",
+          "new_sha256": "bcdc432d26568933596e8f9a76dab21a37a1a1b1d10e2f0758b70a3de730b819"
+        },
+        {
+          "path": "scripts/compare_build_bench.py",
+          "old_sha256": "697411b333a065d315da29eee19fa9803ebe0b83c212e10ca177fe4b2ea26502",
+          "new_sha256": "b47ec33252f4a7c1fa7fa09b1ab232db5cdee2f7820a9518062ef9a9e344965c"
+        },
+        {
+          "path": "scripts/test_compare_build_bench.py",
+          "old_sha256": "01bfacbe6e6fa2716c4c675ac07960bb8e719dd4fda1e835c5091e00ed35e049",
+          "new_sha256": "43173d1eb5ab76d5003d6f2010d3eab6ef762239ed6a6e0a948f8108eb844ab5"
+        }
+      ]
+    }
+  },
+  "unchanged_runtime_inputs_per_revision": 2150,
+  "comparator_change": "Previously demonstrated red/green identity hardening; comparator-identity-fix-validation.json. This is outside producer harness hashes and does not alter workloads.",
+  "qualification": "Old whole-native/domain verdicts are not reused automatically. Eight-owner equivalence requires dependency/scope audit; affected QA consumers require fresh validation."
+}

@@ -1,0 +1,13 @@
+   Compiling roomeq-model v0.5.15 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-model)
+   Compiling roomeq-dsp v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-dsp)
+   Compiling roomeq-quality v0.5.62 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-quality)
+   Compiling roomeq-analysis v0.5.10 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-analysis)
+   Compiling autoeq-cli v0.5.3 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/autoeq-cli)
+   Compiling roomeq-engine v0.5.84 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-engine)
+   Compiling roomeq-export v0.5.9 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-export)
+   Compiling roomeq-workflow v0.5.36 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-workflow)
+   Compiling roomeq-qa v0.5.68 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-qa)
+   Compiling roomeq-cli v0.5.9 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/roomeq-cli)
+   Compiling autoeq-qa v0.5.2 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/source/autoeq/crates/autoeq-qa)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/targets/primed/1/test/affected/cargo-timings/cargo-timing-20261027T080548836Z-2cc6e98ec21b92f0.html
+    Finished `test` profile [optimized + debuginfo] target(s) in 9.98s

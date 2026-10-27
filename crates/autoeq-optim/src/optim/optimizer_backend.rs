@@ -549,7 +549,7 @@ mod tests {
     #[test]
     fn ordinary_native_dispatch_retains_typed_completion_and_counts() {
         let backend = RealOptimizerBackend::new();
-        let mut params = OptimParams::from(&crate::cli::Args::speaker_defaults());
+        let mut params = OptimParams::from(&crate::OptimizationConfig::speaker_defaults());
         params.algo = "autoeq:cmaes".into();
         params.maxeval = 6000;
         params.population = 6;
@@ -584,7 +584,7 @@ mod tests {
     fn ordinary_native_dispatch_distinguishes_budget_and_callback_stops() {
         use crate::optim::OptimizerTermination;
         let backend = RealOptimizerBackend::new();
-        let mut params = OptimParams::from(&crate::cli::Args::speaker_defaults());
+        let mut params = OptimParams::from(&crate::OptimizationConfig::speaker_defaults());
         params.algo = "autoeq:cmaes".into();
         params.population = 6;
         params.maxeval = 60;
@@ -628,7 +628,7 @@ mod tests {
     fn custom_backend_keeps_override_dispatch_and_cannot_claim_typed_convergence() {
         let backend = MockOptimizerBackend::ok("converged", 1.0)
             .with_refine_result(Ok(("local nfev=3".into(), 0.5)));
-        let params = OptimParams::from(&crate::cli::Args::speaker_defaults());
+        let params = OptimParams::from(&crate::OptimizationConfig::speaker_defaults());
         let mut x = [2.0, 1.0, 0.0];
         let evidence = backend.optimize_filters_evidence(
             &mut x,
@@ -648,7 +648,7 @@ mod tests {
     fn only_dispatchers_with_native_knowledge_report_profiles() {
         let lower = [0.0, 0.0, 0.0];
         let upper = [1.0, 1.0, 1.0];
-        let mut args = crate::cli::Args::speaker_defaults();
+        let mut args = crate::OptimizationConfig::speaker_defaults();
         args.algo = "autoeq:de".into();
         let params = OptimParams::from(&args);
         let custom = MockOptimizerBackend::default();

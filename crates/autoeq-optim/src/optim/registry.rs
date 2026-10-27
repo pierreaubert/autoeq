@@ -47,12 +47,15 @@ pub fn all_algorithms() -> Vec<Box<dyn FilterOptimizer>> {
     use super::de::AutoeqDeBackend;
     algos.push(Box::new(AutoeqDeBackend::new("autoeq:de")));
 
-    use super::mh::MhBackend;
-    algos.push(Box::new(MhBackend::new_de("mh:de")));
-    algos.push(Box::new(MhBackend::new_pso("mh:pso")));
-    algos.push(Box::new(MhBackend::new_rga("mh:rga")));
-    algos.push(Box::new(MhBackend::new_tlbo("mh:tlbo")));
-    algos.push(Box::new(MhBackend::new_firefly("mh:firefly")));
+    #[cfg(feature = "backend-metaheuristics")]
+    {
+        use super::mh::MhBackend;
+        algos.push(Box::new(MhBackend::new_de("mh:de")));
+        algos.push(Box::new(MhBackend::new_pso("mh:pso")));
+        algos.push(Box::new(MhBackend::new_rga("mh:rga")));
+        algos.push(Box::new(MhBackend::new_tlbo("mh:tlbo")));
+        algos.push(Box::new(MhBackend::new_firefly("mh:firefly")));
+    }
 
     algos
 }
@@ -157,6 +160,23 @@ fn warn_deprecated_once(removed: &str, replacement: &str) {
 mod tests {
     use super::*;
 
+    #[cfg(not(feature = "backend-metaheuristics"))]
+    #[test]
+    fn disabled_metaheuristics_are_absent_from_registry() {
+        for name in ["mh:de", "mh:pso", "mh:rga", "mh:tlbo", "mh:firefly"] {
+            assert!(
+                resolve(name).is_none(),
+                "disabled backend must not resolve: {name}"
+            );
+        }
+        assert!(resolve("de").is_some(), "built-in DE remains available");
+        assert!(
+            all_algorithms()
+                .iter()
+                .all(|backend| !backend.name().starts_with("mh:"))
+        );
+    }
+
     #[test]
     fn resolves_cobra_with_native_inequalities_without_saved_candidate_support() {
         for name in ["autoeq:cobra", "cobra", "COBRA"] {
@@ -194,6 +214,7 @@ mod tests {
                 "{name} should accept a saved candidate"
             );
         }
+        #[cfg(feature = "backend-metaheuristics")]
         for name in ["mh:de", "mh:pso", "mh:rga", "mh:tlbo", "mh:firefly"] {
             assert!(
                 !resolve(name)

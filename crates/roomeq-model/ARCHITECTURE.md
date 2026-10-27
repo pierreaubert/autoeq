@@ -54,4 +54,4 @@ for (name, chain) in &result.channels {
 
 ## Consumers
 
-All `roomeq-*` crates; `src/bin/roomeq/input_schema.json` mirrors these types.
+All `roomeq-*` crates; `crates/roomeq-cli/schemas/input_schema.json` mirrors these types.

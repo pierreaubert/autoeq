@@ -1,0 +1,42 @@
+{
+  "benchmark_multi_measurement": {
+    "new_source": "crates/autoeq-objective/benches/objective_hot_path.rs",
+    "normalized_source_sha256": "e22c58aa78c469345b13808aca0586d64e9d0f5e5ad90977c3b4d013e491bf78",
+    "unchanged": true
+  },
+  "benchmark_scalar_objectives": {
+    "new_source": "crates/autoeq-objective/benches/objective_hot_path.rs",
+    "normalized_source_sha256": "f55049af27d9de5e0082ea4405c124407bcdf8b1b71399e0d7ef597d1e09cfac",
+    "unchanged": true
+  },
+  "benchmark_shared_pool_scaling": {
+    "new_source": "crates/autoeq-objective/benches/objective_hot_path.rs",
+    "normalized_source_sha256": "131dca55b03ad769db5cc13415b5409280bd3a2ef46aff5141744c4927029681",
+    "unchanged": true
+  },
+  "benchmark_solver_generation": {
+    "new_source": "crates/autoeq-optim/benches/solver_generation.rs",
+    "normalized_source_sha256": "838c01357931826d172a663aea6baa48bdc00ac604f5ba7b311c53ad727dcac5",
+    "unchanged": true
+  },
+  "objective": {
+    "new_source": "crates/autoeq-objective/benches/fixtures/mod.rs",
+    "normalized_source_sha256": "dcacdcf6da060b38a66182d67076172258fb7b16c181d036b4c40aea98bd780c",
+    "unchanged": true
+  },
+  "parameters": {
+    "new_source": "crates/autoeq-objective/benches/fixtures/mod.rs",
+    "normalized_source_sha256": "a2e63c943609127bea4d2e8dab943ca84380a67499a35958ef4d9b1e9d6ad455",
+    "unchanged": true
+  },
+  "profiles": {
+    "bench": "default inheritance unchanged",
+    "dist": "unchanged",
+    "release": "unchanged"
+  },
+  "solver_bounds": {
+    "new_source": "crates/autoeq-optim/benches/solver_generation.rs",
+    "normalized_source_sha256": "60f2db4cd53860c61c79f108f9b5bee2635e0fd8a5ed436adb0bf83f9fe1e001",
+    "unchanged": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "command": [
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/nightly-aarch64-apple-darwin/bin/rustc",
+    "--version"
+  ],
+  "crate_name": null,
+  "crate_type": null,
+  "test": false,
+  "compiler_wall_seconds": 0.021719707874581218,
+  "exit_code": 0,
+  "max_process_rss_bytes": 29818880,
+  "stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-compiler-phases-proof-20261025T162148-0bf4ce96/diagnostics/compiler-events/compile-2841-1792941739910276000.stderr",
+  "phases": []
+}

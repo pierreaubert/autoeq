@@ -1,0 +1,21 @@
+{
+  "status": "configured_before_any_calibration",
+  "configured_utc": "2026-10-26T06:13:03.911161+00:00",
+  "script": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/run-resource-calibration-j8.py",
+  "script_sha256": "9f3406a9a47653291aa70de069cab31eba1cc77da4ae22b043e8f4b5a202230d",
+  "previous_controller_exit_code": 130,
+  "previous_timing_started": false,
+  "cargo_jobs_before": 10,
+  "cargo_jobs_after": 8,
+  "background_cpu_cap_before": 350,
+  "background_cpu_cap_after": 450,
+  "stability_span_percent": 60,
+  "samples": 5,
+  "sample_interval_seconds": 5,
+  "hardware_logical_cpus": 14,
+  "logical_capacity_not_allocated_as_cargo_jobs": 6,
+  "same_workload_required_on_both_revisions": true,
+  "test_inventory_or_numerical_threshold_changes": false,
+  "budgets_frozen": false,
+  "reason": "Observed persistent background CPU approximately350-390%. Reduce Cargo concurrency and leave more CPU capacity for steady system activity before collecting any timings. Completed source-bound prerequisites are verified and reused; no repeat or skipped gate."
+}

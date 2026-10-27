@@ -1,7 +1,5 @@
 use super::super::room_optimization_result::RoomOptimizationResult;
 use super::super::*;
-#[cfg(test)]
-use roomeq_model::SpeakerConfig;
 use super::build::build_bootstrap_uncertainty_report;
 use super::build::build_perceptual_policy_report;
 use super::misc::applied_bass_crossover_hz;
@@ -10,6 +8,8 @@ use super::misc::excursion_hpf_hz_from_chain;
 use super::misc::final_score_band_for_channel;
 use super::misc::recompute_curve_flatness_score;
 use super::role::update_perceptual_metrics;
+#[cfg(test)]
+use roomeq_model::SpeakerConfig;
 
 #[cfg(test)]
 mod serialized_waveform_tests {

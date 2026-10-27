@@ -109,7 +109,7 @@ pub(super) fn list_speakers<P: AsRef<Path>>(data_dir: P) -> Result<Vec<String>, 
 }
 
 pub(super) async fn run_one(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     shutdown: ShutdownSignal,
 ) -> Result<(score::ScoreMetrics, Option<String>), String> {
     // Check for shutdown before starting
@@ -204,7 +204,7 @@ pub(super) async fn run_one(
 }
 
 pub(super) async fn load_input_curve(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
 ) -> Result<(autoeq::Curve, Option<HashMap<String, autoeq::Curve>>), String> {
     autoeq::workflow::load_input_curve(&autoeq::workflow::InputConfig::from(args))
         .await
@@ -212,7 +212,7 @@ pub(super) async fn load_input_curve(
 }
 
 pub(super) fn build_target_curve(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     standard_freq: &Array1<f64>,
     input_curve: &autoeq::Curve,
 ) -> Result<autoeq::Curve, autoeq::AutoeqError> {
@@ -224,7 +224,7 @@ pub(super) fn build_target_curve(
 }
 
 pub(super) fn setup_objective_data(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     input_curve: &autoeq::Curve,
     target_curve: &autoeq::Curve,
     deviation_curve: &autoeq::Curve,
@@ -617,7 +617,7 @@ mod cancellation_tests {
     fn test_optimizer(refine: bool) -> (autoeq::OptimParams, super::ObjectiveData) {
         use clap::Parser;
 
-        let mut args = autoeq::cli::Args::parse_from(["autoeq"]);
+        let mut args = crate::cli::Args::parse_from(["autoeq"]);
         args.algo = "autoeq:de".to_string();
         args.local_algo = "autoeq:cobyla".to_string();
         args.loss = autoeq::LossType::Epa;

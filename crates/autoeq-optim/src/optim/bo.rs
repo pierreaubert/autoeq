@@ -382,7 +382,7 @@ fn bo_failed(message: String) -> FilterOptimizerOutput {
 
 fn bo_completed(
     result: Result<(String, f64), (String, f64)>,
-    pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    pareto_report: Option<autoeq_optim_types::ParetoDispatchReport>,
 ) -> FilterOptimizerOutput {
     FilterOptimizerOutput::Completed {
         result,
@@ -591,7 +591,7 @@ fn bo_dispatch_report(
     returned_parameters: &[f64],
     selected_scalar_loss: f64,
     search_evaluations: usize,
-) -> Result<roomeq_model::ParetoDispatchReport, String> {
+) -> Result<autoeq_optim_types::ParetoDispatchReport, String> {
     if judged_front.members.len() != validated_front.len() {
         return Err("BO Pareto report candidate counts disagree".to_string());
     }
@@ -601,7 +601,7 @@ fn bo_dispatch_report(
         let source = search_front
             .get(judged.index)
             .ok_or_else(|| "BO Pareto report source index is out of range".to_string())?;
-        candidates.push(roomeq_model::ParetoCandidateEvidence {
+        candidates.push(autoeq_optim_types::ParetoCandidateEvidence {
             source_index: judged.index,
             search_parameters: source.x.as_slice().unwrap_or(&[]).to_vec(),
             search_objectives: source.objectives.clone(),
@@ -617,13 +617,13 @@ fn bo_dispatch_report(
         .get(selected_candidate_index)
         .ok_or_else(|| "BO selected Pareto candidate index is out of range".to_string())?;
     let selected_source_index = selected.source_index;
-    Ok(roomeq_model::ParetoDispatchReport {
+    Ok(autoeq_optim_types::ParetoDispatchReport {
         schema: "roomeq.pareto_dispatch/v1".to_string(),
         backend: backend.to_string(),
         submitted_count: judged_front.submitted,
         refused_source_indices: judged_front.refused_source_indices.clone(),
         candidates,
-        selection: roomeq_model::ParetoSelectionEvidence {
+        selection: autoeq_optim_types::ParetoSelectionEvidence {
             rule: "normalized_compromise".to_string(),
             weights: weights.to_vec(),
             ideal: ideal.to_vec(),
@@ -647,17 +647,18 @@ mod bo_branch_tests {
     use super::{
         AutoeqBoBackend, BayesAcquisition, BayesParetoSolution, parse_acquisition, should_refine,
     };
-    use clap::Parser;
     use ndarray::Array1;
 
     fn small_params() -> OptimParams {
-        let mut args = crate::cli::Args::parse_from(["autoeq"]);
-        args.num_filters = 1;
-        args.population = 4;
-        args.maxeval = 12;
-        args.seed = Some(1);
-        args.bo_initial_samples = 4;
-        args.bo_ehvi = false;
+        let args = crate::OptimizationConfig {
+            num_filters: 1,
+            population: 4,
+            maxeval: 12,
+            seed: Some(1),
+            bo_initial_samples: 4,
+            bo_ehvi: false,
+            ..crate::OptimizationConfig::default()
+        };
         OptimParams::from(&args)
     }
 

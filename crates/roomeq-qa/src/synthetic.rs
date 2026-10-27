@@ -1050,6 +1050,50 @@ mod crossover_execution_tests {
 
 #[cfg(test)]
 mod refusal_contract_tests {
+    fn structural_error() -> String {
+        "optimization failed: structural baseline needs 19.000 dB attenuation on non-subwoofer output 'L' beyond 12.000 dB limit (required physical-output cuts: L=19.000 dB (main), Sub1=29.900 dB (subwoofer, exempt))".into()
+    }
+
+    #[test]
+    fn repeated_expected_refusal_still_executes_all_five_seeds() {
+        let config = roomeq_model::RoomConfig::default();
+        let mut seen = Vec::new();
+        let (diagnostic, attempts) = super::refusal_seed_diagnostic(&config, |seeded| {
+            seen.push(seeded.optimizer.seed.unwrap());
+            Err(structural_error())
+        });
+        assert_eq!(seen, crate::qa_seed_values(&config));
+        assert_eq!(attempts.len(), 5);
+        assert_eq!(
+            super::structural_refusal_requirements(&diagnostic),
+            Some(vec![19.0; 5])
+        );
+    }
+
+    #[test]
+    fn any_returned_graph_fails_the_all_seed_refusal_contract() {
+        let config = roomeq_model::RoomConfig::default();
+        let (diagnostic, attempts) = super::refusal_seed_diagnostic(&config, |seeded| {
+            if seeded.optimizer.seed == Some(crate::qa_seed_values(&config)[2]) {
+                Ok(())
+            } else {
+                Err(structural_error())
+            }
+        });
+        assert_eq!(attempts.len(), 5);
+        assert!(super::structural_refusal_requirements(&diagnostic).is_none());
+    }
+
+    #[test]
+    fn unrelated_errors_do_not_count_as_structural_refusals() {
+        let (diagnostic, attempts) =
+            super::refusal_seed_diagnostic(&roomeq_model::RoomConfig::default(), |_| {
+                Err("missing impulse resource".into())
+            });
+        assert_eq!(attempts.len(), 5);
+        assert!(super::structural_refusal_requirements(&diagnostic).is_none());
+    }
+
     #[test]
     fn only_all_seed_structural_refusals_satisfy_the_contract() {
         let causes = [42, 59, 83, 115, 151].map(|seed| format!(
@@ -1086,6 +1130,37 @@ pub fn run_parameter_matrix(jobs: usize) -> Result<QaRunOutcome> {
     } else {
         QaRunOutcome::Passed
     })
+}
+
+// Refusal contracts need evidence for every requested seed. The ordinary QA
+// selector intentionally stops repeated failures early, which is appropriate
+// for convergence work but cannot establish this all-five refusal contract.
+fn refusal_seed_diagnostic(
+    config: &roomeq_model::RoomConfig,
+    mut run: impl FnMut(&roomeq_model::RoomConfig) -> std::result::Result<(), String>,
+) -> (String, Vec<serde_json::Value>) {
+    let mut attempts = Vec::new();
+    let mut errors = Vec::new();
+    for seed in crate::qa_seed_values(config) {
+        let mut seeded = config.clone();
+        seeded.optimizer.seed = Some(seed);
+        match run(&seeded) {
+            Ok(()) => attempts.push(serde_json::json!({"seed": seed, "status": "returned_graph"})),
+            Err(error) => {
+                errors.push(format!("seed {seed}: {error}"));
+                attempts.push(serde_json::json!({"seed": seed, "status": "error", "error": error}));
+            }
+        }
+    }
+    (
+        format!(
+            "{} of {} QA seeds failed; reliability evidence recorded; causes: {}",
+            errors.len(),
+            attempts.len(),
+            errors.join("; ")
+        ),
+        attempts,
+    )
 }
 
 // Match the specific structural safety refusal for every seed, not any error
@@ -1439,12 +1514,15 @@ fn run_parameter_row(
             "inputs": parameter_matrix_request(&config)?,
         }),
     )?;
-    let attempt = crate::optimize_room(&config, sample_rate, Some(&bundle));
     if refusals_only {
-        let diagnostic = match attempt {
-            Ok(_) => "unexpected successful output for full-scale refusal case".to_string(),
-            Err(error) => format!("{error:#}"),
-        };
+        let (diagnostic, seed_attempts) = refusal_seed_diagnostic(&config, |seeded| {
+            let directory = bundle.join(format!("refusal_seed_{}", seeded.optimizer.seed.unwrap()));
+            std::fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+            roomeq_workflow::optimize_room(seeded, sample_rate, None, Some(&directory))
+                .map(|_| ())
+                .map_err(|error| format!("{error:#}"))
+        });
+        write_parameter_matrix_artifact(&bundle.join("seed-attempts.json"), &seed_attempts)?;
         if let Some(required) = structural_refusal_requirements(&diagnostic) {
             let record = serde_json::json!({
                 "row": index, "requested_axes": row, "sample_rate_hz": sample_rate,
@@ -1452,7 +1530,7 @@ fn run_parameter_row(
                 "assertion_status": "passed", "processing_status": "refused",
                 "finalization": config.optimizer.finalization,
                 "required_attenuation_db_by_seed": required, "error": diagnostic,
-                "replay_bundle": {"directory": bundle, "request": "request.json", "refusal": "refusal.json"},
+                "replay_bundle": {"directory": bundle, "request": "request.json", "refusal": "refusal.json", "seed_attempts": "seed-attempts.json"},
             });
             write_parameter_matrix_artifact(&bundle.join("refusal.json"), &record)?;
             return Ok(ParameterRowOutcome::Completed(record));
@@ -1463,6 +1541,7 @@ fn run_parameter_row(
                 "input_scenario": scenario, "error": diagnostic, "replay_bundle": bundle}),
         );
     }
+    let attempt = crate::optimize_room(&config, sample_rate, Some(&bundle));
     let result = match attempt {
         Ok(result) => result,
         Err(error) => {

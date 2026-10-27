@@ -811,7 +811,18 @@ impl<'a> ConfiguredComparison<'a> {
     }
 
     pub(in super::super) fn attach(&self, result: &mut RoomOptimizationResult) {
-        // The configured baseline is replayed from unprocessed captures, so
+        // Routed comparisons must score the delivered logical-input transfer,
+        // including its calibration before the main/bass split. Removing a
+        // gain by label would rank a different playback graph and can turn an
+        // improving delivered response into a reported regression. Direct
+        // channels retain their existing calibrated physical-target plane.
+        let routed = result
+            .metadata
+            .bass_management
+            .as_ref()
+            .and_then(|bass| bass.routing_graph.as_ref())
+            .is_some();
+        // The direct configured baseline is replayed from unprocessed captures, so
         // it carries no level-alignment gains. Judge every graph on that
         // same plane: strip alignment gains from the replayed candidate
         // instead of counting the intentional inter-channel level shift as
@@ -819,7 +830,7 @@ impl<'a> ConfiguredComparison<'a> {
         // final channel-level alignment stage and by seat validation
         // against the pre-alignment frozen baseline.
         let mut replay_result = result.clone();
-        for chain in replay_result.channels.values_mut() {
+        for chain in replay_result.channels.values_mut().filter(|_| !routed) {
             chain.plugins.retain(|plugin| {
                 !matches!(
                     plugin
@@ -1499,7 +1510,6 @@ mod tests {
             &config,
             48000.0,
             directory.path(),
-            
         )
         .unwrap();
         attach_configured_comparison(
@@ -1535,6 +1545,67 @@ mod tests {
         assert_eq!(left.physical_outputs, ["L", "Sub1"]);
         assert_eq!(left.delivered_physical_outputs, ["L", "Sub1", "Sub2"]);
         assert!(left.score.post_covers_baseline_grid);
+
+        // Gain ownership metadata cannot change the measured transfer used by
+        // a frozen routed comparison. Both graphs deliver the same -1 dB trim.
+        let frozen = ConfiguredComparison::new(
+            &result,
+            &captures,
+            &HashMap::new(),
+            &config,
+            48000.0,
+            directory.path(),
+        );
+        let mut scores = Vec::new();
+        for label in [
+            "probe_gain",
+            "automatic_input_level_alignment",
+            "post_dsp_input_level_alignment",
+            "final_channel_level_alignment",
+        ] {
+            let mut candidate = result.clone();
+            let mut gain = roomeq_engine::output::create_gain_plugin(-1.0);
+            gain.parameters["label"] = serde_json::json!(label);
+            gain.parameters["room_eq_stage"] = serde_json::json!("pre_route");
+            candidate
+                .channels
+                .get_mut("L")
+                .unwrap()
+                .plugins
+                .insert(0, gain);
+            frozen.attach(&mut candidate);
+            let comparison = candidate
+                .metadata
+                .correction_acceptance
+                .as_ref()
+                .unwrap()
+                .acoustic_quality
+                .as_ref()
+                .unwrap()
+                .training
+                .configured_baseline
+                .as_ref()
+                .unwrap();
+            assert!(
+                comparison.unavailable.is_empty(),
+                "{:?}",
+                comparison.unavailable
+            );
+            scores.push(
+                comparison
+                    .residuals
+                    .iter()
+                    .find(|row| row.score.logical_input.as_deref() == Some("L"))
+                    .unwrap()
+                    .score
+                    .post_weighted_rms_db
+                    .unwrap(),
+            );
+        }
+        assert!(
+            scores.iter().all(|score| (score - scores[0]).abs() < 1e-10),
+            "{scores:?}"
+        );
     }
 
     #[test]
@@ -1581,7 +1652,6 @@ mod tests {
                 &config,
                 48000.0,
                 directory.path(),
-            
             )
             .unwrap();
             let before = result.metadata.correction_acceptance.clone().unwrap();

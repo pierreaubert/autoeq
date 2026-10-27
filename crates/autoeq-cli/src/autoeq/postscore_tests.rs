@@ -3,9 +3,9 @@ mod tests {
     use crate::autoeq_command::postscore::{
         PostOptMetrics, compute_peq_cached, compute_post_optimization_metrics,
     };
+    use crate::cli::Args;
     use autoeq::Curve;
     use autoeq::PeqModel;
-    use autoeq::cli::Args;
     use clap::Parser;
     use ndarray::Array1;
 

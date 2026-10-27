@@ -293,10 +293,9 @@ mod tests {
             .as_mut()
             .unwrap()
             .mapv_inplace(|phase| phase + 180.0);
-        let inverted_band =
-            correlated_bass_band_efficiency_regression(&before, &inverted, 300.0)
-                .unwrap()
-                .0;
+        let inverted_band = correlated_bass_band_efficiency_regression(&before, &inverted, 300.0)
+            .unwrap()
+            .0;
         assert!(inverted_band > 20.0, "inverted band loss {inverted_band}");
         // Common delay/gain remains free, exactly like the worst-bin measure.
         let mut common = before.clone();

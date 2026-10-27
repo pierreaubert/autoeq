@@ -1,0 +1,224 @@
+--- /dev/null
++++ b/scripts/check_package_contents.py
+@@ -0,0 +1,80 @@
++"""Check actual Cargo archive file lists for every publishable workspace owner."""
++from __future__ import annotations
++
++import argparse
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++
++REJECTED_ROOTS = ("data_tests/", "data_generated/", "scripts/")
++REJECTED_SUFFIXES = (".mdat", "~")
++
++
++def forbidden_path(path: str) -> bool:
++    normalized = path.replace("\\", "/")
++    return normalized.startswith(REJECTED_ROOTS) or normalized.endswith(REJECTED_SUFFIXES)
++
++
++def audit_packages(workspace: Path, cargo: str, *, run=subprocess.run) -> dict:
++    report = {"status": "failed", "workspace": str(workspace), "packages": [], "unpublished": []}
++    metadata_command = [cargo, "metadata", "--no-deps", "--offline", "--locked", "--format-version", "1"]
++    metadata = run(metadata_command, cwd=workspace, capture_output=True, text=True)
++    if metadata.returncode:
++        report["error"] = "Cargo metadata failed: " + metadata.stderr.strip()
++        return report
++    try:
++        graph = json.loads(metadata.stdout)
++        members = set(graph["workspace_members"])
++        packages = [p for p in graph["packages"] if p["id"] in members]
++        if {p["id"] for p in packages} != members:
++            raise ValueError("Cargo metadata omitted workspace members")
++    except (KeyError, TypeError, ValueError) as error:
++        report["error"] = "Invalid Cargo metadata: " + str(error)
++        return report
++    publishable = sorted((p for p in packages if p.get("publish") != []), key=lambda p: p["name"])
++    report["unpublished"] = sorted(p["name"] for p in packages if p.get("publish") == [])
++    if not publishable:
++        report["error"] = "No publishable workspace owners were checked"
++        return report
++    for package in publishable:
++        command = [cargo, "package", "--package", package["name"], "--list", "--allow-dirty", "--no-verify", "--offline", "--locked"]
++        result = run(command, cwd=workspace, capture_output=True, text=True)
++        files = result.stdout.splitlines()
++        leaked = [p for p in files if forbidden_path(p)]
++        report["packages"].append({
++            "name": package["name"], "version": package["version"], "command": command,
++            "exit_code": result.returncode, "files": files, "leaked": leaked,
++            "stderr": result.stderr, "passed": result.returncode == 0 and "Cargo.toml" in files and not leaked,
++        })
++    report["status"] = "passed" if all(p["passed"] for p in report["packages"]) else "failed"
++    return report
++
++
++def main(argv=None, *, run=subprocess.run) -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--workspace", type=Path, default=Path(__file__).resolve().parents[1])
++    parser.add_argument("--cargo", default=os.environ.get("CARGO", "cargo"))
++    parser.add_argument("--output", type=Path)
++    args = parser.parse_args(argv)
++    try:
++        report = audit_packages(args.workspace.resolve(), args.cargo, run=run)
++    except OSError as error:
++        report = {"status": "failed", "packages": [], "error": str(error)}
++    if args.output:
++        args.output.parent.mkdir(parents=True, exist_ok=True)
++        args.output.write_text(json.dumps(report, indent=2, ensure_ascii=False) + "\n")
++    if report["status"] != "passed":
++        print(report.get("error", "Cargo archive-content policy failed"), file=sys.stderr)
++        for package in report["packages"]:
++            if not package["passed"]:
++                print(f"{package['name']}: exit={package['exit_code']}; files={len(package['files'])}; leaked={package['leaked']}; {package['stderr'].strip()}", file=sys.stderr)
++        return 1
++    count = len(report["packages"])
++    print(f"Cargo archive contents pass for {count} publishable owners; {len(report['unpublished'])} owners remain unpublished.")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+--- /dev/null
++++ b/scripts/test_check_package_contents.py
+@@ -0,0 +1,77 @@
++"""Functional controls for Cargo archive membership and failure handling."""
++from __future__ import annotations
++
++import contextlib
++import io
++import json
++from pathlib import Path
++import tempfile
++from types import SimpleNamespace
++import unittest
++
++from scripts.check_package_contents import main
++
++
++class CargoBoundary:
++    def __init__(self, *, files=None, package_exit=0, metadata_exit=0):
++        self.files = ["Cargo.toml", "src/lib.rs"] if files is None else files
++        self.package_exit = package_exit
++        self.metadata_exit = metadata_exit
++        self.checked = []
++
++    def __call__(self, command, **kwargs):
++        if command[1] == "metadata":
++            packages = [
++                {"id": "a", "name": "library-a", "version": "1.0.0", "publish": None},
++                {"id": "b", "name": "library-b", "version": "1.0.0", "publish": ["private"]},
++                {"id": "t", "name": "terminal", "version": "1.0.0", "publish": []},
++                {"id": "external", "name": "non-member", "version": "1.0.0", "publish": None},
++            ]
++            return SimpleNamespace(returncode=self.metadata_exit, stdout=json.dumps({"workspace_members": ["a", "b", "t"], "packages": packages}), stderr="metadata refusal" if self.metadata_exit else "")
++        if command[1] != "package":
++            raise AssertionError(command)
++        name = command[command.index("--package") + 1]
++        if name not in {"library-a", "library-b"}:
++            raise AssertionError("unpublished or non-member archive was requested: " + name)
++        self.checked.append(name)
++        return SimpleNamespace(returncode=self.package_exit, stdout="\n".join(self.files), stderr="package refusal" if self.package_exit else "")
++
++
++class PackageContentsTests(unittest.TestCase):
++    def invoke(self, boundary):
++        parent = Path("/Volumes/home_tmp/tmp")
++        with tempfile.TemporaryDirectory(prefix="autoeq package policy ", dir=parent if parent.is_dir() else None) as directory:
++            root = Path(directory)
++            (root / "Cargo.toml").write_text("[workspace]\nmembers=[]\n")
++            output = root / "audit result.json"
++            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
++                code = main(["--workspace", str(root), "--cargo", "/a cargo path with spaces/cargo", "--output", str(output)], run=boundary)
++            return code, json.loads(output.read_text())
++
++    def test_all_publishable_members_checked_and_terminal_excluded(self):
++        boundary = CargoBoundary()
++        code, report = self.invoke(boundary)
++        self.assertEqual(code, 0)
++        self.assertEqual(report["status"], "passed")
++        self.assertEqual(boundary.checked, ["library-a", "library-b"])
++        self.assertEqual(report["unpublished"], ["terminal"])
++        self.assertTrue(all(p["command"][0] == "/a cargo path with spaces/cargo" for p in report["packages"]))
++
++    def test_qa_scripts_backups_and_measurements_cannot_leak(self):
++        for path in ["data_tests/raw.csv", "data_generated/out.json", "scripts/helper.py", "measurement.mdat", "src/lib.rs~", r"scripts\helper.py"]:
++            with self.subTest(path=path):
++                code, report = self.invoke(CargoBoundary(files=["Cargo.toml", path]))
++                self.assertEqual(code, 1)
++                self.assertEqual(report["status"], "failed")
++                self.assertTrue(all(p["leaked"] == [path] for p in report["packages"]))
++
++    def test_empty_lists_and_cargo_failures_cannot_report_success(self):
++        for boundary in [CargoBoundary(files=[]), CargoBoundary(files=[""]), CargoBoundary(files=["usage: cargo package"]), CargoBoundary(package_exit=17), CargoBoundary(metadata_exit=19)]:
++            with self.subTest(package_exit=boundary.package_exit, metadata_exit=boundary.metadata_exit, files=boundary.files):
++                code, report = self.invoke(boundary)
++                self.assertEqual(code, 1)
++                self.assertEqual(report["status"], "failed")
++
++
++if __name__ == "__main__":
++    unittest.main()
+--- a/Justfile
++++ b/Justfile
+@@ -182,15 +182,20 @@
+ # WP0 crate-partition gates. Keep the fast checker tests and graph/ownership
+ # report independently runnable; the umbrella also regenerates both schemas.
+ [group('test')]
+-check-crate-partition: test-crate-partition-checker check-crate-partition-fitness check-roomeq-schema-baselines
++check-crate-partition: test-crate-partition-checker check-crate-partition-fitness check-roomeq-schema-baselines check-package-contents
+ 
+ [group('test')]
+ test-crate-partition-checker:
+-	python3 -m unittest scripts/test_check_crate_partition.py
++	python3 -m unittest scripts/test_check_crate_partition.py scripts/test_check_package_contents.py
+ 
+ [group('test')]
+ check-crate-partition-fitness:
+ 	python3 scripts/check_crate_partition.py
++
++# Inspect real Cargo archive members without compiling or publishing.
++[group('test')]
++check-package-contents:
++	python3 scripts/check_package_contents.py --cargo "{{cargo}}" --output target/qa/package-contents.json
+ 
+ [group('test')]
+ check-roomeq-schema-baselines:
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -46,10 +46,14 @@
+             target
+           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+ 
++      - name: Fetch locked Cargo dependencies
++        run: cargo fetch --locked
++
+       - name: Check crate-partition architecture
+         run: |
+-          python3 -m unittest scripts/test_check_crate_partition.py
++          python3 -m unittest scripts/test_check_crate_partition.py scripts/test_check_package_contents.py
+           python3 scripts/check_crate_partition.py --baseline-ref "${{ github.event.pull_request.base.sha }}"
++          python3 scripts/check_package_contents.py --output target/qa/package-contents.json
+ 
+       - name: Check CI workflow mirror
+         run: |
+--- a/.gitea/workflows/ci.yml
++++ b/.gitea/workflows/ci.yml
+@@ -51,10 +51,14 @@
+             target
+           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+ 
++      - name: Fetch locked Cargo dependencies
++        run: cargo fetch --locked
++
+       - name: Check crate-partition architecture
+         run: |
+-          python3 -m unittest scripts/test_check_crate_partition.py
++          python3 -m unittest scripts/test_check_crate_partition.py scripts/test_check_package_contents.py
+           python3 scripts/check_crate_partition.py --baseline-ref "${{ github.event.pull_request.base.sha }}"
++          python3 scripts/check_package_contents.py --output target/qa/package-contents.json
+ 
+       - name: Check CI workflow mirror
+         run: |

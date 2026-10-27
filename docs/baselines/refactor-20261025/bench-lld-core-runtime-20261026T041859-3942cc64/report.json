@@ -1,0 +1,75 @@
+{
+  "schema": "refactor-20261025/bench/v2",
+  "label": "lld-core-runtime",
+  "status": "failed",
+  "harness_sha256": {
+    "scripts/bench_build.py": "43ce7454c859193310b8f93ef1d601b3cd7d189608fa4310d1eadf8935cc2694",
+    "scripts/build_bench/__init__.py": "197e8d9ea96ec92b6ba3aa589988aadca35163c7e9191055121ca7a9bd357e53",
+    "scripts/build_bench/compiler.py": "210d5e3ae70ae9e6b62f06b5a7b4e8b35642dcdfd3d0fdb4335035b763849bde",
+    "scripts/build_bench/execution.py": "9d9c5cea89f9d732b15dd43201f1e0ea55c45f05625611ae5b0d3a53016a48a7",
+    "scripts/build_bench/linker.py": "0855f694537dc39d7f37e045ae5452d1c771556f9baa98b92fb9a590c52ec059",
+    "scripts/build_bench/plans.py": "bc5cd0dc92fd27b315a324c455f6460f14eadadc8d5a147ad96c4228ab6bdb01",
+    "scripts/build_bench/probes.py": "0d4870227566b6c0dd60c5d40c4c4e982c3c08140e35fc7180c057a6d4a9cf0a",
+    "scripts/build_bench/scopes.py": "b262dbaeb1f9ef1c8d78e1a1b69a2d591c0b107407c222a930824e5c06874565",
+    "scripts/build_bench/snapshots.py": "1340378c0d9554d87121a3c0fd16f5979796e275460c9d61fafc4a7e90de233e",
+    "scripts/build_bench/test_scopes.json": "3afd90025d9dcf1eb1d97a1d5521a580e74e605b55d8ceba872f21d0a73f4e2b"
+  },
+  "tools": {
+    "description": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.1",
+    "host": "aarch64-apple-darwin",
+    "paths": {
+      "cargo": "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+      "rustc": "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc",
+      "rustdoc": "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustdoc"
+    },
+    "sha256": {
+      "cargo": "6d576d8058f8ca643e8fce55b64ee3c614ba64c9da2e536bae843e6a2e1f3951",
+      "rustc": "1ba7bb8e273bd64125f4048d2ecce530e0a6470e565ab1b3aecf0b82b532f7b1",
+      "rustdoc": "21f27299ea863556078be5074ab193672c0460049688cf0f08dc47c73b730c29"
+    },
+    "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "nextest_version": "cargo-nextest 0.9.148 (cd1d6d546 2026-10-07)\nrelease: 0.9.148\ncommit-hash: cd1d6d5467322dbc0d39a80cb671d000ac302798\ncommit-date: 2026-10-07\nhost: aarch64-apple-darwin",
+    "compiler_driver_version": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+    "native_linker": {
+      "kind": "lld-macho",
+      "driver_path": "/usr/bin/cc",
+      "driver_sha256": "34129c71a01a74f7f3b2443521519b2e5447553fa187f5fcafaaf8c42cc192e2",
+      "linker_path": "/Volumes/home_tmp/opt/homebrew/Cellar/lld/23.1.4/bin/lld",
+      "linker_invocation_path": "/opt/homebrew/bin/ld64.lld",
+      "version": "Homebrew LLD 23.1.4",
+      "sha256": "bcc465b526deeb48db164ee2a8d1451f6299e3712f8966b7bc8dd8bc98b43ef3"
+    }
+  },
+  "environment": {
+    "AR": null,
+    "CARGO_BUILD_JOBS": "2",
+    "CARGO_BUILD_TARGET": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CARGO_HOME": null,
+    "CARGO_INCREMENTAL": null,
+    "CC": null,
+    "CFLAGS": null,
+    "CPPFLAGS": null,
+    "CXX": null,
+    "CXXFLAGS": null,
+    "LDFLAGS": null,
+    "MACOSX_DEPLOYMENT_TARGET": null,
+    "RUSTC_WORKSPACE_WRAPPER": null,
+    "RUSTC_WRAPPER": null,
+    "RUSTFLAGS": null,
+    "RUSTUP_TOOLCHAIN": null,
+    "SDKROOT": null
+  },
+  "host": {
+    "cpu_model": "Apple M4 Pro",
+    "memory_bytes": 68719476736,
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "cpu_count": 14,
+    "jobs": 2
+  },
+  "results": [],
+  "normal_timing_excludes_diagnostics": true,
+  "acceptance_repetitions_satisfied": false,
+  "error": "RuntimeError: source changed while snapshotting: /Volumes/home_worktrees/autoeq-refactor",
+  "summary": []
+}

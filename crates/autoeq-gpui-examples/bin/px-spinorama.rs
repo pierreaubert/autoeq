@@ -8,11 +8,12 @@
 //! This demo fetches speaker data from spinorama.org and displays CEA2034 plots
 //! using the high-level gpui-px charting API.
 
-use autoeq::read::{
+use autoeq_measurements::read::{
     extract_cea2034_curves_original, fetch_available_speakers, fetch_directivity_data,
     fetch_measurement_plot_data,
 };
-use autoeq::{Curve, DirectivityData};
+use autoeq_core::Curve;
+use autoeq_measurements::cea2034::DirectivityData;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_design::DesignExt;

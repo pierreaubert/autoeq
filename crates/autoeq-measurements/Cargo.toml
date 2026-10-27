@@ -11,8 +11,13 @@ homepage = "https://github.com/pierreaubert/autoeq"
 workspace = true
 
 [features]
-default = ["api"]
-api = []
+# Offline by default (refactor-20261025 Phase 3a): CSV/local loads,
+# cache reads through caller-supplied backends, and all preprocessing
+# compile without a network stack. `api` enables the spinorama.org
+# HTTP adapters (reqwest backend, filesystem cache, default fetch
+# entry points) for consumers that load measurements by name.
+default = []
+api = ["dep:reqwest", "dep:tokio"]
 
 [dependencies]
 autoeq-core = { workspace = true }
@@ -21,15 +26,29 @@ base64 = { workspace = true }
 directories = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, optional = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 strsim = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, optional = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+clap = { workspace = true }
 tempfile = { workspace = true }
+tokio = { workspace = true }
+
+[[bin]]
+name = "migrate_provenance"
+path = "src/bin/migrate_provenance.rs"
+test = false
+bench = false
+
+[[example]]
+name = "cea2034_score"
+path = "examples/cea2034_score.rs"
+test = false
+required-features = ["api"]

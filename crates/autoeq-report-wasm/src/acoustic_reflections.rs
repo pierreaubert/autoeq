@@ -463,10 +463,7 @@ fn etc_series(channel: &Value, waveform_key: &str) -> Option<Value> {
     let mut time_domain = bandpassed.clone();
     inverse.process(&mut time_domain);
     let scale = 1.0 / count as f64;
-    let bandpassed: Vec<f64> = time_domain
-        .iter()
-        .map(|value| value.re * scale)
-        .collect();
+    let bandpassed: Vec<f64> = time_domain.iter().map(|value| value.re * scale).collect();
     // Analytic signal: keep DC/Nyquist, double positive frequencies.
     for (index, value) in spectrum.iter_mut().enumerate() {
         let frequency_index = index.min(count - index);
@@ -490,8 +487,8 @@ fn etc_series(channel: &Value, waveform_key: &str) -> Option<Value> {
         .max_by(|a, b| a.1.total_cmp(b.1))
         .map(|(index, _)| index)?;
     let direct_window = ((sample_rate / 1000.0).round() as usize).max(1);
-    let direct_peak = bandpassed[direct.saturating_sub(direct_window)
-        ..=(direct + direct_window).min(count - 1)]
+    let direct_peak = bandpassed
+        [direct.saturating_sub(direct_window)..=(direct + direct_window).min(count - 1)]
         .iter()
         .map(|sample| sample.abs())
         .fold(0.0_f64, f64::max);
@@ -517,7 +514,9 @@ fn etc_series(channel: &Value, waveform_key: &str) -> Option<Value> {
         let b = (index + half + 1).min(count);
         let smoothed = (prefix[b] - prefix[a]) / (b - a) as f64;
         xs.push(x);
-        ys.push(Some((20.0 * (smoothed / direct_peak).log10()).clamp(-40.0, 3.0)));
+        ys.push(Some(
+            (20.0 * (smoothed / direct_peak).log10()).clamp(-40.0, 3.0),
+        ));
     }
     if xs.len() < 16 || *xs.last()? < 5.0 {
         return None;
@@ -677,7 +676,10 @@ mod tests {
         // Without a saved waveform the figure keeps its three series.
         let bare = reflection_report(&json!({"early_reflections": report()}), "L", None);
         assert_eq!(
-            bare["figures"][0]["figure"]["series"].as_array().unwrap().len(),
+            bare["figures"][0]["figure"]["series"]
+                .as_array()
+                .unwrap()
+                .len(),
             3
         );
     }

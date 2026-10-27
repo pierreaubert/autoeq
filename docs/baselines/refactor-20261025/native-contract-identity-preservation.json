@@ -1,0 +1,35 @@
+{
+  "status": "passed exact post-contract identity preservation",
+  "before": "native-final-after-baseline-repairs.json",
+  "after": "native-contract-fixed-list.json.gz",
+  "after_uncompressed_sha256": "641650df2ab4430f788153d6d9bfeae77929f796776207138bf85a40ada031cf",
+  "before_cases": 5407,
+  "after_cases": 5412,
+  "retained": 5407,
+  "removed": [],
+  "changed_ignored": [],
+  "added": [
+    [
+      "autoeq-optim",
+      "optim::optimize::staged_run_control_tests::finalized_bound_projection_reports_the_returned_parameters_loss"
+    ],
+    [
+      "autoeq-optim",
+      "optim::scalar::tests::cmaes_scores_and_returns_exact_parameter_rails"
+    ],
+    [
+      "roomeq-engine",
+      "channel_fir::tests::kirkeby_spatial_aligns_reference_to_common_seat_grid"
+    ],
+    [
+      "roomeq-engine",
+      "home_cinema::bass::tests::common_bass_matching_gain_preserves_lfe_reference_and_relative_driver_controls"
+    ],
+    [
+      "roomeq-engine",
+      "topology::apply::tests::representative_delta_preserves_capture_confidence_and_resolution"
+    ]
+  ],
+  "ignored_after": 42,
+  "qualification": "Listing and identity proof do not replace final complete native execution."
+}

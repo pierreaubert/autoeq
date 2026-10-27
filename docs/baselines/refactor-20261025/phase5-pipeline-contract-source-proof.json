@@ -1,0 +1,30 @@
+{
+  "status": "exact source-only seam transformation verified; compiler checks pending",
+  "checked_utc": "2026-10-26T09:09:44.767757+00:00",
+  "source_files": 10,
+  "borrow_source_proof": {
+    "crates/roomeq-workflow/src/channel.rs": {
+      "unchanged_except_declared_borrow_type": true,
+      "original_sha256": "537da3f6502c2de08008b55621fa9fa6775487cc2d9820e1a3efd8a153413e52",
+      "overlay_sha256": "c9b5fe8e658363936283530b0c763fb14315533aae0b2a2e67fa98d324f8a8a0"
+    },
+    "crates/roomeq-workflow/src/room_optimization.rs": {
+      "unchanged_except_declared_borrow_type": true,
+      "original_sha256": "018a06807389f612fd6b2c977029441efcfcc4a9faabe9285028cb9a5889efcb",
+      "overlay_sha256": "4df3811375346654085db9e856a04feec36c4f428c785a795ddba676a296c0cc"
+    },
+    "crates/roomeq-workflow/src/room_optimization/process.rs": {
+      "unchanged_except_declared_borrow_type": true,
+      "original_sha256": "7a21abca10feddb9180ec6bd7dc6b5a0a00ee1e4384d8e053e4f0daa7410553d",
+      "overlay_sha256": "68328ada54ba8c90970252f90be3e47304e9b2a3f0498c31d2bbbe76229c7326"
+    }
+  },
+  "concrete_recovery_file_unchanged_after_removing_exact_forwarder_impl": true,
+  "three_forwarders_call_existing_inherent_methods_exactly_once": true,
+  "all_existing_test_function_identities_unchanged": true,
+  "result_and_observer_owners_unchanged": true,
+  "capture_representation_untouched": true,
+  "compiler_or_object_safety_verified": false,
+  "performance_acceptance": false,
+  "qualification": "Only a preparatory production interface. Persistence bodies, errors, counters and tests are unchanged; runtime and compiler behavior must still be verified after calibration."
+}

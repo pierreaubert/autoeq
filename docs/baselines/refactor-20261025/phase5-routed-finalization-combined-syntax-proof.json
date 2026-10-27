@@ -1,0 +1,14 @@
+{
+  "verified_utc": "2026-10-26T14:11:14.053529+00:00",
+  "overlay": "/Volumes/home_tmp/tmp/autoeq-routed-finalization-combined-overlay-20261026",
+  "source_record": "phase5-routed-finalization-combined-overlay-preparation.json",
+  "patch_sha256": "851ad979cf2e460cd20f2d7367483495a4e173fad3414042a44330b55753e658",
+  "all87_result_file_sha256_bound": true,
+  "all18_deletions_applied": true,
+  "independent_git_apply_roundtrip": true,
+  "rust_files_parsed": 80,
+  "no_rust_parser_error_nodes": true,
+  "positive_control": "phase5-routed-candidate-source-proof.json",
+  "compiler_runtime_verified": false,
+  "performance_acceptance": false
+}

@@ -1,0 +1,22 @@
+{
+  "status": "passed full affected refactor libraries",
+  "enabled_passed": 2139,
+  "preexisting_ignored": 9,
+  "strict_clippy": "passed",
+  "baseline_enabled_passed": 2147,
+  "scope_difference": "Eight existing engine tests moved to roomeq-dsp during the architectural refactor; no further tests moved or removed by the repairs. Complete native identity preservation recorded separately.",
+  "baseline_commits": [
+    "230ad047",
+    "81599b9a",
+    "16953d50"
+  ],
+  "byte_identical_port_files": {
+    "crates/roomeq-engine/src/channel_fir/spatial_realized.rs": "45f251eb41757667b3eacef47b10d3bcc4688621dd1ccae062020a39681b0405",
+    "crates/roomeq-engine/src/channel_fir/tests.rs": "ece0c34d12edde4156341fc836c012886afa97fba88bf420503f84c24d01476e",
+    "crates/roomeq-engine/src/home_cinema/bass.rs": "4478494fbeb4834c6ff45c15f23f4a55995c8d34a563b060afd306eddd52b91a",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs": "b0bc19afa3bf59183428fcd6810debc467c6e4ab41634ff85c28f62f01fe86f2"
+  },
+  "port_patch": "baseline-routing-grid-contract-port.patch",
+  "omitted_port_hunks": "Only two blank-line deletions already present in refactor; all four final files equal baseline byte-for-byte.",
+  "routed_fast_lane": "running; no passing result inferred"
+}

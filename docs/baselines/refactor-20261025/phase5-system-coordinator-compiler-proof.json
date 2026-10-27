@@ -1,0 +1,27 @@
+{
+  "status": "compiler_passed_pending_behavior",
+  "checked_utc": "2026-10-26T11:23:19.087307+00:00",
+  "command": [
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+    "check",
+    "--offline",
+    "--locked",
+    "--profile",
+    "qa",
+    "--all-targets",
+    "--all-features",
+    "-p",
+    "roomeq-engine",
+    "-p",
+    "roomeq-engine-channel",
+    "-p",
+    "roomeq-engine-system",
+    "-p",
+    "roomeq-workflow"
+  ],
+  "exit_code": 0,
+  "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/phase5-system-compiler-fixed.log",
+  "log_sha256": "36163689f116654078f20a33e7b035d75e8f8f9a7ef984b98daddcd669358f6d",
+  "performance_acceptance": false,
+  "ported": false
+}

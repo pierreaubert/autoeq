@@ -1,0 +1,78 @@
+[
+  {
+    "file": "crates/roomeq-playback/src/assessment/reports.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-playback/src/assessment/room_optimization_result.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-playback/src/assessment/seat_replay.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-playback/src/assessment/timing.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-playback/src/assessment.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-playback/src/multiseat_report.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/delay_compile.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/evidence_intake.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/export.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/home_cinema/all.rs",
+    "status": "obsolete_imports_absent_in_thin_adapter"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+    "status": "applied_to_new_finalization_owner"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/parallel_timing.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/phase/misc.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/reports.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+    "status": "applied"
+  },
+  {
+    "file": "crates/roomeq-workflow/src/room_optimization.rs",
+    "status": "applied"
+  }
+]

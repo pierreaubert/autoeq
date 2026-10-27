@@ -1,0 +1,34 @@
+{
+  "recorded_utc": "2026-10-26T14:38:10.546269+00:00",
+  "status": "passed",
+  "scope": "32 benchmark-harness unit tests, including five native helper controls",
+  "command": [
+    "/Volumes/home_tmp/tmp/autoeq-refactor-qa-python-20261026/bin/python",
+    "-m",
+    "unittest",
+    "discover",
+    "-s",
+    "scripts",
+    "-p",
+    "test_bench*.py",
+    "-v"
+  ],
+  "observed_exit_code": 0,
+  "observed_tests_passed": 32,
+  "execution_evidence": "Tool-observed unittest output: Ran32 tests in1.486s; OK. No raw logfile was created for this focused run.",
+  "red_regression_observed_before_fix": true,
+  "red_failure": "native recipe observed producer path equal to mutable Cargo output",
+  "controls": [
+    "original Cargo output may be replaced without changing the bound helper",
+    "changing the bound helper still rejects lane",
+    "failed Cargo build never runs recipe",
+    "test harness cannot stand in for an ordinary producer",
+    "release and qa profiles retain explicit ordinary artifact provenance"
+  ],
+  "source_sha256": {
+    "scripts/build_bench/native_lane.py": "d6cab5963a075929b3b990a6e700125bbf02f9a538914c08be4d542a7e122349",
+    "scripts/test_bench_native_lane.py": "e903fe1369a9ccbcd92997c505db4129074fd270cdc4cc71b53e461f07ebdd68"
+  },
+  "real_native_preflight_pending": true,
+  "performance_acceptance": false
+}

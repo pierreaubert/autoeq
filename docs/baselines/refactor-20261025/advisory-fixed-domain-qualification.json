@@ -1,0 +1,137 @@
+{
+  "status": "affected_domain_checks_complete",
+  "started_utc": "2026-10-26T07:31:55.780507+00:00",
+  "input_record_sha256": "3458a57bb26f740142b4638d3a05429dca5ac6a29adf1d6f996083d20921ce02",
+  "steps": [
+    {
+      "name": "advisory-baseline-coverage-build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "autoeq",
+        "--bin",
+        "roomeq-qa-coverage",
+        "--features",
+        "qa"
+      ],
+      "source": "baseline",
+      "exit_code": 0,
+      "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-baseline-coverage-build.log",
+      "log_sha256": "0ceeb6eac35003d10a895c8ad9f592bd53569e43804bdd16f42568ae1b5c97a4"
+    },
+    {
+      "name": "advisory-baseline-pr",
+      "command": [
+        "/Volumes/home_tmp/tmp/autoeq-advisory-baseline-domain-target/release/roomeq-qa-coverage",
+        "--tier",
+        "pr",
+        "--jobs",
+        "4",
+        "--json",
+        "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-baseline-pr.json"
+      ],
+      "source": "baseline",
+      "exit_code": 1,
+      "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-baseline-pr.log",
+      "log_sha256": "0b203b95ecb07f5f9b819f45a45c133dfd221f5fc3f8920196a4a91dc2b6b73f"
+    },
+    {
+      "name": "advisory-candidate-coverage-build",
+      "command": [
+        "cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--release",
+        "-p",
+        "roomeq-qa",
+        "--bin",
+        "roomeq-qa-coverage"
+      ],
+      "source": "candidate",
+      "exit_code": 0,
+      "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-coverage-build.log",
+      "log_sha256": "87ebdfec93c81915f2218e8b73ff28a776ddb721ffccd02cbc8854d4233e3fc9"
+    },
+    {
+      "name": "advisory-candidate-pr",
+      "command": [
+        "/Volumes/home_tmp/tmp/autoeq-advisory-candidate-domain-target/release/roomeq-qa-coverage",
+        "--tier",
+        "pr",
+        "--jobs",
+        "4",
+        "--json",
+        "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-pr.json"
+      ],
+      "source": "candidate",
+      "exit_code": 1,
+      "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-pr.log",
+      "log_sha256": "35d7ee539f2198b02eee64166da6c1234161a9aed597f50ec3ede4a54349a1b8"
+    },
+    {
+      "name": "advisory-candidate-quick",
+      "command": [
+        "/Volumes/home_tmp/tmp/autoeq-advisory-candidate-domain-target/release/roomeq-qa-coverage",
+        "--quick",
+        "--jobs",
+        "14",
+        "--seed-runs",
+        "5",
+        "--metamorphic",
+        "--maxeval",
+        "200",
+        "--json",
+        "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-quick.json"
+      ],
+      "source": "candidate",
+      "exit_code": 0,
+      "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-quick.log",
+      "log_sha256": "9d0c18103a0bd8fa3d471e2fde67cf5b903965e558312446715390b50bb6e070"
+    }
+  ],
+  "performance_acceptance": false,
+  "baseline": {
+    "binary": "/Volumes/home_tmp/tmp/autoeq-advisory-baseline-domain-target/release/roomeq-qa-coverage",
+    "binary_sha256": "03a93838f2a9e659bad630fa097a05449198eee6c499f814ced2356afe983c8f",
+    "pr_json": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-baseline-pr.json",
+    "pr_sha256": "f8312b6198bbce121b55f0ef5107e3371e01a93b56ce66349341f57351dab45a",
+    "exit_code": 1
+  },
+  "candidate": {
+    "binary": "/Volumes/home_tmp/tmp/autoeq-advisory-candidate-domain-target/release/roomeq-qa-coverage",
+    "binary_sha256": "4e5dbeb00bd7a6f10722b6e37f4bdf17cce8e0424c8835493b66e3693dd4c7c4",
+    "pr_json": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-pr.json",
+    "pr_sha256": "4d5ff788366245445183feed48b583df4cdf4882f6c9364e8d07a5d9d16974c0",
+    "exit_code": 1
+  },
+  "quick": {
+    "json": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/advisory-candidate-quick.json",
+    "sha256": "b7c4847b057ca4ba6c1da623390fb4b64c3e8e8f630b8895f34f4354db369728",
+    "rows": 4,
+    "exit_code": 0,
+    "outcomes": [
+      {
+        "name": "small_stereo_2_0 fem iir",
+        "outcome": "passed"
+      },
+      {
+        "name": "small_stereo_2_2_mso fem iir",
+        "outcome": "reverted"
+      },
+      {
+        "name": "home cinema/iir redirected bass",
+        "outcome": "reverted"
+      },
+      {
+        "name": "home cinema/hybrid redirected bass quick",
+        "outcome": "reverted"
+      }
+    ]
+  },
+  "completed_utc": "2026-10-26T08:18:23.288873+00:00"
+}

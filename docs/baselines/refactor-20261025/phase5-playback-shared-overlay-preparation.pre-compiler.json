@@ -1,0 +1,1239 @@
+{
+  "status": "source-only shared implementation move; not compiled, measured, accepted, or ported",
+  "prepared_utc": "2026-10-26T09:51:41.481037+00:00",
+  "overlay": "/Volumes/home_tmp/tmp/autoeq-playback-shared-overlay-20261026",
+  "base_combined_pilot": "/Volumes/home_tmp/tmp/autoeq-system-coordinator-trial-20261026/autoeq",
+  "prerequisite_overlay": "/Volumes/home_tmp/tmp/autoeq-pipeline-contract-overlay-20261026",
+  "files": {
+    "Cargo.toml": "6576d94d5c2acd92d9c08d051d13c0cf0fd57ebc68263aab7b2ed2f80b390311",
+    "crates/autoeq-qa/Cargo.toml": "ce35cd32aefd6c4c83b412e3ad5bf38acc46397894e0d0390ea45a3585d208fb",
+    "crates/autoeq-qa/tests/qa_contract/workflow_evidence.rs": "ce0227bf4fe44b34a31717b310585e08410908c2e6778d7b70b58d59177a00c1",
+    "crates/autoeq-qa/tests/qa_contract.rs": "17b21e4722339919968c2e5dced93f2fe904098e4398366d728aa3e2f71d5950",
+    "crates/roomeq-playback/ARCHITECTURE.md": "498cf5addfd1fa00621b96165f103761a95ea4db5c2a04776734ea57ba659828",
+    "crates/roomeq-playback/Cargo.toml": "55faf0519839e753811ddb0de650b72ce89cc9013a4135d7b7ae05bbfb8827ed",
+    "crates/roomeq-playback/src/chain.rs": "c4ffff23c8acd2b11c46cad3cefdf19ddcb9416cb2fea227aa6b57f0d370eba3",
+    "crates/roomeq-playback/src/delay_compile.rs": "d3262988c6f7e65a90922bfad83d5ab38f41eb522f4fed046802d6b86bd9582e",
+    "crates/roomeq-playback/src/electrical_headroom.rs": "b737e1d2bebafab09e17760c871e264e73b0dd82e71bd24b87f94ac60b6b6415",
+    "crates/roomeq-playback/src/eq_resources.rs": "aaa840025efe427c296401dc9ca79bdafcae11003220b242a9d49eeef8c46d47",
+    "crates/roomeq-playback/src/evidence_intake.rs": "9ac0cc144c8f2cf7f91228c6eafcdc02d61713b36efb19343b5128218a646a2b",
+    "crates/roomeq-playback/src/final_ledger/delivered_gains.rs": "0d2959e6757dd87de46e21262c5af41a9715d4e31cc740bceab4f1ff80161ab2",
+    "crates/roomeq-playback/src/final_ledger.rs": "37a0cf9158043d936c929d43d4cab40aef2f956717ae4d02c1df40819b33642f",
+    "crates/roomeq-playback/src/final_resources.rs": "feadea5c818cebfc314074f1cd85250c9495de824f8ac5ab336426a3cf395aae",
+    "crates/roomeq-playback/src/fir.rs": "309eeaa9dc9950bf26a3300cb3bb59ce8761eaa9bba26af4d395bc6f7f730a6d",
+    "crates/roomeq-playback/src/lib.rs": "cd53c5288bc342cb83e1373d8f7da9fd27ef23a6a9772ddec5b7eb963cb3c272",
+    "crates/roomeq-playback/src/measurement.rs": "ea1ce8b4915d9a9ec76a0b29ebc7c329d0f6b4095032e19cd0d1c9e90bf70868",
+    "crates/roomeq-playback/src/parallel_timing.rs": "aa17010aa8bdaf46f6da73a4f2d5e2ca4b054cee8421b661200828b950b3ea13",
+    "crates/roomeq-playback/src/physical_fir.rs": "1d51f039a3109eba8e9121e4ed38ab376bcdab90503c6a27eebb3d688ea674dc",
+    "crates/roomeq-playback/src/resource.rs": "4da36867102d33a35cc1af7bb46721f5f8160cb22987355143b8bf28b0fb1b64",
+    "crates/roomeq-playback/src/routed.rs": "138f5b7b56de280b2aab3e164b0b12f8f799caacfe682ce28af1141bc3f0c8de",
+    "crates/roomeq-playback/src/target_enforcement.rs": "72f807a9bf3ab8a95bc476e2036961e2b1726e8310f2c5dfeef284be474fbf5a",
+    "crates/roomeq-playback/src/test_fixtures.rs": "1630d4f1e847932f06c536f6d2847a4ccc2de64a8c38ef351e6fd628fc427b98",
+    "crates/roomeq-playback/src/wav.rs": "be498fbed318181a45e4f5aff026bef1b639808de6741ef5e1badae3613e1478",
+    "crates/roomeq-workflow/Cargo.toml": "119f1fc8da31a7d363a91b369311a00e12443b5f474bd37b720e983c7c02dab1",
+    "crates/roomeq-workflow/src/ctc/dsp_response_cache.rs": "4f31880819e1e06faaa41651f07b7ba651dc38d4ab221a9e36eb04c7fc0f245c",
+    "crates/roomeq-workflow/src/ctc/misc.rs": "1019bf350d8d1013b26a1c2ce13a291ffa1dba7650edb27eaa6ca6caf3e8ffa3",
+    "crates/roomeq-workflow/src/delay_compile.rs": "bb539cf3044f5f4b99fd90590d9449e43381ee14f72518a5bfcffd67d3f8385a",
+    "crates/roomeq-workflow/src/electrical_headroom.rs": "7bf9838113c0ff84f403cb543c6490bb8a2b08017f355fa72548ae091c887653",
+    "crates/roomeq-workflow/src/eq_resources.rs": "f6e9d5d9f8a93f6d65b94bf132ac491470be04493bc1b91264bee0e034464c36",
+    "crates/roomeq-workflow/src/evidence_intake.rs": "7b602c81ca3920578bbaf474585992d91b4cbd12d9d0bc13f4e35d34bfd0fedc",
+    "crates/roomeq-workflow/src/export.rs": "2a5cc0092ca05207c8fcb26f55f3a8f3065dd1ef46e01365bb2c2ccc9fc203c3",
+    "crates/roomeq-workflow/src/final_ledger.rs": "8b0e4e5a85f8a2b372bfaa7e861b90ae5d3d553a1596f3484396008d3b735138",
+    "crates/roomeq-workflow/src/fir.rs": "ca01d61820138249919e2d8776b646b9c9ecafda1adf12cf627f36ff595b5f6b",
+    "crates/roomeq-workflow/src/group_measurements.rs": "9fcac3931338ae06d992bb816bab58b3bfd3223007791ab6a665d3eae7a174db",
+    "crates/roomeq-workflow/src/measurement.rs": "a48929b9a131ba7eb9c7d60675ff7d7cc17fffbe46d80cc450c3836415ba2395",
+    "crates/roomeq-workflow/src/room_optimization/parallel_timing.rs": "6fdce42b762e0e2b055998fda5d1eb6758a021bada96b2882b11046fe3354d63",
+    "crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs": "b0379827a84d5d103c468eb6e00c824b8e7cd2dbb7f16f4484d8cb2fe15b2343",
+    "crates/roomeq-workflow/src/target_enforcement.rs": "d24062c019e28d33b66bd77e14943c90a819e48a2f46c426d8807d3fddab3e0c",
+    "crates/roomeq-workflow/src/topology/home_cinema.rs": "911a606a5f5ef07cefbdd09a671a022b457ca1f9ffdbae039a40aff91ac25bbc",
+    "crates/roomeq-workflow/src/wav.rs": "d2da2e4d436b93d1d4510bad34bb6d5b543556d6a8d2106efb7a477a4c7f6be6"
+  },
+  "routed_items": [
+    {
+      "name": "apply_reconstruction_chain",
+      "kind": "function",
+      "old_lines": [
+        40,
+        76
+      ],
+      "original_sha256": "1b00abffba797e11a92139b01237c73ba6d42702d054d12d0898ce2667d027f7",
+      "moved_sha256": "76bc7ceb73bc5c2f3fc741b5089396677879044be055fc1c982a0a0b8ff34501",
+      "exported": true
+    },
+    {
+      "name": "BASS_MANAGEMENT_LOG_TARGET",
+      "kind": "const",
+      "old_lines": [
+        86,
+        86
+      ],
+      "original_sha256": "7927897af216a13f44528e12d6e0bcae5759f60f7fa8eda6f8e8fa3f42dfff6e",
+      "moved_sha256": "354504c096304475f6c6d9f49de9b013256d3b25713f8fa529a3c6017da80ea9",
+      "exported": true
+    },
+    {
+      "name": "main_level_alignment_band",
+      "kind": "function",
+      "old_lines": [
+        88,
+        132
+      ],
+      "original_sha256": "54d1e488da0d335241d4edae8b10731fde3b198e9a4d883e4f26cdda5000bbd1",
+      "moved_sha256": "b40054fe2c0973f7d3020df55a88fe08dd23fc66efa1d0fcd75bb461ecb318d3",
+      "exported": true
+    },
+    {
+      "name": "average_spl",
+      "kind": "function",
+      "old_lines": [
+        134,
+        136
+      ],
+      "original_sha256": "41f7e5492b9d1020f9ee005eeb7d4c9cad544fada3b878156f486278a4ff8a7f",
+      "moved_sha256": "1eb1b613ea45be60a4d87af10f27e772fdc09e8c495d7ad496503e5a1f25f5a1",
+      "exported": true
+    },
+    {
+      "name": "shift_curve_level",
+      "kind": "function",
+      "old_lines": [
+        138,
+        140
+      ],
+      "original_sha256": "3f170ff11e8739323181c5c6dcf9bdec01679ef8d3e9fb09f1b980fa5ebf1581",
+      "moved_sha256": "3f170ff11e8739323181c5c6dcf9bdec01679ef8d3e9fb09f1b980fa5ebf1581",
+      "exported": false
+    },
+    {
+      "name": "apply_gain_to_main_chain",
+      "kind": "function",
+      "old_lines": [
+        142,
+        178
+      ],
+      "original_sha256": "948aea169a87e78d741a67288c7d54e04b579f8dd96db3e10a8b27ae7c62f4a8",
+      "moved_sha256": "de956fc3648f6ae9881722dafa4dbb1d8f9be378b84e70c46ae16e35a2323df8",
+      "exported": true
+    },
+    {
+      "name": "apply_output_safety_gain",
+      "kind": "function",
+      "old_lines": [
+        180,
+        202
+      ],
+      "original_sha256": "d02faa2aa49e5d9ebc61775b91deeb73e3a34ed2154e943010072f722059a523",
+      "moved_sha256": "39cdce3febd3407d11919b3ac0fa42a6cc32be3f1bd712983459e3a252b4dfe1",
+      "exported": true
+    },
+    {
+      "name": "is_source_pre_route_plugin",
+      "kind": "function",
+      "old_lines": [
+        254,
+        260
+      ],
+      "original_sha256": "dd34c5a1cd32366fdf1b9ad1804d90f6efec7ac99e1e324238999c317a973188",
+      "moved_sha256": "1e3ad1764afff39921441ea55f0a2f9dccb0f87308e96f81beb9cde3a3f4be9c",
+      "exported": true
+    },
+    {
+      "name": "validate_routed_plugin_stage_ownership",
+      "kind": "function",
+      "old_lines": [
+        270,
+        335
+      ],
+      "original_sha256": "0410ed9cccc31371da1e5a2ba335e52706069d5fc88ee1871d277717fb2567c7",
+      "moved_sha256": "0410ed9cccc31371da1e5a2ba335e52706069d5fc88ee1871d277717fb2567c7",
+      "exported": false
+    },
+    {
+      "name": "realize_source_pre_route_transfer",
+      "kind": "function",
+      "old_lines": [
+        595,
+        612
+      ],
+      "original_sha256": "40baa171462d7295e970db3dbc76e210c586caa593cd8334eb66960e56b1e58b",
+      "moved_sha256": "f356de9fac9e039f35c6bce087f8a2b40e2b3d9ceaf6ea4e6de0ff92301b0fdd",
+      "exported": true
+    },
+    {
+      "name": "prepare_source_pre_route_transfer",
+      "kind": "function",
+      "old_lines": [
+        614,
+        652
+      ],
+      "original_sha256": "0e0b68ff30ec5fa3b4c02d5a0659feb17bbeac76c023db2532f2992787aa5d00",
+      "moved_sha256": "0e0b68ff30ec5fa3b4c02d5a0659feb17bbeac76c023db2532f2992787aa5d00",
+      "exported": false
+    },
+    {
+      "name": "embedded_convolution_irs",
+      "kind": "function",
+      "old_lines": [
+        654,
+        684
+      ],
+      "original_sha256": "322d072953752b6ce3c36e99364783dea9db788398e1ce6d22a66343ef312897",
+      "moved_sha256": "f8446d7bfacfe13a27e1c3363c209cf53fb265cd5d5dd88c5e9a71fd7ae7af40",
+      "exported": true
+    },
+    {
+      "name": "source_pre_route_transfers",
+      "kind": "function",
+      "old_lines": [
+        686,
+        751
+      ],
+      "original_sha256": "5392880b0621209c00f005e238ad76fcbee763bb7d57ef73e4903d1ebac7e192",
+      "moved_sha256": "bc5a0a55bee0ef43ef507fdab38ee3fb3351aec0d248df43ca14a5df00ea4e36",
+      "exported": true
+    },
+    {
+      "name": "realize_source_pre_route_transfer_with_provider",
+      "kind": "function",
+      "old_lines": [
+        753,
+        770
+      ],
+      "original_sha256": "b0735eab9c6efaa3e24709091d645415a6ce1a296786f40acb231ac18d4221a4",
+      "moved_sha256": "4c8d3528a4a76dc91fd71214c3f8ac2b7938e48e1809f6b30ab197e759bad2e0",
+      "exported": false
+    },
+    {
+      "name": "CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX",
+      "kind": "const",
+      "old_lines": [
+        772,
+        777
+      ],
+      "original_sha256": "c79f880515cd1bc6a0c75b424e62b7073048095d73292e14648023d57252300d",
+      "moved_sha256": "c0c9a586c70bd34f355075a9ad0b500c8dc72209adf12e7787eb460cc4b5d5e9",
+      "exported": true
+    },
+    {
+      "name": "CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY",
+      "kind": "const",
+      "old_lines": [
+        779,
+        786
+      ],
+      "original_sha256": "5726fb1d99e30efc6a96c20b4be2a926a0b6d84e5febc64542f4fe20a4f696a3",
+      "moved_sha256": "e91633580c2e266e7226aa7461789a529d9a781a37e813de7cf9d6f917559469",
+      "exported": true
+    },
+    {
+      "name": "crossover_timing_refused",
+      "kind": "function",
+      "old_lines": [
+        788,
+        802
+      ],
+      "original_sha256": "1f8b05c05210d0d69d4a2a09b204963596669d5b10224b41004567972a07d6be",
+      "moved_sha256": "cc57c5b0ad94943a472c1078530b9c68259a4a1a36043392ca5f45f10640723d",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves",
+      "kind": "function",
+      "old_lines": [
+        804,
+        827
+      ],
+      "original_sha256": "0f8acfafd165cacb7ac4518093a52ecff859c75c165ea86d4d357d1ec7012c6d",
+      "moved_sha256": "4af28f2849aaa63c832458331635319dadc7d08cd5bb0e15eec9d74b0ab6df0a",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves_unenforced",
+      "kind": "function",
+      "old_lines": [
+        829,
+        849
+      ],
+      "original_sha256": "ed8b8af2fb75d0884be64507ee91c4c06c6caa199e190d5c972ac518b352575f",
+      "moved_sha256": "967e627cd03992dc4882a9b11ef5faebcdd3349c74e07df99e125103ab2f4979",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves_with_evidence",
+      "kind": "function",
+      "old_lines": [
+        851,
+        874
+      ],
+      "original_sha256": "9242fa9817f41406aa9ede95bd809f0c943657e4d5d9daacf52e0dd92278d34b",
+      "moved_sha256": "52187e7ca523bef49ef7553f1cb5c83307e2f720c2b549f72ec40fe5dbc23cd4",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves_with_ir_provider",
+      "kind": "function",
+      "old_lines": [
+        876,
+        906
+      ],
+      "original_sha256": "fbc8cfe19f57228ebc177f7f10268aa8c44b0e796e611e257d6423ace95a9389",
+      "moved_sha256": "fbc8cfe19f57228ebc177f7f10268aa8c44b0e796e611e257d6423ace95a9389",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves_with_ir_provider_and_evidence",
+      "kind": "function",
+      "old_lines": [
+        908,
+        942
+      ],
+      "original_sha256": "3b282ea9abbc5a5112d4806d636c6be42b102ea9e4293ab3e4e7c18700a3da2b",
+      "moved_sha256": "3b282ea9abbc5a5112d4806d636c6be42b102ea9e4293ab3e4e7c18700a3da2b",
+      "exported": true
+    },
+    {
+      "name": "collect_routed_splice_outcomes",
+      "kind": "function",
+      "old_lines": [
+        944,
+        971
+      ],
+      "original_sha256": "6bbb5bbd501a01fa5a80ecead6d03749db05ef68b0122df693b8df2245157129",
+      "moved_sha256": "0844cf8ab50b4f81d371dfca3d2a64205bfcad0d3bc3b1039651d9f713185351",
+      "exported": true
+    },
+    {
+      "name": "SpliceSafety",
+      "kind": "enum",
+      "old_lines": [
+        1003,
+        1008
+      ],
+      "original_sha256": "9c3435a75575dd6bb6ae1eea6aade7069f5914c567862afda186eb6eeca45097",
+      "moved_sha256": "c94bf3ab20aed7c46dbab066e0a665a7766bdee07192d378ad85f4a2a6755b7e",
+      "exported": true
+    },
+    {
+      "name": "SpliceSafety<'_>",
+      "kind": "impl",
+      "old_lines": [
+        1010,
+        1017
+      ],
+      "original_sha256": "bc14bfdd1fcf1957fad901a7a75dd467e1e513c0d409017176c644071b212e06",
+      "moved_sha256": "bc14bfdd1fcf1957fad901a7a75dd467e1e513c0d409017176c644071b212e06",
+      "exported": false
+    },
+    {
+      "name": "RoleSpliceOutcome",
+      "kind": "struct",
+      "old_lines": [
+        1019,
+        1030
+      ],
+      "original_sha256": "75f7ee6617130d083e08b76c098e6f18ab7b318e6c3ce660b36021c5a664f6ea",
+      "moved_sha256": "4cc2956da3c0668cc2c7f8d7ea2efc59b186a42b791e6e0ca2edf2261ead52ad",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves_impl",
+      "kind": "function",
+      "old_lines": [
+        1032,
+        1053
+      ],
+      "original_sha256": "ab072d5a76a124504a7712186d588e598229233e74901b9d572f02ad37fa65ed",
+      "moved_sha256": "766970fa35da880a2b5226589ecf2e4ee1898dc3ec0f3679b8aedde9f00c8c12",
+      "exported": true
+    },
+    {
+      "name": "reconstruct_deployed_source_curves_impl_with_provider",
+      "kind": "function",
+      "old_lines": [
+        1055,
+        1526
+      ],
+      "original_sha256": "83564f01c83c7dfb8584cad25bdecc2548a0b85cc4e0f5ef692a6851314fe586",
+      "moved_sha256": "83564f01c83c7dfb8584cad25bdecc2548a0b85cc4e0f5ef692a6851314fe586",
+      "exported": false
+    },
+    {
+      "name": "calibrate_post_dsp_input_levels",
+      "kind": "function",
+      "old_lines": [
+        1528,
+        1740
+      ],
+      "original_sha256": "6f1102998500bdd0b21bf80d21a89d3e400fd9a4c860d2b87eb46bb69d161937",
+      "moved_sha256": "2297b394992cfb6f7f1dccf278a829cb906e3333407a8a258685d0955793a2c8",
+      "exported": true
+    },
+    {
+      "name": "recalibrate_post_dsp_levels",
+      "kind": "function",
+      "old_lines": [
+        1742,
+        1972
+      ],
+      "original_sha256": "2ddd29a2c450db6e406437f6419a4710e7f0fdcb33817e9c3851ed47547e323c",
+      "moved_sha256": "cdd2ea1e5aa112ed67c28ed50d2c88121f431d360ddcd96629e429521e4edd43",
+      "exported": true
+    },
+    {
+      "name": "canonical_main_roles",
+      "kind": "function",
+      "old_lines": [
+        2790,
+        2801
+      ],
+      "original_sha256": "300aad83f43b5b31f8f34137d31d1617883be014c08aa023acd002f66a91adca",
+      "moved_sha256": "51781839e382c91ab0a24b1a0169297836e9a7d5f13738519cdbd12680ada329",
+      "exported": true
+    }
+  ],
+  "workflow_reimports": [
+    "BASS_MANAGEMENT_LOG_TARGET",
+    "CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY",
+    "CROSSOVER_TIMING_REFUSED_ADVISORY_PREFIX",
+    "RoleSpliceOutcome",
+    "SpliceSafety",
+    "apply_gain_to_main_chain",
+    "apply_output_safety_gain",
+    "apply_reconstruction_chain",
+    "average_spl",
+    "calibrate_post_dsp_input_levels",
+    "canonical_main_roles",
+    "collect_routed_splice_outcomes",
+    "crossover_timing_refused",
+    "embedded_convolution_irs",
+    "is_source_pre_route_plugin",
+    "main_level_alignment_band",
+    "realize_source_pre_route_transfer",
+    "recalibrate_post_dsp_levels",
+    "reconstruct_deployed_source_curves",
+    "reconstruct_deployed_source_curves_impl",
+    "reconstruct_deployed_source_curves_unenforced",
+    "reconstruct_deployed_source_curves_with_evidence",
+    "reconstruct_deployed_source_curves_with_ir_provider",
+    "reconstruct_deployed_source_curves_with_ir_provider_and_evidence",
+    "source_pre_route_transfers"
+  ],
+  "new_dependency_direction": "workflow -> playback -> engine/model; no playback dependency on workflow or coordinators",
+  "existing_test_bodies_changed": 0,
+  "existing_test_function_identities_removed": 0,
+  "capture_fields_and_receipt_logic_untouched": true,
+  "resource_operations": "Existing WAV byte/path decode, checked sample rate, DSP cache, retained-tap and explicit frozen-provider paths relocated; no algorithm or error-text changes intended",
+  "intentional_api_change": "DspResponseCache::new available to consuming workflow test targets without cfg(test); opaque fields retained",
+  "required_proofs": [
+    "Compile after calibration and qualify normal/dev/features/lock graph",
+    "Verify each moved body excluding only import/visibility relocation; compare all existing case identities",
+    "Run WAV precision/layout/errors, chain transfer, frozen-provider, crossover, level alignment and finalization behavior",
+    "Move cross-subsystem tests to integration owner before completing routed extraction",
+    "Complete actual routed/finalization extraction pilots and measured accept/reject decisions"
+  ],
+  "performance_acceptance": false,
+  "patch_sha256": "33688307cdd4a848a877d8d958eea75a9fb6c6979a948a3590b22b29c013fb18",
+  "public_workflow_paths_retained": [
+    "reconstruct_deployed_source_curves_with_ir_provider",
+    "reconstruct_deployed_source_curves_with_ir_provider_and_evidence"
+  ],
+  "updated_utc": "2026-10-26T10:37:40.144336+00:00",
+  "whole_modules_moved_with_tests": [
+    {
+      "module": "delay_compile",
+      "original_sha256": "15a6ea2cf5f037f5adeda78bc0045dcac2f3ffb2042c88eec4d8526575a22703",
+      "moved_sha256": "d3262988c6f7e65a90922bfad83d5ab38f41eb522f4fed046802d6b86bd9582e",
+      "public_paths": [
+        "COMPILE_PADDING_LABEL",
+        "DelayCompilationReport",
+        "compile_graph_delays_causal"
+      ],
+      "restricted_paths_retained": [
+        "applied_lfe_playback_gain_db",
+        "correction_strength_for_electrical_ceiling",
+        "electrical_boost_bound_db"
+      ],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::sigberg3_advances_compile_causal_with_common_offset"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::already_causal_graph_is_untouched"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::unreplayed_negative_delay_flags_replay_divergence"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::shared_channel_negative_compiles_uniformly"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::nonrouted_branch_pads_without_route"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::compilation_is_idempotent"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::electrical_bound_sums_positive_branch_gains"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::correction_strength_respects_fixed_route_headroom_and_signed_eq_gains"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::routed_electrical_bound_uses_each_self_route_stage_once"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::routed_electrical_bound_uses_input_and_output_owners_and_route_gain_once"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::electrical_bound_excludes_applied_lfe_playback_calibration"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::routed_electrical_bound_refuses_unknown_plugin_ownership"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::correction_strength_refuses_zero_strength_overage_and_keeps_safe_full_strength"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::electrical_bound_excludes_convolution_branches"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "delay_compile::tests::electrical_bound_takes_branch_maximum"
+        }
+      ],
+      "test_bodies_unchanged": true
+    },
+    {
+      "module": "electrical_headroom",
+      "original_sha256": "385289a81a18ed840821363a7668c408bd0a9893a583ecc9e430d106f7475381",
+      "moved_sha256": "b737e1d2bebafab09e17760c871e264e73b0dd82e71bd24b87f94ac60b6b6415",
+      "public_paths": [
+        "ExpandedElectricalPath",
+        "SerializedElectricalPath",
+        "assess_final_graph",
+        "assess_final_graph_physical_drive",
+        "canonical_electrical_routing",
+        "expand_independent_electrical_paths",
+        "expand_routed_electrical_paths",
+        "final_graph_unit_peak_stage",
+        "independent_graph_output_ports",
+        "replay_sampled_electrical_assessment",
+        "replay_sampled_electrical_headroom",
+        "room_eq_safety_attenuation_by_output"
+      ],
+      "restricted_paths_retained": [],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::electrical_replay_refuses_excess_response_storage_before_sidecar_access"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::final_graph_policy_uses_declared_input_peaks_and_rejects_unknown_inputs"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::final_graph_assessment_uses_serialized_cascade_without_mutation"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::final_graph_assessment_marks_unsupported_global_processing_unknown"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::final_graph_assessment_reloads_delivered_sidecars_at_each_rate"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::electrical_replay_preserves_dc_and_exact_zero_transfer"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::driver_expansion_preserves_common_gain_and_separate_physical_outputs"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::routed_expansion_applies_total_route_gain_once"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::safety_budget_counts_common_and_output_gains_on_each_routed_path"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::safety_budget_counts_a_common_cut_for_each_driver_output"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::safety_budget_rejects_malformed_tagged_gain_metadata"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::routed_virtual_lfe_replays_named_physical_driver"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::serialized_peq_and_fir_gain_replay_ignore_acoustic_cancellation"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::wav_sidecars_and_independent_inputs_replay_at_each_rate"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::unexpanded_driver_groups_and_invalid_grids_are_rejected"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "electrical_headroom::tests::multichannel_ir_cannot_silently_select_the_first_channel"
+        }
+      ],
+      "test_bodies_unchanged": true
+    },
+    {
+      "module": "eq_resources",
+      "original_sha256": "aaa840025efe427c296401dc9ca79bdafcae11003220b242a9d49eeef8c46d47",
+      "moved_sha256": "aaa840025efe427c296401dc9ca79bdafcae11003220b242a9d49eeef8c46d47",
+      "public_paths": [
+        "prepare_eq_resources",
+        "prepare_eq_target"
+      ],
+      "restricted_paths_retained": [],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "eq_resources::tests::resolves_target_csv_and_impulse_response"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "eq_resources::tests::missing_optional_impulse_is_ignored"
+        }
+      ],
+      "test_bodies_unchanged": true
+    },
+    {
+      "module": "wav",
+      "original_sha256": "45e65682bfbc0780917c32f278d3687950bcc94ec35a5396ec8c801433437622",
+      "moved_sha256": "be498fbed318181a45e4f5aff026bef1b639808de6741ef5e1badae3613e1478",
+      "public_paths": [],
+      "restricted_paths_retained": [
+        "DecodedMonoWav",
+        "decode_first_channel"
+      ],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "wav::tests::decodes_only_the_first_channel"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "wav::tests::decodes_integer_samples_normalized_to_full_scale"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "wav::tests::missing_file_is_an_error_not_a_panic"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "wav::tests::empty_wav_is_rejected"
+        }
+      ],
+      "test_bodies_unchanged": true
+    },
+    {
+      "module": "measurement",
+      "original_sha256": "d6ed1ac3bf29bd2440f8954633c11a4c86b6c13db34a454408d4686401e38a36",
+      "moved_sha256": "ea1ce8b4915d9a9ec76a0b29ebc7c329d0f6b4095032e19cd0d1c9e90bf70868",
+      "public_paths": [
+        "DEFAULT_FREQUENCY_SAMPLES",
+        "load_curve_from_csv",
+        "load_curve_from_csv_with_frequency_samples",
+        "load_measurement",
+        "load_measurement_with_frequency_samples",
+        "load_source",
+        "load_source_individual",
+        "load_source_individual_with_frequency_samples",
+        "load_source_with_frequency_samples",
+        "load_source_with_individual",
+        "load_source_with_individual_with_frequency_samples"
+      ],
+      "restricted_paths_retained": [
+        "ConditionedSource",
+        "load_source_with_conditioning"
+      ],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::conditioning_resolution_records_upper_smoothing_without_erasing_bass_support"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::curve_only_workflow_load_refuses_disjoint_support"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::roadmap_dense_loading_does_not_smooth_unusable_samples_into_valid_band"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::roadmap_dense_loading_preserves_metadata_and_isolates_phase"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::roadmap_dense_loading_requires_usable_samples_and_preserves_legacy_path"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::sub_measurement_keeps_every_native_bin_and_measured_phase"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::dense_and_sparse_sampling_preserve_narrow_resonance"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::workflow_measurement_adapters_load_csv_ref_and_source"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::oversized_measurements_are_smoothed_to_room_eq_grid"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::oversized_measurements_use_custom_room_eq_grid"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::small_measurements_keep_their_original_grid"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::workflow_measurement_adapters_preserve_operation_context"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::phase_reconstruction_preserves_delay_and_excess_phase"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::phase_wrapping_is_unwrapped_before_resampling"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::sparse_measurements_are_not_extrapolated"
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "measurement::tests::missing_phase_remains_magnitude_only"
+        }
+      ],
+      "test_bodies_unchanged": true,
+      "source_qualification": "Verbatim numeric operations plus explicit ToolIdentity argument/adapter; preexisting test bodies remain byte-identical. One new workflow adapter regression is separately declared."
+    },
+    {
+      "module": "fir",
+      "original_sha256": "ba4218df6fdad3fae42466ff7cca0be092ce1f6ff5da7d9215f6a0544527f66d",
+      "moved_sha256": "309eeaa9dc9950bf26a3300cb3bb59ce8761eaa9bba26af4d395bc6f7f730a6d",
+      "public_paths": [
+        "FirPhase",
+        "apply_gd_delay_to_fir_coefficients",
+        "generate_fir_correction",
+        "generate_fir_correction_prepared",
+        "generate_fir_correction_with_gd_target",
+        "generate_fir_correction_with_gd_target_prepared"
+      ],
+      "restricted_paths_retained": [
+        "resolve_fir_target_curve"
+      ],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "fir::tests::default_target_is_prepared_in_memory"
+        }
+      ],
+      "test_bodies_unchanged": true
+    }
+  ],
+  "copied_test_only_fixture": {
+    "source": "crates/roomeq-workflow/src/test_fixtures.rs",
+    "sha256": "1630d4f1e847932f06c536f6d2847a4ccc2de64a8c38ef351e6fd628fc427b98",
+    "functions": [
+      "empty_metadata",
+      "flat_curve",
+      "single_channel_room_result"
+    ],
+    "production_compilation": false
+  },
+  "moved_test_count": 98,
+  "additional_shared_operations": [
+    {
+      "name": "seat_labels",
+      "original_path": "crates/roomeq-workflow/src/group_measurements.rs",
+      "target": "crates/roomeq-playback/src/resource.rs",
+      "old_lines": [
+        8,
+        26
+      ],
+      "original_sha256": "a3e0c093956595da5dcfc1f7c172a958ec5ad4a56e1dc9e340d92fce40339bd4",
+      "moved_sha256": "ab2db23148ef7c22338acbcd381549d4bb11648456ce9e4393872b6098a08ab4"
+    },
+    {
+      "name": "processing_snapshot",
+      "original_path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "target": "crates/roomeq-playback/src/routed.rs",
+      "old_lines": [
+        44,
+        62
+      ],
+      "original_sha256": "fdda6e37b8c0ac99ef6fefb2ad5bc3f7e78c4edddfae9167edc40d6295235cd2",
+      "moved_sha256": "8377b8987c4850b1715e1fbbd95f0cf1f0f0a74ddbade8c6527feb7c2e8d86b0"
+    },
+    {
+      "name": "multisub_source_reference_scope",
+      "original_path": "crates/roomeq-workflow/src/group_measurements.rs",
+      "target": "crates/roomeq-playback/src/resource.rs",
+      "old_lines": [
+        39,
+        117
+      ],
+      "original_sha256": "2f163c37be57d979a33fc61954be849fcdd6ffad1660ff7b9cb2a06761fcf350",
+      "moved_sha256": "6aa31cccd99268a1573fa209ce787c6f5dece1863160740bde8f58ee12131792"
+    },
+    {
+      "name": "bind_final_convolution_artifacts",
+      "original_path": "crates/roomeq-workflow/src/export.rs",
+      "target": "crates/roomeq-playback/src/final_resources.rs",
+      "old_lines": [
+        23,
+        121
+      ],
+      "original_sha256": "cc39dd345307a4e32e355d0efa5104f674fd28e53a4dc10ebfce60eef7eb2f4f",
+      "moved_sha256": "6613a32eecbc86e7f3c0f84334c3d21acb8606bcb7dcd438d0698a5036c73daa"
+    },
+    {
+      "name": "validate_final_routed_stage_ownership",
+      "original_path": "crates/roomeq-workflow/src/export.rs",
+      "target": "crates/roomeq-playback/src/final_resources.rs",
+      "old_lines": [
+        123,
+        157
+      ],
+      "original_sha256": "4b2234aedd1cd086b6e333d312f0f6fbff87642e1b0981baa439887e6781b317",
+      "moved_sha256": "0b7f640ff17d8d1293b4855ddaa1805aaeb6905a742cbac8b1da42140053546d"
+    },
+    {
+      "name": "has_physical_fir",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs",
+      "target": "crates/roomeq-playback/src/physical_fir.rs",
+      "old_lines": [
+        462,
+        473
+      ],
+      "original_sha256": "bcdf553574ce7c4e1db14c84bc6fbd7713a5b05f70b8c4565d63bbb8b6c3094d",
+      "moved_sha256": "064714ca89a7505b7a26f92d76325e0f0550dcc3aba4a834f6c63061e559d451",
+      "visibility_from": "pub(super) fn ",
+      "doc_prefix": "/// Report whether a physical branch owns a FIR stage.\n",
+      "module_path_replacements": {
+        "crate::ctc::": "crate::chain::"
+      }
+    },
+    {
+      "name": "replay",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs",
+      "target": "crates/roomeq-playback/src/physical_fir.rs",
+      "old_lines": [
+        475,
+        541
+      ],
+      "original_sha256": "1d3fad1a95059a5518937675cc52959248b8c9984330cacb3999a78990b9c308",
+      "moved_sha256": "c047aff27338e81e27e7d70918b718d7a36206d1b282e6868ffa1e9e9bf7c9d3",
+      "visibility_from": "pub(super) fn ",
+      "doc_prefix": "",
+      "module_path_replacements": {
+        "crate::ctc::": "crate::chain::"
+      }
+    }
+  ],
+  "evidence_intake_move": {
+    "source": "crates/roomeq-workflow/src/evidence_intake.rs",
+    "target": "crates/roomeq-playback/src/evidence_intake.rs",
+    "original_sha256": "ac5e7878836d5d50af88c4faae13964918574e9356280960652e5218e9c8370b",
+    "public_paths_retained": [
+      "AlignmentLedgerEntry",
+      "BandEvidence",
+      "BoundaryBudgets",
+      "CalibrationLedgerEntry",
+      "ChannelEvidence",
+      "ChannelGateInput",
+      "ConditioningLedger",
+      "GainLedgerEntry",
+      "INTAKE_BOUNDARY_BUDGETS",
+      "INTAKE_POLICY_VERSION",
+      "RawCaptureRef",
+      "WorkflowIntake",
+      "WorkflowOutcome",
+      "apply_operation_boundary",
+      "assess_direct_capture",
+      "build_channel_evidence",
+      "gate_all_channels",
+      "gate_channel_operations",
+      "provenance_capture_kind",
+      "resolve_channel_source",
+      "source_measurement_id",
+      "supported_overlap",
+      "validate_intake_grids"
+    ],
+    "production_change": "Only removes application conditioning-adapter module/reexports; production evidence data, validation, timing and eligibility bodies unchanged",
+    "application_conditioning_owner_unchanged": true,
+    "original_test_count": 20,
+    "unit_test_count_remaining_below": 17,
+    "integration_tests_moved": [
+      "workflow_evidence_gaps_and_unknowns_pass_through_optimize_room",
+      "workflow_evidence_survives_all_topologies",
+      "workflow_f05_disjoint_gap_optimizes_with_segment_authorization"
+    ],
+    "integration_target": "autoeq-qa/qa_contract",
+    "test_helper_closure": [
+      "assert_channel_evidence_survives",
+      "band_evidence",
+      "fast_optimizer",
+      "intake_from_config",
+      "room_config",
+      "stereo_system",
+      "test_curve"
+    ],
+    "test_helpers_removed_from_lower": [
+      "assert_channel_evidence_survives",
+      "fast_optimizer",
+      "intake_from_config",
+      "room_config",
+      "stereo_system"
+    ],
+    "test_changes": "Only owner/type path relocation; all numerical inputs and assertions retained"
+  },
+  "additional_whole_modules": [
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/parallel_timing.rs",
+      "target": "crates/roomeq-playback/src/parallel_timing.rs",
+      "original_sha256": "43742b9397d97996ded15cfed80351aafb18742c38eb1269b39e27f79a4f724a",
+      "moved_sha256": "aa17010aa8bdaf46f6da73a4f2d5e2ca4b054cee8421b661200828b950b3ea13",
+      "transformation": "pub(super) operations become shared public operations; source-reference helper path relocates to shared resource owner",
+      "standalone_test_cases": 0,
+      "required_behavior_scope": "All existing waveform/replay/source-identity tests; this move does not remove those contracts"
+    }
+  ],
+  "reconciliation_module_moves": [
+    {
+      "module": "final_ledger",
+      "input_sha256": "dc4eb5dc9b327a1749f3b0936a26e2f058dd087fa4bb7b0d5261605f4b61b37c",
+      "base_sha256": "5aa21fc91c54294e54d3bdf56e800a8aa9e6567f677e91498a2435ca32a9411a",
+      "moved_sha256": "37a0cf9158043d936c929d43d4cab40aef2f956717ae4d02c1df40819b33642f",
+      "children_unchanged": {
+        "crates/roomeq-workflow/src/final_ledger/delivered_gains.rs": "0d2959e6757dd87de46e21262c5af41a9715d4e31cc740bceab4f1ff80161ab2"
+      },
+      "public_paths": [
+        "GraphIdentity",
+        "OutputRegressionAssessment",
+        "RECONCILIATION_POLICY_VERSION",
+        "ReconciliationEvents",
+        "WorkflowResultDocument",
+        "assess_output_regression",
+        "canonical_graph_identity",
+        "canonical_value_identity",
+        "finalize_output_ledger",
+        "group_decision_rows",
+        "reconcile_ledger",
+        "verify_final_binding"
+      ],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::delivered_gains::tests::final_gain_records_follow_physical_driver_branches",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::delivered_gains::tests::final_gain_records_keep_routed_input_and_output_ownership",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::delivered_gains::tests::final_gain_records_refinalize_without_duplicates_and_refuse_stale_claims",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::delivered_gains::tests::final_gain_records_refuse_missing_or_nonfinite_values",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::amendment4_final_ledger_refuses_negative_shipped_delay",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_acceptance_failure_does_not_invent_processing_reversion",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_final_mutation_does_not_promote_candidate_claims",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_finalize_attaches_bound_ledger",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_finalize_empty_provisional_is_explicitly_empty",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_finalize_refuses_invalid_provisional",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_finalize_replaces_stale_attachment",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_joint_phase_requires_every_resource",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_phase_resource_replacement_is_not_delivery",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_public_snapshot_invalidates_later_mutation",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_reconciled_ledger_carries_operational_summaries",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_report_only_updates_preserve_processing_claim",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::roadmap_correction_stale_reversion_binding_is_refused",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::workflow_final_ledger_matches_delivered_graph",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::workflow_identity_fallback_reports_unchanged",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::workflow_ledger_grouping_preserves_gaps_and_seats",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::workflow_post_eq_gain_does_not_hide_output_regression",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "final_ledger::tests::workflow_reversion_supersedes_applied_candidate",
+          "ignored": false
+        }
+      ],
+      "whole_test_module_byte_identical": true,
+      "source_change": "Final ledger starts from the already source-proven processing_snapshot relocation, promotes only its workflow entrypoint and fixes its internal alias; target reconciliation moves verbatim"
+    },
+    {
+      "module": "target_enforcement",
+      "input_sha256": "72f807a9bf3ab8a95bc476e2036961e2b1726e8310f2c5dfeef284be474fbf5a",
+      "base_sha256": "72f807a9bf3ab8a95bc476e2036961e2b1726e8310f2c5dfeef284be474fbf5a",
+      "moved_sha256": "72f807a9bf3ab8a95bc476e2036961e2b1726e8310f2c5dfeef284be474fbf5a",
+      "children_unchanged": {},
+      "public_paths": [
+        "TARGET_RECONCILIATION_VERSION",
+        "TargetReconciliationSummary",
+        "reconcile_target_decisions"
+      ],
+      "mapped_tests": [
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "target_enforcement::tests::guard_rows_record_insufficient_evidence",
+          "ignored": false
+        },
+        {
+          "old_owner": "roomeq-workflow",
+          "new_owner": "roomeq-playback",
+          "name": "target_enforcement::tests::reconcile_rows_without_named_target_invent_no_identity",
+          "ignored": false
+        }
+      ],
+      "whole_test_module_byte_identical": true,
+      "source_change": "Final ledger starts from the already source-proven processing_snapshot relocation, promotes only its workflow entrypoint and fixes its internal alias; target reconciliation moves verbatim"
+    }
+  ],
+  "deleted_files": {
+    "crates/roomeq-workflow/src/final_ledger/delivered_gains.rs": "0d2959e6757dd87de46e21262c5af41a9715d4e31cc740bceab4f1ff80161ab2"
+  },
+  "physical_fir_move": {
+    "source": "crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs",
+    "test_owner_retained": "roomeq-workflow",
+    "original_test_count": 24,
+    "test_bodies_unchanged": true,
+    "operations": [
+      "has_physical_fir",
+      "replay"
+    ],
+    "configuration_error_factory_copied": {
+      "name": "invalid",
+      "sha256": "d76d506f030d56897e7cf3b2e60976dd0e24b1ebbbc018dc0eb227117334bd24",
+      "qualification": "This three-line model-error constructor remains private in each owner; no numerical DSP or policy is copied."
+    },
+    "required_behavior_scope": "Physical branch realization, phase/clock admission, target/resource ownership and all 24 original per-driver cases plus callers"
+  },
+  "measurement_receipt_identity": {
+    "status": "source-only adapter fix; compiler and regression execution pending",
+    "problem": "CARGO_PKG_VERSION is evaluated in the compiling crate: a verbatim move would replace the workflow version in serialized dense-conditioning receipts with 0.1.0.",
+    "legacy_application": "roomeq-workflow",
+    "legacy_version_source": "workflow env!(CARGO_PKG_VERSION), currently 0.5.36; never a hard-coded historical version or blanket package bump",
+    "new_library_default": "the helper library identifies its own standalone receipt-producing entrypoint; application adapters supply explicit ToolIdentity",
+    "transformations": [
+      {
+        "old": "pub fn load_source_with_conditioning(\n    source: &MeasurementSource,\n    frequency_samples: usize,\n) -> Result<ConditionedSource> {",
+        "new": "/// Load conditioned curves using this library's tool identity.\n///\n/// # Errors\n/// Returns errors for invalid measurements, unsupported bands, or failed resource loading.\npub fn load_source_with_conditioning(\n    source: &MeasurementSource,\n    frequency_samples: usize,\n) -> Result<ConditionedSource> {\n    load_source_with_conditioning_for_tool(\n        source,\n        frequency_samples,\n        autoeq_measurements::ToolIdentity {\n            application: Some(env!(\"CARGO_PKG_NAME\").into()),\n            version: Some(env!(\"CARGO_PKG_VERSION\").into()),\n            ..Default::default()\n        },\n    )\n}\n\n/// Load conditioned curves using the caller's application identity.\n///\n/// # Errors\n/// Returns errors for invalid measurements, unsupported bands, or failed resource loading.\npub fn load_source_with_conditioning_for_tool(\n    source: &MeasurementSource,\n    frequency_samples: usize,\n    tool_identity: autoeq_measurements::ToolIdentity,\n) -> Result<ConditionedSource> {"
+      },
+      {
+        "old": "                tool: Some(autoeq_measurements::ToolIdentity {\n                    application: Some(\"roomeq-workflow\".into()),\n                    version: Some(env!(\"CARGO_PKG_VERSION\").into()),\n                    ..Default::default()\n                }),",
+        "new": "                tool: Some(tool_identity.clone()),"
+      }
+    ],
+    "workflow_adapter_sha256": "3b28a2371980cc4531cee4867143446452c7128395c8a5f5a7a692a5f4cdb14a",
+    "old_lower_file_sha256": "e6640fda9889003ab405e97947fed477b58d69070fc26d92a17549e547a30dc2",
+    "new_lower_file_sha256": "ea1ce8b4915d9a9ec76a0b29ebc7c329d0f6b4095032e19cd0d1c9e90bf70868",
+    "regression": {
+      "owner": "roomeq-workflow",
+      "name": "measurement::tests::conditioning_receipt_keeps_workflow_application_identity",
+      "kind": "test",
+      "ignored": false,
+      "status": "not compiled or executed",
+      "required_red_probe": "After materialization, route the workflow wrapper to the helper library default entrypoint; expect the version assertion to fail, restore the explicit application adapter, then verify green."
+    },
+    "future_extraction_requirement": "Any shared report/finalization caller that emits application conditioning receipts must receive and forward the application identity; moving its caller into the helper library must not silently switch back to the library default."
+  },
+  "new_test_additions": [
+    {
+      "owner": "roomeq-workflow",
+      "name": "measurement::tests::conditioning_receipt_keeps_workflow_application_identity",
+      "kind": "test",
+      "ignored": false,
+      "status": "not compiled or executed",
+      "required_red_probe": "After materialization, route the workflow wrapper to the helper library default entrypoint; expect the version assertion to fail, restore the explicit application adapter, then verify green."
+    }
+  ]
+}

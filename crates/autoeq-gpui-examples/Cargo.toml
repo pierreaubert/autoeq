@@ -10,7 +10,8 @@ description = "Spinorama visualization demos for AutoEQ and GPUI"
 resolver = "3"
 
 [dependencies]
-autoeq = { path = "../.." }
+autoeq-core = { path = "../autoeq-core" }
+autoeq-measurements = { path = "../autoeq-measurements", features = ["api"] }
 d3rs = { package = "gpui-d3rs", version = "0.10", git = "https://github.com/pierreaubert/gpui-toolkit", features = ["gpui", "gpu-2d", "gpu-3d"] }
 gpui = { version = "0.2.3",  package = "sotf-gpui-toolkit-gpui", git = "https://github.com/pierreaubert/sotf-3rdparties" }
 gpui-builder = { version = "0.10", git = "https://github.com/pierreaubert/gpui-toolkit" }

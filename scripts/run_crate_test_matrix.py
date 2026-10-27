@@ -29,6 +29,8 @@ TEST_RESULT = re.compile(
     r"test result: (?:ok|FAILED)\.\s+(\d+) passed;\s+(\d+) failed;\s+(\d+) ignored;"
 )
 QA_RESULT_PREFIX = "QA_RESULT:"
+TEST_CASE_RESULT = re.compile(r"^test ([\w:]+) \.\.\. (ok|FAILED|ignored)")
+TEST_CASE_PENDING = re.compile(r"^test ([\w:]+) \.\.\. ")
 PINNED_REQUIREMENT = re.compile(r"^([A-Za-z0-9_.-]+)\s*==")
 GENERATED_PATH_PARTS = {
     ".git",
@@ -594,6 +596,10 @@ def qa_inventory(
             test_path = qa_root / "tests" / f"{test_name}.rs"
             if not test_path.is_file():
                 errors.append(f"QA case {case.get('id')} is missing Rust test {relative_path(test_path)}")
+            if not case.get("target"):
+                errors.append(
+                    f"QA case {case.get('id')} must declare its grouped Cargo target"
+                )
         elif runner == "python":
             test_path = qa_root / "tests" / f"{test_name}.py"
             if not test_path.is_file():
@@ -607,6 +613,7 @@ def qa_inventory(
             "owner": case.get("owner"),
             "runner": runner,
             "test": test_name,
+            "target": case.get("target") if runner == "rust" else None,
             "test_path": relative_path(test_path),
             "script": relative_path(script_path),
             "script_sha256": sha256_file(script_path) if script_path.is_file() else None,
@@ -646,24 +653,56 @@ def qa_inventory(
             for target in package.get("targets", [])
             if "test" in target.get("kind", [])
         }
-    rust_target_names = {case["test"] for case in rust_cases}
+    # Grouped targets (Phase 2): `test` names the case module kept at
+    # tests/<test>.rs; `target` names the one Cargo test target whose
+    # root file includes that module. A case file no group includes
+    # would silently stop executing, so module inclusion is checked
+    # per case and must total exactly one include per module.
+    group_target_names = {case.get("target", "") for case in rust_cases}
     expected_target_count = qa["expected_rust_test_target_count"]
     if len(test_targets) != expected_target_count:
         errors.append(
             f"Rust QA test-target count: expected {expected_target_count}, found {len(test_targets)}"
         )
-    missing_targets = sorted(rust_target_names - test_targets)
+    missing_targets = sorted(
+        target for target in group_target_names if target and target not in test_targets
+    )
     if missing_targets:
         errors.append("Rust manifest cases missing Cargo test targets: " + ", ".join(missing_targets))
+
+    group_root_text: dict[str, str] = {}
+    module_includes: Counter[str] = Counter()
+    for case in rust_cases:
+        target = case.get("target", "")
+        if not target:
+            continue
+        if target not in group_root_text:
+            root_path = qa_root / "tests" / f"{target}.rs"
+            group_root_text[target] = (
+                root_path.read_text(encoding="utf-8") if root_path.is_file() else ""
+            )
+        include = f"mod {case['test']};"
+        count = group_root_text[target].count(include)
+        module_includes[case["test"]] += count
+        if count != 1:
+            errors.append(
+                f"QA case {case.get('id')} module must be included exactly once "
+                f"by {target}: found {count}"
+            )
+    for module_name, count in sorted(module_includes.items()):
+        if count != 1:
+            errors.append(
+                f"Rust QA module included {count} times across group targets: {module_name}"
+            )
 
     auxiliary_target_list = qa.get("additional_rust_test_targets", [])
     auxiliary_targets = set(auxiliary_target_list)
     if len(auxiliary_targets) != len(auxiliary_target_list):
         errors.append("declared auxiliary Rust QA targets must be unique")
-    overlap = sorted(auxiliary_targets & rust_target_names)
+    overlap = sorted(auxiliary_targets & group_target_names)
     if overlap:
         errors.append("auxiliary Rust targets also appear in the manifest: " + ", ".join(overlap))
-    undeclared_targets = sorted(test_targets - rust_target_names - auxiliary_targets)
+    undeclared_targets = sorted(test_targets - group_target_names - auxiliary_targets)
     missing_auxiliary = sorted(auxiliary_targets - test_targets)
     if undeclared_targets:
         errors.append("unregistered Rust QA test targets: " + ", ".join(undeclared_targets))
@@ -692,7 +731,8 @@ def qa_inventory(
         "runner_counts": dict(sorted(runner_counts.items())),
         "expected_rust_test_target_count": expected_target_count,
         "rust_test_target_count": len(test_targets),
-        "rust_manifest_target_count": len(rust_target_names),
+        "rust_manifest_target_count": len(group_target_names),
+        "rust_manifest_module_count": len(rust_cases),
         "python_runner_count": len(python_cases),
         "status": "valid" if not errors else "invalid",
         "cases": evidence_cases,
@@ -863,7 +903,7 @@ def rust_qa_record_matches(
             "live-engine" if "WOLFRAMSCRIPT" in os.environ else "checked-in-golden"
         )
     return (
-        result.get("_cargo_target") == case["test"]
+        result.get("_cargo_target") == case.get("target")
         and result.get("case") == case["id"]
         and result.get("pass") is True
         and result.get("tolerance_kind") == case["tolerance_kind"]
@@ -978,6 +1018,82 @@ def parse_rust_case_results(output: str) -> dict[str, dict[str, int]]:
     return results
 
 
+def parse_rust_module_results(
+    output: str,
+) -> dict[str, dict[str, dict[str, int]]]:
+    """Attribute individual libtest outcomes to (target, first module).
+
+    Grouped targets hold many manifest cases, so the per-target
+    summary alone cannot say which case module failed; the first
+    path segment of a test name is the case module. The runner
+    executes with `--test-threads=1`, so at most one test is ever
+    pending: a case prints its QA_RESULT before libtest writes the
+    status, which puts a bare `ok` on the following line. Track the
+    pending test and attribute the next status token to it.
+    """
+    current_target: str | None = None
+    pending_module: str | None = None
+    results: dict[str, dict[str, dict[str, int]]] = {}
+    status_key = {"ok": "passed", "FAILED": "failed", "ignored": "ignored"}
+
+    def record(module: str, status: str) -> None:
+        assert current_target is not None
+        bucket = results.setdefault(current_target, {}).setdefault(
+            module, {"passed": 0, "failed": 0, "ignored": 0}
+        )
+        bucket[status_key[status]] += 1
+
+    for line in output.splitlines():
+        running = RUNNING_TEST_TARGET.search(line)
+        if running:
+            if pending_module is not None and current_target is not None:
+                record(pending_module, "FAILED")
+            current_target = pathlib.Path(running.group(1)).stem
+            pending_module = None
+            continue
+        if TEST_RESULT.search(line):
+            if pending_module is not None and current_target is not None:
+                record(pending_module, "FAILED")
+            current_target = None
+            pending_module = None
+            continue
+        if current_target is None:
+            continue
+        stripped = line.strip()
+        case_line = TEST_CASE_RESULT.match(stripped)
+        if case_line:
+            if pending_module is not None:
+                record(pending_module, "FAILED")
+            record(case_line.group(1).split("::", 1)[0], case_line.group(2))
+            pending_module = None
+            continue
+        pending_line = TEST_CASE_PENDING.match(stripped)
+        if pending_line:
+            if pending_module is not None:
+                record(pending_module, "FAILED")
+            pending_module = pending_line.group(1).split("::", 1)[0]
+            continue
+        if pending_module is not None and stripped in status_key:
+            record(pending_module, stripped)
+            pending_module = None
+    if pending_module is not None and current_target is not None:
+        record(pending_module, "FAILED")
+    return results
+
+
+def rust_module_status(
+    module_result: dict[str, int] | None, target_status: str
+) -> str:
+    """Case-level test status inside a grouped target binary."""
+    if module_result is not None:
+        if module_result["failed"] == 0 and module_result["passed"] > 0:
+            return "passed"
+        return "failed"
+    # The group binary ran but this case module produced no test line:
+    # it did not execute as registered, which must not read as a pass.
+    return "not_run" if target_status == "not_run" else "failed"
+
+
 def rust_target_reports(
     target_names: list[str],
     results: dict[str, dict[str, int]],
@@ -1061,7 +1177,12 @@ def run_rust_cases(
         command.append("--release")
     for target in test_targets:
         command.extend(["--test", target])
-    command.extend(["--", "--nocapture"])
+    # Grouped targets run many cases in one binary; parallel libtest
+    # threads interleave `--nocapture` output badly enough that a
+    # test's `ok` can land on another line, which would make
+    # per-module evidence attribution guesswork. Sequential execution
+    # keeps every result line attributable.
+    command.extend(["--", "--nocapture", "--test-threads=1"])
 
     print("Running all registered Rust QA targets:", shlex.join(command), flush=True)
     input_hash_errors = verify_inventory_input_hashes(inventory, target_files)
@@ -1099,6 +1220,7 @@ def run_rust_cases(
         inventory_input_errors=input_hash_errors,
     )
     target_results = parse_rust_case_results("".join(output_lines))
+    module_results = parse_rust_module_results("".join(output_lines))
     rust_cases = [case for case in inventory["cases"] if case["runner"] == "rust"]
     qa_records, malformed_qa_records = parse_rust_qa_records("".join(output_lines))
     expected_provenance = (
@@ -1114,16 +1236,21 @@ def run_rust_cases(
     for case in inventory["cases"]:
         if case["runner"] != "rust":
             continue
-        target_report = reports_by_name[case["test"]]
+        target_report = reports_by_name[case["target"]]
+        module_result = module_results.get(case["target"], {}).get(case["test"])
         qa_result = qa_validation[case["id"]]
         case_status = rust_case_status(
-            target_report["status"], qa_result["status"], qa_result["record_count"]
+            rust_module_status(module_result, target_report["status"]),
+            qa_result["status"],
+            qa_result["record_count"],
         )
         case_results.append({
             "id": case["id"],
             "family": case["family"],
             "owner": case["owner"],
             "test": case["test"],
+            "target": case["target"],
+            "module_result": module_result,
             "test_path": case["test_path"],
             "test_sha256": case["test_sha256"],
             "status": case_status,

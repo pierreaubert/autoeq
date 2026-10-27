@@ -1,0 +1,436 @@
+{
+  "command": [
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/nightly-aarch64-apple-darwin/bin/rustc",
+    "--crate-name",
+    "build_script_build",
+    "--edition=2024",
+    "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/icu_normalizer_data-2.3.0/build.rs",
+    "--error-format=json",
+    "--json=diagnostic-rendered-ansi,artifacts,future-incompat,unused-externs-silent",
+    "--crate-type",
+    "bin",
+    "--emit=dep-info,link",
+    "-C",
+    "opt-level=3",
+    "-C",
+    "embed-bitcode=no",
+    "-C",
+    "debug-assertions=on",
+    "--check-cfg",
+    "cfg(docsrs,test)",
+    "--check-cfg",
+    "cfg(feature, values())",
+    "-C",
+    "metadata=80ca071a5c9f1c1d",
+    "--out-dir",
+    "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/targets/diagnostics/release/debug/build/icu_normalizer_data/d3f4dbe24f5fca8c/out",
+    "--cap-lints",
+    "allow",
+    "-C",
+    "target-cpu=native",
+    "-C",
+    "target-feature=+neon",
+    "-C",
+    "link-arg=-mmacosx-version-min=15.0",
+    "-C",
+    "link-arg=-framework",
+    "-C",
+    "link-arg=Accelerate",
+    "-C",
+    "link-arg=-L /Applications/Xcode.app/Contents/Frameworks",
+    "-C",
+    "link-arg=-L /opt/homebrew/Cellar/llvm/23.1.1_1/lib",
+    "-C",
+    "linker=/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-f9367vf6/targets/diagnostics/linker-shim",
+    "-Ztime-passes",
+    "-Ztime-passes-format=json",
+    "--force-warn=unused_crate_dependencies"
+  ],
+  "crate_name": "build_script_build",
+  "crate_type": "bin",
+  "test": false,
+  "compiler_wall_seconds": 0.12704216595739126,
+  "exit_code": 0,
+  "max_process_rss_bytes": 94978048,
+  "stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-independent-copy-candidate-j8-20261027T080139-c11bc78a/diagnostics/compiler-events/compile-46118-1793093392465182000.stderr",
+  "phases": [
+    {
+      "pass": "parse_crate",
+      "time": 0.00010025,
+      "rss_start": 40009728,
+      "rss_end": 40665088
+    },
+    {
+      "pass": "crate_injection",
+      "time": 1.7333e-05,
+      "rss_start": 44744704,
+      "rss_end": 44908544
+    },
+    {
+      "pass": "expand_crate",
+      "time": 0.002683209,
+      "rss_start": 44908544,
+      "rss_end": 50741248
+    },
+    {
+      "pass": "check_unused_macros",
+      "time": 1.083e-06,
+      "rss_start": 50741248,
+      "rss_end": 50741248
+    },
+    {
+      "pass": "macro_expand_crate",
+      "time": 0.002694959,
+      "rss_start": 44908544,
+      "rss_end": 50741248
+    },
+    {
+      "pass": "maybe_building_test_harness",
+      "time": 2.041e-06,
+      "rss_start": 50741248,
+      "rss_end": 50757632
+    },
+    {
+      "pass": "AST_validation",
+      "time": 5.8125e-05,
+      "rss_start": 50757632,
+      "rss_end": 51118080
+    },
+    {
+      "pass": "maybe_create_a_macro_crate",
+      "time": 1e-06,
+      "rss_start": 51118080,
+      "rss_end": 51118080
+    },
+    {
+      "pass": "finalize_imports",
+      "time": 2.583e-06,
+      "rss_start": 51134464,
+      "rss_end": 51150848
+    },
+    {
+      "pass": "compute_effective_visibilities",
+      "time": 4.5e-06,
+      "rss_start": 51150848,
+      "rss_end": 51200000
+    },
+    {
+      "pass": "lint_reexports",
+      "time": 1.041e-06,
+      "rss_start": 51200000,
+      "rss_end": 51200000
+    },
+    {
+      "pass": "finalize_macro_resolutions",
+      "time": 6.667e-06,
+      "rss_start": 51200000,
+      "rss_end": 51249152
+    },
+    {
+      "pass": "late_resolve_crate",
+      "time": 0.000417459,
+      "rss_start": 51249152,
+      "rss_end": 54280192
+    },
+    {
+      "pass": "resolve_main",
+      "time": 1.084e-06,
+      "rss_start": 54280192,
+      "rss_end": 54280192
+    },
+    {
+      "pass": "resolve_check_unused",
+      "time": 3.709e-06,
+      "rss_start": 54280192,
+      "rss_end": 54296576
+    },
+    {
+      "pass": "resolve_report_errors",
+      "time": 1.208e-06,
+      "rss_start": 54296576,
+      "rss_end": 54296576
+    },
+    {
+      "pass": "resolve_postprocess",
+      "time": 6.125e-06,
+      "rss_start": 54296576,
+      "rss_end": 54345728
+    },
+    {
+      "pass": "resolve_crate",
+      "time": 0.000480667,
+      "rss_start": 51118080,
+      "rss_end": 54345728
+    },
+    {
+      "pass": "write_dep_info",
+      "time": 0.000237,
+      "rss_start": 54362112,
+      "rss_end": 54657024
+    },
+    {
+      "pass": "complete_gated_feature_checking",
+      "time": 7.833e-06,
+      "rss_start": 54837248,
+      "rss_end": 54935552
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.75e-06,
+      "rss_start": 55771136,
+      "rss_end": 55787520
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.042e-06,
+      "rss_start": 56082432,
+      "rss_end": 56098816
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.25e-06,
+      "rss_start": 56410112,
+      "rss_end": 56410112
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.416e-06,
+      "rss_start": 56688640,
+      "rss_end": 56688640
+    },
+    {
+      "pass": "looking_for_entry_point",
+      "time": 5.584e-06,
+      "rss_start": 56721408,
+      "rss_end": 56786944
+    },
+    {
+      "pass": "check_externally_implementable_items",
+      "time": 8.834e-06,
+      "rss_start": 56786944,
+      "rss_end": 56901632
+    },
+    {
+      "pass": "looking_for_derive_registrar",
+      "time": 2.208e-06,
+      "rss_start": 56901632,
+      "rss_end": 56918016
+    },
+    {
+      "pass": "unused_lib_feature_checking",
+      "time": 8.083e-06,
+      "rss_start": 57868288,
+      "rss_end": 57982976
+    },
+    {
+      "pass": "misc_checking_1",
+      "time": 0.000116459,
+      "rss_start": 56721408,
+      "rss_end": 57999360
+    },
+    {
+      "pass": "emit_ast_lowering_delayed_lints",
+      "time": 1.375e-06,
+      "rss_start": 57999360,
+      "rss_end": 57999360
+    },
+    {
+      "pass": "coherence_checking",
+      "time": 0.000338584,
+      "rss_start": 58048512,
+      "rss_end": 62619648
+    },
+    {
+      "pass": "type_check_crate",
+      "time": 0.000956208,
+      "rss_start": 58032128,
+      "rss_end": 68501504
+    },
+    {
+      "pass": "MIR_borrow_checking",
+      "time": 0.001030583,
+      "rss_start": 68501504,
+      "rss_end": 78036992
+    },
+    {
+      "pass": "layout_testing",
+      "time": 1e-06,
+      "rss_start": 78036992,
+      "rss_end": 78036992
+    },
+    {
+      "pass": "abi_testing",
+      "time": 8.33e-07,
+      "rss_start": 78036992,
+      "rss_end": 78036992
+    },
+    {
+      "pass": "crate_lints",
+      "time": 1.3666e-05,
+      "rss_start": 78282752,
+      "rss_end": 78331904
+    },
+    {
+      "pass": "module_lints",
+      "time": 3.75e-06,
+      "rss_start": 78331904,
+      "rss_end": 78348288
+    },
+    {
+      "pass": "lint_checking",
+      "time": 2.7667e-05,
+      "rss_start": 78266368,
+      "rss_end": 78348288
+    },
+    {
+      "pass": "privacy_checking_modules",
+      "time": 1.3667e-05,
+      "rss_start": 78364672,
+      "rss_end": 78430208
+    },
+    {
+      "pass": "check_lint_expectations",
+      "time": 2.708e-06,
+      "rss_start": 78430208,
+      "rss_end": 78430208
+    },
+    {
+      "pass": "misc_checking_3",
+      "time": 0.000125417,
+      "rss_start": 78036992,
+      "rss_end": 78626816
+    },
+    {
+      "pass": "monomorphization_collector_root_collections",
+      "time": 2.5083e-05,
+      "rss_start": 78708736,
+      "rss_end": 78921728
+    },
+    {
+      "pass": "monomorphization_collector_graph_walk",
+      "time": 0.002042,
+      "rss_start": 78921728,
+      "rss_end": 87244800
+    },
+    {
+      "pass": "partition_and_assert_distinct_symbols",
+      "time": 0.000113166,
+      "rss_start": 87490560,
+      "rss_end": 87867392
+    },
+    {
+      "pass": "write_allocator_module",
+      "time": 0.000180292,
+      "rss_start": 88096768,
+      "rss_end": 89341952
+    },
+    {
+      "pass": "find_cgu_reuse",
+      "time": 1.875e-06,
+      "rss_start": 89489408,
+      "rss_end": 89505792
+    },
+    {
+      "pass": "codegen_to_LLVM_IR",
+      "time": 0.000645209,
+      "rss_start": 89522176,
+      "rss_end": 91783168
+    },
+    {
+      "pass": "codegen_crate",
+      "time": 0.003226,
+      "rss_start": 78675968,
+      "rss_end": 91832320
+    },
+    {
+      "pass": "serialize_dep_graph",
+      "time": 1.583e-06,
+      "rss_start": 93208576,
+      "rss_end": 93224960
+    },
+    {
+      "pass": "LLVM_passes",
+      "time": 0.003409916,
+      "rss_start": 91668480,
+      "rss_end": 85442560
+    },
+    {
+      "pass": "LLVM_thinlto",
+      "time": 0.0035275,
+      "rss_start": 84295680,
+      "rss_end": 91848704
+    },
+    {
+      "pass": "join_worker_thread",
+      "time": 7.6542e-05,
+      "rss_start": 91504640,
+      "rss_end": 90062848
+    },
+    {
+      "pass": "finish_ongoing_codegen",
+      "time": 0.007371042,
+      "rss_start": 79986688,
+      "rss_end": 90062848
+    },
+    {
+      "pass": "serialize_work_products",
+      "time": 2.75e-06,
+      "rss_start": 90062848,
+      "rss_end": 90079232
+    },
+    {
+      "pass": "check_externally_implementable_item_linkage",
+      "time": 5.42e-07,
+      "rss_start": 90112000,
+      "rss_end": 90112000
+    },
+    {
+      "pass": "link_binary_check_files_are_writeable",
+      "time": 3.834e-06,
+      "rss_start": 90112000,
+      "rss_end": 90112000
+    },
+    {
+      "pass": "get_apple_sdk_root",
+      "time": 0.0052135,
+      "rss_start": 90472448,
+      "rss_end": 90554368
+    },
+    {
+      "pass": "run_linker",
+      "time": 0.078570708,
+      "rss_start": 91176960,
+      "rss_end": 91176960
+    },
+    {
+      "pass": "link_binary_remove_temps",
+      "time": 7.7541e-05,
+      "rss_start": 91209728,
+      "rss_end": 91209728
+    },
+    {
+      "pass": "link_binary",
+      "time": 0.084918833,
+      "rss_start": 90095616,
+      "rss_end": 91209728
+    },
+    {
+      "pass": "link_crate",
+      "time": 0.08492875,
+      "rss_start": 90095616,
+      "rss_end": 91209728
+    },
+    {
+      "pass": "link",
+      "time": 0.084941458,
+      "rss_start": 90062848,
+      "rss_end": 91209728
+    },
+    {
+      "pass": "total",
+      "time": 0.104760167,
+      "rss_start": 27033600,
+      "rss_end": 82149376
+    }
+  ]
+}

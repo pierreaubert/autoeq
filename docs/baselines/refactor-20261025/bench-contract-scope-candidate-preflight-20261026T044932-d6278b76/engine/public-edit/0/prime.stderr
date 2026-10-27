@@ -1,0 +1,20 @@
+   Compiling aho-corasick v1.1.5
+   Compiling autoeq-optim v0.5.64 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-optim)
+   Compiling regex-automata v0.4.18
+   Compiling regex v1.13.1
+   Compiling env_filter v2.0.0
+   Compiling env_logger v0.11.11
+   Compiling roomeq-engine v0.5.84 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-engine)
+   Compiling sofa-reader v0.2.1 (https://github.com/pierreaubert/sofa-reader#c2ba490d)
+   Compiling gpui-d3rs v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling autoeq-workflow v0.5.6 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-workflow)
+   Compiling roomeq-workflow v0.5.36 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-workflow)
+   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-report-wasm)
+   Compiling autoeq-plot v0.5.5 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-plot)
+   Compiling roomeq-qa v0.5.68 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-qa)
+   Compiling roomeq-cli v0.5.9 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-cli)
+   Compiling autoeq-cli v0.5.3 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-cli)
+   Compiling autoeq-qa v0.5.2 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-qa)
+   Compiling criterion v0.8.2
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/targets/primed/0/test/affected/cargo-timings/cargo-timing-20261026T035552747Z-b6ba9a4ac4e1da6e.html
+    Finished `test` profile [optimized + debuginfo] target(s) in 2m 13s

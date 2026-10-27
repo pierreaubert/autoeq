@@ -1,0 +1,3 @@
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/source/autoeq/crates/autoeq-core)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/targets/primed/0/test/core/test/cargo-timings/cargo-timing-20261026T052036365Z-a094431a4462e3fb.html
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.69s

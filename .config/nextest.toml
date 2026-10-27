@@ -1,0 +1,50 @@
+# Nextest execution profiles (refactor-20261025 Phase 1).
+#
+# Cargo compilation scope is selected by package/target flags and by
+# `--cargo-profile test|qa` in the Justfile lanes; these profiles only
+# control execution: fail-fast behaviour, slow-test reporting, and
+# resource groups for solver-heavy tests. No profile here filters the
+# test inventory, so `fast` cannot silently shrink `just test` coverage:
+# the lane's Cargo package selection is the coverage boundary.
+#
+# Optimizer-backed tests fork Rayon evaluators internally (RoomEqExecutor
+# and the optimizer backends size pools explicitly), so concurrent solver
+# tests oversubscribe CPU and memory. The `solver` group caps those tests
+# at two concurrent processes; everything else keeps nextest's default
+# parallelism. An environment-only Rayon cap would not override the
+# explicitly sized pools, hence the process-level group.
+
+[test-groups]
+solver = { max-threads = 2 }
+
+# Focused development loop (`just test`, `just test-crate`): stop at the
+# first failure so feedback is immediate.
+[profile.fast]
+fail-fast = true
+retries = 0
+
+[[profile.fast.overrides]]
+filter = "package(autoeq-qa)"
+test-group = "solver"
+
+# Complete native inventory (`just ntest`): never fail fast, so one run
+# reports the whole suite.
+[profile.full]
+fail-fast = false
+retries = 0
+
+[[profile.full.overrides]]
+filter = "package(autoeq-qa)"
+test-group = "solver"
+
+# Executable/QA artifact lane (`just test-cli`, QA-target nextest runs):
+# long optimizer cases are expected; report at 5 minutes and terminate a
+# test only after four consecutive slow periods (20 minutes).
+[profile.qa]
+fail-fast = false
+retries = 0
+slow-timeout = { period = "300s", terminate-after = 4 }
+
+[[profile.qa.overrides]]
+filter = "package(autoeq-qa)"
+test-group = "solver"

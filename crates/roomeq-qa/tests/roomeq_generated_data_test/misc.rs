@@ -1,0 +1,238 @@
+use roomeq_model::{ProcessingMode, RoomConfig, default_config_version};
+use roomeq_workflow::optimize_room;
+use serial_test::serial;
+use std::path::PathBuf;
+
+/// Get the autoeq crate root (CARGO_MANIFEST_DIR).
+/// roomeq test data lives under `<crate>/data_tests/roomeq/`.
+pub(super) fn crate_root() -> PathBuf {
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+}
+
+/// Get project root (same as CARGO_MANIFEST_DIR in this standalone repo).
+/// Used for output paths under `data_generated/`.
+pub(super) fn workspace_root() -> PathBuf {
+    PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
+}
+
+pub(super) fn allow_empty_main_eq(scenario_name: &str) -> bool {
+    is_bass_or_multi_sub_scenario(scenario_name)
+}
+
+pub(super) fn is_bass_or_multi_sub_scenario(scenario_name: &str) -> bool {
+    scenario_name.contains("2_1")
+        || scenario_name.contains("2_2")
+        || scenario_name.contains("multi_sub")
+}
+
+/// Compute RMS and max dB difference between two curves in a frequency range
+pub(super) fn curve_diff_stats(
+    curve_a: &autoeq_core::Curve,
+    curve_b: &autoeq_core::Curve,
+    freq_lo: f64,
+    freq_hi: f64,
+) -> (f64, f64, f64) {
+    // (rms_diff, max_diff, freq_at_max)
+    let mut sum_sq = 0.0;
+    let mut count = 0usize;
+    let mut max_diff: f64 = 0.0;
+    let mut freq_at_max: f64 = 0.0;
+
+    for k in 0..curve_a.freq.len() {
+        let f = curve_a.freq[k];
+        if f < freq_lo || f > freq_hi {
+            continue;
+        }
+        if let Some(idx_b) = curve_b
+            .freq
+            .iter()
+            .position(|&fb| fb >= f * 0.95 && fb <= f * 1.05)
+        {
+            let diff = (curve_a.spl[k] - curve_b.spl[idx_b]).abs();
+            sum_sq += diff * diff;
+            count += 1;
+            if diff > max_diff {
+                max_diff = diff;
+                freq_at_max = f;
+            }
+        }
+    }
+
+    let rms = if count > 0 {
+        (sum_sq / count as f64).sqrt()
+    } else {
+        0.0
+    };
+    (rms, max_diff, freq_at_max)
+}
+
+/// Verify that MixedPhase mode exercises the full pipeline (decompose_phase + FIR)
+/// when phase data is available. Uses synthetic data with known propagation delay.
+#[test]
+#[serial]
+fn test_mixedphase_with_phase_data() {
+    use math_audio_iir_fir::{Biquad, BiquadFilterType};
+    use roomeq_model::config::FirConfig;
+    use roomeq_model::{
+        MeasurementSource, MixedPhaseSerdeConfig, OptimizerConfig, SpeakerConfig, SystemConfig,
+        SystemModel,
+    };
+    use roomeq_synthetic::{generate_channel_curve, generate_flat_curve};
+    use std::collections::HashMap;
+
+    let sample_rate = 48000.0;
+
+    // Generate a flat base curve
+    let base = generate_flat_curve(20.0, 20000.0, 400);
+
+    // Simulate room modes (resonances a real room would have)
+    let room_modes = vec![
+        Biquad::new(BiquadFilterType::Peak, 63.0, sample_rate, 8.0, 10.0),
+        Biquad::new(BiquadFilterType::Peak, 125.0, sample_rate, 5.0, -8.0),
+        Biquad::new(BiquadFilterType::Peak, 200.0, sample_rate, 6.0, 6.0),
+        Biquad::new(BiquadFilterType::Peak, 80.0, sample_rate, 4.0, -5.0),
+    ];
+
+    // Generate channel curve WITH phase data (2ms propagation delay)
+    let left = generate_channel_curve(&base, &room_modes, 2.0, 0.3, 42, sample_rate);
+    let right = generate_channel_curve(&base, &room_modes, 2.5, 0.3, 43, sample_rate);
+
+    // Verify phase data is present
+    assert!(left.phase.is_some(), "Left channel must have phase data");
+    assert!(right.phase.is_some(), "Right channel must have phase data");
+
+    // Build RoomConfig with InMemory sources
+    let mut speakers = HashMap::new();
+    speakers.insert(
+        "left".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(left)),
+    );
+    speakers.insert(
+        "right".to_string(),
+        SpeakerConfig::Single(MeasurementSource::InMemory(right)),
+    );
+
+    let mut system_speakers = HashMap::new();
+    system_speakers.insert("L".to_string(), "left".to_string());
+    system_speakers.insert("R".to_string(), "right".to_string());
+
+    // Use Custom model (not Stereo) to avoid the Stereo 2.0 workflow
+    // which bypasses process_single_speaker and ignores processing_mode.
+    let config = RoomConfig {
+        version: default_config_version(),
+        system: Some(SystemConfig {
+            model: SystemModel::Custom,
+            speakers: system_speakers,
+            subwoofers: None,
+            bass_management: None,
+            supporting_source_outputs: None,
+        }),
+        speakers,
+        crossovers: None,
+        target_curve: None,
+        optimizer: OptimizerConfig {
+            processing_mode: ProcessingMode::MixedPhase,
+            loss_type: "flat".to_string(),
+            algorithm: "autoeq:de".to_string(),
+            num_filters: 5,
+            min_q: 0.5,
+            max_q: 6.0,
+            min_db: -12.0,
+            max_db: 4.0,
+            min_freq: 20.0,
+            max_freq: 500.0,
+            max_iter: 2000,
+            seed: Some(42),
+            refine: false,
+            psychoacoustic: true,
+            asymmetric_loss: true,
+            mixed_phase: Some(MixedPhaseSerdeConfig {
+                max_fir_length_ms: 10.0,
+                pre_ringing_threshold_db: -30.0,
+                min_spatial_depth: 0.5,
+                phase_smoothing_octaves: 0.167,
+                assessment: Default::default(),
+                max_correction_latency_ms: None,
+            }),
+            fir: Some(FirConfig {
+                placement: Default::default(),
+                taps: 512,
+                phase: "kirkeby".to_string(),
+                correct_excess_phase: true,
+                phase_smoothing: 0.167,
+                pre_ringing: None,
+                max_boost_db: None,
+            }),
+            ..OptimizerConfig::default()
+        },
+        provenance: Default::default(),
+        recording_config: None,
+        ctc: None,
+        reporting: None,
+        cea2034_cache: None,
+        measured_impulse_responses: Default::default(),
+    };
+
+    let output_dir = workspace_root().join("data_generated/roomeq_comparison/mixedphase_synthetic");
+    std::fs::create_dir_all(&output_dir).unwrap();
+
+    let result = optimize_room(&config, sample_rate, None, Some(&output_dir))
+        .unwrap_or_else(|e| panic!("MixedPhase optimization failed: {e}"));
+
+    // MixedPhase combines IIR + FIR, and this short synthetic smoke run is not
+    // the production quality gate. Its purpose is to exercise the FIR pipeline
+    // (checked below), so allow a bounded regression while still rejecting a
+    // materially broken result; the dedicated RoomEQ QA matrix owns quality.
+    let convergence_margin = 0.2 * result.combined_pre_score.abs();
+    assert!(
+        result.combined_post_score < result.combined_pre_score + convergence_margin,
+        "MixedPhase regressed past margin: pre={:.4}, post={:.4}, margin={:.4}",
+        result.combined_pre_score,
+        result.combined_post_score,
+        convergence_margin,
+    );
+
+    // Verify FIR was generated and either retained or explicitly removed by
+    // the final safety gate. A silent IIR-only fallback would leave neither.
+    let has_fir = result
+        .channel_results
+        .values()
+        .any(|ch| ch.fir_coeffs.is_some());
+    let fir_was_safely_reverted =
+        result
+            .metadata
+            .correction_acceptance
+            .as_ref()
+            .is_some_and(|report| {
+                report
+                    .reverted_stages
+                    .iter()
+                    .any(|stage| stage.ends_with(":fir"))
+            });
+    assert!(
+        has_fir || fir_was_safely_reverted,
+        "MixedPhase should retain FIR coefficients or report an explicit FIR safety reversion"
+    );
+
+    // A retained FIR must have a convolution plugin; an explicitly reverted
+    // FIR must not leave that plugin in the final DSP chain.
+    let has_convolution = result
+        .channels
+        .values()
+        .any(|ch| ch.plugins.iter().any(|p| p.plugin_type == "convolution"));
+    assert!(
+        has_convolution || fir_was_safely_reverted,
+        "MixedPhase should retain a convolution plugin or report an explicit FIR safety reversion"
+    );
+
+    // Save output for inspection
+    let dsp_output = result.to_dsp_chain_output();
+    let json = serde_json::to_string_pretty(&dsp_output).unwrap();
+    std::fs::write(output_dir.join("mixed_phase.json"), json).unwrap();
+
+    let improvement = (1.0 - result.combined_post_score / result.combined_pre_score) * 100.0;
+    println!(
+        "  MixedPhase with phase data: pre={:.4}, post={:.4}, improvement={:.1}%",
+        result.combined_pre_score, result.combined_post_score, improvement
+    );
+}

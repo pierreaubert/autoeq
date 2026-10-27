@@ -1,0 +1,296 @@
+{
+  "status": "passed eight paired logical library scopes",
+  "cases": {
+    "core": {
+      "tests_each_side": 195,
+      "ignored_each_side": 0,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/core/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v2-20261025T205105-8127fda1/core/test-edit/0/execution-0.stdout",
+      "candidate_test_probe": {
+        "path": "crates/autoeq-core/src/curve_interpolation_tests.rs",
+        "kind": "test-edit",
+        "line": 17,
+        "before_sha256": "3eae623b4fb69b627ad1429308c221f06973babdfb5f8f65fae0ede9a6fd8789",
+        "after_sha256": "6c7185279df5c76066b1249d73dde26405d25daae945c796add7398703a98331"
+      },
+      "candidate_public_probe": {
+        "path": "crates/autoeq-core/src/lib.rs",
+        "kind": "public-edit",
+        "line": 92,
+        "before_sha256": "6d67774c6720c9daa21b23522e40df3f06ebaefe480a28bd2ca129cf74ac1d2a",
+        "after_sha256": "910c286d4cd9d6d136dfbc84b2371d01e8aff076d56d60d6d93753266818d0c1"
+      },
+      "profile_exclusions": {}
+    },
+    "objective": {
+      "tests_each_side": 221,
+      "ignored_each_side": 0,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/objective/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v2-20261025T205105-8127fda1/objective/test-edit/0/execution-1.stdout",
+      "candidate_test_probe": {
+        "path": "crates/autoeq-objective/src/loss/epa/score/tests.rs",
+        "kind": "test-edit",
+        "line": 125,
+        "before_sha256": "87354bf9d8be0c6be40c26fac50af3ed22c1d249f1f1fe78385ae6c4be915f8c",
+        "after_sha256": "a2b8f79ad2d957467cb3d3261b72a3b66cd617f48167a0f35cce66d780fba94f"
+      },
+      "candidate_public_probe": {
+        "path": "crates/autoeq-objective/src/lib.rs",
+        "kind": "public-edit",
+        "line": 98,
+        "before_sha256": "bbcdf97757a74936b4ba612ab98ab7e152919761292262c870985bf8592aa4c9",
+        "after_sha256": "37d66897743e0dacbfac424daecf19e7e146918bfc4be753c9e6953edce145cf"
+      },
+      "profile_exclusions": {}
+    },
+    "optimizer": {
+      "tests_each_side": 203,
+      "ignored_each_side": 0,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/optimizer/test-edit/0/execution-1.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v2-20261025T205105-8127fda1/optimizer/test-edit/0/execution-1.stdout",
+      "candidate_test_probe": {
+        "path": "crates/autoeq-optim/src/optim/de/tests.rs",
+        "kind": "test-edit",
+        "line": 40,
+        "before_sha256": "fa8c9db6e560113c6311fc9b1bbf890b147a0d111522044d564d7e9d408c66dc",
+        "after_sha256": "65a358b1725743af0fa212f8d8fa0fe9f852ef0adcc515712dc2988956bcc15f"
+      },
+      "candidate_public_probe": {
+        "path": "crates/autoeq-optim/src/lib.rs",
+        "kind": "public-edit",
+        "line": 134,
+        "before_sha256": "926a44f8e95a5c98247aa456147b37779c96536c4a18783b3e3137f4ee81b8c8",
+        "after_sha256": "9e07f6e495560528c5b95fa87fd173e3b57ce5a7d29574a415664fa48918ff02"
+      },
+      "profile_exclusions": {}
+    },
+    "config": {
+      "tests_each_side": 332,
+      "ignored_each_side": 0,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/config/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v2-20261025T205105-8127fda1/config/test-edit/0/execution-0.stdout",
+      "candidate_test_probe": {
+        "path": "crates/roomeq-model/src/validation_rules/tests.rs",
+        "kind": "test-edit",
+        "line": 50,
+        "before_sha256": "d0196f12e7ddffc8a77cdf0276e6017eb1e6100c4f81399e3dbdb258af43fee8",
+        "after_sha256": "0f7d9c67c4d2e922cf727302680ad77667d9fc1cfca395ba7375636a27e25f5f"
+      },
+      "candidate_public_probe": {
+        "path": "crates/roomeq-model/src/lib.rs",
+        "kind": "public-edit",
+        "line": 183,
+        "before_sha256": "efc8ce67b38c744968bad33b763b6146a0f2e099041b2c53bf7eacf23c5b0d3b",
+        "after_sha256": "ecaab92cfa48a7d18bccd83787a7f19ed9c15c0475fef134ea418ffbcbe08ef6"
+      },
+      "profile_exclusions": {}
+    },
+    "engine": {
+      "tests_each_side": 969,
+      "ignored_each_side": 2,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/engine/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v3-remaining-20261025T210552-7968ea16/engine/test-edit/0/execution-0.stdout",
+      "candidate_test_probe": {
+        "path": "crates/roomeq-engine/src/channel_fir/tests.rs",
+        "kind": "test-edit",
+        "line": 182,
+        "before_sha256": "b6f976dc64c69a4943079a279c09485a9113cd18b82b3e7586656b498a4ed2b7",
+        "after_sha256": "cb6500fc78617f740f2e168b3c833d2cbb893b8094f476f24622f12fdba1a30e"
+      },
+      "candidate_public_probe": {
+        "path": "crates/roomeq-engine/src/lib.rs",
+        "kind": "public-edit",
+        "line": 243,
+        "before_sha256": "606a14abd94830c20f9fd6f6f4514769d382585e1a78495691fbeab2b63cf998",
+        "after_sha256": "d2d91df709dd0302bd746b962eb3470a69c0a56c119e8c1c987dfb6da22138e1"
+      },
+      "profile_exclusions": {}
+    },
+    "dsp": {
+      "tests_each_side": 8,
+      "ignored_each_side": 0,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/dsp/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v3-remaining-20261025T210552-7968ea16/dsp/test-edit/0/execution-0.stdout",
+      "candidate_test_probe": {
+        "path": "crates/roomeq-dsp/src/physical_routing.rs",
+        "kind": "test-edit",
+        "line": 474,
+        "before_sha256": "2bb71ab2c97826a6cd6a9beef5edbe892cecac79792c20cc5cb4f78e436adca9",
+        "after_sha256": "67a2893e1b91866e62c7ff6b394a5da84056d069693a20a683b9eb49c9af9974"
+      },
+      "candidate_public_probe": {
+        "path": "crates/roomeq-dsp/src/physical_routing.rs",
+        "kind": "public-edit",
+        "line": 686,
+        "before_sha256": "2bb71ab2c97826a6cd6a9beef5edbe892cecac79792c20cc5cb4f78e436adca9",
+        "after_sha256": "e51d983b751adbcf48b36e2c5956a1ac70ac8ec008fd8ae5cef14ffd2a86cae5"
+      },
+      "profile_exclusions": {}
+    },
+    "workflow": {
+      "tests_each_side": 1175,
+      "ignored_each_side": 7,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/workflow/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v4-remaining-20261025T224929-98035c79/workflow/test-edit/0/execution-0.stdout",
+      "candidate_test_probe": {
+        "path": "crates/roomeq-workflow/src/ctc/tests.rs",
+        "kind": "test-edit",
+        "line": 635,
+        "before_sha256": "9244ea6615da8e5e9f5df57a306fbba1208bc89aa394711cc07e6c94c9c0a368",
+        "after_sha256": "d09ff66f737f15e85c5a70fff9e737e557df8ab6bdec8b5f64fe4c7c567e923e"
+      },
+      "candidate_public_probe": {
+        "path": "crates/roomeq-workflow/src/lib.rs",
+        "kind": "public-edit",
+        "line": 103,
+        "before_sha256": "20b609257be1c14506ec0a4505d98aa0fb00cd99c9170bb621ec08a41a24e419",
+        "after_sha256": "16b75c64c6b60b47f01f663361fe30906b5f4ebdf40abdda2724f56d4bd4b5bc"
+      },
+      "profile_exclusions": {
+        "room_optimization::room_optimization_result::tests::sanity_check_result_detects_non_finite_spl": {
+          "debug_assertions": false
+        }
+      }
+    },
+    "renderer": {
+      "tests_each_side": 170,
+      "ignored_each_side": 0,
+      "candidate_profile": {
+        "opt_level": "1",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "original_profile": {
+        "opt_level": "0",
+        "debuginfo": "line-tables-only",
+        "debug_assertions": true,
+        "overflow_checks": true,
+        "test": true
+      },
+      "candidate_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/renderer/test-edit/0/execution-0.stdout",
+      "original_test_execution_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-matching-scope-baseline-preflight-v4-remaining-20261025T224929-98035c79/renderer/test-edit/0/execution-0.stdout",
+      "candidate_test_probe": {
+        "path": "crates/autoeq-report-wasm/src/acoustic_reflections.rs",
+        "kind": "test-edit",
+        "line": 663,
+        "before_sha256": "4ac8f5a1f4c54cbff17e24258f32137a4c2c2bda83743c285a5e825b4c8cba15",
+        "after_sha256": "7dcacf787390dba0ed77b397d49dab424fadce7620182e5c655a04647370fb58"
+      },
+      "candidate_public_probe": {
+        "path": "crates/autoeq-report-wasm/src/lib.rs",
+        "kind": "public-edit",
+        "line": 84,
+        "before_sha256": "4b341b18c5714ab861f695c95d2533d46a90ee226672489ab31a176a9f4a33e9",
+        "after_sha256": "e894c0a268942a21d03a81dbeaccce8c8c3df7b201b0fde143be034c9d16101d"
+      },
+      "profile_exclusions": {}
+    }
+  },
+  "total_logical_cases_each_side": 3273,
+  "total_ignored_each_side": 9,
+  "candidate_report": "docs/baselines/refactor-20261025/bench-matching-scope-candidate-preflight-v4-20261026T011717-1179d782/report.json",
+  "original_proof": "matching-scope-original-preflight-proof.json",
+  "scope_manifest_revalidated": true,
+  "accepted_performance_data": false,
+  "note": "One-repetition semantic/identity preflights only. Actual compiler profile gates, exact listings, pass/ignore summaries and public probes are verified; no speedup is accepted from these samples."
+}

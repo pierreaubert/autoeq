@@ -1,0 +1,27 @@
+{
+  "reference": "151338b1",
+  "production_repairs_applied": false,
+  "tests": [
+    {
+      "path": "crates/roomeq-engine/src/home_cinema/bass.rs",
+      "test": "common_bass_matching_gain_preserves_lfe_reference_and_relative_driver_controls",
+      "historical_body_sha256": "480f7c0bbc6318748a11e0ed6fbdafdb0ac1b4425d59abb320457908288398c8",
+      "restored_body_sha256": "480f7c0bbc6318748a11e0ed6fbdafdb0ac1b4425d59abb320457908288398c8",
+      "adaptation": null
+    },
+    {
+      "path": "crates/roomeq-engine/src/channel_fir/tests.rs",
+      "test": "kirkeby_spatial_aligns_reference_to_common_seat_grid",
+      "historical_body_sha256": "740c2d24abc599eef7514b679bc0dfe9352cb63ce88df90c6fbd2908489c14f5",
+      "restored_body_sha256": "3f241d1ba54287796a21a1ec7fda08d2bcba9a1b45bc3917ee7cbeb3d3d878eb",
+      "adaptation": "Retain the supported-grid end-to-end assertions; omit direct calls to the helper absent in main so the pre-fix test compiles and fails at runtime. Unsupported support coverage will be validated separately after restoration."
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "test": "configured_routed_reference_is_independent_of_candidate_controls",
+      "historical_body_sha256": "e629aac058bbab1553337b500a61c34c2f6462b1c87b45cb8db9cca0f41ad568",
+      "restored_body_sha256": "e629aac058bbab1553337b500a61c34c2f6462b1c87b45cb8db9cca0f41ad568",
+      "adaptation": null
+    }
+  ]
+}

@@ -1,0 +1,370 @@
+[
+  {
+    "row": 0,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 2,
+      "sample_rate": 2,
+      "filter_count": 2,
+      "grid_size": 2,
+      "measurement_shape": 2,
+      "phase": 1,
+      "crossover": 2,
+      "fir_duration": 2
+    },
+    "sample_rate_hz": 96000.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      19.281,
+      19.462,
+      19.432,
+      19.462,
+      19.358
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 42: optimization failed: structural baseline needs 19.281 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.281 dB (main), L=19.281 dB (main), R=19.281 dB (main), SL=19.281 dB (main), SR=19.281 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 59: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 83: optimization failed: structural baseline needs 19.432 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.432 dB (main), L=19.432 dB (main), R=19.432 dB (main), SL=19.432 dB (main), SR=19.432 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 115: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 151: optimization failed: structural baseline needs 19.358 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.358 dB (main), L=19.358 dB (main), R=19.358 dB (main), SL=19.358 dB (main), SR=19.358 dB (main), Sub1=29.900 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-00-UTgy1V",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 5,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 1,
+      "sample_rate": 2,
+      "filter_count": 0,
+      "grid_size": 0,
+      "measurement_shape": 0,
+      "phase": 1,
+      "crossover": 1,
+      "fir_duration": 0
+    },
+    "sample_rate_hz": 96000.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      13.323,
+      13.365,
+      13.343,
+      13.326,
+      13.294
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 47: optimization failed: structural baseline needs 13.323 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.323 dB (main), L=13.323 dB (main), R=13.323 dB (main), SL=13.323 dB (main), SR=13.323 dB (main), Sub1=29.698 dB (subwoofer, exempt)); seed 64: optimization failed: structural baseline needs 13.365 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.365 dB (main), L=13.365 dB (main), R=13.365 dB (main), SL=13.365 dB (main), SR=13.365 dB (main), Sub1=29.699 dB (subwoofer, exempt)); seed 88: optimization failed: structural baseline needs 13.343 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.343 dB (main), L=13.343 dB (main), R=13.343 dB (main), SL=13.343 dB (main), SR=13.343 dB (main), Sub1=29.698 dB (subwoofer, exempt)); seed 120: optimization failed: structural baseline needs 13.326 dB attenuation on non-subwoofer output 'R' beyond 12.000 dB limit (required physical-output cuts: C=13.326 dB (main), L=13.326 dB (main), R=13.326 dB (main), SL=13.326 dB (main), SR=13.326 dB (main), Sub1=29.697 dB (subwoofer, exempt)); seed 156: optimization failed: structural baseline needs 13.294 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.294 dB (main), L=13.294 dB (main), R=13.294 dB (main), SL=13.294 dB (main), SR=13.294 dB (main), Sub1=29.699 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-05-68946j",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 6,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 1,
+      "sample_rate": 0,
+      "filter_count": 2,
+      "grid_size": 2,
+      "measurement_shape": 2,
+      "phase": 0,
+      "crossover": 1,
+      "fir_duration": 1
+    },
+    "sample_rate_hz": 44100.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      14.34,
+      14.34,
+      14.34,
+      14.34,
+      14.34
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 48: optimization failed: structural baseline needs 14.340 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=14.340 dB (main), L=14.340 dB (main), R=14.340 dB (main), SL=14.340 dB (main), SR=14.340 dB (main), Sub1=29.903 dB (subwoofer, exempt)); seed 65: optimization failed: structural baseline needs 14.340 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=14.340 dB (main), L=14.340 dB (main), R=14.340 dB (main), SL=14.340 dB (main), SR=14.340 dB (main), Sub1=29.903 dB (subwoofer, exempt)); seed 89: optimization failed: structural baseline needs 14.340 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=14.340 dB (main), L=14.340 dB (main), R=14.340 dB (main), SL=14.340 dB (main), SR=14.340 dB (main), Sub1=29.903 dB (subwoofer, exempt)); seed 121: optimization failed: structural baseline needs 14.340 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=14.340 dB (main), L=14.340 dB (main), R=14.340 dB (main), SL=14.340 dB (main), SR=14.340 dB (main), Sub1=29.903 dB (subwoofer, exempt)); seed 157: optimization failed: structural baseline needs 14.340 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=14.340 dB (main), L=14.340 dB (main), R=14.340 dB (main), SL=14.340 dB (main), SR=14.340 dB (main), Sub1=29.903 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-06-XZYzxr",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 11,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 0,
+      "sample_rate": 0,
+      "filter_count": 1,
+      "grid_size": 1,
+      "measurement_shape": 2,
+      "phase": 1,
+      "crossover": 1,
+      "fir_duration": 2
+    },
+    "sample_rate_hz": 44100.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      18.75,
+      18.893,
+      18.874,
+      18.956,
+      18.834
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 53: optimization failed: structural baseline needs 18.750 dB attenuation on non-subwoofer output 'R' beyond 12.000 dB limit (required physical-output cuts: C=18.750 dB (main), L=18.750 dB (main), R=18.750 dB (main), SL=18.750 dB (main), SR=18.750 dB (main), Sub1=29.906 dB (subwoofer, exempt)); seed 70: optimization failed: structural baseline needs 18.893 dB attenuation on non-subwoofer output 'R' beyond 12.000 dB limit (required physical-output cuts: C=18.893 dB (main), L=18.893 dB (main), R=18.893 dB (main), SL=18.893 dB (main), SR=18.893 dB (main), Sub1=29.906 dB (subwoofer, exempt)); seed 94: optimization failed: structural baseline needs 18.874 dB attenuation on non-subwoofer output 'R' beyond 12.000 dB limit (required physical-output cuts: C=18.874 dB (main), L=18.874 dB (main), R=18.874 dB (main), SL=18.874 dB (main), SR=18.874 dB (main), Sub1=29.906 dB (subwoofer, exempt)); seed 126: optimization failed: structural baseline needs 18.956 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=18.956 dB (main), L=18.956 dB (main), R=18.956 dB (main), SL=18.956 dB (main), SR=18.956 dB (main), Sub1=29.906 dB (subwoofer, exempt)); seed 162: optimization failed: structural baseline needs 18.834 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=18.834 dB (main), L=18.834 dB (main), R=18.834 dB (main), SL=18.834 dB (main), SR=18.834 dB (main), Sub1=29.906 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-11-Mwk3i0",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 12,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 1,
+      "sample_rate": 1,
+      "filter_count": 0,
+      "grid_size": 2,
+      "measurement_shape": 1,
+      "phase": 1,
+      "crossover": 0,
+      "fir_duration": 1
+    },
+    "sample_rate_hz": 48000.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      13.13,
+      12.97,
+      13.011,
+      13.106,
+      13.106
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 54: optimization failed: structural baseline needs 13.130 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.130 dB (main), L=13.130 dB (main), R=13.130 dB (main), SL=13.130 dB (main), SR=13.130 dB (main), Sub1=29.442 dB (subwoofer, exempt)); seed 71: optimization failed: structural baseline needs 12.970 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=12.970 dB (main), L=12.970 dB (main), R=12.970 dB (main), SL=12.970 dB (main), SR=12.970 dB (main), Sub1=29.439 dB (subwoofer, exempt)); seed 95: optimization failed: structural baseline needs 13.011 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.011 dB (main), L=13.011 dB (main), R=13.011 dB (main), SL=13.011 dB (main), SR=13.011 dB (main), Sub1=29.442 dB (subwoofer, exempt)); seed 127: optimization failed: structural baseline needs 13.106 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.106 dB (main), L=13.106 dB (main), R=13.106 dB (main), SL=13.106 dB (main), SR=13.106 dB (main), Sub1=29.441 dB (subwoofer, exempt)); seed 163: optimization failed: structural baseline needs 13.106 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=13.106 dB (main), L=13.106 dB (main), R=13.106 dB (main), SL=13.106 dB (main), SR=13.106 dB (main), Sub1=29.441 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-12-2Xuu3W",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 14,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 2,
+      "sample_rate": 2,
+      "filter_count": 2,
+      "grid_size": 0,
+      "measurement_shape": 2,
+      "phase": 1,
+      "crossover": 0,
+      "fir_duration": 2
+    },
+    "sample_rate_hz": 96000.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      19.503,
+      19.361,
+      19.503,
+      19.407,
+      19.42
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 56: optimization failed: structural baseline needs 19.503 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.503 dB (main), L=19.503 dB (main), R=19.503 dB (main), SL=19.503 dB (main), SR=19.503 dB (main), Sub1=29.903 dB (subwoofer, exempt)); seed 73: optimization failed: structural baseline needs 19.361 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.361 dB (main), L=19.361 dB (main), R=19.361 dB (main), SL=19.361 dB (main), SR=19.361 dB (main), Sub1=29.904 dB (subwoofer, exempt)); seed 97: optimization failed: structural baseline needs 19.503 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.503 dB (main), L=19.503 dB (main), R=19.503 dB (main), SL=19.503 dB (main), SR=19.503 dB (main), Sub1=29.903 dB (subwoofer, exempt)); seed 129: optimization failed: structural baseline needs 19.407 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.407 dB (main), L=19.407 dB (main), R=19.407 dB (main), SL=19.407 dB (main), SR=19.407 dB (main), Sub1=29.904 dB (subwoofer, exempt)); seed 165: optimization failed: structural baseline needs 19.420 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.420 dB (main), L=19.420 dB (main), R=19.420 dB (main), SL=19.420 dB (main), SR=19.420 dB (main), Sub1=29.904 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-14-kAz45g",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 15,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 2,
+      "sample_rate": 2,
+      "filter_count": 1,
+      "grid_size": 2,
+      "measurement_shape": 0,
+      "phase": 1,
+      "crossover": 2,
+      "fir_duration": 2
+    },
+    "sample_rate_hz": 96000.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      19.103,
+      18.998,
+      19.034,
+      19.103,
+      19.103
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 57: optimization failed: structural baseline needs 19.103 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.103 dB (main), L=19.103 dB (main), R=19.103 dB (main), SL=19.103 dB (main), SR=19.103 dB (main), Sub1=29.438 dB (subwoofer, exempt)); seed 74: optimization failed: structural baseline needs 18.998 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=18.998 dB (main), L=18.998 dB (main), R=18.998 dB (main), SL=18.998 dB (main), SR=18.998 dB (main), Sub1=29.437 dB (subwoofer, exempt)); seed 98: optimization failed: structural baseline needs 19.034 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.034 dB (main), L=19.034 dB (main), R=19.034 dB (main), SL=19.034 dB (main), SR=19.034 dB (main), Sub1=29.437 dB (subwoofer, exempt)); seed 130: optimization failed: structural baseline needs 19.103 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.103 dB (main), L=19.103 dB (main), R=19.103 dB (main), SL=19.103 dB (main), SR=19.103 dB (main), Sub1=29.438 dB (subwoofer, exempt)); seed 166: optimization failed: structural baseline needs 19.103 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.103 dB (main), L=19.103 dB (main), R=19.103 dB (main), SL=19.103 dB (main), SR=19.103 dB (main), Sub1=29.438 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-15-DSJQnc",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  },
+  {
+    "row": 16,
+    "requested_axes": {
+      "topology": 2,
+      "mode": 2,
+      "sample_rate": 2,
+      "filter_count": 0,
+      "grid_size": 1,
+      "measurement_shape": 2,
+      "phase": 1,
+      "crossover": 2,
+      "fir_duration": 2
+    },
+    "sample_rate_hz": 96000.0,
+    "input_scenario": "full_scale_safety_refusal",
+    "outcome_scope": "expected_safety_refusal",
+    "assertion_status": "passed",
+    "processing_status": "refused",
+    "finalization": {
+      "physical_drive": null,
+      "physical_drive_weight": 0.0,
+      "default_input_peak": 1.0,
+      "input_peak_limits": {},
+      "output_ceiling_dbfs": -24.0,
+      "max_attenuation_db": 12.0,
+      "max_useful_output_loss_db": 3.0,
+      "max_correlated_bass_regression_db": 3.0,
+      "subwoofer_limiter": false,
+      "min_primary_improvement_db": 0.25,
+      "min_improvement_lower_bound_db": 0.0
+    },
+    "required_attenuation_db_by_seed": [
+      19.462,
+      19.462,
+      19.462,
+      19.462,
+      19.462
+    ],
+    "error": "5 of 5 QA seeds failed; reliability evidence recorded; causes: seed 58: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 75: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 99: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 131: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt)); seed 167: optimization failed: structural baseline needs 19.462 dB attenuation on non-subwoofer output 'SR' beyond 12.000 dB limit (required physical-output cuts: C=19.462 dB (main), L=19.462 dB (main), R=19.462 dB (main), SL=19.462 dB (main), SR=19.462 dB (main), Sub1=29.900 dB (subwoofer, exempt))",
+    "replay_bundle": {
+      "directory": "/Volumes/home_worktrees/autoeq-refactor/target/qa/roomeq-parameter-bundles/row-16-7vJqpv",
+      "request": "request.json",
+      "refusal": "refusal.json",
+      "seed_attempts": "seed-attempts.json"
+    }
+  }
+]

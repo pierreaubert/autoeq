@@ -5,7 +5,7 @@
 
 pub use autoeq_core::{AutoeqError, Curve, Result};
 pub mod error {
-    pub use autoeq_core::error::*;
+    pub use autoeq_core::error::{AutoeqError, Result};
 }
 
 pub mod crossover_utils;
@@ -41,10 +41,12 @@ pub mod time_align {
     mod tests;
     mod types;
 
-    pub use detect::*;
-    pub use error::*;
-    pub use estimate::*;
-    pub use find::*;
-    pub use misc::*;
-    pub use types::*;
+    pub use detect::{detect_delay_with_probe, detect_delays_multi_channel};
+    pub use error::PhaseArrivalError;
+    pub use estimate::{estimate_arrival_from_phase, estimate_arrival_from_phase_detailed};
+    pub use find::{
+        find_arrival_time, find_arrival_time_samples, find_arrival_time_with_reference,
+    };
+    pub use misc::{calculate_alignment_delays, phase_arrival_regression_band};
+    pub use types::{ArrivalTimeResult, ProbeDelayResult};
 }

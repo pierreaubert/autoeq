@@ -1,0 +1,610 @@
+{
+  "status": "prepared_not_final_execution",
+  "generated_utc": "2026-10-26T05:35:34.225267+00:00",
+  "justfile_sha256": "81705ed4f8f2f6c7937467d12a4ee464e5a2206f98ea71ca17eabceb5292fa95",
+  "dump_sha256": "2d2db182037f0881e039451ba2025602d82d3daed6cc44938eebf51e548f5ee5",
+  "nodes": {
+    "qa": {
+      "dependencies": [],
+      "body_calls": [
+        {
+          "recipe": "qa-autoeq-all",
+          "condition": "always"
+        },
+        {
+          "recipe": "qa-roomeq-all",
+          "condition": "always"
+        },
+        {
+          "recipe": "qa-export-all",
+          "condition": "always"
+        },
+        {
+          "recipe": "qa-wolfram-validation",
+          "condition": "always"
+        }
+      ],
+      "parameters": [],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -u",
+        "status=0",
+        "just qa-autoeq-all || status=1",
+        "just qa-roomeq-all || status=1",
+        "just qa-export-all || status=1",
+        "just qa-wolfram-validation || status=1",
+        "exit $status"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-autoeq-all": {
+      "dependencies": [
+        "prod-autoeq",
+        "qa-ascilab-6b",
+        "qa-jbl-m2-flat",
+        "qa-jbl-m2-score",
+        "qa-beyerdynamic-dt1990pro",
+        "qa-edifierw830nb"
+      ],
+      "body_calls": [],
+      "parameters": [],
+      "body": [],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "prod-autoeq": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "{{cargo}} build -p autoeq-cli --release --bin autoeq",
+        "{{cargo}} build -p autoeq-cli --release --bin benchmark-autoeq-speaker",
+        "{{cargo}} build -p autoeq-cli --release --bin autoeq-download-speakers"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-ascilab-6b": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq --speaker=\"AsciLab F6B\" --version asr --measurement CEA2034 \\",
+        "--algo autoeq:de --loss speaker-score -n 7 --min-freq=30 --max-q=6 \\",
+        "--maxeval 100000 --seed 4 --qa 0.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-jbl-m2-flat": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq --speaker=\"JBL M2\" --version eac --measurement CEA2034 \\",
+        "--algo autoeq:de --loss speaker-flat -n 7 --min-freq=20 --max-q=6 --peq-model hp-pk \\",
+        "--maxeval 100000 --qa 0.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-jbl-m2-score": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq --speaker=\"JBL M2\" --version eac --measurement CEA2034 \\",
+        "--algo autoeq:de --loss speaker-score -n 7 --min-freq=20 --max-q=6 --peq-model hp-pk \\",
+        "--maxeval 100000 --qa 0.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-beyerdynamic-dt1990pro": {
+      "dependencies": [
+        "qa-beyerdynamic-dt1990pro-flat",
+        "qa-beyerdynamic-dt1990pro-score",
+        "qa-beyerdynamic-dt1990pro-score2"
+      ],
+      "body_calls": [],
+      "parameters": [],
+      "body": [],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-beyerdynamic-dt1990pro-flat": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq -n 5 \\",
+        "--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\\ DT1990\\ Pro\\ Headphone\\ Frequency\\ Response\\ Measurement.csv \\",
+        "--target ./data_tests/targets/harman-over-ear-2018.csv \\",
+        "--loss headphone-flat  --max-db 6 --max-q 6 --maxeval 100000 --algo autoeq:de --seed 42 --min-freq=20 --max-freq 10000 --peq-model pk \\",
+        "--qa 0.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-beyerdynamic-dt1990pro-score": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq -n 5 \\",
+        "--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\\ DT1990\\ Pro\\ Headphone\\ Frequency\\ Response\\ Measurement.csv \\",
+        "--target ./data_tests/targets/harman-over-ear-2018.csv --loss headphone-score  \\",
+        "--maxeval 100000 --qa 3.0"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-beyerdynamic-dt1990pro-score2": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq -n 7 \\",
+        "--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\\ DT1990\\ Pro\\ Headphone\\ Frequency\\ Response\\ Measurement.csv \\",
+        "--target ./data_tests/targets/harman-over-ear-2018.csv \\",
+        "--loss headphone-score\t--max-db 6 --max-q 6 --algo autoeq:de --seed 42 --maxeval 100000 --min-freq=20 --max-freq 10000 --peq-model hp-pk-lp --min-q 0.6 --min-db 0.25 \\",
+        "--qa 1.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-edifierw830nb": {
+      "dependencies": [
+        "qa-edifierw830nb-autoeqde",
+        "qa-edifierw830nb-autoeqde-pop100",
+        "qa-edifierw830nb-autoeqde-pop80"
+      ],
+      "body_calls": [],
+      "parameters": [],
+      "body": [],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-edifierw830nb-autoeqde": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq -n 9 \\",
+        "--curve data_tests/headphones/asr/edifierw830nb/Edifier\\ W830NB.csv \\",
+        "--target ./data_tests/targets/harman-over-ear-2018.csv \\",
+        "--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \\",
+        "--loss headphone-score \\",
+        "--min-spacing-oct 0.08 \\",
+        "--algo autoeq:de --population 70 --maxeval 80000 --seed 42 \\",
+        "--qa 6.0"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-edifierw830nb-autoeqde-pop100": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq -n 5 \\",
+        "--curve data_tests/headphones/asr/edifierw830nb/Edifier\\ W830NB.csv \\",
+        "--target ./data_tests/targets/harman-over-ear-2018.csv \\",
+        "--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \\",
+        "--loss headphone-score \\",
+        "--min-spacing-oct 0.04 --atolerance 0.00000001 --tolerance 0.0000001 --algo autoeq:de --seed 42 --population 100 --maxeval 80000 \\",
+        "--qa 2.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-edifierw830nb-autoeqde-pop80": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "./target/release/autoeq -n 5 \\",
+        "--curve data_tests/headphones/asr/edifierw830nb/Edifier\\ W830NB.csv \\",
+        "--target ./data_tests/targets/harman-over-ear-2018.csv \\",
+        "--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \\",
+        "--loss headphone-score \\",
+        "--min-spacing-oct 0.04 --atolerance 0.00000001 --tolerance 0.000000001 --algo autoeq:de --seed 42 --population 80 --maxeval 80000 \\",
+        "--qa 2.5"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-roomeq-all": {
+      "dependencies": [
+        "qa-roomeq-weekly"
+      ],
+      "body_calls": [],
+      "parameters": [],
+      "body": [],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-roomeq-weekly": {
+      "dependencies": [],
+      "body_calls": [
+        {
+          "recipe": "qa-roomeq-audit-mutants",
+          "condition": "sequential; preceding weekly commands must pass"
+        },
+        {
+          "recipe": "qa-roomeq-audit-resources",
+          "condition": "sequential; preceding weekly commands must pass"
+        }
+      ],
+      "parameters": [
+        {
+          "default": "2",
+          "export": false,
+          "flag": false,
+          "help": null,
+          "kind": "singular",
+          "long": null,
+          "max": null,
+          "min": null,
+          "multiple": false,
+          "name": "jobs",
+          "pattern": null,
+          "short": null,
+          "value": null
+        }
+      ],
+      "body": [
+        "{{cargo}} run -p roomeq-qa --bin roomeq-qa-coverage --release -- --tier weekly --jobs {{jobs}}",
+        "{{cargo}} run -p roomeq-qa --bin roomeq-qa-quality --release -- --jobs {{jobs}}",
+        "{{cargo}} test --release -p roomeq-qa --test roomeq_generated_data_test -- --ignored --test-threads=1",
+        "{{cargo}} run -p roomeq-qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix",
+        "{{cargo}} run -p roomeq-qa --bin roomeq-qa-features --no-default-features --release",
+        "{{cargo}} run -p roomeq-qa --bin roomeq-qa-acoustic --release -- --tier nightly",
+        "{{cargo}} run -p roomeq-qa --bin roomeq-fuzzer --release -- -n 1000 --seed 42 --skip-kautz-modal",
+        "just qa-roomeq-audit-mutants",
+        "just qa-roomeq-audit-resources"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-roomeq-audit-mutants": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "python3 scripts/audit_oct18_mutations.py"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-roomeq-audit-resources": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [
+        {
+          "default": "3",
+          "export": false,
+          "flag": false,
+          "help": null,
+          "kind": "singular",
+          "long": null,
+          "max": null,
+          "min": null,
+          "multiple": false,
+          "name": "samples",
+          "pattern": null,
+          "short": null,
+          "value": null
+        }
+      ],
+      "body": [
+        "python3 scripts/measure_subwoofer_resources.py --samples {{samples}}"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-export-all": {
+      "dependencies": [
+        "qa-export-portable",
+        "qa-export-camilladsp",
+        "qa-export-pipewire"
+      ],
+      "body_calls": [
+        {
+          "recipe": "qa-export-equalizer-apo",
+          "condition": "Darwin or Windows shell; skipped by this recipe on other OSes"
+        }
+      ],
+      "parameters": [],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "case \"$(uname -s)\" in",
+        "\tDarwin|MINGW*|MSYS*|CYGWIN*) just qa-export-equalizer-apo ;;",
+        "\t*) echo \"Equalizer APO engine QA requires Windows; portable APO semantics passed.\" ;;",
+        "esac"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-export-portable": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "# Roon and Wavelet have no supported headless importer. These tests parse each",
+        "# generated artifact independently and reconstruct its frequency response;",
+        "# optional application validators remain available through ROOMEQ_*_VALIDATE_CMD.",
+        "{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail \\",
+        "\t-E 'test(/equalizer_apo|easyeffects|wavelet|roon/)'"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-export-camilladsp": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "validator=\"${ROOMEQ_CAMILLADSP_BIN:-camilladsp}\"",
+        "if ! command -v \"$validator\" >/dev/null 2>&1; then",
+        "\techo \"CamillaDSP validator not found: $validator\" >&2",
+        "\techo \"Run 'just install-export-test-systems' or set ROOMEQ_CAMILLADSP_BIN.\" >&2",
+        "\texit 1",
+        "fi",
+        "ROOMEQ_CAMILLADSP_VALIDATE_CMD=\"$validator --check {config}\" \\",
+        "\t{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/camilladsp/)'"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-export-pipewire": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "if ! command -v docker >/dev/null 2>&1; then",
+        "\techo \"Docker is required for Linux PipeWire export validation.\" >&2",
+        "\texit 1",
+        "fi",
+        "if ! docker info >/dev/null 2>&1; then",
+        "\techo \"Docker is installed but its daemon is not available.\" >&2",
+        "\texit 1",
+        "fi",
+        "requested_base_image=\"${AUTOEQ_PIPEWIRE_BASE_IMAGE:-math-audio-base-linux-arm64:latest}\"",
+        "if ! docker image inspect \"$requested_base_image\" >/dev/null 2>&1; then",
+        "\techo \"AutoEQ Linux test base image not found: $requested_base_image\" >&2",
+        "\techo \"Set AUTOEQ_PIPEWIRE_BASE_IMAGE to an existing Linux test image.\" >&2",
+        "\texit 1",
+        "fi",
+        "base_image=\"$requested_base_image\"",
+        "# Cargo path dependencies resolve against the pinned sibling checkouts.",
+        "checkout_root=\"$(cd .. && pwd)\"",
+        "if [[ \"$(pwd)\" != \"$checkout_root/autoeq\" || ! -f \"$checkout_root/scripts/release/sources.json\" ]]; then",
+        "\techo \"PipeWire export QA requires the pinned all_of_sotf sibling checkout.\" >&2",
+        "\texit 1",
+        "fi",
+        "toolchain=\"$(docker run --rm --entrypoint bash \"$base_image\" -c 'rustup toolchain list | sed -n \"s/ (active.*//p\" | head -n 1')\"",
+        "if [[ -z \"$toolchain\" ]]; then",
+        "\techo \"Could not determine the active Rust toolchain in $base_image.\" >&2",
+        "\texit 1",
+        "fi",
+        "if [[ \"${AUTOEQ_PIPEWIRE_BASE_READY:-0}\" == 1 ]]; then",
+        "\t# The dedicated release image already has PipeWire; use its immutable ID.",
+        "\tqa_image=\"$base_image\"",
+        "else",
+        "\timage_id_file=\"$(mktemp)\"",
+        "\ttrap 'rm -f \"$image_id_file\"' EXIT",
+        "\tdocker build --build-arg BASE_IMAGE=\"$base_image\" --iidfile \"$image_id_file\" -f builds/qa/Dockerfile.pipewire .",
+        "\tqa_image=\"$(cat \"$image_id_file\")\"",
+        "fi",
+        "docker run --rm \\",
+        "\t-v \"$checkout_root\":/all_of_sotf \\",
+        "\t-v autoeq-pipewire-cargo-registry:/root/.cargo/registry \\",
+        "\t-v autoeq-pipewire-cargo-git:/root/.cargo/git \\",
+        "\t-v autoeq-pipewire-target:/target \\",
+        "\t-w /all_of_sotf/autoeq \\",
+        "\t-e CARGO_TARGET_DIR=/target \\",
+        "\t-e RUSTUP_TOOLCHAIN=\"$toolchain\" \\",
+        "\t-e CARGO_HTTP_MULTIPLEXING=false \\",
+        "\t-e CARGO_NET_RETRY=10 \\",
+        "\t\"$qa_image\" \\",
+        "\tbash -c 'ROOMEQ_PIPEWIRE_VALIDATE_CMD=\"bash scripts/validate-pipewire-config.sh {config}\" bash scripts/run-pipewire-export-tests.sh'"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-export-equalizer-apo": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "case \"$(uname -s)\" in",
+        "\tDarwin)",
+        "\t\trunner=\"$(pwd)/scripts/run-equalizer-apo-utm.sh\"",
+        "\t\tROOMEQ_EQUALIZER_APO_PCM_CMD=\"bash '$runner' '{config}' '{input}' '{output}'\" \\",
+        "\t\t\t{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'",
+        "\t\t;;",
+        "\tMINGW*|MSYS*|CYGWIN*)",
+        "\t\tbenchmark=\"${ROOMEQ_EQUALIZER_APO_BENCHMARK:-C:\\\\Program Files\\\\EqualizerAPO\\\\Benchmark.exe}\"",
+        "\t\tif [[ ! -f \"$benchmark\" ]]; then",
+        "\t\t\techo \"Equalizer APO Benchmark.exe not found: $benchmark\" >&2",
+        "\t\t\techo \"Install Equalizer APO on Windows or set ROOMEQ_EQUALIZER_APO_BENCHMARK.\" >&2",
+        "\t\t\texit 1",
+        "\t\tfi",
+        "\t\tROOMEQ_EQUALIZER_APO_PCM_CMD=\"powershell -NoProfile -ExecutionPolicy Bypass -File scripts/run-equalizer-apo-benchmark.ps1 -Benchmark '$benchmark' -Config '{config}' -InputFile '{input}' -OutputFile '{output}'\" \\",
+        "\t\t\t{{cargo}} nextest run --release -p roomeq-export --lib --no-tests fail -E 'test(/equalizer_apo/)'",
+        "\t\t;;",
+        "\t*)",
+        "\t\techo \"Equalizer APO engine QA requires Windows or macOS with a Windows UTM VM.\" >&2",
+        "\t\texit 1",
+        "\t\t;;",
+        "esac"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-wolfram-validation": {
+      "dependencies": [],
+      "body_calls": [
+        {
+          "recipe": "qa-wolfram",
+          "condition": "sequential; prior command must pass"
+        },
+        {
+          "recipe": "qa-wolfram-python",
+          "condition": "sequential; prior command must pass"
+        }
+      ],
+      "parameters": [],
+      "body": [
+        "just qa-wolfram",
+        "just qa-wolfram-python"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-wolfram": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "python3 scripts/run_crate_test_matrix.py --qa-runner rust --release"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-wolfram-python": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [],
+      "body": [
+        "python3 scripts/run_crate_test_matrix.py --qa-runner python",
+        "# This helper is a negative control, not a seventh manifest case.",
+        "python3 crates/autoeq-qa/tests/negative_controls_tailpy.py"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-roomeq-convergence": {
+      "dependencies": [],
+      "body_calls": [],
+      "parameters": [
+        {
+          "default": "",
+          "export": false,
+          "flag": false,
+          "help": null,
+          "kind": "singular",
+          "long": null,
+          "max": null,
+          "min": null,
+          "multiple": false,
+          "name": "jobs",
+          "pattern": null,
+          "short": null,
+          "value": null
+        }
+      ],
+      "body": [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "if [ -n \"{{jobs}}\" ]; then",
+        "  {{cargo}} run -p roomeq-qa --bin roomeq-qa-quality --release -- --jobs {{jobs}}",
+        "else",
+        "  {{cargo}} run -p roomeq-qa --bin roomeq-qa-quality --release",
+        "fi"
+      ],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    },
+    "qa-export-equivalence": {
+      "dependencies": [
+        "qa-export-all"
+      ],
+      "body_calls": [],
+      "parameters": [],
+      "body": [],
+      "source_evidence": "Justfile AST; dependency edges plus manually reviewed executed body calls"
+    }
+  },
+  "weekly_required_commands": [
+    {
+      "index": 1,
+      "command_template": "{{cargo}} run -p roomeq-qa --bin roomeq-qa-coverage --release -- --tier weekly --jobs {{jobs}}",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 2,
+      "command_template": "{{cargo}} run -p roomeq-qa --bin roomeq-qa-quality --release -- --jobs {{jobs}}",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 3,
+      "command_template": "{{cargo}} test --release -p roomeq-qa --test roomeq_generated_data_test -- --ignored --test-threads=1",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 4,
+      "command_template": "{{cargo}} run -p roomeq-qa --bin roomeq-qa-synthetic --no-default-features --release -- --full-matrix",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 5,
+      "command_template": "{{cargo}} run -p roomeq-qa --bin roomeq-qa-features --no-default-features --release",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 6,
+      "command_template": "{{cargo}} run -p roomeq-qa --bin roomeq-qa-acoustic --release -- --tier nightly",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 7,
+      "command_template": "{{cargo}} run -p roomeq-qa --bin roomeq-fuzzer --release -- -n 1000 --seed 42 --skip-kautz-modal",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 8,
+      "command_template": "just qa-roomeq-audit-mutants",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    },
+    {
+      "index": 9,
+      "command_template": "just qa-roomeq-audit-resources",
+      "required_even_if_an_earlier_component_fails": true,
+      "final_execution_status": "pending"
+    }
+  ],
+  "umbrella_deduplication": [
+    {
+      "required": "just qa-autoeq-all",
+      "covered_by": "just qa -> qa-autoeq-all",
+      "condition": "All nine AutoEQ result records pass on the final coordinated source; prerequisite compilation alone does not satisfy this."
+    },
+    {
+      "required": "just qa-roomeq-convergence <jobs>",
+      "covered_by": "qa-roomeq-weekly command2",
+      "condition": "Use the same explicit jobs value, features, source, data and default quality workload. An omitted jobs parameter is not assumed equal. Actual command2 pass required."
+    },
+    {
+      "required": "just qa-export-equivalence",
+      "covered_by": "just qa -> qa-export-all",
+      "condition": "Identical dependency recipe; every applicable backend must pass. Windows engine validation remains required separately when the umbrella OS branch omits it."
+    },
+    {
+      "required": "just qa-wolfram-validation",
+      "covered_by": "just qa -> qa-wolfram-validation",
+      "condition": "Rust and Python runner records, all124 matching cases, and supplemental negative controls must actually complete; native nextest success alone is not equivalent."
+    }
+  ],
+  "fail_fast_caution": "just qa-roomeq-weekly stops at its first failed recipe line. A started umbrella is not evidence that all nine commands ran. Final execution must record every component and aggregate failures without dropping later workloads. Likewise qa-wolfram-validation can stop before its Python runner.",
+  "qa_top_level_failure_handling": "The qa shell attempts each of its four domains and aggregates status, but each child domain may still short-circuit.",
+  "not_satisfied_by_qa": [
+    "native compile/lint scope",
+    "complete native test identity/execution",
+    "doctests/examples/benchmarks",
+    "production coverage and subsystem floors",
+    "complete Python/UI including four fresh native synthetic exit tests",
+    "exact product CLI/schema/fixture compatibility",
+    "native/stable-WASM/nightly-GPUI report build and runtime checks",
+    "minimal/platform/native backend checks",
+    "sibling manifest/lockfile/commit set",
+    "controlled performance trials, budget freeze and final improvements"
+  ],
+  "excluded_false_dependencies": [
+    "CamillaDSP recipe echoes installer guidance; it does not invoke installation",
+    "Export help text mentions optional licensed Roon setup/runtime recipes; those are not qa dependencies"
+  ],
+  "refresh_requirement": "Refresh this AST-derived map after any Justfile change and bind actual final results to final coordinated source/tool/input identities. No new domain execution is claimed by this preparation."
+}

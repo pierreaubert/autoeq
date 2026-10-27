@@ -1,7 +1,7 @@
 use super::backend::FilterOptimizerOutput;
 use super::constraint_envelope::finalize_candidate;
+use super::de::run_autoeq_de_with_epa_callback;
 use super::objective_data::ObjectiveData;
-use super::objective_data::run_autoeq_de_with_epa_callback;
 use super::run_control::{OptimizerRunControl, OptimizerStageSnapshot};
 use super::types::OptimProgressCallback;
 use schemars::JsonSchema;
@@ -154,6 +154,10 @@ fn finalize_dispatch_winner(
         Ok(mut finalized) => {
             let clamped =
                 clamp_epsilon_overshoot(&mut finalized.params, lower_bounds, upper_bounds);
+            if clamped {
+                finalized.loss =
+                    super::compute::compute_fitness_penalties_ref(&finalized.params, data);
+            }
             let is_peq = super::constraint_envelope::is_peq_layout_loss(data.loss_type);
             let spacing = if is_peq {
                 crate::constraints::viol_spacing_from_xs(
@@ -305,10 +309,10 @@ pub struct OptimizerRestartEvidence {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct OptimizerRunEvidence {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub multi_input_normalization: Option<roomeq_model::MultiInputNormalizationEvidence>,
+    pub multi_input_normalization: Option<autoeq_optim_types::MultiInputNormalizationEvidence>,
     /// Analysis conditioning recorded by the owning preparation path, when available.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub input_normalization: Option<roomeq_model::InputNormalizationEvidence>,
+    pub input_normalization: Option<autoeq_optim_types::InputNormalizationEvidence>,
     pub algorithm: String,
     pub termination: OptimizerTermination,
     pub converged: bool,
@@ -361,7 +365,7 @@ pub struct OptimizerRunEvidence {
     pub restart_history: Vec<OptimizerRestartEvidence>,
     /// Pareto selection evidence emitted by this exact optimizer invocation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    pub pareto_report: Option<autoeq_optim_types::ParetoDispatchReport>,
     /// Envelope finalization report for the emitted parameters, when the
     /// emitter ran the shared choke-point. Dispatchers finalize before
     /// returning; engine emission re-checks and attaches the diagnostics
@@ -1016,14 +1020,14 @@ struct ControlledOptimizationDispatch {
     dispatch: OptimizerDispatchOutcome,
     evaluation_limit: usize,
     validation_stop_refusal: bool,
-    pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    pareto_report: Option<autoeq_optim_types::ParetoDispatchReport>,
     search_evidence: Option<super::backend::BackendSearchEvidence>,
     backend_completion: Option<OptimizerBackendCompletion>,
 }
 
 struct NormalizedBackendOutput {
     result: crate::optim::OptimizerOutcome,
-    pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+    pareto_report: Option<autoeq_optim_types::ParetoDispatchReport>,
     validation_stop_refusal: bool,
     search_evidence: Option<super::backend::BackendSearchEvidence>,
     backend_completion: Option<OptimizerBackendCompletion>,
@@ -1622,23 +1626,23 @@ pub fn optimize_filters_with_callback_detailed(
 mod evidence_validation_tests {
     use super::*;
 
-    fn pareto_report(parameters: Vec<f64>) -> roomeq_model::ParetoDispatchReport {
-        roomeq_model::ParetoDispatchReport {
+    fn pareto_report(parameters: Vec<f64>) -> autoeq_optim_types::ParetoDispatchReport {
+        autoeq_optim_types::ParetoDispatchReport {
             schema: "roomeq.pareto_dispatch/v1".into(),
             backend: "autoeq:nsga2".into(),
             submitted_count: 1,
             refused_source_indices: Vec::new(),
-            candidates: vec![roomeq_model::ParetoCandidateEvidence {
+            candidates: vec![autoeq_optim_types::ParetoCandidateEvidence {
                 source_index: 0,
                 search_parameters: parameters.clone(),
                 search_objectives: vec![1.0],
                 validated_parameters: parameters.clone(),
                 validated_objectives: vec![1.0],
                 rank: Some(0),
-                crowding_distance: Some(roomeq_model::ParetoCrowdingDistance::Unbounded),
+                crowding_distance: Some(autoeq_optim_types::ParetoCrowdingDistance::Unbounded),
                 scalar_loss: Some(1.0),
             }],
-            selection: roomeq_model::ParetoSelectionEvidence {
+            selection: autoeq_optim_types::ParetoSelectionEvidence {
                 rule: "normalized_compromise".into(),
                 weights: vec![1.0],
                 ideal: vec![1.0],
@@ -1961,8 +1965,7 @@ mod evidence_validation_tests {
 mod staged_run_control_tests {
     use super::*;
     use crate::Curve;
-    use crate::cli::Args;
-    use clap::Parser;
+    use crate::OptimizationConfig as Args;
     use ndarray::Array1;
     use std::num::NonZeroUsize;
 
@@ -1973,15 +1976,17 @@ mod staged_run_control_tests {
         Vec<f64>,
         Vec<f64>,
     ) {
-        let mut args = Args::parse_from(["autoeq"]);
-        args.num_filters = 1;
-        args.population = 6;
-        args.maxeval = 60;
-        args.seed = Some(1);
-        args.min_freq = 20.0;
-        args.max_freq = 20_000.0;
-        args.min_db = -12.0;
-        args.max_db = 12.0;
+        let args = Args {
+            num_filters: 1,
+            population: 6,
+            maxeval: 60,
+            seed: Some(1),
+            min_freq: 20.0,
+            max_freq: 20_000.0,
+            min_db: -12.0,
+            max_db: 12.0,
+            ..Args::default()
+        };
         let params = crate::OptimParams::from(&args);
         let frequencies = Array1::from(vec![
             20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0, 2560.0, 5120.0, 10_240.0,
@@ -2485,6 +2490,29 @@ mod staged_run_control_tests {
         assert_eq!(run.evidence.evaluation_count, Some(0));
         assert_eq!(run.snapshot.evaluations_started, 0);
         assert_eq!(run.snapshot.validation_evaluations_started, 0);
+    }
+
+    #[test]
+    fn finalized_bound_projection_reports_the_returned_parameters_loss() {
+        let (objective, params, mut lower, upper, mut candidate) = scalar_fixture();
+        lower[2] = -4.2;
+        candidate[2] = -4.2000000001;
+        let (_, reported_loss) = finalize_dispatch_winner(
+            "captured-roundoff",
+            &mut candidate,
+            &lower,
+            &upper,
+            &objective,
+            &params,
+            Ok((String::from("captured"), 0.0)),
+        )
+        .expect("roundoff is projected to an exact feasible control");
+        assert_eq!(candidate[2], lower[2]);
+        assert_eq!(
+            reported_loss,
+            super::super::compute::compute_fitness_penalties_ref(&candidate, &objective),
+            "reported loss must describe the exact returned controls"
+        );
     }
 
     #[test]

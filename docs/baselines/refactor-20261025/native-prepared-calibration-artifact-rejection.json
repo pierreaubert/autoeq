@@ -1,0 +1,20 @@
+{
+  "rejected_utc": "2026-10-26T14:37:10.435436+00:00",
+  "status": "rejected; incomplete failed calibration cannot freeze budgets",
+  "report": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-native-prepared-baseline-j8-20261026T132827-11f88124/report.json",
+  "report_sha256": "a76dbab04da81228b03464701949aa43013cb7c7dbad03e658b465729ba7a75e",
+  "normal_rows_rejected": 65,
+  "native_recipe_exit_code": 0,
+  "observed_original_native_enabled_passed": 5369,
+  "observed_ignored_not_executed": 42,
+  "failure": "Cargo replaced its mutable report-producer output after preparation; pinned runtime helper identity was not maintained",
+  "prepared_cargo_sha256": "316afc9b1f9029ba58ae0d5d199971eec6cf5209a58be4c64bc3edcf67ab9a17",
+  "after_lane_cargo_sha256": "719e02917c73ffad007d6021039632bfbf6f83b1703fb5d2d012cfda0105e2ba",
+  "producer_record": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-native-prepared-baseline-j8-20261026T132827-11f88124/workspace/full-native/0/report-producer.json",
+  "producer_record_sha256": "70ce74572861c0ade1029e864c0ee752bb0abf4b9e5487c9bfbd819fdbea73f9",
+  "solution": "Independent exact copy within the timed command; selected artifact metadata preserved; actual runtime copy must retain its digest",
+  "failed_session": 69960,
+  "session_observed_terminal_exit_code": 1,
+  "performance_acceptance": false,
+  "budgets_frozen": false
+}

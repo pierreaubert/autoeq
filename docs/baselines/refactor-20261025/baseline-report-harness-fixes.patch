@@ -1,0 +1,242 @@
+diff --git a/scripts/test_advanced_eq.py b/scripts/test_advanced_eq.py
+index c9df9acb..e493410a 100644
+--- a/scripts/test_advanced_eq.py
++++ b/scripts/test_advanced_eq.py
+@@ -18,19 +18,26 @@ class AdvancedEqTests(unittest.TestCase):
+         from scripts.src.figures import create_comparison_eq_overlay_figure
+         from scripts.src.report import create_comparison_html_report
+         from scripts.test_figures import two_sub_overview_data
++        from scripts.test_report import report_payload
+         low = two_sub_overview_data()
+         high = copy.deepcopy(low)
+         low["sample_rate"], high["sample_rate"] = 32000.0, 96000.0
+         with tempfile.TemporaryDirectory() as directory, patch(
+-            "scripts.src.report.create_comparison_eq_overlay_figure",
++            "scripts.src.figures.create_comparison_eq_overlay_figure",
+             wraps=create_comparison_eq_overlay_figure,
+         ) as figure:
+             output = Path(directory) / "comparison.html"
+             create_comparison_html_report([("iir_auto", low), ("fir", high)], output)
+             self.assertGreater(figure.call_count, 0)
++            expected_rates = {"iir_auto": 32000.0, "fir": 96000.0}
++            observed_modes = set()
+             for call in figure.call_args_list:
+-                self.assertEqual(call.kwargs["sample_rates"], {"iir_auto": 32000.0, "fir": 96000.0})
+-            self.assertIn("EQ sections</th>", output.read_text())
++                mode_name = call.args[1][0][0]
++                observed_modes.add(mode_name)
++                self.assertEqual(call.kwargs["sample_rates"], {mode_name: expected_rates[mode_name]})
++            self.assertEqual(observed_modes, set(expected_rates))
++            sections = report_payload(output.read_text())["sections"]
++            self.assertIn("EQ sections</th>", "\n".join(section.get("html", "") for section in sections))
+ 
+     def test_comparison_eq_uses_each_output_rate(self):
+         from scripts.src.figures import create_comparison_eq_overlay_figure
+@@ -75,7 +82,7 @@ class AdvancedEqTests(unittest.TestCase):
+         table = _eq_filter_table_html([{"label": None, "filters": [filt]}])
+         for html in (line, table):
+             self.assertIn("KAUTZ bank", html)
+-            self.assertIn("weight=-0.2 (linear)", html)
++            self.assertIn("weight=-0.200000 (linear)", html)
+             self.assertNotIn("dB", html)
+         escaped = _format_eq_filter_line({"filter_type": "<script>"}, 1)
+         self.assertNotIn("<SCRIPT>", escaped)
+diff --git a/scripts/test_comparison_payload_python_goldens.py b/scripts/test_comparison_payload_python_goldens.py
+index 72e9ed5b..a37dcc50 100644
+--- a/scripts/test_comparison_payload_python_goldens.py
++++ b/scripts/test_comparison_payload_python_goldens.py
+@@ -2,6 +2,9 @@
+ 
+ import json
+ import math
++import os
++import shlex
++import subprocess
+ from pathlib import Path
+ import unittest
+ from unittest.mock import patch
+@@ -18,6 +21,26 @@ class ComparisonPayloadPythonGoldenTests(unittest.TestCase):
+         cls.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
+         if cls.fixture.get("schema_version") != 1:
+             raise AssertionError("unsupported comparison payload golden schema")
++        # This fixture records the source-checkout dev producer. Optimized
++        # profiles can differ by a few floating-point bits, so select the
++        # reference build explicitly and keep the exact payload assertion.
++        built = subprocess.run(
++            [*shlex.split(os.environ.get("CARGO", "cargo")), "build", "--offline", "--locked",
++             "-p", "autoeq-report-wasm", "--bin", "report-producer", "--profile", "dev",
++             "--message-format=json-render-diagnostics"],
++            cwd=FIXTURE.parents[3], text=True, capture_output=True, check=False,
++        )
++        if built.returncode:
++            raise RuntimeError("Reference report producer build failed: " + built.stderr)
++        producers = []
++        for line in built.stdout.splitlines():
++            event = json.loads(line)
++            if (event.get("reason") == "compiler-artifact"
++                    and event["target"]["name"] == "report-producer" and event.get("executable")):
++                producers.append(Path(event["executable"]))
++        if len(producers) != 1 or not producers[0].is_file():
++            raise RuntimeError("Cargo did not identify the reference report producer")
++        cls.reference_producer = str(producers[0])
+ 
+     def capture_payload(self, case):
+         captured = {}
+@@ -27,6 +50,7 @@ class ComparisonPayloadPythonGoldenTests(unittest.TestCase):
+ 
+         expected_provenance = case["payload"].get("provenance")
+         with (
++            patch.dict(os.environ, {"AUTOEQ_REPORT_PRODUCER": self.reference_producer}),
+             patch(
+                 "scripts.src.native_dataset_adapter._prepared_header_provenance",
+                 return_value=expected_provenance,
+diff --git a/scripts/test_payload_binding.py b/scripts/test_payload_binding.py
+index 747301a9..9c35a936 100644
+--- a/scripts/test_payload_binding.py
++++ b/scripts/test_payload_binding.py
+@@ -4,6 +4,7 @@ import copy
+ import hashlib
+ import json
+ import re
++import struct
+ from pathlib import Path
+ import tempfile
+ import unittest
+@@ -162,8 +163,15 @@ class PayloadBindingTests(unittest.TestCase):
+             temp_root = Path(tempfile.gettempdir())
+         with tempfile.TemporaryDirectory(dir=temp_root) as directory:
+             root = Path(directory)
+-            resource = root / "impulse.bin"
+-            resource.write_bytes(b"fixture impulse bytes")
++            resource = root / "impulse.wav"
++            # A real mono float WAV exercises resource loading as well as the
++            # byte binding; arbitrary bytes are correctly refused by the loader.
++            samples = struct.pack("<f", 1.0)
++            resource.write_bytes(
++                b"RIFF" + struct.pack("<I", 36 + len(samples)) + b"WAVEfmt "
++                + struct.pack("<IHHIIHH", 16, 3, 1, 48_000, 192_000, 4, 32)
++                + b"data" + struct.pack("<I", len(samples)) + samples
++            )
+             data = bound_fixture()
+             data["channels"]["L"]["plugins"] = [{"plugin_type": "convolution", "parameters": {"ir_file": resource.name}}]
+             data["metadata"] = {"final_convolution_sha256": {
+diff --git a/scripts/test_roomeq_suite_report.py b/scripts/test_roomeq_suite_report.py
+index 9f59b651..f2452fc8 100644
+--- a/scripts/test_roomeq_suite_report.py
++++ b/scripts/test_roomeq_suite_report.py
+@@ -326,11 +326,13 @@ class MeasuredModeComparisonTests(unittest.TestCase):
+         args = Namespace(out_dir=self.root, scenarios="chosen", modes="fir")
+         self.assertEqual(suite.expected_matrix(args), (["chosen"], ["fir"]))
+ 
+-    def test_default_matrix_includes_all_22_scenarios(self):
++    def test_default_matrix_includes_all_23_scenarios(self):
+         args = Namespace(out_dir=self.root, scenarios="", modes="")
+         with patch.dict(os.environ, {}, clear=True):
+             scenarios, modes = suite.expected_matrix(args)
+-        self.assertEqual(len(scenarios), 22)
++        self.assertEqual(len(scenarios), 23)
++        self.assertEqual(len(set(scenarios)), 23)
++        self.assertTrue({"2.0_t7v_2024", "2.0_t7v_2026"}.issubset(scenarios))
+         self.assertEqual(len([s for s in scenarios if "badroom" in s]), 6)
+         self.assertEqual(len(modes), 4)
+ 
+diff --git a/scripts/test_roomeq_synthetic_exit.py b/scripts/test_roomeq_synthetic_exit.py
+index 90728a03..b153b819 100644
+--- a/scripts/test_roomeq_synthetic_exit.py
++++ b/scripts/test_roomeq_synthetic_exit.py
+@@ -1,7 +1,7 @@
+ #!/usr/bin/env python3
+ """Shell-level exit contract checks against a freshly built release QA binary.
+ 
+-Build with: cargo build --release --features qa --bin roomeq-qa-synthetic
++Build with: cargo build -p roomeq-qa --release --bin roomeq-qa-synthetic
+ Run with: python3 scripts/test_roomeq_synthetic_exit.py
+ """
+ 
+@@ -9,6 +9,8 @@ from pathlib import Path
+ from copy import deepcopy
+ import json
+ import math
++import os
++import shlex
+ import subprocess
+ import struct
+ import unittest
+@@ -17,7 +19,10 @@ from parameter_signal_contract import verify_signal_axes
+ from src.payload_binding import verify_payload_binding
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+-BINARY = ROOT / "target/release/roomeq-qa-synthetic"
++TARGET = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
++if not TARGET.is_absolute():
++    TARGET = ROOT / TARGET
++BINARY = TARGET / "release" / ("roomeq-qa-synthetic.exe" if os.name == "nt" else "roomeq-qa-synthetic")
+ # Progress observers preserve adaptive selection and its existing per-pass
+ # budgets. A single full-scale 5.1 refusal row can exceed 15 minutes, and the
+ # reduced-level matrix contains 17 rows (parallel workers by default, serial
+@@ -26,12 +31,54 @@ BINARY = ROOT / "target/release/roomeq-qa-synthetic"
+ MATRIX_TIMEOUT_SECONDS = 3 * 60 * 60
+ 
+ 
++def build_qa_binary():
++    """Build the owning target once; an existing file alone may be stale."""
++    selected = os.environ.get("AUTOEQ_QA_SYNTHETIC")
++    if selected:
++        executable = Path(selected).resolve()
++        if not executable.is_file():
++            raise RuntimeError(f"Selected synthetic QA executable is missing: {executable}")
++        return executable
++    cargo = shlex.split(os.environ.get("CARGO", "cargo"))
++    metadata = json.loads(subprocess.check_output(
++        [*cargo, "metadata", "--offline", "--locked", "--no-deps", "--format-version", "1"], cwd=ROOT))
++    owners = [(package, target) for package in metadata["packages"]
++              if package["id"] in metadata["workspace_members"] for target in package["targets"]
++              if target["name"] == "roomeq-qa-synthetic" and "bin" in target["kind"]]
++    if len(owners) != 1:
++        raise RuntimeError("Synthetic QA target must have exactly one Cargo owner")
++    package, target = owners[0]
++    command = [*cargo, "build", "--offline", "--locked", "--release", "-p", package["name"],
++               "--bin", target["name"], "--message-format=json-render-diagnostics"]
++    required = target.get("required-features", [])
++    if required:
++        command += ["--features", ",".join(required)]
++    built = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
++                           text=True, check=False)
++    if built.returncode:
++        raise RuntimeError("Synthetic QA build failed: " + built.stderr)
++    executables = []
++    for line in built.stdout.splitlines():
++        event = json.loads(line)
++        if (event.get("reason") == "compiler-artifact" and event["target"]["name"] == target["name"]
++                and event.get("executable")):
++            executables.append(Path(event["executable"]))
++    if len(executables) != 1 or not executables[0].is_file():
++        raise RuntimeError("Cargo did not identify the synthetic QA executable")
++    return executables[0]
++
++
+ class SavedOutput(dict):
+     """Retain the sidecar directory when checking a saved RoomEQ payload."""
+ 
+ 
+ 
+ class SyntheticExitContract(unittest.TestCase):
++    @classmethod
++    def setUpClass(cls):
++        global BINARY
++        BINARY = build_qa_binary()
++
+     def assert_hybrid_selection(self, row):
+         stages = [stage for stage in row["stage_outcomes"]
+                   if stage["stage"] == "hybrid_best_part_selection"]
+@@ -219,8 +266,9 @@ class SyntheticExitContract(unittest.TestCase):
+             decision = acceptance.get("decision")
+             delivered = row["delivered_fir_taps"]
+             self.assertTrue(delivered)
+-            if decision == "identity_fallback":
++            if decision in {"identity_fallback", "safe_fallback"}:
+                 safe_fallback_rows.add(row["row"])
++                self.assertIs(acceptance.get("accepted"), False, row["row"])
+                 self.assertTrue(acceptance.get("violations"), row["row"])
+                 self.assertTrue(all(value is None for value in delivered.values()), row["row"])
+             else:

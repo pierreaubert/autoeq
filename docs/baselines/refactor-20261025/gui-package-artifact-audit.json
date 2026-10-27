@@ -1,0 +1,22 @@
+{
+  "status": "passed",
+  "python": "3.12.15 (main, Sep 30 2026, 22:04:19) [Clang 21.0.0 (clang-2100.3.34.2)]",
+  "setuptools": "84.0.0",
+  "wheel": "0.48.0",
+  "sdist": "/Volumes/home_tmp/tmp/autoeq-refactor-gui-package-audit/artifacts/autoeq_roomeq_gui-0.1.0.tar.gz",
+  "wheel_artifact": "/Volumes/home_tmp/tmp/autoeq-refactor-gui-package-audit/artifacts/autoeq_roomeq_gui-0.1.0-py3-none-any.whl",
+  "readme_in_sdist": true,
+  "readme_in_both_metadata": true,
+  "both_schemas_in_both_artifacts": true,
+  "runtime_ui_executed": false,
+  "source_hashes": {
+    "ui/roomeq-gui/README.md": "b386d225667211d3c046f0005514cc993c440768f5e8189db04293c7ff5f37d4",
+    "ui/roomeq-gui/pyproject.toml": "333dc35fec73ed5f4a0ffe7cfb7abc3501a5c5f390e767a667e10b170fda02e1",
+    "ui/roomeq-gui/roomeq_gui/resources/input_schema.json": "77d743c1a0b03aed34584a62f38cb5b8003d2a43e9edb6827bc0a096673d55b7",
+    "ui/roomeq-gui/roomeq_gui/resources/output_schema.json": "c10c0abae0208a8f54f3a6156ac974c37d25ac149a44a7238cd1295f04e15795"
+  },
+  "artifact_hashes": {
+    "sdist": "919966bc6c92c6c9fd01f29202f4535e505ff786e98793661cd9348ae5015c65",
+    "wheel_artifact": "3a938f2963d43b12b2b1088f121972773d86d358453dc288689aac0fecff8965"
+  }
+}

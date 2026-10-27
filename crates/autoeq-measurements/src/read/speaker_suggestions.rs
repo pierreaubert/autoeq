@@ -1,4 +1,5 @@
 use serde_json::Value;
+#[cfg(feature = "api")]
 use std::error::Error;
 use strsim::levenshtein;
 
@@ -42,6 +43,7 @@ fn extract_speaker_name_from_error(error_message: &str) -> Option<String> {
 }
 
 /// Fetch a list of names from a spinorama API endpoint (speakers or headphones)
+#[cfg(feature = "api")]
 async fn fetch_name_list(url: &str, kind: &str) -> Result<Vec<String>, Box<dyn Error>> {
     let response = reqwest::get(url).await?;
     if !response.status().is_success() {
@@ -62,11 +64,13 @@ async fn fetch_name_list(url: &str, kind: &str) -> Result<Vec<String>, Box<dyn E
 }
 
 /// Fetch the list of available speakers from the API
+#[cfg(feature = "api")]
 pub async fn fetch_available_speakers() -> Result<Vec<String>, Box<dyn Error>> {
     fetch_name_list("https://api.spinorama.org/v1/speakers", "speakers").await
 }
 
 /// Fetch the list of available headphones from the API
+#[cfg(feature = "api")]
 pub async fn fetch_available_headphones() -> Result<Vec<String>, Box<dyn Error>> {
     fetch_name_list("https://api.spinorama.org/v1/headphones", "headphones").await
 }

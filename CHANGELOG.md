@@ -1,3 +1,98 @@
+# Unreleased
+
+- Baseline spatial/routing repairs: align Kirkeby FIR references to the common
+  seat grid within measured support, preserve the LFE playback reference during
+  common bass matching, and score delivered routed transfers consistently across
+  gain ownership labels. Existing extrapolation refusals and safety limits remain.
+
+- Baseline correctness repairs (separate from the ownership refactor): keep
+  CMA-ES scoring and emitted controls within exact physical bounds, recompute
+  reported loss after final bound projection, and preserve capture confidence,
+  noise floor, and resolution when transferring representative curve deltas.
+  Phase decomposition caches are invalidated after the response changes.
+
+- Refactor: move shared argument parsing, validation, enum metadata, and display
+  helpers into `autoeq-cli`; library/desktop clients use parser-independent
+  `autoeq-optim-types::OptimizationConfig`. Plain and tuned defaults, CLI text,
+  and optimizer behavior are preserved.
+
+- Refactor: make the metaheuristics backend dependency optional through the
+  default-enabled `backend-metaheuristics` feature; built-in-only library builds
+  can disable defaults without changing the shipping algorithm registry.
+
+- Build/test refactor Phase 4, executable ownership: move all 12 launchers
+  to their CLI, QA, or measurement packages, along with seven executable-test
+  targets. RoomEQ schemas and the input manual now live under
+  `crates/roomeq-cli/schemas/`. Product launcher versions remain 0.5.78;
+  serialized library versions are unchanged. Build commands select the owning
+  package explicitly (for example, `cargo run -p roomeq-cli --bin roomeq`).
+
+- Build/test refactor Phase 3d (`refactor-20261025.md`): new
+  `roomeq-dsp` crate owns the stateless FIR delay realization,
+  physical routing, and DSP-graph/biquad construction shared by
+  `roomeq-engine` and `roomeq-export` (engine re-export shims keep
+  every `roomeq_engine::` path). `roomeq-export` no longer depends
+  on `roomeq-engine`, and the export -> workflow dev-dependency
+  cycle is removed: the realized-transfer conformance suite moved
+  to `roomeq-workflow/tests/realized_transfer_conformance.rs`.
+  Export outputs and schemas are byte-identical.
+- Build/test refactor Phase 3c step 2 (`refactor-20261025.md`): new
+  `autoeq-objective` crate owns objective-function evaluation (loss
+  computations/strategies, objective data and builders, prepared
+  objectives, fitness composition, evaluation budgets, and
+  evaluation-only constraints), extracted from `autoeq-optim` with
+  full path-compatible re-exports. Prepared evaluation is now
+  reusable without compiling optimizer backends; objective values
+  are unchanged (Wolfram oracle 118/118).
+- Build/test refactor Phase 3c step 1 (`refactor-20261025.md`): new
+  `autoeq-optim-types` crate owns the serialized Pareto/normalization
+  evidence and approved-reference registry previously defined in
+  `roomeq-model` (re-exported there, wire forms unchanged).
+  `autoeq-optim` no longer depends on `roomeq-model`, and the EPA
+  DE orchestration moved out of objective data into the DE backend.
+- Build/test refactor Phase 3b (`refactor-20261025.md`): the native
+  report renderer no longer enables the `gpui` feature of
+  `gpui-d3rs` — at the locked revision its geometry modules are
+  unconditional, so the GPUI host stack leaves the native build (and
+  the 2D WASM bundle shrinks). Report JSON key order, previously
+  preserved only by transitive feature unification, is now declared
+  directly via `serde_json/preserve_order`, keeping serialized
+  reports byte-identical.
+- Build/test refactor Phase 3a (`refactor-20261025.md`):
+  `autoeq-measurements` is offline by default. The `api` feature now
+  actually enables reqwest/tokio and the spinorama.org fetch entry
+  points; CSV/local loading and the backend-trait fetch core compile
+  with no network stack. `autoeq-workflow`, `roomeq-workflow`, and
+  the root facade enable `api` explicitly, so product behavior is
+  unchanged while offline dependents (`roomeq-engine`,
+  `autoeq-optim`, …) no longer build reqwest/tokio.
+- Build/test refactor Phase 2 (`refactor-20261025.md`): consolidate the
+  140 `autoeq-qa` integration-test targets into 9 (six owner-grouped
+  Wolfram oracle targets, one merged `negative_controls`, plus
+  `qa_contract` and `optimizer_benchmark`). Case files stay in place;
+  the validation manifest now maps each case to its module and grouped
+  Cargo target explicitly, enforced by `qa_contract`, the numerical
+  runner, and the partition policy. All 124 case IDs, tolerances, and
+  goldens are unchanged; the 369-test identity set is preserved
+  exactly. The numerical runner attributes per-module outcomes inside
+  grouped binaries and runs them sequentially so `--nocapture`
+  evidence stays attributable.
+- Build/test refactor Phase 0+1 (`refactor-20261025.md`): add a baseline
+  inventory and isolated build-bench harness under
+  `docs/baselines/refactor-20261025/`; scope bare Cargo commands to the
+  library set via workspace `default-members` (CLI/QA/renderer packages
+  are selected explicitly, and every recipe/CI step that builds a root
+  binary now says `-p autoeq`); add `test`/`qa` Cargo profiles and
+  nextest `fast`/`full`/`qa` execution profiles with a solver resource
+  group; replace the workspace-wide release prebuild with per-lane
+  selection (`just test`, `test-crate`, `test-pr`, `test-cli`, `ntest`
+  keeps the complete inventory on the shared `qa` profile); drop the
+  `prod-autoeq` prerequisite from `qa-roomeq-quick`; add the bounded
+  `qa-autoeq-quick` flat+score smoke; and record the scheduled
+  optimizer/export dependency cuts as partition-policy temporary
+  exceptions with Phase 3 removal deadlines. No numerical behavior,
+  CLI, schema, or export-format change.
+
 # 0.5.78
 
 - Add a fast RoomEQ QA iteration lane: coverage runs one deterministic seed
@@ -2155,7 +2250,7 @@
 ## RoomEQ audibility Stage 5 (evidence-gated rollout)
 
 - Independent release gates (`roomeq-qa/release_gates.rs`): implementation correctness, physical safety, perceptual validation, and listening benefit pass separately; advisory releases and evidence-free passes never promote; physical safeguards promote without Stage 4 evidence; legacy rollback is never gated.
-- Versioned policy selection with legacy-restore guarantee, grounded in the veto config (`None`/disabled → legacy, default selection → advisory, explicit opt-in → enforcing). Documented rollout in `docs/ROOMEQ_MANUAL.md` ("Staged rollout and release gates") and `src/bin/roomeq/INPUT_FORMAT.md`.
+- Versioned policy selection with legacy-restore guarantee, grounded in the veto config (`None`/disabled → legacy, default selection → advisory, explicit opt-in → enforcing). Documented rollout in `docs/ROOMEQ_MANUAL.md` ("Staged rollout and release gates") and `crates/roomeq-cli/schemas/INPUT_FORMAT.md`.
 - Export round-trip verifiers (`roomeq-export/roundtrip.rs`): biquad-coefficient JSON parsed back and compared section-by-section against recomputed canonical biquads plus routing/preamp/delay echoes; convolution WAV sidecars decoded and compared sample-exact with hash re-verification; tampered or unmatched artifacts fail. Demo via `roomeq-qa-synthetic --release-gates`.
 
 ## RoomEQ audibility Stage 4 (rerank pipeline staging)

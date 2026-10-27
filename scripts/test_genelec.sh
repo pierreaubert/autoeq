@@ -6,7 +6,7 @@ fi
 IN=./data_tests/roomeq/measured/5.1.4_genelec
 OUT=./data_generated/roomeq/measured/5.1.4_genelec
 
-$CARGO build --release --features cli --bin roomeq
+$CARGO build --release -p roomeq-cli --bin roomeq
 
 rm -fr ${OUT} && mkdir -p ${OUT}
 

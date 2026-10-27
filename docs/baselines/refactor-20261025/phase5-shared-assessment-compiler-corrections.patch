@@ -1,0 +1,413 @@
+--- a/crates/roomeq-playback/src/assessment/reports.rs
++++ b/crates/roomeq-playback/src/assessment/reports.rs
+@@ -14,11 +14,6 @@
+ pub use channel::{
+     compute_and_correct_icd,
+ };
+-pub(super) use channel::{
+-    channel_matching_band_rms_db,
+-    channel_matching_profile_for_role_key,
+-    channel_matching_worsens_reported_scores,
+-};
+ pub use misc::{
+     final_score_band_for_channel,
+     generate_validation_bundle_report,
+@@ -27,19 +22,9 @@
+     should_apply_spectral_shelves,
+     spread,
+ };
+-pub(super) use misc::{
+-    applied_bass_crossover_hz,
+-    apply_channel_matching_correction,
+-    bass_consistency_rms_db,
+-    curve_roughness_rms_db,
+-    dialog_band_roughness_rms_db,
+-    excursion_hpf_hz_from_chain,
+-    group_mean_deviation_rms_db,
+-    headroom_peak_boost_db,
+-    lcr_timing_advisory,
+-    rms,
+-    surround_or_height_precedence_risk,
+-};
++pub(super) use misc::excursion_hpf_hz_from_chain;
++#[cfg(test)]
++pub(super) use misc::apply_channel_matching_correction;
+ pub use refresh::{
+     refresh_direct_early_late_reports,
+     refresh_final_reports,
+@@ -49,8 +34,3 @@
+ pub use role::{
+     update_perceptual_metrics,
+ };
+-pub(super) use role::{
+-    role_aware_channel_matching_groups,
+-    role_aware_channel_matching_groups_with_keys,
+-    role_channel_matching_rms_db,
+-};
+--- a/crates/roomeq-playback/src/assessment/room_optimization_result.rs
++++ b/crates/roomeq-playback/src/assessment/room_optimization_result.rs
+@@ -3074,7 +3074,6 @@
+     use crate::test_fixtures::{empty_metadata, single_channel_room_result};
+     use roomeq_engine::OptimizerRunEvidence;
+     use roomeq_engine::quality::CorrectionDecision;
+-    use roomeq_model::{CtcConfig, RoomConfig, SystemConfig, SystemModel};
+     use std::collections::HashMap;
+ 
+     #[test]
+--- a/crates/roomeq-playback/src/assessment/seat_replay.rs
++++ b/crates/roomeq-playback/src/assessment/seat_replay.rs
+@@ -1570,7 +1570,7 @@
+     ))
+ }
+ 
+-#[cfg(test)]
++#[cfg(any(test, feature = "test-support"))]
+ pub fn validate_final_seats(
+     result: &mut RoomOptimizationResult,
+     captures: &[Capture],
+@@ -5702,7 +5702,7 @@
+             );
+             let store = autoeq_artifacts::MemoryArtifactStore::new();
+             assert!(
+-                crate::export::bind_final_convolution_artifacts(
++                crate::final_resources::bind_final_convolution_artifacts(
+                     &mut result,
+                     Path::new("."),
+                     &store,
+--- /dev/null
++++ b/crates/roomeq-playback/src/assessment/timing.rs
+@@ -0,0 +1,48 @@
++//! Delay accounting for deployed playback diagnostics.
++
++use roomeq_model::ChannelDspChain;
++
++/// Sum all delay plugins in a channel chain.
++pub fn total_chain_delay_ms(chain: &ChannelDspChain) -> f64 {
++    chain
++        .plugins
++        .iter()
++        .filter(|plugin| plugin.plugin_type == "delay")
++        .filter_map(|plugin| {
++            plugin
++                .parameters
++                .get("delay_ms")
++                .and_then(|value| value.as_f64())
++        })
++        .sum()
++}
++
++/// Delay added by the arrival-time alignment stage only.
++///
++/// Later stages add their own intentional delays — bass-management routing
++/// (`route_owned`) and crossover phase alignment (`phase_alignment`) — which
++/// deliberately trade time alignment for summation and must not be read as
++/// arrival misalignment by the timing diagnostics.
++pub fn time_alignment_chain_delay_ms(chain: &ChannelDspChain) -> f64 {
++    const INTENTIONAL_STAGES: [&str; 2] = ["route_owned", "phase_alignment"];
++    chain
++        .plugins
++        .iter()
++        .filter(|plugin| plugin.plugin_type == "delay")
++        .filter(|plugin| {
++            let stage = plugin
++                .parameters
++                .get("room_eq_stage")
++                .and_then(|value| value.as_str())
++                .unwrap_or_default();
++            !INTENTIONAL_STAGES.contains(&stage)
++        })
++        .filter_map(|plugin| {
++            plugin
++                .parameters
++                .get("delay_ms")
++                .and_then(|value| value.as_f64())
++        })
++        .sum()
++}
++
+--- a/crates/roomeq-playback/src/assessment.rs
++++ b/crates/roomeq-playback/src/assessment.rs
+@@ -3,18 +3,14 @@
+ use std::collections::HashMap;
+ use std::path::Path;
+ use math_audio_iir_fir::Biquad;
+-use log::{debug, info, warn};
+-use roomeq_model::{AutoeqError, ChannelDspChain, Curve, MeasurementSource, OptimizationMetadata,
+-    OptimizerConfig, PerceptualMetrics, ProcessingMode, Result, RoomConfig, SpeakerConfig,
+-    StageCheck, StageCheckKind, StageOutcome, StageStatus, SystemConfig, SystemModel, TargetCurveConfig};
++use log::info;
++use roomeq_model::{AutoeqError, ChannelDspChain, Curve, MeasurementSource, OptimizationMetadata, PerceptualMetrics, Result, RoomConfig};
+ pub use roomeq_engine::room_result::{ChannelOptimizationResult, RoomOptimizationResult};
+-use roomeq_engine::{output, phase_alignment};
+ use crate::physical_fir as per_driver_fir;
+ use crate::parallel_timing;
+-use crate::level_alignment::{apply_final_channel_level_alignment, final_role_level_alignment_gains,
+-    group_delay_budget_ms, retained_fir_coeffs_by_channel, reported_curve_with_user_preferences,
+-    FINAL_CHANNEL_LEVEL_TOLERANCE_DB, FINAL_CHANNEL_LEVEL_MAX_TRIM_DB};
+-use reports::*;
++use crate::level_alignment::{group_delay_budget_ms, retained_fir_coeffs_by_channel, reported_curve_with_user_preferences, FINAL_CHANNEL_LEVEL_MAX_TRIM_DB};
++pub use timing::{total_chain_delay_ms, time_alignment_chain_delay_ms};
++mod timing;
+ 
+ pub mod configured_acceptance;
+ pub mod misc;
+--- a/crates/roomeq-playback/src/multiseat_report.rs
++++ b/crates/roomeq-playback/src/multiseat_report.rs
+@@ -428,6 +428,18 @@
+     }
+ }
+ 
++pub fn all_channel_multiseat_enabled(config: &RoomConfig) -> bool {
++    let is_home_cinema = config
++        .system
++        .as_ref()
++        .is_some_and(|system| system.model == SystemModel::HomeCinema);
++    is_home_cinema && all_channel_multiseat_policy(config).all_channel_enabled
++}
++
++pub fn all_channel_multiseat_policy(config: &RoomConfig) -> MultiSeatConfig {
++    config.optimizer.multi_seat.clone().unwrap_or_default()
++}
++
+ #[cfg(test)]
+ mod multi_seat_branch_tests {
+     use super::{
+@@ -907,14 +919,3 @@
+     }
+ }
+ 
+-pub fn all_channel_multiseat_enabled(config: &RoomConfig) -> bool {
+-    let is_home_cinema = config
+-        .system
+-        .as_ref()
+-        .is_some_and(|system| system.model == SystemModel::HomeCinema);
+-    is_home_cinema && all_channel_multiseat_policy(config).all_channel_enabled
+-}
+-
+-pub fn all_channel_multiseat_policy(config: &RoomConfig) -> MultiSeatConfig {
+-    config.optimizer.multi_seat.clone().unwrap_or_default()
+-}
+--- a/crates/roomeq-workflow/src/delay_compile.rs
++++ b/crates/roomeq-workflow/src/delay_compile.rs
+@@ -9,5 +9,4 @@
+ pub(crate) use roomeq_playback::delay_compile::{
+     applied_lfe_playback_gain_db,
+     correction_strength_for_electrical_ceiling,
+-    electrical_boost_bound_db,
+ };
+--- a/crates/roomeq-workflow/src/evidence_intake.rs
++++ b/crates/roomeq-workflow/src/evidence_intake.rs
+@@ -32,5 +32,5 @@
+ };
+ 
+ pub(crate) use roomeq_playback::evidence_intake::{
+-    crossover_timing_reference, shared_timing_reference,
++    crossover_timing_reference,
+ };
+--- a/crates/roomeq-workflow/src/export.rs
++++ b/crates/roomeq-workflow/src/export.rs
+@@ -1662,7 +1662,7 @@
+ }
+ 
+ pub(crate) use roomeq_playback::final_resources::{
+-    bind_final_convolution_artifacts, validate_final_routed_stage_ownership,
++    bind_final_convolution_artifacts,
+ };
+ 
+ #[cfg(test)]
+--- a/crates/roomeq-workflow/src/home_cinema/all.rs
++++ b/crates/roomeq-workflow/src/home_cinema/all.rs
+@@ -6,7 +6,7 @@
+     resolve_all_channel_seat_weights, role_for_channel as engine_role_for_channel,
+ };
+ pub use roomeq_model::home_cinema::*;
+-use roomeq_model::{MultiMeasurementConfig, MultiSeatConfig, RoomConfig, SystemModel};
++use roomeq_model::{MultiMeasurementConfig, RoomConfig};
+ 
+ pub fn derive_all_channel_multiseat_config(
+     config: &RoomConfig,
+--- a/crates/roomeq-workflow/src/room_optimization/finalization.rs
++++ b/crates/roomeq-workflow/src/room_optimization/finalization.rs
+@@ -3826,6 +3826,7 @@
+     Ok(())
+ }
+ 
++#[cfg(test)]
+ pub(super) use roomeq_playback::assessment::configured_acceptance::configured_acceptance_graph;
+ 
+ pub(super) use roomeq_playback::assessment::configured_acceptance::refresh_configured_native_acceptance;
+--- a/crates/roomeq-workflow/src/room_optimization/parallel_timing.rs
++++ b/crates/roomeq-workflow/src/room_optimization/parallel_timing.rs
+@@ -1,3 +1,6 @@
+ //! Shared acquisition timing verification.
+ 
+-pub(super) use roomeq_playback::parallel_timing::{validate, validated_sources};
++#[cfg(test)]
++pub(super) use roomeq_playback::parallel_timing::validate;
++
++pub(super) use roomeq_playback::parallel_timing::{validated_sources};
+--- a/crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs
++++ b/crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs
+@@ -5,6 +5,9 @@
+ };
+ use roomeq_model::{AutoeqError, ChannelDspChain, Curve, Result, RoomConfig};
+ use std::path::Path;
++
++#[cfg(test)]
++pub(super) use roomeq_playback::physical_fir::has_physical_fir;
+ 
+ /// Realize a routed common output FIR on each physical branch. Only post-route
+ /// filters commute with the branch sum: F * sum(B_i) = sum(F * B_i).
+@@ -461,7 +464,7 @@
+ 
+ 
+ 
+-pub(super) use roomeq_playback::physical_fir::{has_physical_fir, replay};
++pub(super) use roomeq_playback::physical_fir::{replay};
+ 
+ #[cfg(test)]
+ mod tests {
+--- a/crates/roomeq-workflow/src/room_optimization/phase/misc.rs
++++ b/crates/roomeq-workflow/src/room_optimization/phase/misc.rs
+@@ -24,48 +24,9 @@
+         .collect()
+ }
+ 
+-pub(in super::super) fn total_chain_delay_ms(chain: &ChannelDspChain) -> f64 {
+-    chain
+-        .plugins
+-        .iter()
+-        .filter(|plugin| plugin.plugin_type == "delay")
+-        .filter_map(|plugin| {
+-            plugin
+-                .parameters
+-                .get("delay_ms")
+-                .and_then(|value| value.as_f64())
+-        })
+-        .sum()
+-}
+-
+-/// Delay added by the arrival-time alignment stage only.
+-///
+-/// Later stages add their own intentional delays — bass-management routing
+-/// (`route_owned`) and crossover phase alignment (`phase_alignment`) — which
+-/// deliberately trade time alignment for summation and must not be read as
+-/// arrival misalignment by the timing diagnostics.
+-pub(in super::super) fn time_alignment_chain_delay_ms(chain: &ChannelDspChain) -> f64 {
+-    const INTENTIONAL_STAGES: [&str; 2] = ["route_owned", "phase_alignment"];
+-    chain
+-        .plugins
+-        .iter()
+-        .filter(|plugin| plugin.plugin_type == "delay")
+-        .filter(|plugin| {
+-            let stage = plugin
+-                .parameters
+-                .get("room_eq_stage")
+-                .and_then(|value| value.as_str())
+-                .unwrap_or_default();
+-            !INTENTIONAL_STAGES.contains(&stage)
+-        })
+-        .filter_map(|plugin| {
+-            plugin
+-                .parameters
+-                .get("delay_ms")
+-                .and_then(|value| value.as_f64())
+-        })
+-        .sum()
+-}
++pub(in super::super) use roomeq_playback::assessment::{
++    total_chain_delay_ms,
++};
+ 
+ pub(in super::super) fn compute_phase_alignment_delay_schedule(
+     phase_alignment_results: &HashMap<String, (f64, bool, String)>,
+--- a/crates/roomeq-workflow/src/room_optimization/reports.rs
++++ b/crates/roomeq-workflow/src/room_optimization/reports.rs
+@@ -5,13 +5,13 @@
+     compute_and_correct_icd,
+     final_score_band_for_channel,
+     generate_validation_bundle_report,
+-    mean,
+-    recompute_curve_flatness_score,
+     refresh_direct_early_late_reports,
+     refresh_final_reports,
+     refresh_perceptual_policy_reports,
+     refresh_temporal_ir_evidence,
+     should_apply_spectral_shelves,
+-    spread,
+     update_perceptual_metrics,
+ };
++
++#[cfg(test)]
++pub(crate) use roomeq_playback::assessment::reports::recompute_curve_flatness_score;
+--- a/crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs
++++ b/crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs
+@@ -1,4 +1,7 @@
+ //! Application import adapter for shared playback assessment.
++
++#[cfg(test)]
++pub(super) use roomeq_playback::assessment::room_optimization_result::{is_plugin_free_identity, refresh_optimizer_evidence};
+ 
+ pub(crate) use roomeq_playback::assessment::room_optimization_result::{
+     apply_final_correction_safety_gate,
+@@ -7,10 +10,8 @@
+     evaluate_preserved_target_passband,
+     hybrid_fir_design_input,
+     is_baseline_correction,
+-    is_plugin_free_identity,
+     policy_for_delivered_graph,
+     record_peq_candidates,
+-    refresh_optimizer_evidence,
+     remove_routing_transfer,
+     sanity_check_result,
+ };
+--- a/crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs
++++ b/crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs
+@@ -2,7 +2,7 @@
+ 
+ #[cfg(test)]
+ mod tests {
+-    use roomeq_playback::assessment::seat_replay::ConfiguredComparison;
++    use roomeq_playback::assessment::seat_replay::{ConfiguredComparison, configured_selection_metrics};
+     use roomeq_model::{RoomConfig, SpeakerConfig, MeasurementSource};
+     use std::collections::HashMap;
+ 
+--- a/crates/roomeq-workflow/src/room_optimization/seat_replay.rs
++++ b/crates/roomeq-workflow/src/room_optimization/seat_replay.rs
+@@ -22,9 +22,11 @@
+     validate_candidate_final_seats,
+     validate_candidate_final_seats_with_diagnostic_trace,
+     validate_final_correlated_bass,
+-    validate_final_seats,
+ };
+ 
+ 
+ #[cfg(test)]
++pub(crate) use roomeq_playback::assessment::seat_replay::validate_final_seats;
++
++#[cfg(test)]
+ mod configured_reference;
+--- a/crates/roomeq-workflow/src/room_optimization.rs
++++ b/crates/roomeq-workflow/src/room_optimization.rs
+@@ -17,7 +17,7 @@
+ };
+ use roomeq_model::{
+     AutoeqError, ChannelDspChain, Curve, MeasurementSource, OptimizationMetadata, OptimizerConfig,
+-    PerceptualMetrics, ProcessingMode, Result, RoomConfig, SpeakerConfig, StageCheck,
++    ProcessingMode, Result, RoomConfig, SpeakerConfig, StageCheck,
+     StageCheckKind, StageOutcome, StageStatus, SystemConfig, SystemModel, TargetCurveConfig,
+ };
+ use std::collections::HashMap;
+@@ -1502,12 +1502,6 @@
+ }
+ 
+ use roomeq_playback::level_alignment::FINAL_CHANNEL_LEVEL_TOLERANCE_DB;
+-/// Deepest permitted final level-alignment trim. Alignment beyond this is
+-/// level correction, not channel matching: deeper trims are capped and the
+-/// residual spread is accepted (reported Degraded) instead of discarding
+-/// an otherwise valid correction to chase exact broadband equality.
+-use roomeq_playback::level_alignment::FINAL_CHANNEL_LEVEL_MAX_TRIM_DB;
+-
+ use roomeq_playback::level_alignment::final_role_level_alignment_gains;
+ 
+ 

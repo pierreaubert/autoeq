@@ -777,7 +777,7 @@ fn nsga_dispatch_report(
     returned_parameters: &[f64],
     nfev: usize,
     generations: usize,
-) -> Result<roomeq_model::ParetoDispatchReport, String> {
+) -> Result<autoeq_optim_types::ParetoDispatchReport, String> {
     if judged.members.len() != judged.source_indices.len()
         || judged.members.len() != scalar_scores.len()
         || selection.points.len() != judged.members.len()
@@ -794,15 +794,15 @@ fn nsga_dispatch_report(
             if original.crowding_distance < 0.0 {
                 return Err("NSGA reported a negative crowding distance".to_string());
             }
-            Some(roomeq_model::ParetoCrowdingDistance::Finite(
+            Some(autoeq_optim_types::ParetoCrowdingDistance::Finite(
                 original.crowding_distance,
             ))
         } else if original.crowding_distance == f64::INFINITY {
-            Some(roomeq_model::ParetoCrowdingDistance::Unbounded)
+            Some(autoeq_optim_types::ParetoCrowdingDistance::Unbounded)
         } else {
             return Err("NSGA reported an invalid crowding distance".to_string());
         };
-        candidates.push(roomeq_model::ParetoCandidateEvidence {
+        candidates.push(autoeq_optim_types::ParetoCandidateEvidence {
             source_index,
             search_parameters: original.x.as_slice().unwrap_or(&[]).to_vec(),
             search_objectives: original.objectives.clone(),
@@ -826,13 +826,13 @@ fn nsga_dispatch_report(
     let scalar_best_loss = *scalar_scores
         .get(scalar_best_index)
         .ok_or_else(|| "NSGA scalar-best score index is out of range".to_string())?;
-    Ok(roomeq_model::ParetoDispatchReport {
+    Ok(autoeq_optim_types::ParetoDispatchReport {
         schema: "roomeq.pareto_dispatch/v1".to_string(),
         backend: backend_name.to_string(),
         submitted_count: judged.submitted,
         refused_source_indices: judged.refused_source_indices.clone(),
         candidates,
-        selection: roomeq_model::ParetoSelectionEvidence {
+        selection: autoeq_optim_types::ParetoSelectionEvidence {
             rule: selection.selection.rule.clone(),
             weights: selection.selection.weights.clone(),
             ideal: selection.selection.ideal.clone(),
@@ -919,7 +919,6 @@ mod nsga_front_report_tests {
     use crate::loss::LossType;
     use crate::roomeq::MultiMeasurementStrategy;
     use crate::{MultiObjectiveData, ObjectiveDataBuilder, PeqModel};
-    use clap::Parser;
     use ndarray::Array1;
     use std::num::NonZeroUsize;
     use std::sync::Arc;
@@ -1193,12 +1192,14 @@ mod nsga_front_report_tests {
         let objective = tradeoff_objective();
         let control = OptimizerRunControl::new(NonZeroUsize::new(16).expect("positive cap"));
         let search = objective.with_run_control(control.clone());
-        let mut args = crate::cli::Args::parse_from(["autoeq"]);
-        args.num_filters = 1;
-        args.population = 16;
-        args.maxeval = 16;
-        args.seed = Some(20261003);
-        args.no_parallel = true;
+        let args = crate::OptimizationConfig {
+            num_filters: 1,
+            population: 16,
+            maxeval: 16,
+            seed: Some(20261003),
+            no_parallel: true,
+            ..crate::OptimizationConfig::default()
+        };
         let params = OptimParams::from(&args);
         let backend = AutoeqNsgaBackend::new_nsga2("autoeq:nsga2");
         let lower = vec![2.0, 0.3, -6.0];

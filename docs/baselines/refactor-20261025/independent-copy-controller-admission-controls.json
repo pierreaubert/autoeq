@@ -1,0 +1,108 @@
+{
+  "checked_utc": "2026-10-26T14:55:51.572827+00:00",
+  "status": "passed",
+  "scope": "Execute the actual controllers final record-shape admission code with logical fixture records. No real build/test/benchmark, raw-file validation, performance admission or budget freeze is implied.",
+  "controller": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/run-independent-copy-calibration.py",
+  "controller_sha256": "b4cee33ea47cfac158da18f38e9b1e13d3b2d19ebd471ce194ad5a6ec11c0f5c",
+  "matrix_sha256": "8a8fd4dbb5c73126d38baf61273509b6792945fd9d58f6831007f772cc91735e",
+  "old_controller_red_control": "KeyError: 'repetition'",
+  "old_controller_red_count_control": "normal timing matrix is incomplete or duplicated",
+  "current_accepts210_normal_plus_required_diagnostic": true,
+  "current_accepts_cargo_output_replacement_when_bound_copy_survives": true,
+  "negative_controls": [
+    {
+      "control": "missing normal tuple",
+      "rejected": true,
+      "reason": "RuntimeError: normal timing matrix is incomplete,failed or duplicated"
+    },
+    {
+      "control": "duplicate normal tuple",
+      "rejected": true,
+      "reason": "RuntimeError: normal timing matrix is incomplete,failed or duplicated"
+    },
+    {
+      "control": "normal exit failure",
+      "rejected": true,
+      "reason": "RuntimeError: normal timing matrix is incomplete,failed or duplicated"
+    },
+    {
+      "control": "diagnostic not marked separately",
+      "rejected": true,
+      "reason": "KeyError: 'repetition'"
+    },
+    {
+      "control": "missing required diagnostics",
+      "rejected": true,
+      "reason": "RuntimeError: separate native-link/compiler diagnostics incomplete"
+    },
+    {
+      "control": "missing compiler phases",
+      "rejected": true,
+      "reason": "RuntimeError: separate native-link/compiler diagnostics incomplete"
+    },
+    {
+      "control": "missing native link events",
+      "rejected": true,
+      "reason": "RuntimeError: separate native-link/compiler diagnostics incomplete"
+    },
+    {
+      "control": "failed report despite filled rows",
+      "rejected": true,
+      "reason": "RuntimeError: producer completion/repetition admission failed"
+    },
+    {
+      "control": "incomplete observed repetitions",
+      "rejected": true,
+      "reason": "RuntimeError: producer completion/repetition admission failed"
+    },
+    {
+      "control": "harness identity changed",
+      "rejected": true,
+      "reason": "RuntimeError: producer harness identity mismatch"
+    },
+    {
+      "control": "nightly identity changed",
+      "rejected": true,
+      "reason": "RuntimeError: nightly toolchain changed"
+    },
+    {
+      "control": "ordinary helper profile is a test harness",
+      "rejected": true,
+      "reason": "RuntimeError: wrong original producer profile/artifact"
+    },
+    {
+      "control": "wrong original helper profile",
+      "rejected": true,
+      "reason": "RuntimeError: wrong original producer profile/artifact"
+    },
+    {
+      "control": "copy not independent",
+      "rejected": true,
+      "reason": "RuntimeError: runtime producer is not independently bound"
+    },
+    {
+      "control": "runtime copy digest changed",
+      "rejected": true,
+      "reason": "RuntimeError: native helper execution or hash proof failed"
+    },
+    {
+      "control": "copy differs from selected ordinary artifact",
+      "rejected": true,
+      "reason": "RuntimeError: prepared copy differs from ordinary Cargo artifact"
+    },
+    {
+      "control": "runtime helper uses mutable Cargo path",
+      "rejected": true,
+      "reason": "RuntimeError: runtime producer is not independently bound"
+    },
+    {
+      "control": "runtime helper outside owned target",
+      "rejected": true,
+      "reason": "RuntimeError: prepared runtime copy escaped owned target"
+    }
+  ],
+  "negative_control_count": 18,
+  "baseline_launched": false,
+  "performance_acceptance": false,
+  "budgets_frozen": false
+}

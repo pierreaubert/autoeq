@@ -184,7 +184,7 @@ fn validate_candidate_objective_constraints(
 }
 
 fn validate_profiled_output_envelope(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     loss_type: &autoeq::LossType,
     profile: &autoeq::workflow::DeviceProfile,
     source_parameters: &[f64],
@@ -406,7 +406,7 @@ pub(super) fn apo_roundtrip_objective_gap(
 /// # Returns
 /// * Result indicating success or error
 pub(super) async fn save_peq_to_file(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     x: &[f64],
     output_path: &Path,
     loss_type: &autoeq::LossType,
@@ -511,7 +511,7 @@ pub(super) async fn save_peq_to_file(
 /// against an explicit product device profile. RME and AU remain available in
 /// the legacy path but do not yet have equivalent profile validation.
 pub(super) async fn save_profiled_apo_to_file(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     filters: &[autoeq::iir::Biquad],
     preamp_db: f64,
     output_path: &Path,

@@ -660,8 +660,7 @@ mod tests {
         let stimulus: Vec<f32> = (0..48000)
             .map(|i| {
                 let t = i as f64 / sample_rate;
-                let phase =
-                    2.0 * std::f64::consts::PI * 20.0 / ratio * ((ratio * t).exp() - 1.0);
+                let phase = 2.0 * std::f64::consts::PI * 20.0 / ratio * ((ratio * t).exp() - 1.0);
                 (0.1 * phase.sin()) as f32
             })
             .collect();
@@ -721,11 +720,7 @@ mod tests {
             .unwrap();
         identity.bytes = config_bytes.len() as u64;
         identity.sha256 = digest(&config_bytes);
-        std::fs::write(
-            &handoff_path,
-            serde_json::to_vec_pretty(&handoff).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&handoff_path, serde_json::to_vec_pretty(&handoff).unwrap()).unwrap();
         (path, handoff)
     }
 
@@ -771,11 +766,7 @@ mod tests {
             .unwrap();
         identity.bytes = response_bytes.len() as u64;
         identity.sha256 = digest(&response_bytes);
-        std::fs::write(
-            &handoff_path,
-            serde_json::to_vec_pretty(&handoff).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(&handoff_path, serde_json::to_vec_pretty(&handoff).unwrap()).unwrap();
 
         let (config, _) = crate::config_loader::load_merged_config_strict(&path, None).unwrap();
         let SpeakerConfig::Single(MeasurementSource::Multiple(source)) = &config.speakers["L"]

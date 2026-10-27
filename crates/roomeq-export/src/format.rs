@@ -4,24 +4,16 @@ use std::path::{Path, PathBuf};
 ///
 /// This is an engine-neutral contract: renderers may reject a format when the
 /// realized DSP graph uses routing or stages that target cannot represent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExternalExportFormat {
-    #[value(name = "camilladsp")]
     CamillaDsp,
-    #[value(name = "apo")]
     EqualizerApo,
-    #[value(name = "easyeffects")]
     EasyEffects,
-    #[value(name = "wavelet")]
     Wavelet,
-    #[value(name = "pipewire")]
     PipeWire,
-    #[value(name = "roon")]
     RoonDsp,
     /// REW Generic EQ reference text for manual entry; REW cannot reload this text.
-    #[value(name = "rew")]
     Rew,
-    #[value(name = "coefficients", alias = "biquad-coefficients")]
     BiquadCoefficients,
 }
 

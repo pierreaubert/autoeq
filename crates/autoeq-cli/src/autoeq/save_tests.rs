@@ -8,7 +8,7 @@ mod tests {
     use crate::autoeq_command::save::{
         ProductExportContext, save_peq_to_file, save_profiled_apo_to_file,
     };
-    use autoeq::cli::Args;
+    use crate::cli::Args;
     use autoeq::loss::LossType;
     use clap::Parser;
     use std::fs;

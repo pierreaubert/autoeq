@@ -1,0 +1,37 @@
+{
+  "reason": "Restore three contract regression tests and exact bounds/loss and capture confidence repairs. Existing owner budgets already accommodate the restored code; no ceiling was raised. Separate commits: 483b7306 and f5c89a8a.",
+  "owners": {
+    "autoeq-optim": {
+      "unchanged_budget": {
+        "source_tree_lines": 20515,
+        "external_test_tree_lines": 553,
+        "largest_source_file_lines": 2598,
+        "source_files": 45,
+        "external_test_files": 4
+      },
+      "actual_after_contract_port": {
+        "source_tree_lines": 19984,
+        "external_test_tree_lines": 512,
+        "largest_source_file_lines": 2539,
+        "source_files": 43,
+        "external_test_files": 2
+      }
+    },
+    "roomeq-engine": {
+      "unchanged_budget": {
+        "source_tree_lines": 78042,
+        "external_test_tree_lines": 208,
+        "largest_source_file_lines": 7274,
+        "source_files": 187,
+        "external_test_files": 3
+      },
+      "actual_after_contract_port": {
+        "source_tree_lines": 75777,
+        "external_test_tree_lines": 177,
+        "largest_source_file_lines": 7052,
+        "source_files": 185,
+        "external_test_files": 1
+      }
+    }
+  }
+}

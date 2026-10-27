@@ -1,0 +1,64 @@
+{
+  "status": "passed",
+  "started_utc": "2026-10-26T11:45:41.415471+00:00",
+  "performance_acceptance": false,
+  "ported": false,
+  "phase5-playback-quick-build.log": {
+    "command": [
+      "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+      "build",
+      "--offline",
+      "--locked",
+      "--profile",
+      "qa",
+      "-p",
+      "roomeq-qa",
+      "--bin",
+      "roomeq-qa-coverage"
+    ],
+    "exit_code": 0,
+    "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/phase5-playback-quick-build.log",
+    "sha256": "cc674b78594adc9133e4d982ea710a1f6946e9a3a5ca062e1ead558915509828"
+  },
+  "binary_sha256": "c95178a696fcaba8f83b9c1894120b6ab3ba10c483c8e90730aa4b5a07b8b3d0",
+  "phase5-playback-quick.log": {
+    "command": [
+      "/Volumes/home_tmp/tmp/autoeq-playback-shared-target/qa/roomeq-qa-coverage",
+      "--quick",
+      "--jobs",
+      "14",
+      "--seed-runs",
+      "5",
+      "--metamorphic",
+      "--maxeval",
+      "200",
+      "--json",
+      "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/phase5-playback-quick.json"
+    ],
+    "exit_code": 0,
+    "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/phase5-playback-quick.log",
+    "sha256": "69bbb83fb790fae2885a47ea81f00695c3c335aa7596ec593fe385267a559dd0"
+  },
+  "cases": 4,
+  "outcomes": [
+    {
+      "name": "small_stereo_2_0 fem iir",
+      "outcome": "passed"
+    },
+    {
+      "name": "small_stereo_2_2_mso fem iir",
+      "outcome": "reverted"
+    },
+    {
+      "name": "home cinema/iir redirected bass",
+      "outcome": "reverted"
+    },
+    {
+      "name": "home cinema/hybrid redirected bass quick",
+      "outcome": "reverted"
+    }
+  ],
+  "raw_json": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/phase5-playback-quick.json",
+  "raw_sha256": "4be692f7ddf7a9b48f27d4b1c9db71c35067deb9988b81212d54f3b3af878d4f",
+  "completed_utc": "2026-10-26T12:19:37.914714+00:00"
+}

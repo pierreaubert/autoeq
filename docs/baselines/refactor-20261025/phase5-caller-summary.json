@@ -1,0 +1,39 @@
+[
+  {
+    "symbol": "execute_prepared_channel",
+    "file": "crates/roomeq-engine/src/channel_execution.rs",
+    "callers": 7,
+    "caller_files": [
+      "crates/roomeq-engine/src/channel_execution.rs",
+      "crates/roomeq-engine/src/channel_fir/tests.rs",
+      "crates/roomeq-workflow/src/arrival.rs",
+      "crates/roomeq-workflow/src/channel.rs"
+    ]
+  },
+  {
+    "symbol": "process_multisub_group_with_callback",
+    "file": "crates/roomeq-workflow/src/group_processing.rs",
+    "callers": 3,
+    "caller_files": [
+      "crates/roomeq-workflow/src/group_processing.rs",
+      "crates/roomeq-workflow/src/topology/bass_management/preprocess.rs"
+    ]
+  },
+  {
+    "symbol": "process_multisub_group_with_callback",
+    "file": "crates/roomeq-engine/src/group_processing.rs",
+    "callers": 2,
+    "caller_files": [
+      "crates/roomeq-engine/src/group_processing.rs",
+      "crates/roomeq-engine/src/multisub/joint_objective.rs"
+    ]
+  },
+  {
+    "symbol": "optimize_room_pipeline_impl_with_optional_recovery",
+    "file": "crates/roomeq-workflow/src/room_optimization.rs",
+    "callers": 2,
+    "caller_files": [
+      "crates/roomeq-workflow/src/room_optimization.rs"
+    ]
+  }
+]

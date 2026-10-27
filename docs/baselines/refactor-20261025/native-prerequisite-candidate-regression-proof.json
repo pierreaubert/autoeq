@@ -1,0 +1,43 @@
+{
+  "status": "passed",
+  "started_utc": "2026-10-26T11:05:00.866869+00:00",
+  "purpose": "Complete current refactor native correctness with the repaired full-native producer prerequisite",
+  "performance_acceptance": false,
+  "budgets_frozen": false,
+  "command": [
+    "/Volumes/home_tmp/tmp/autoeq-refactor-qa-python-20261026/bin/python",
+    "/Volumes/home_worktrees/autoeq-refactor/scripts/build_bench/native_lane.py",
+    "--root",
+    "/Volumes/home_worktrees/autoeq-refactor",
+    "--profile",
+    "qa",
+    "--cargo",
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+    "--producer-record",
+    "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/native-prerequisite-candidate-report-producer.json",
+    "--",
+    "just",
+    "--set",
+    "cargo",
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+    "ntest"
+  ],
+  "expected_cases": 5370,
+  "ignored_cases": 42,
+  "python_identity": "benchmark-python-native-prerequisite-environment.json",
+  "producer_harness_sha256": {
+    "scripts/bench_build.py": "153e4c22a588cbbdf2560bd7717ae8b635ae16e60b1f15e8ebf1952e6de30ecd",
+    "scripts/build_bench/native_lane.py": "faf1a9a34a816f0b29fa2f898ede373bae009c29a66f6d92de212990c3e4a3c9",
+    "scripts/test_bench_native_lane.py": "21e7c61179639f967f78d1760c7b5a816084c9e26202ac140a513e48f7b2f8da"
+  },
+  "exit_code": 0,
+  "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/native-prerequisite-candidate.log",
+  "log_sha256": "b1e45e480c6d427c34846985ae3eb47bff5345421a23697263379b8f2e78f4b4",
+  "previous_validation_parser_error": "AssertionError: ('native execution scope changed', 4371, 4371, 999)",
+  "passed_exactly_once": 5370,
+  "ignored_not_executed": 42,
+  "native_source_files_unchanged": 1162,
+  "completed_utc": "2026-10-26T11:15:11.806422+00:00",
+  "validator_recovery": "Revalidated existing immutable successful native log with whitespace-aware progress counter parser; no tests rerun.",
+  "summary": "Summary [ 143.722s] 5370 tests run: 5370 passed (5 slow), 42 skipped"
+}

@@ -1,0 +1,19 @@
+[package]
+name = "autoeq-optim-types"
+version = "0.5.0"
+edition = "2024"
+description = "Serialized optimizer evidence and reference-registry contracts shared by AutoEQ and RoomEQ"
+license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/autoeq-optim-types"
+homepage = "https://github.com/pierreaubert/autoeq"
+
+[lints]
+workspace = true
+
+[dependencies]
+autoeq-core = { workspace = true }
+schemars = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }

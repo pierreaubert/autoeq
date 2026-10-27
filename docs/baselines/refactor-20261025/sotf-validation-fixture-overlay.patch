@@ -1,0 +1,33 @@
+diff --git a/crates/sotf-player/src/controllers/plugin/set.rs b/crates/sotf-player/src/controllers/plugin/set.rs
+index 2a20a0113..5b1358340 100644
+--- a/crates/sotf-player/src/controllers/plugin/set.rs
++++ b/crates/sotf-player/src/controllers/plugin/set.rs
+@@ -696,6 +696,7 @@ mod tests {
+             fir_length: 1024.0,
+             phase_mode: 0.0,
+             auto_gain: true,
++            accuracy_mode: false,
+             mix: 1.0,
+             stereo_pairs: None,
+         };
+@@ -725,6 +726,7 @@ mod tests {
+             fir_length: 2048.0,
+             phase_mode: 0.0,
+             auto_gain: true,
++            accuracy_mode: false,
+             mix: 1.0,
+             stereo_pairs: None,
+         };
+diff --git a/crates/sotf-player/tests/capture_frontend.rs b/crates/sotf-player/tests/capture_frontend.rs
+index 2a07a8570..3531d67dd 100644
+--- a/crates/sotf-player/tests/capture_frontend.rs
++++ b/crates/sotf-player/tests/capture_frontend.rs
+@@ -62,6 +62,8 @@ fn fixture() -> (Golden, RawCaptureManifest, Vec<f32>, Vec<f32>) {
+         stimulus: stimulus.layout,
+         timing_reference_output_channel: Some(0),
+         status: RawCaptureStatus::RawComplete,
++        checkpoint: None,
++        transport_evidence: Vec::new(),
+         pending_processing: vec!["clock_correction".into()],
+         calibrations: vec![],
+         takes: vec![],

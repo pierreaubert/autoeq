@@ -167,7 +167,7 @@ pub(super) fn normalize_export_identifier(name: &str) -> String {
         .collect()
 }
 
-pub(super) fn validate_camilladsp_input(
+pub fn validate_camilladsp_input(
     output: &DspGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
@@ -641,11 +641,8 @@ pub(super) fn camilladsp_physical_routing(
     output: &DspGraph,
     graph: &BassManagementRoutingGraph,
 ) -> anyhow::Result<CamillaDspPhysicalRouting> {
-    let physical =
-        roomeq_engine::physical_routing::resolve_physical_routing(&output.channels, graph)
-            .map_err(|error| {
-                anyhow::anyhow!("CamillaDsp physical routing is unavailable: {error}")
-            })?;
+    let physical = roomeq_dsp::physical_routing::resolve_physical_routing(&output.channels, graph)
+        .map_err(|error| anyhow::anyhow!("CamillaDsp physical routing is unavailable: {error}"))?;
     let mut controls = HashMap::new();
     if let Some(report) = output
         .metadata
@@ -710,7 +707,7 @@ pub(super) fn camilladsp_physical_routing(
             let mut plugins = port.plugins.clone();
             if let Some(control) = controls.get(port.name.as_str()) {
                 if control.gain_db != 0.0 || control.polarity_inverted {
-                    let mut gain = roomeq_engine::output::create_gain_plugin_with_invert(
+                    let mut gain = roomeq_dsp::output::create_gain_plugin_with_invert(
                         control.gain_db,
                         control.polarity_inverted,
                     );
@@ -718,7 +715,7 @@ pub(super) fn camilladsp_physical_routing(
                     plugins.push(gain);
                 }
                 if control.delay_ms > 0.0 {
-                    let mut delay = roomeq_engine::output::create_delay_plugin(control.delay_ms);
+                    let mut delay = roomeq_dsp::output::create_delay_plugin(control.delay_ms);
                     delay.parameters["room_eq_stage"] = serde_json::json!("post_route");
                     plugins.push(delay);
                 }

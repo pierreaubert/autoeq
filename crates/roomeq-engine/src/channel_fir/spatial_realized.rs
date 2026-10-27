@@ -6,6 +6,39 @@ use autoeq_core::Curve;
 use autoeq_optim::optim::{compute_response_fitness, scalar::ScalarOptimConfig};
 use num_complex::Complex64;
 
+/// Align a measured FIR reference without leaving its declared support.
+///
+/// # Errors
+/// Returns an error when the objective grid exceeds the usable reference.
+pub(super) fn reference_on_objective_grid<'a>(
+    prepared: &PreparedChannelInput,
+    curve: &'a Curve,
+    grid: &Array1<f64>,
+) -> Result<std::borrow::Cow<'a, Curve>> {
+    let reference = prepared.usable_curve(curve)?;
+    if reference.freq == *grid {
+        return Ok(reference);
+    }
+    let covered = reference
+        .freq
+        .first()
+        .zip(reference.freq.last())
+        .is_some_and(|(low, high)| {
+            grid.iter().all(|frequency| {
+                frequency >= low && frequency <= high && prepared.supports_frequency(*frequency)
+            })
+        });
+    if !covered {
+        return Err(AutoeqError::OptimizationFailed {
+            message: "Kirkeby spatial FIR objective grid exceeds phase-reference support".into(),
+        });
+    }
+    // Use the seat objective's grid without extrapolating measurement support.
+    Ok(std::borrow::Cow::Owned(autoeq_core::interpolate_log_space(
+        grid, &reference,
+    )))
+}
+
 pub(super) fn optimize(
     request: &FirChannelRequest<'_>,
     curve: &Curve,
@@ -87,13 +120,9 @@ pub(super) fn optimize(
         }
     }
     let neutral = if kirkeby {
-        if curve.freq != grid {
-            return Err(fail(
-                "Kirkeby spatial FIR needs its phase-reference curve on the objective grid".into(),
-            ));
-        }
-        let mut residual = response::apply_complex_response(curve, &iir);
-        if curve.phase.is_none() {
+        let reference = reference_on_objective_grid(request.prepared, curve, grid)?;
+        let mut residual = response::apply_complex_response(&reference, &iir);
+        if reference.phase.is_none() {
             residual.phase = None;
         } else if excess_phase {
             // A common arrival delay belongs to source alignment, not to the

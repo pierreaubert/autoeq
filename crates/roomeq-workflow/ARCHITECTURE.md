@@ -8,8 +8,9 @@ sidecars, progress reporting.
 ## Layer
 
 Orchestration over `roomeq-engine` + `roomeq-model` + `roomeq-export`.
-The root `src/roomeq/` tree is a thin compatibility facade over this crate's
-partitions.
+The workspace root has no package or compatibility facade. Product callers
+depend on `roomeq-workflow` directly; shared realization helpers live below
+the orchestration layer in `roomeq-dsp`.
 
 ## Key modules
 
@@ -67,7 +68,7 @@ let merged = load_merged_config_strict(&recordings, &overrides)?;
 
 ## Data contracts
 
-- **In:** `recordings.json` + optimizer JSONs (see `src/bin/roomeq/INPUT_FORMAT.md`).
+- **In:** `recordings.json` + optimizer JSONs (see `crates/roomeq-cli/schemas/INPUT_FORMAT.md`).
 - **Out:** `RoomOptimizationResult` (channels, DSP chains, curves, metadata,
   stage outcomes) → JSON + export formats + sidecars.
 

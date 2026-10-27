@@ -1,0 +1,92 @@
+{
+  "status": "exact source/body/budget/test preservation, independent patch application, compiler inventory, all affected behavior and strict Clippy passed; no extraction or performance acceptance",
+  "checked_utc": "2026-10-26T12:29:24.107335+00:00",
+  "preparation_sha256": "ceda21bf613d7f71367e0869aee18a48ab796c4bfc3d6b289705a805133e7d75",
+  "items": [
+    {
+      "name": "reported_curve_with_user_preferences",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "uses_routed_home_cinema_inputs",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "final_role_level_alignment_gains",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "insert_final_level_gain",
+      "public": false,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "refresh_deployed_inter_channel_deviation",
+      "public": false,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "apply_final_channel_level_alignment",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "group_delay_budget_ms",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "retained_fir_coeffs_by_channel",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "is_subwoofer_channel",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "sync_reported_gain_adjustment",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "apply_phase_only_adjustment_to_reported_curve",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "role_aware_channel_matching_groups_with_keys",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    },
+    {
+      "name": "RoleChannelMatchingGroup",
+      "public": true,
+      "exact_body_except_declared_visibility_and_path_rebinding": true
+    }
+  ],
+  "unit_test_tails": [
+    "crates/roomeq-workflow/src/room_optimization/misc.rs",
+    "crates/roomeq-workflow/src/room_optimization/phase/sync.rs",
+    "crates/roomeq-workflow/src/room_optimization/phase/misc.rs"
+  ],
+  "compiler_verified": true,
+  "runtime_verified": true,
+  "performance_acceptance": false,
+  "root_workflow_external_test_file_byte_identical": "878d433c1a65a65b2a319f0a8445e91b2b0866c15c9862b42687d444142f398f",
+  "files": 8,
+  "function_items": 12,
+  "role_types": 1,
+  "unchanged_numeric_budgets": 4,
+  "new_public_functions": 10,
+  "new_public_constants": 2,
+  "internal_functions_kept_private": 2,
+  "internal_constants_kept_private": 2,
+  "patch_sha256": "472b17d743da1dec859088499e95c47ce975a5289c73bf35666fd87cecddcf20",
+  "mirror": "/Volumes/home_tmp/tmp/autoeq-shared-level-alignment-api-scope-roundtrip-37yhk7n5",
+  "behavior_proof": "phase5-shared-level-alignment-behavior-proof.json"
+}

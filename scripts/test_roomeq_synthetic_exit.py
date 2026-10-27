@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shell-level exit contract checks against a freshly built release QA binary.
 
-Build with: cargo build --release --features qa --bin roomeq-qa-synthetic
+Build with: cargo build -p roomeq-qa --release --bin roomeq-qa-synthetic
 Run with: python3 scripts/test_roomeq_synthetic_exit.py
 """
 
@@ -9,6 +9,8 @@ from pathlib import Path
 from copy import deepcopy
 import json
 import math
+import os
+import shlex
 import subprocess
 import struct
 import unittest
@@ -17,7 +19,10 @@ from parameter_signal_contract import verify_signal_axes
 from src.payload_binding import verify_payload_binding
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "target/release/roomeq-qa-synthetic"
+TARGET = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+if not TARGET.is_absolute():
+    TARGET = ROOT / TARGET
+BINARY = TARGET / "release" / ("roomeq-qa-synthetic.exe" if os.name == "nt" else "roomeq-qa-synthetic")
 # Progress observers preserve adaptive selection and its existing per-pass
 # budgets. A single full-scale 5.1 refusal row can exceed 15 minutes, and the
 # reduced-level matrix contains 17 rows (parallel workers by default, serial
@@ -26,12 +31,54 @@ BINARY = ROOT / "target/release/roomeq-qa-synthetic"
 MATRIX_TIMEOUT_SECONDS = 3 * 60 * 60
 
 
+def build_qa_binary():
+    """Build the owning target once; an existing file alone may be stale."""
+    selected = os.environ.get("AUTOEQ_QA_SYNTHETIC")
+    if selected:
+        executable = Path(selected).resolve()
+        if not executable.is_file():
+            raise RuntimeError(f"Selected synthetic QA executable is missing: {executable}")
+        return executable
+    cargo = shlex.split(os.environ.get("CARGO", "cargo"))
+    metadata = json.loads(subprocess.check_output(
+        [*cargo, "metadata", "--offline", "--locked", "--no-deps", "--format-version", "1"], cwd=ROOT))
+    owners = [(package, target) for package in metadata["packages"]
+              if package["id"] in metadata["workspace_members"] for target in package["targets"]
+              if target["name"] == "roomeq-qa-synthetic" and "bin" in target["kind"]]
+    if len(owners) != 1:
+        raise RuntimeError("Synthetic QA target must have exactly one Cargo owner")
+    package, target = owners[0]
+    command = [*cargo, "build", "--offline", "--locked", "--release", "-p", package["name"],
+               "--bin", target["name"], "--message-format=json-render-diagnostics"]
+    required = target.get("required-features", [])
+    if required:
+        command += ["--features", ",".join(required)]
+    built = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           text=True, check=False)
+    if built.returncode:
+        raise RuntimeError("Synthetic QA build failed: " + built.stderr)
+    executables = []
+    for line in built.stdout.splitlines():
+        event = json.loads(line)
+        if (event.get("reason") == "compiler-artifact" and event["target"]["name"] == target["name"]
+                and event.get("executable")):
+            executables.append(Path(event["executable"]))
+    if len(executables) != 1 or not executables[0].is_file():
+        raise RuntimeError("Cargo did not identify the synthetic QA executable")
+    return executables[0]
+
+
 class SavedOutput(dict):
     """Retain the sidecar directory when checking a saved RoomEQ payload."""
 
 
 
 class SyntheticExitContract(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        global BINARY
+        BINARY = build_qa_binary()
+
     def assert_hybrid_selection(self, row):
         stages = [stage for stage in row["stage_outcomes"]
                   if stage["stage"] == "hybrid_best_part_selection"]
@@ -219,8 +266,9 @@ class SyntheticExitContract(unittest.TestCase):
             decision = acceptance.get("decision")
             delivered = row["delivered_fir_taps"]
             self.assertTrue(delivered)
-            if decision == "identity_fallback":
+            if decision in {"identity_fallback", "safe_fallback"}:
                 safe_fallback_rows.add(row["row"])
+                self.assertIs(acceptance.get("accepted"), False, row["row"])
                 self.assertTrue(acceptance.get("violations"), row["row"])
                 self.assertTrue(all(value is None for value in delivered.values()), row["row"])
             else:

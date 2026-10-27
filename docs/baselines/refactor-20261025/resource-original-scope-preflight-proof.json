@@ -1,0 +1,95 @@
+{
+  "status": "passed",
+  "checked_utc": "2026-10-26T05:15:59.369580+00:00",
+  "report": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/report.json",
+  "report_sha256": "28faf018afe23721ff83faf3c47cbb544e4db1c7c53c4719bdad8cec7b9deed7",
+  "owners": [
+    {
+      "case": "core",
+      "logical_cases": 195,
+      "ignored": 0,
+      "passed": 195,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/core/test-edit/0/execution-0.identities.json"
+      ]
+    },
+    {
+      "case": "objective",
+      "logical_cases": 221,
+      "ignored": 0,
+      "passed": 221,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/objective/test-edit/0/execution-1.identities.json"
+      ]
+    },
+    {
+      "case": "optimizer",
+      "logical_cases": 205,
+      "ignored": 0,
+      "passed": 205,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/optimizer/test-edit/0/execution-1.identities.json"
+      ]
+    },
+    {
+      "case": "config",
+      "logical_cases": 332,
+      "ignored": 0,
+      "passed": 332,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/config/test-edit/0/execution-0.identities.json"
+      ]
+    },
+    {
+      "case": "engine",
+      "logical_cases": 972,
+      "ignored": 2,
+      "passed": 970,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/engine/test-edit/0/execution-0.identities.json"
+      ]
+    },
+    {
+      "case": "dsp",
+      "logical_cases": 8,
+      "ignored": 0,
+      "passed": 8,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/dsp/test-edit/0/execution-0.identities.json"
+      ]
+    },
+    {
+      "case": "workflow",
+      "logical_cases": 1175,
+      "ignored": 7,
+      "passed": 1168,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/workflow/test-edit/0/execution-0.identities.json"
+      ]
+    },
+    {
+      "case": "renderer",
+      "logical_cases": 170,
+      "ignored": 0,
+      "passed": 170,
+      "exact_test_scope_verified": true,
+      "identity_files": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-resource-scope-baseline-preflight-20261026T053054-6b4c88ab/renderer/test-edit/0/execution-0.identities.json"
+      ]
+    }
+  ],
+  "public_and_test_edit_rows": 16,
+  "logical_cases": 3278,
+  "passed": 3269,
+  "ignored": 9,
+  "paired_candidate_status": "pending",
+  "performance_acceptance": false,
+  "qualification": "One-repetition complete-input scope and actual execution proof, not controlled timing acceptance. Exact compiler profile and mapped identities remain in each raw execution record."
+}

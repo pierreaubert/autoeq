@@ -1,0 +1,92 @@
+{
+  "status": "recorded exact requested runtime dependency closure",
+  "python": {
+    "invocation": "/Volumes/home_tmp/Binaries/.cache/uv/builds-v0/.tmpCnCJFn/bin/python",
+    "real_path": "/Volumes/home_tmp/opt/homebrew/Cellar/python@3.12/3.12.15_1/Frameworks/Python.framework/Versions/3.12/bin/python3.12",
+    "sha256": "85de2a76867fcb24057ac85839cfa404f963dbd9e292552bb543b5102882abeb",
+    "version": "3.12.15 (main, Sep 30 2026, 22:04:19) [Clang 21.0.0 (clang-2100.3.34.2)]",
+    "packages": {
+      "numpy": "2.5.2",
+      "scipy": "1.18.1",
+      "pytest": "9.1.1",
+      "pytest-subtests": "0.15.0",
+      "plotly": "7.1.0",
+      "javaobj-py3": "0.6.1"
+    }
+  },
+  "requested_versions": {
+    "numpy": "2.5.2",
+    "scipy": "1.18.1",
+    "pytest": "9.1.1",
+    "pytest-subtests": "0.15.0",
+    "plotly": "7.1.0",
+    "javaobj-py3": "0.6.1"
+  },
+  "dependency_closure": [
+    {
+      "name": "attrs",
+      "version": "26.1.0",
+      "distribution_record_fingerprint": "e5800a26430ca889d13ce20dd968b43ba0736f8f130451e65f5ad02fa45f99ca"
+    },
+    {
+      "name": "iniconfig",
+      "version": "2.3.1",
+      "distribution_record_fingerprint": "23488a13d920e547d8935d08bc26b09356af6bf1c64e616eda79f04167ab913d"
+    },
+    {
+      "name": "javaobj-py3",
+      "version": "0.6.1",
+      "distribution_record_fingerprint": "e7be7a9d6c904f67561d035f9492a1a3d2f3761c8018ce888d43337aae26c4f5"
+    },
+    {
+      "name": "narwhals",
+      "version": "2.27.1",
+      "distribution_record_fingerprint": "2e4f9552a8671ef31aa91650c1c313067662755d1da39fc8ed6f9431b5e74ff5"
+    },
+    {
+      "name": "numpy",
+      "version": "2.5.2",
+      "distribution_record_fingerprint": "d5ff3897adec02a767c4de1027448491441536927d2d380fe620b606b2cd13b2"
+    },
+    {
+      "name": "packaging",
+      "version": "26.3",
+      "distribution_record_fingerprint": "35a8d2b3ec77c0ed2edc4d7d6394b85ece4e8338f230c5fccbe7bec2458aa7c6"
+    },
+    {
+      "name": "plotly",
+      "version": "7.1.0",
+      "distribution_record_fingerprint": "f2bdee0215b079428d76baaa04bb10f44a76f321c1c9989af7e86eae050f8a18"
+    },
+    {
+      "name": "pluggy",
+      "version": "1.7.0",
+      "distribution_record_fingerprint": "bed7b6ea92a9e2c3750e844228e3a6d7fe3e023a88966855292ff18928826c48"
+    },
+    {
+      "name": "Pygments",
+      "version": "2.21.0",
+      "distribution_record_fingerprint": "6d5fb5eaa66af85dc511a3790707b23fb37f607442b2cb24bb7ea08d612d840f"
+    },
+    {
+      "name": "pytest",
+      "version": "9.1.1",
+      "distribution_record_fingerprint": "d7eb7f4801481d16e6aeef69464adce70addb97a3d9fc329a2b8e4bf0bf9ea04"
+    },
+    {
+      "name": "pytest-subtests",
+      "version": "0.15.0",
+      "distribution_record_fingerprint": "66cab76b933da204244014fc367999e2302f4fe135fad332428024c5de5340d9"
+    },
+    {
+      "name": "scipy",
+      "version": "1.18.1",
+      "distribution_record_fingerprint": "ea57c6d9f6a2aaaee78aae1c02dddcdd2a7d4d1698dc40e06ec9f092848557b3"
+    }
+  ],
+  "requirements": "benchmark-python-requirements.txt",
+  "requirements_sha256": "b6970412d98f3231b3ac73fbdcf6e506f7e6bfb307ef8de9e0ee7c6ce1d04537",
+  "distribution_fingerprint_method": "Sorted installed paths and declared RECORD hashes, excluding parent-path entry points and bytecode. This avoids temporary virtualenv shebang differences.",
+  "replay": "Use UV with the same canonical interpreter and this exact requirements file; compare requested versions and dependency record fingerprints before candidate acceptance.",
+  "qualification": "UV uses a temporary dependency overlay; a direct call to its interpreter without the overlay does not reproduce the environment. Ambient package metadata outside this requested closure is not part of the pin file."
+}

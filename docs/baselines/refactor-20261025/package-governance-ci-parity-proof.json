@@ -1,0 +1,10 @@
+{
+  "status": "passed",
+  "recorded_utc": "2026-10-27T07:02:09.870990+00:00",
+  "overlay": "/Volumes/home_tmp/tmp/autoeq-package-governance-overlay-20261026",
+  "files": {
+    ".github/workflows/ci.yml": "de61ffa6fcc3322c8f650bdba3eb74cf4dfa1212be8d3f39907c5e5f25ada937",
+    ".gitea/workflows/ci.yml": "450bbea0e27df7d53ffa207b8faf3f073ebb180670f4e9da0d6eee7b1ae203da"
+  },
+  "adopted": false
+}

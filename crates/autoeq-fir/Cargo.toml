@@ -19,4 +19,5 @@ num-complex = { workspace = true }
 rustfft = { workspace = true }
 
 [dev-dependencies]
+autoeq-measurements = { workspace = true }
 tempfile = { workspace = true }

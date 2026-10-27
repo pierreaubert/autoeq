@@ -1,6 +1,6 @@
 use super::super::SpinoramaApp;
 use crate::types::Colormap;
-use autoeq::DirectivityData;
+use autoeq_measurements::cea2034::DirectivityData;
 use d3rs::gpu3d::{
     Colormap as Surface3DColormap, Surface3DConfig, Surface3DElement, SurfaceData as Surface3DData,
     SurfacePlotType,
@@ -41,7 +41,7 @@ impl SpinoramaApp {
     /// Get SPL at a given angle from directivity curves at a specific frequency.
     /// Interpolates between measured angles.
     pub(super) fn get_spl_at_angle(
-        curves: &[autoeq::cea2034::DirectivityCurve],
+        curves: &[autoeq_measurements::cea2034::DirectivityCurve],
         angle: f64,
         target_freq: f64,
     ) -> f64 {

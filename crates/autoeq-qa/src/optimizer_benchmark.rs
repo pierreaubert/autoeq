@@ -708,27 +708,29 @@ fn run_cell(
     control: &OptimizerRunControl,
 ) -> BenchmarkCell {
     let started = Instant::now();
-    let mut args = autoeq_optim::cli::Args::parse_from(["autoeq"]);
-    args.algo = backend_name.to_string();
-    args.num_filters = manifest.filter_count;
-    args.sample_rate = manifest.sample_rate_hz;
-    args.min_freq = case.declaration.frequency_min_hz;
-    args.max_freq = case.declaration.frequency_max_hz;
-    args.min_q = manifest.filter_limits.min_q;
-    args.max_q = manifest.filter_limits.max_q;
-    args.min_db = manifest.filter_limits.min_gain_db;
-    args.max_db = manifest.filter_limits.max_gain_db;
-    args.population = manifest.population_size;
-    args.maxeval = budget;
-    args.seed = Some(seed);
-    args.refine = false;
-    args.no_parallel = true;
-    args.parallel_threads = 1;
-    args.bo_batch_size = 1;
-    args.bo_initial_samples = 0;
-    args.loss = match case.declaration.domain.as_str() {
-        "headphone" => LossType::HeadphoneFlat,
-        _ => LossType::SpeakerFlat,
+    let args = autoeq_optim::OptimizationConfig {
+        algo: backend_name.to_string(),
+        num_filters: manifest.filter_count,
+        sample_rate: manifest.sample_rate_hz,
+        min_freq: case.declaration.frequency_min_hz,
+        max_freq: case.declaration.frequency_max_hz,
+        min_q: manifest.filter_limits.min_q,
+        max_q: manifest.filter_limits.max_q,
+        min_db: manifest.filter_limits.min_gain_db,
+        max_db: manifest.filter_limits.max_gain_db,
+        population: manifest.population_size,
+        maxeval: budget,
+        seed: Some(seed),
+        refine: false,
+        no_parallel: true,
+        parallel_threads: 1,
+        bo_batch_size: 1,
+        bo_initial_samples: 0,
+        loss: match case.declaration.domain.as_str() {
+            "headphone" => LossType::HeadphoneFlat,
+            _ => LossType::SpeakerFlat,
+        },
+        ..autoeq_optim::OptimizationConfig::default()
     };
     let params = OptimParams::from(&args);
     let (lower, upper) = setup_bounds(&params);

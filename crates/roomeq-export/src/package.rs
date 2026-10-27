@@ -369,7 +369,7 @@ fn rebind_ledger_to_packaged_graph(graph: &mut DspGraph) -> anyhow::Result<()> {
             .and_then(serde_json::Value::as_f64)
             .context("acceptance diagnostics lack their analysis sample rate")?;
         carried.acceptance_evidence = Some(
-            roomeq_engine::quality::graph_acceptance_evidence(graph, sample_rate)
+            roomeq_quality::graph_acceptance_evidence(graph, sample_rate)
                 .map_err(anyhow::Error::msg)?,
         );
     }
@@ -892,7 +892,7 @@ mod tests {
         // Reference rewriting renames a.wav, so the pre-package binding
         // would go stale if it were carried forward unchanged.
         let stale_identity = canonical_graph_identity(&graph);
-        let evidence = roomeq_engine::quality::graph_acceptance_evidence(&graph, 48_000.0).unwrap();
+        let evidence = roomeq_quality::graph_acceptance_evidence(&graph, 48_000.0).unwrap();
         let provisional = DecisionRecord {
             decision_id: "dec-history".to_string(),
             ledger_version: DECISION_LEDGER_VERSION.to_string(),

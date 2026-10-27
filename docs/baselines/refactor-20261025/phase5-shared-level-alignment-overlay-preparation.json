@@ -1,0 +1,298 @@
+{
+  "status": "independent all-target compilation, exact 1204-case inventory, all 1197 enabled cases plus seven unchanged ignores and strict Clippy passed; not measured, accepted or ported",
+  "prepared_utc": "2026-10-26T11:57:26.495459+00:00",
+  "base": "/Volumes/home_tmp/tmp/autoeq-playback-shared-trial-20261026/autoeq",
+  "overlay": "/Volumes/home_tmp/tmp/autoeq-shared-level-alignment-overlay-20261026",
+  "files": {
+    "crates/roomeq-workflow/src/room_optimization.rs": "4accbcea3713c2ef7be162666151c6b53ce7c0201e8c330a5137b3150bc2a56e",
+    "crates/roomeq-workflow/src/room_optimization/misc.rs": "9e555b4e365a099e20b9adacc1cf7357f6adad6234e97282dd99a50da88e15dc",
+    "crates/roomeq-workflow/src/room_optimization/phase/sync.rs": "f99e200e3a2e8321554ab00c11820dee7f45bcd985ac8e386d54455101977aa3",
+    "crates/roomeq-workflow/src/room_optimization/phase/misc.rs": "e7cab12763e17a46bd678f819ab517b8c1db8ee4d7ef3d9b409e8469242be912",
+    "crates/roomeq-workflow/src/room_optimization/reports/role.rs": "d884db8598c05513fbebf7318f5cdcc8ff91b7046f8f5d209eb75e8c47a724b9",
+    "crates/roomeq-workflow/src/room_optimization/reports/types.rs": "d09af306c384405e314defd56a2a91863570dddbe794373cba35c8100fef3a8d",
+    "crates/roomeq-playback/src/level_alignment.rs": "5aaa4ea485ad5e4664b71ec4080fa7a572a6af9aeaa414dabd3dee3c7519ec6f",
+    "crates/roomeq-playback/src/lib.rs": "ea608e9fdd0b25e78de09ce2e0f061e2a60e6295c9a777e264bf4acfd7625ffd"
+  },
+  "items": [
+    {
+      "name": "reported_curve_with_user_preferences",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        1284,
+        1324
+      ],
+      "original_sha256": "9d49fd6b4281bf751611e31094ab744bf4c2fb0fb25f973e6171a774f376ac83",
+      "moved_sha256": "5cc4233cba2b2f6fbff485673059cb4c017208c4e91c1b4fa0260e6b13051793",
+      "doc_prefix": "/// Apply user-preference filters to a reported response.\n",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": true
+    },
+    {
+      "name": "uses_routed_home_cinema_inputs",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        1528,
+        1541
+      ],
+      "original_sha256": "0671941abfa4774efb3b996e87e586cccf39365f07c338224facf358be561162",
+      "moved_sha256": "50ca042f8c01525ef2a565740719a974b506f545410aa1438eb6893e9746fee4",
+      "doc_prefix": "",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": true
+    },
+    {
+      "name": "final_role_level_alignment_gains",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        1566,
+        1712
+      ],
+      "original_sha256": "7ee95d2c9bbeb5e76b4a791dad41366eea3a1623698ac15e9ea666adbe31c0e9",
+      "moved_sha256": "c6e2ab3297405a99ccbe15343a81baef5adfe141df6fd86e4246728fbff6e92d",
+      "doc_prefix": "",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": true
+    },
+    {
+      "name": "insert_final_level_gain",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        1714,
+        1742
+      ],
+      "original_sha256": "21d97494c16b71b6ae9676faba6bc10a040b6d736aa6ab8088c5f06732892bba",
+      "moved_sha256": "870a7f24b887dff99d205c2bf975342fec68c51a91bc00740a2e31f52733a149",
+      "doc_prefix": "/// Insert a final serialized channel level gain.\n",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": false
+    },
+    {
+      "name": "refresh_deployed_inter_channel_deviation",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        1744,
+        1769
+      ],
+      "original_sha256": "250e23af284a8db516f31ab2f54ed7be8406edbe3e50bd747423d0a3eee96b13",
+      "moved_sha256": "1ddd721aa3f3e1e491f7e584234970774e002b4d00c7d34679e74322a5bf319a",
+      "doc_prefix": "/// Refresh deviation using the deployed channel responses.\n",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": false
+    },
+    {
+      "name": "apply_final_channel_level_alignment",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        1771,
+        2114
+      ],
+      "original_sha256": "62447e98b3158f8fec7f0564fe297c7b4aa494237e8e09e0f400ad7222eb70b9",
+      "moved_sha256": "b22f7ace9481608d60a4bb19039292a250d9d564cf54e56c38f3d471791d3765",
+      "doc_prefix": "",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": true,
+      "doc_before_signature": "///\n/// # Errors\n/// Returns failures when the deployed graph cannot be reconstructed or verified.\n"
+    },
+    {
+      "name": "group_delay_budget_ms",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        2876,
+        2887
+      ],
+      "original_sha256": "52571f55fda761a48edfb74b32a8910b7979e3f6b19fc1f819f2dcbbcdf07561",
+      "moved_sha256": "254970865f260a7d05d97ce7570a4d4852a0a1d034ae2278f38b9a9f0611f4f3",
+      "doc_prefix": "",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": true
+    },
+    {
+      "name": "retained_fir_coeffs_by_channel",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization.rs",
+      "original_lines": [
+        2889,
+        2900
+      ],
+      "original_sha256": "443b5fa19476791223caa31474a5921eaf6497cda674425dbeb1580515b234cc",
+      "moved_sha256": "f9d2e742a5e0e8f7a8f2ba7a69fb9646545a2e4454c3f83dd5907597b6462c73",
+      "doc_prefix": "/// Collect retained FIR coefficients by channel.\n",
+      "path_replacements": {
+        "crate::topology::": "crate::routed::"
+      },
+      "exported": true
+    },
+    {
+      "name": "is_subwoofer_channel",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/misc.rs",
+      "original_lines": [
+        33,
+        54
+      ],
+      "original_sha256": "d79a04abe9eee3203d1eb9411f5af4b8f0cd1ebb234a1bc73bec08f40e66fbd4",
+      "moved_sha256": "20d36ef652cb7c064176347196cd80f0ef086430cd0af7e64a38b41fa7cf6755",
+      "doc_prefix": "/// Resolve subwoofer roles from configuration and channel names.\n",
+      "path_replacements": {},
+      "exported": true
+    },
+    {
+      "name": "sync_reported_gain_adjustment",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/phase/sync.rs",
+      "original_lines": [
+        34,
+        63
+      ],
+      "original_sha256": "8e76f27ea9deb9c921f2c0f24f0b7ece6c72385a27f996a955cd4f2a222c3343",
+      "moved_sha256": "6b579a2b059124de446b48d16b38f1cd0c15de0bc86f5bc4e9aecbcab92a0ddf",
+      "doc_prefix": "/// Synchronize gain and polarity across reported responses.\n",
+      "path_replacements": {},
+      "exported": true
+    },
+    {
+      "name": "apply_phase_only_adjustment_to_reported_curve",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/phase/misc.rs",
+      "original_lines": [
+        4,
+        27
+      ],
+      "original_sha256": "831589d3f67755f4ef168537a0b0be9622059b402f37e72889f77c1aba8fcea4",
+      "moved_sha256": "03c31d76373394f90933148da7e34bfbcb9358286b84ea516a711878c6108a8b",
+      "doc_prefix": "",
+      "path_replacements": {},
+      "exported": true
+    },
+    {
+      "name": "role_aware_channel_matching_groups_with_keys",
+      "kind": "function",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/reports/role.rs",
+      "original_lines": [
+        176,
+        211
+      ],
+      "original_sha256": "9728179088ccd71199f94154b4b3995fa5fd06d5f53a95c32821a58a6f759c74",
+      "moved_sha256": "c6b0d064d4ef22274130d3a700039f634300a2ec1e6665e9cff46b477e2096d3",
+      "doc_prefix": "/// Group measured curves by compatible channel roles.\n",
+      "path_replacements": {
+        "channel_matching_role_key(name)": "roomeq_engine::home_cinema::matching_group_key(name)"
+      },
+      "exported": true
+    },
+    {
+      "name": "RoleChannelMatchingGroup",
+      "kind": "struct",
+      "original_path": "crates/roomeq-workflow/src/room_optimization/reports/types.rs",
+      "original_lines": [
+        3,
+        7
+      ],
+      "original_sha256": "07c06206ddded1f6553930b48b17f9b56800ad607119d0f5823045c3223fa17c",
+      "moved_sha256": "c06ac85cc9529cb29b1571024da3f61f56ee4c44a225bc5aa8619f0bee8c0f58",
+      "doc_prefix": "/// Measured curves sharing one compatible channel role.\n",
+      "path_replacements": {},
+      "exported": true
+    }
+  ],
+  "constants": [
+    {
+      "name": "FINAL_CHANNEL_LEVEL_TOLERANCE_DB",
+      "original": "const FINAL_CHANNEL_LEVEL_TOLERANCE_DB: f64 = 0.5;\n",
+      "moved": "/// Preserved final level-alignment budget.\npub const FINAL_CHANNEL_LEVEL_TOLERANCE_DB: f64 = 0.5;\n",
+      "original_sha256": "c0be17c467c83444ccb9016dfe91e60c644fbacb51a466c945cefb6dd7b61e63",
+      "moved_sha256": "2103141e84bbba90f7e41fbedc51a20e917081b486a2962a246ac8016e7bd0d5",
+      "exported": true
+    },
+    {
+      "name": "FINAL_CHANNEL_LEVEL_MAX_TRIM_DB",
+      "original": "const FINAL_CHANNEL_LEVEL_MAX_TRIM_DB: f64 = 2.0;\n",
+      "moved": "/// Preserved final level-alignment budget.\npub const FINAL_CHANNEL_LEVEL_MAX_TRIM_DB: f64 = 2.0;\n",
+      "original_sha256": "fb8407d50e2568242dc90029df074ad9383849b3fc69417bb2ef53abab19c2ab",
+      "moved_sha256": "333c0233e84882f04cf0628e673a2ce80d5e0c143a9438477af9851ecae66e8f",
+      "exported": true
+    },
+    {
+      "name": "FINAL_CHANNEL_LEVEL_MIN_HZ",
+      "original": "const FINAL_CHANNEL_LEVEL_MIN_HZ: f64 = 100.0;\n",
+      "moved": "/// Preserved final level-alignment budget.\nconst FINAL_CHANNEL_LEVEL_MIN_HZ: f64 = 100.0;\n",
+      "original_sha256": "a441f7a6d43815b3393456c8a62deed4441b4cf734696ef2a8b6007254265d68",
+      "moved_sha256": "00f656edc70443d101a72ad82a7c5b8768ed941fe29e2134944e2e43636c3c8e",
+      "exported": false
+    },
+    {
+      "name": "FINAL_CHANNEL_LEVEL_MAX_HZ",
+      "original": "const FINAL_CHANNEL_LEVEL_MAX_HZ: f64 = 1_000.0;\n",
+      "moved": "/// Preserved final level-alignment budget.\nconst FINAL_CHANNEL_LEVEL_MAX_HZ: f64 = 1_000.0;\n",
+      "original_sha256": "5783b0e13757afe4fdaa889690b7470595ae61bd5b6c209f4397351e920aed4f",
+      "moved_sha256": "886d2b189139cac44434eb0723aa502e925f3af84d6c9e4cd898fd9b3489d83e",
+      "exported": false
+    }
+  ],
+  "function_items": 12,
+  "struct_items": 1,
+  "existing_test_bodies_changed": 0,
+  "existing_test_cases_removed": 0,
+  "tests": "Existing workflow tests remain in their current owner and exercise explicit aliases to the shared operations. An actual compiler inventory and affected behavior run are required.",
+  "new_crates": 0,
+  "new_dependencies": 0,
+  "patch": "phase5-shared-level-alignment-overlay.patch",
+  "patch_sha256": "472b17d743da1dec859088499e95c47ce975a5289c73bf35666fd87cecddcf20",
+  "preserved_budgets": [
+    "0.5 dB tolerance",
+    "2.0 dB maximum trim",
+    "100.0 Hz minimum",
+    "1000.0 Hz maximum"
+  ],
+  "identity_receipts": "No measurement loading or ToolIdentity construction moves in this overlay. Future receipt-producing report moves must explicitly forward the application identity.",
+  "performance_acceptance": false,
+  "ported": false,
+  "next_required": [
+    "Compiler and strict Clippy with all targets/features",
+    "Exact workflow case/ignored-state preservation and affected behavior",
+    "Native routed quick lane after full routed/finalization implementation",
+    "Complete remaining routed/finalization candidates and measured accept/reject decisions"
+  ],
+  "new_public_function_items": 10,
+  "new_public_role_types": 1,
+  "new_public_constants": 2,
+  "scope_cleanup": "Two internal operations and two constants stay private. Seven unused private workflow import aliases removed after inspecting all workflow references; function/test bodies unchanged.",
+  "removed_unused_import_aliases": {
+    "crates/roomeq-workflow/src/room_optimization.rs": [
+      "use roomeq_playback::level_alignment::insert_final_level_gain;\n",
+      "use roomeq_playback::level_alignment::refresh_deployed_inter_channel_deviation;\n",
+      "use roomeq_playback::level_alignment::FINAL_CHANNEL_LEVEL_MIN_HZ;\n",
+      "use roomeq_playback::level_alignment::FINAL_CHANNEL_LEVEL_MAX_HZ;\n"
+    ],
+    "crates/roomeq-workflow/src/room_optimization/reports/role.rs": [
+      "use super::types::RoleChannelMatchingGroup;\n"
+    ],
+    "crates/roomeq-workflow/src/room_optimization/reports/types.rs": [
+      "pub(in super::super) use roomeq_playback::level_alignment::RoleChannelMatchingGroup;\n",
+      "use super::super::*;\n"
+    ]
+  },
+  "compiler_required_import_correction": "Restored the original roomeq_model Result alias and AutoeqError; numerical/error bodies unchanged.",
+  "behavior_proof": "phase5-shared-level-alignment-behavior-proof.json"
+}

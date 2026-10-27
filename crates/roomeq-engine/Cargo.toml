@@ -28,6 +28,7 @@ oxiblas-ndarray = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
 roomeq-analysis = { workspace = true }
+roomeq-dsp = { workspace = true }
 roomeq-model = { workspace = true }
 roomeq-quality = { workspace = true }
 rustfft = { workspace = true }

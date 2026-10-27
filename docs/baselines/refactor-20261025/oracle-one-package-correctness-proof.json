@@ -1,0 +1,112 @@
+{
+  "status": "passed",
+  "checked_utc": "2026-10-26T08:15:19.661772+00:00",
+  "library_cases_passed_exactly_once": 23,
+  "rust_oracle_cases": 118,
+  "supplemental_cases": 228,
+  "total_preserved_rust_cases": 369,
+  "rust_oracle_proof": "oracle-one-correctness-proof.json",
+  "supplemental_proof": "oracle-one-supplemental-correctness-proof.json",
+  "library_log": "target/qa/final-live-logs/oracle-one-library-correctness.log",
+  "library_log_sha256": "33b990e3df79fbbe5fad8634bd38f7469b121bb853a4a9d4e9258f68a6982854",
+  "library_identities": [
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::comparison_metric_tests::final_snapshot_captures_deadline_latched_after_optimizer_return"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::comparison_metric_tests::final_snapshot_preserves_simultaneous_cancel_and_deadline_flags"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::comparison_metric_tests::worst_metric_requires_every_selected_score_to_be_finite"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::analytic_fixture_and_objective_use_the_requested_realization_rate"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::changed_spec_refuses_before_any_optimizer_dispatch"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::duplicate_cell_spec_ids_are_rejected"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::generated_matrix_has_exact_declared_cells_and_stage_quotas"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::inventory_declares_the_full_matrix_and_is_deterministic"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::manifest_case_and_seed_duplicates_are_rejected"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::modified_rate_canary_spec_refuses_before_execution"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::multirate_canary_has_a_distinct_complete_inventory_and_ids"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::observer_contracts_preserve_authoritative_failure_records"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::observer_stop_does_not_mask_backend_failure_but_expected_refusal_is_not_failure"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::rate_loader_rejects_a_correction_band_at_nyquist"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark::controlled_cell::tests::typed_failures_precede_deadline_and_typed_timeout_is_retained"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark_sources::tests::changed_or_missing_room_path_is_refused"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark_sources::tests::declared_order_does_not_change_explicit_room_roles"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark_sources::tests::duplicate_role_and_mixed_measurement_directories_are_refused"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark_sources::tests::snapshot_parser_and_hash_use_the_same_original_bytes_after_file_changes"
+    ],
+    [
+      "autoeq-qa",
+      "optimizer_benchmark_sources::tests::unsafe_noncanonical_and_unrecognized_curve_paths_are_refused"
+    ],
+    [
+      "autoeq-qa",
+      "tests::complex_rel_error_is_difference_over_reference"
+    ],
+    [
+      "autoeq-qa",
+      "tests::missing_golden_without_engine_is_none"
+    ],
+    [
+      "autoeq-qa",
+      "tests::rel_error_handles_zeros"
+    ]
+  ],
+  "source_identity_record": "/Volumes/home_tmp/tmp/autoeq-oracle-layout-trial-20261026/source-identities-advisory-fixed.json",
+  "source_unchanged_through_execution": true,
+  "original_physical_test_targets": 10,
+  "combined_layout_physical_test_targets": 5,
+  "performance_acceptance": false,
+  "qualification": "All Rust QA-package identities are preserved across the library, combined oracle, and three retained supplemental targets. This proves correctness and target consolidation only; Python oracles, controlled build/edit/link/memory measurements and a layout decision remain separate."
+}

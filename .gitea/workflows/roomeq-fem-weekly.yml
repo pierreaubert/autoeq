@@ -47,16 +47,16 @@ jobs:
           key: ${{ runner.os }}-cargo-roomeq-fem-weekly-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run registry-driven weekly FEM matrix
-        run: cargo run --release --features qa --bin roomeq-qa-coverage -- --tier weekly
+        run: cargo run -p roomeq-qa --release --bin roomeq-qa-coverage -- --tier weekly
 
       - name: Run blocking scorecard and strict cross-mode quality matrix
-        run: cargo run --release --features qa --bin roomeq-qa-quality -- --jobs 2
+        run: cargo run -p roomeq-qa --release --bin roomeq-qa-quality -- --jobs 2
 
       - name: Run optimizer feature-progression matrix
-        run: cargo run --release --features qa --bin roomeq-qa-features --no-default-features
+        run: cargo run -p roomeq-qa --release --bin roomeq-qa-features --no-default-features
 
       - name: Run retained ignored FEM integration matrix
-        run: cargo test --release -p autoeq --features qa --test roomeq_generated_data_test -- --ignored --test-threads=1
+        run: cargo test --release -p roomeq-qa --test roomeq_generated_data_test -- --ignored --test-threads=1
 
   randomized-quality:
     name: Randomized five-seed quality coverage
@@ -80,4 +80,4 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-roomeq-fuzzer-weekly-${{ hashFiles('**/Cargo.lock') }}
       - name: Run required randomized scenario buckets across five seeds
-        run: cargo run --bin roomeq-fuzzer --release --features qa -- -n 21 --seed 42 --skip-kautz-modal
+        run: cargo run -p roomeq-qa --bin roomeq-fuzzer --release -- -n 21 --seed 42 --skip-kautz-modal

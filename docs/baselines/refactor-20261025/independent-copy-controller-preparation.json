@@ -1,0 +1,19 @@
+{
+  "prepared_utc": "2026-10-26T14:55:51.533220+00:00",
+  "status": "source prepared only; pending all8 product preflights and actual static-prefix execution",
+  "controller": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/run-independent-copy-calibration.py",
+  "controller_sha256": "b4cee33ea47cfac158da18f38e9b1e13d3b2d19ebd471ce194ad5a6ec11c0f5c",
+  "static_preflight_driver": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/preflight-independent-copy-controller.py",
+  "static_driver_sha256": "a615953fc6817136e540cae01ba66d7110a82d8e1b5a087bdfee179ddafad445",
+  "matrix": "controlled-full-matrix-contract-independent-copy.json",
+  "matrix_sha256": "8a8fd4dbb5c73126d38baf61273509b6792945fd9d58f6831007f772cc91735e",
+  "same_expected210_normal_rows": true,
+  "jobs": 8,
+  "repetitions": 3,
+  "diagnostics_counted_separately": true,
+  "independent_runtime_copy_required": true,
+  "no_old_rows_reused": true,
+  "baseline_launched": false,
+  "performance_acceptance": false,
+  "budgets_frozen": false
+}

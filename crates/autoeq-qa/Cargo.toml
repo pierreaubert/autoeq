@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "autoeq-qa"
 version = "0.5.2"
 edition = "2024"
@@ -8,6 +9,9 @@ homepage = "https://github.com/pierreaubert/autoeq"
 repository = "https://github.com/pierreaubert/autoeq"
 keywords = ["qa", "validation", "audio", "wolfram", "dsp"]
 categories = ["science", "development-tools::testing"]
+# Grouped integration targets are declared explicitly below; case
+# files under tests/ must never be rediscovered as standalone targets.
+autotests = false
 
 [lib]
 name = "autoeq_qa"
@@ -16,6 +20,51 @@ path = "src/lib.rs"
 [[bin]]
 name = "optimizer-benchmark"
 path = "src/bin/optimizer_benchmark.rs"
+test = false
+bench = false
+
+# Grouped integration targets (refactor-20261025 Phase 2): the 118
+# manifest case files stay at tests/<module>.rs and compile into six
+# owner-grouped oracle targets; negative controls merge into one
+# target. The case -> target/module mapping lives in
+# validation-manifest.toml and is enforced by qa_contract plus
+# scripts/run_crate_test_matrix.py.
+
+[[test]]
+name = "oracle_core"
+path = "tests/oracle_core.rs"
+
+[[test]]
+name = "oracle_optim"
+path = "tests/oracle_optim.rs"
+
+[[test]]
+name = "oracle_engine"
+path = "tests/oracle_engine.rs"
+
+[[test]]
+name = "oracle_analysis_quality"
+path = "tests/oracle_analysis_quality.rs"
+
+[[test]]
+name = "oracle_workflow"
+path = "tests/oracle_workflow.rs"
+
+[[test]]
+name = "oracle_export"
+path = "tests/oracle_export.rs"
+
+[[test]]
+name = "negative_controls"
+path = "tests/negative_controls.rs"
+
+[[test]]
+name = "qa_contract"
+path = "tests/qa_contract.rs"
+
+[[test]]
+name = "optimizer_benchmark"
+path = "tests/optimizer_benchmark.rs"
 
 [lints]
 workspace = true

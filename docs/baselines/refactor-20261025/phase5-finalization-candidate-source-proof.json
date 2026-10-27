@@ -1,0 +1,759 @@
+{
+  "status": "source-only full finalization implementation, case identities and patch roundtrip verified; compiler/runtime/performance pending",
+  "checked_utc": "2026-10-26T13:17:33.321507+00:00",
+  "preparation_sha256": "914845645d04449fb44ae2f421d6fd81eeec6c1ad340fbf5ba043fb9439474dd",
+  "prerequisite_source_sha256": {
+    "crates/roomeq-playback/src/assessment/seat_replay.rs": "6db92ac939422abc9cdc3c657472a8548f8e063c1838daeab27ca483e104c9f9",
+    "crates/roomeq-playback/src/assessment/seat_replay/correlated_bass.rs": "9f2e85da8b6fc6fdbf5369b0c4f31106ebb692154a428d7880e53d337387e350",
+    "crates/roomeq-playback/src/assessment/seat_replay/intake.rs": "e8f94162262232914a354dbbecd04137f6d85fe53aa0fdee4beb5bda41d7c470",
+    "crates/roomeq-playback/src/assessment/seat_replay/asymmetric.rs": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+    "crates/roomeq-playback/src/assessment/seat_replay/configured_reference.rs": "b0865bc9f19d8ef3b85f199c6ac1caa71131a5aebc43fb6bbfb3fe26a12ea14c",
+    "crates/roomeq-playback/src/assessment/seat_replay/bounded_sum.rs": "ed3c2d00e8fbe50c2a59ef0b6075997232c7feb05617c79135b2c8affbf24690",
+    "crates/roomeq-playback/src/assessment/seat_replay/configured_reference/lfe_target.rs": "b5498481657cf9026a0e2d048c5b4eecd723412efa86b680ac4b7327c27aedcb",
+    "crates/roomeq-playback/src/assessment/room_optimization_result.rs": "11ee5db23435ebd6dd106d4c46600f5205469c98aec7808e75759197d231dc67",
+    "crates/roomeq-playback/src/assessment/reports.rs": "63c8f5080bc44715514eb6cd325ecc384faa40495e91cc9f4b2f7cde24b960ed",
+    "crates/roomeq-playback/src/assessment/reports/role.rs": "51532418b2a4390d316c533af1240aa37b3d18711e6cb050db73f8814e869eb3",
+    "crates/roomeq-playback/src/assessment/reports/types.rs": "7aa5dd9bbc9650ca507af47fcf95e934959dcb499ad320c015a11849cb91bd11",
+    "crates/roomeq-playback/src/assessment/reports/channel.rs": "022c906cbef1919b52c4c446cd4e4351c78389175985805d6846457e9fcc2fc0",
+    "crates/roomeq-playback/src/assessment/reports/build.rs": "2d8e3a88eaf7507dcda7ac1980ff5b85818389f0a3fcb516d07abf0d5bfa4aed",
+    "crates/roomeq-playback/src/assessment/reports/waveform_status.rs": "8d75519b38d39ea8901eae82cb46d7b76fea15ce15b089d1be4d8b2f85e5f255",
+    "crates/roomeq-playback/src/assessment/reports/misc.rs": "ae0e53c8e3a42f6997414209719df324b099a0d9f04eb5d308fade7a1097656c",
+    "crates/roomeq-playback/src/assessment/reports/refresh.rs": "df05a8e3b10f2a0d5eed94de99fe1145813df22cb29560c28b39f47ca0cad526",
+    "crates/roomeq-playback/src/assessment/validation_scorecard.rs": "f63f978e653ea7364aa4477b83cd5e81ccec392ae7127195cff6181e8a6cb45b",
+    "crates/roomeq-workflow/src/room_optimization/finalization.rs": "6f77b284f8e597ae1fa3dbd3cdf730f44f16dcb949ac8ab55b677f2cdc4475c3",
+    "crates/roomeq-playback/src/assessment/configured_acceptance.rs": "1a83adf514e629a7397143a64ae29a0876e49a8efe60e30509b688e7a2da4e24",
+    "crates/roomeq-workflow/src/home_cinema/all.rs": "2d1dccb60022a5eec577688b4519c50b1ced730a4666fa35aa6eb5dfa4670068",
+    "crates/roomeq-playback/src/multiseat_report.rs": "e3cbabb30450004835db772832a863fe96a780f25dd4915775ab0a44ab68e24a",
+    "crates/roomeq-playback/src/assessment.rs": "42dad3d1105ddf17f0eeeffe592eee65f4085f6cd3a344cdff2f74f0e8c2b8bb",
+    "crates/roomeq-playback/src/assessment/types.rs": "8addf990378df93ce46128199fbe855bc47463e21e70f4e285bd5417f5bed263",
+    "crates/roomeq-playback/src/assessment/misc.rs": "bae562af4a84b4c8a6b3fc2d3d9e62d778056c35e5e8a9a3fcdc88de7823bcba",
+    "crates/roomeq-workflow/src/room_optimization/misc.rs": "5502a94ccca1f8656b6f097fbfbe1987fbcffd640a27da0084c2d9966907ef10",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay.rs": "1ce595ee4cb648cf7eaf4ee001fbd0443d87f3824ce96eac5c2392a72fab33b8",
+    "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs": "ab2cbe400b523b203d78d9869246a340c0b574addfac774bddf50e9869198f58",
+    "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs": "7c2111b8838f82da600827e451ff1c980cdcbeef972f515afb8846042c5234ca",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs": "2fdb22ee8bc52120eb349dc5047c4003367c290b4311e19714a4ce4e026ae657",
+    "crates/roomeq-workflow/src/room_optimization/reports.rs": "e8e18e745624d97c11b96b0fc2b37ad739fa355456725290c21dddb96b1bc75f",
+    "crates/roomeq-workflow/src/home_cinema/multi.rs": "248aa7d3f67c8bcd7f14426cd6bdbd46c9d356f02539a24bfe2fa533ec4718e3",
+    "crates/roomeq-playback/Cargo.toml": "ed0af50de696ce8109e692eaa0a408890afd060d9d1fb75491350476665006da",
+    "crates/roomeq-workflow/Cargo.toml": "1bd3abfb443b5e349dddd91303a226754f16f55ca133cfc22d9c0d57abc90c43",
+    "crates/roomeq-playback/src/lib.rs": "3b493dfe17315208747d6f6c932dcd181b8684c2af358188af7b2a0afbbaf84b"
+  },
+  "prerequisite_deleted_files": {
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs": "470d798b6b6e7e7b1dfce46cc6bbb1ce34eeac923239cc5b81f370f4b118fd80",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs": "d60d8115cee2b6f7af3f3fa2209ed06621e7ed320b80b32e4e49f3dd90f1de85",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs": "a981973e93cfc799682a946f16d01bda377a86a5151d86c45b59a6b24e6e427e",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs": "3b6581e4e937518de1a8163f109cc3ecb1fb44e8e45fe4fb689a841e516054fe",
+    "crates/roomeq-workflow/src/room_optimization/reports/role.rs": "d884db8598c05513fbebf7318f5cdcc8ff91b7046f8f5d209eb75e8c47a724b9",
+    "crates/roomeq-workflow/src/room_optimization/reports/types.rs": "d09af306c384405e314defd56a2a91863570dddbe794373cba35c8100fef3a8d",
+    "crates/roomeq-workflow/src/room_optimization/reports/channel.rs": "b8b8bb677e6a660567f61290624c9fd899a4254c96ebe6912e58cbcb0e8caa0e",
+    "crates/roomeq-workflow/src/room_optimization/reports/build.rs": "603c058e4fc549774369f609db0eec12365492ca0a0ff64dda211958f21651bc",
+    "crates/roomeq-workflow/src/room_optimization/reports/waveform_status.rs": "8d75519b38d39ea8901eae82cb46d7b76fea15ce15b089d1be4d8b2f85e5f255",
+    "crates/roomeq-workflow/src/room_optimization/reports/misc.rs": "f9fd3860d1d43d3787a242dd818006681ea86b5138f3d5fb941ec7fbf3ca98ef",
+    "crates/roomeq-workflow/src/room_optimization/reports/refresh.rs": "0d5f85cf19065d26a5a6894ce51228e7c668fc0e35dd0e06943d55d61542aede"
+  },
+  "whole_modules": [
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization/attenuation_budget.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization/physical_drive.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization/physical_drive.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization/joint_drive.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization/sub_output_limiter.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization/sub_output_limiter.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization/kautz.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization/epa.rs",
+      "target": "crates/roomeq-finalization/src/room_optimization/finalization/epa.rs",
+      "exact_numerical_body_and_assertions_after_only_declared_rebindings_and_entry_visibility": true
+    }
+  ],
+  "case_map": [
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::attenuation_budget::tests::structural_fallback_allows_large_sub_cut_and_rechecks_ceiling",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::attenuation_budget::tests::structural_fallback_allows_large_sub_cut_and_rechecks_ceiling",
+      "ignored": false,
+      "original_function_sha256": "5849848f1eb017ba8c9a7ae59bd709ff01dca3216bb883dd66b17d0dce6ce25f",
+      "moved_function_sha256": "314f8be3b151dc1fbab00a8bdb5ddc64c5316bea34f0093a814f202f2592cb3f",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::attenuation_budget::tests::sub_attenuation_preserves_main_transfer_and_enforces_output_ceiling",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::attenuation_budget::tests::sub_attenuation_preserves_main_transfer_and_enforces_output_ceiling",
+      "ignored": false,
+      "original_function_sha256": "13abe8dfd389b9427859018016f12e73339e4e481375f990e3427d945822d956",
+      "moved_function_sha256": "7785e66a8562564f01d8d65364b4d6fd0f5916ef30970291912e214e802639f5",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::attenuation_budget::tests::sub_cut_is_unbounded_but_main_and_common_cuts_are_bounded",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::attenuation_budget::tests::sub_cut_is_unbounded_but_main_and_common_cuts_are_bounded",
+      "ignored": false,
+      "original_function_sha256": "52d3f22436e47378033d955434b369d5348a19bd8e438fec0d0765d9f2b8f3de",
+      "moved_function_sha256": "52d3f22436e47378033d955434b369d5348a19bd8e438fec0d0765d9f2b8f3de",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::configured_fallback_classification_tests::configured_changes_flag_marginal_identity_without_granting_benefit",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::configured_fallback_classification_tests::configured_changes_flag_marginal_identity_without_granting_benefit",
+      "ignored": false,
+      "original_function_sha256": "f7543986eeab14d71786e05943f553a1005c1f8b6822f465449f5a079babb56a",
+      "moved_function_sha256": "f7543986eeab14d71786e05943f553a1005c1f8b6822f465449f5a079babb56a",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::epa::tests::delivered_epa_requires_complete_finite_spectral_evidence",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::epa::tests::delivered_epa_requires_complete_finite_spectral_evidence",
+      "ignored": false,
+      "original_function_sha256": "621462e02eb7f9335ec9193f545c8cc3c30e24852638897f7bcba4341cd19172",
+      "moved_function_sha256": "621462e02eb7f9335ec9193f545c8cc3c30e24852638897f7bcba4341cd19172",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::joint_drive::tests::delay_proposals_use_emitted_controls_not_historical_array_values",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::joint_drive::tests::delay_proposals_use_emitted_controls_not_historical_array_values",
+      "ignored": false,
+      "original_function_sha256": "e1ec25d6f5994bb148f6a11df172ffbb2694a0a5899e18aa7f0192f660d71436",
+      "moved_function_sha256": "e1ec25d6f5994bb148f6a11df172ffbb2694a0a5899e18aa7f0192f660d71436",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::joint_drive::tests::joint_drive_delay_trials_realize_advances_with_nonnegative_physical_delays",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::joint_drive::tests::joint_drive_delay_trials_realize_advances_with_nonnegative_physical_delays",
+      "ignored": false,
+      "original_function_sha256": "7fc1554c827db6cbea774cc521401bc667f7e39668bfaa50e866225d22ce630a",
+      "moved_function_sha256": "7fc1554c827db6cbea774cc521401bc667f7e39668bfaa50e866225d22ce630a",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::joint_drive::tests::joint_drive_gain_delay_trials_keep_both_post_route_controls",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::joint_drive::tests::joint_drive_gain_delay_trials_keep_both_post_route_controls",
+      "ignored": false,
+      "original_function_sha256": "95b7903577233e65946ffa8656bb5ecb2e16083d97b468a10739dc907c555494",
+      "moved_function_sha256": "95b7903577233e65946ffa8656bb5ecb2e16083d97b468a10739dc907c555494",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::joint_drive::tests::joint_drive_pairs_independent_nonreference_gain_trials",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::joint_drive::tests::joint_drive_pairs_independent_nonreference_gain_trials",
+      "ignored": false,
+      "original_function_sha256": "12430c1a55534f93df902da1689c583c41e17f790cfcd0a6df9a3f777362f16b",
+      "moved_function_sha256": "12430c1a55534f93df902da1689c583c41e17f790cfcd0a6df9a3f777362f16b",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::joint_drive::tests::routed_aliases_require_configured_group_order_and_valid_routing",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::joint_drive::tests::routed_aliases_require_configured_group_order_and_valid_routing",
+      "ignored": false,
+      "original_function_sha256": "e0451a73b3ec101d4ad1c2327b0d5e0e659927f25aa5546d3bb23b330bf45756",
+      "moved_function_sha256": "e0451a73b3ec101d4ad1c2327b0d5e0e659927f25aa5546d3bb23b330bf45756",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::kautz::tests::kautz_strength_preserves_aliases_defaults_poles_and_order",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::kautz::tests::kautz_strength_preserves_aliases_defaults_poles_and_order",
+      "ignored": false,
+      "original_function_sha256": "8ec6b59709be3aed044fe6f9c2398908636fcf6eb55fb2ae4c379e63721151e4",
+      "moved_function_sha256": "8ec6b59709be3aed044fe6f9c2398908636fcf6eb55fb2ae4c379e63721151e4",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::kautz::tests::kautz_strength_rejects_malformed_weights_without_partial_mutation",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::kautz::tests::kautz_strength_rejects_malformed_weights_without_partial_mutation",
+      "ignored": false,
+      "original_function_sha256": "68eaa3d48a711b78f6fb4299cd7d1cc4e51b1c9efe0a6d5f7639f6a8fd246df7",
+      "moved_function_sha256": "68eaa3d48a711b78f6fb4299cd7d1cc4e51b1c9efe0a6d5f7639f6a8fd246df7",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::kautz::tests::kautz_strength_scales_legacy_fallback_linear_weight",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::kautz::tests::kautz_strength_scales_legacy_fallback_linear_weight",
+      "ignored": false,
+      "original_function_sha256": "20285c41ef5588ebae195af7e85ba50de1d33ff752d1ff452819e11863534b00",
+      "moved_function_sha256": "20285c41ef5588ebae195af7e85ba50de1d33ff752d1ff452819e11863534b00",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::physical_drive::tests::declared_drive_ranking_is_separate_and_fail_closed",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::physical_drive::tests::declared_drive_ranking_is_separate_and_fail_closed",
+      "ignored": false,
+      "original_function_sha256": "89e297e050bc6ef42fe9ec7cfa232fe741d9f67761e030e80c905adb3a4b8393",
+      "moved_function_sha256": "89e297e050bc6ef42fe9ec7cfa232fe741d9f67761e030e80c905adb3a4b8393",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::physical_drive::tests::physical_requirements_use_amplitude_ratios_and_declared_linear_domain",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::physical_drive::tests::physical_requirements_use_amplitude_ratios_and_declared_linear_domain",
+      "ignored": false,
+      "original_function_sha256": "69db616dd6aef3c60dc4bd79b45b559184462dbcab95d533ed8b5426a9fd9df5",
+      "moved_function_sha256": "69db616dd6aef3c60dc4bd79b45b559184462dbcab95d533ed8b5426a9fd9df5",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::runtime_sub_output_protection_is_terminal_and_keeps_linear_overload_evidence",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::runtime_sub_output_protection_is_terminal_and_keeps_linear_overload_evidence",
+      "ignored": false,
+      "original_function_sha256": "a7ff6fbba0ebaefa1455ec77567ba23cbc4211f00b635e0d25b977b7d1b2040a",
+      "moved_function_sha256": "b496a1bdfdb2d3c6ba67f2044576f43e23f2a79cee367bef184c067b74f59e88",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::aligned_structural_baseline_is_flagged_only_when_every_replay_gate_passes",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::aligned_structural_baseline_is_flagged_only_when_every_replay_gate_passes",
+      "ignored": false,
+      "original_function_sha256": "34608cf4d8c2f16bb049b7e2d016937cf5f76dee4c6b5425273c3e86bcbd814c",
+      "moved_function_sha256": "34608cf4d8c2f16bb049b7e2d016937cf5f76dee4c6b5425273c3e86bcbd814c",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::alignment_strength_preserves_manual_calibration_and_safety_gains",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::alignment_strength_preserves_manual_calibration_and_safety_gains",
+      "ignored": false,
+      "original_function_sha256": "e8e006cc89cacaf316bd7f70fe9fd6d44eb7d9e0c505a4b0a5df18810a3583c4",
+      "moved_function_sha256": "e8e006cc89cacaf316bd7f70fe9fd6d44eb7d9e0c505a4b0a5df18810a3583c4",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::baseline_removes_complete_hybrid_stage_and_preserves_protection",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::baseline_removes_complete_hybrid_stage_and_preserves_protection",
+      "ignored": false,
+      "original_function_sha256": "8be149ff1708c6a4ef4501b3eeead6950929168175f841ccd23840b9f39f77e6",
+      "moved_function_sha256": "8be149ff1708c6a4ef4501b3eeead6950929168175f841ccd23840b9f39f77e6",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::baseline_removes_spectral_level_fit_but_preserves_calibration_and_safety",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::baseline_removes_spectral_level_fit_but_preserves_calibration_and_safety",
+      "ignored": false,
+      "original_function_sha256": "b300d0c9be2c6005c2ee242fda99d7f5072470f64d04a145558de98f9f057fcc",
+      "moved_function_sha256": "b300d0c9be2c6005c2ee242fda99d7f5072470f64d04a145558de98f9f057fcc",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::benefit_floor_rejects_uncertainty_bound_training_seats",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::benefit_floor_rejects_uncertainty_bound_training_seats",
+      "ignored": false,
+      "original_function_sha256": "062b6f1a3b2144a7b0444a623c79b0814dba85f7a1b2c5bbe1fb75cb181e3941",
+      "moved_function_sha256": "062b6f1a3b2144a7b0444a623c79b0814dba85f7a1b2c5bbe1fb75cb181e3941",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::changed_configured_fallback_requires_actual_replay_qualification",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::changed_configured_fallback_requires_actual_replay_qualification",
+      "ignored": false,
+      "original_function_sha256": "14cbd848cfcc597b412cca11a24fd643aa77c19e30ca04614f2294d90ae133b8",
+      "moved_function_sha256": "31d89901a5a5bf4045a4e3c334031c37374ee83b42fa2ce0f07871bfd38a734f",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::configured_fallback_replaces_worse_optimized_structural_controls",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::configured_fallback_replaces_worse_optimized_structural_controls",
+      "ignored": false,
+      "original_function_sha256": "9b0ed7b6769a2fb7bd2d6863a0c079dcfb851c0d628a5bd5130885d7f3c9ad5f",
+      "moved_function_sha256": "9b0ed7b6769a2fb7bd2d6863a0c079dcfb851c0d628a5bd5130885d7f3c9ad5f",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::correction_strength_keeps_retained_biquads_equal_to_emitted_filters",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::correction_strength_keeps_retained_biquads_equal_to_emitted_filters",
+      "ignored": false,
+      "original_function_sha256": "97382a56fecfcbc03b0047c1dfbb11dc5663e40cfa9097d5b14d345b8a6e82f1",
+      "moved_function_sha256": "97382a56fecfcbc03b0047c1dfbb11dc5663e40cfa9097d5b14d345b8a6e82f1",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::correction_strength_scales_kautz_playback_weights_not_db_placeholder",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::correction_strength_scales_kautz_playback_weights_not_db_placeholder",
+      "ignored": false,
+      "original_function_sha256": "ed07aa29185cbb2aa838d7a10aa0ed4b1bd0b4b77e0879daeae856528ffb53f2",
+      "moved_function_sha256": "ed07aa29185cbb2aa838d7a10aa0ed4b1bd0b4b77e0879daeae856528ffb53f2",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::ctc_over_budget_without_acceptance_evidence_fails_closed",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::ctc_over_budget_without_acceptance_evidence_fails_closed",
+      "ignored": false,
+      "original_function_sha256": "b07b19cc5bd63ccebf878db3e608205431aa29d5e4a2dc5d7f2f54285f28d291",
+      "moved_function_sha256": "b07b19cc5bd63ccebf878db3e608205431aa29d5e4a2dc5d7f2f54285f28d291",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::ctc_with_room_seat_captures_goes_through_final_seat_selection",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::ctc_with_room_seat_captures_goes_through_final_seat_selection",
+      "ignored": false,
+      "original_function_sha256": "64e21449755ceb3e663ea52497d8ab08948592daed600d047a9b19c03c9e5dcb",
+      "moved_function_sha256": "64e21449755ceb3e663ea52497d8ab08948592daed600d047a9b19c03c9e5dcb",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::cumulative_eq_refinement_preserves_useful_sub_correction",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::cumulative_eq_refinement_preserves_useful_sub_correction",
+      "ignored": false,
+      "original_function_sha256": "412b2574ba83e9eca2e7c22c15c141497c2dc0ccaf71cf86b8e6a59af4af5d3a",
+      "moved_function_sha256": "94db60e2ffb349c33e44065a653802f32259448a597bbe4f239cd4eae87f4d69",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::declared_gain_allowance_delivers_electrically_bounded_final_graph",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::declared_gain_allowance_delivers_electrically_bounded_final_graph",
+      "ignored": false,
+      "original_function_sha256": "1d874cec842dbc979aab5bbe7742aeae55e5581d5fa479f7dbaf50b8afacbd91",
+      "moved_function_sha256": "9bb93122001c1b5001677408e8663f1c126ca00051c7d47adbe57251fbf17ba9",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::deployed_acceptance_comparison_detects_physical_target_mutation",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::deployed_acceptance_comparison_detects_physical_target_mutation",
+      "ignored": false,
+      "original_function_sha256": "e20e0dea4c8c958fd2bc98bd07740451955b249390aefd29df467a72d92fbf48",
+      "moved_function_sha256": "e20e0dea4c8c958fd2bc98bd07740451955b249390aefd29df467a72d92fbf48",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::diagnostic_capture_refuses_when_selection_stops_before_target_trial",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::diagnostic_capture_refuses_when_selection_stops_before_target_trial",
+      "ignored": false,
+      "original_function_sha256": "9e89e550fd001a143f621c8e7727d85be79d3e6753ab25f0917b644286540f88",
+      "moved_function_sha256": "9e9218128110c63f30da73644cc8139e86b68df5076cbc635071fc3777551adf",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::diagnostic_sink_failure_rolls_back_finalization_result",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::diagnostic_sink_failure_rolls_back_finalization_result",
+      "ignored": false,
+      "original_function_sha256": "b986902f9cd8189238f8f8c9b408e026d59db405178ecc5485c0ec468f7b1b8b",
+      "moved_function_sha256": "07a79692dc3554df135ad19d230256cd25cccf1ee5c7c205561b4ebf293b19f9",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::electrical_attenuation_cannot_hide_in_single_seat_baseline",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::electrical_attenuation_cannot_hide_in_single_seat_baseline",
+      "ignored": false,
+      "original_function_sha256": "068be623d8de173ad12d6c3a59356bb78828be8ce0c5cb5d49db22f6a8add9ff",
+      "moved_function_sha256": "068be623d8de173ad12d6c3a59356bb78828be8ce0c5cb5d49db22f6a8add9ff",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::explicit_over_budget_without_acceptance_evidence_fails_closed",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::explicit_over_budget_without_acceptance_evidence_fails_closed",
+      "ignored": false,
+      "original_function_sha256": "2cf3a5a25d8a7ea6102287eaf2cca2988286d761e2ab3a635e62fa4fc7133583",
+      "moved_function_sha256": "2cf3a5a25d8a7ea6102287eaf2cca2988286d761e2ab3a635e62fa4fc7133583",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::fallback_with_structural_gain_is_safe_and_not_reported_unchanged",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::fallback_with_structural_gain_is_safe_and_not_reported_unchanged",
+      "ignored": false,
+      "original_function_sha256": "86f97d42ada1624ee7bd9fc1bc297263a6a7d30ccce2090827632fe94826ee2c",
+      "moved_function_sha256": "b10d549f9c8b5c12945d7c0516007468a78333982d98a5636b1feb4dcd63b1c9",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::headroom_attenuation_reaches_implicit_lfe_routes",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::headroom_attenuation_reaches_implicit_lfe_routes",
+      "ignored": false,
+      "original_function_sha256": "9b2d2d91c33a4c0798de1403bf296b36b4847068a638ff2e04f41cdfb4fbe7dc",
+      "moved_function_sha256": "aae7754e2f5074a795923ddb510936d40a3ea8084dbe348588d033835b2a2174",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::headroom_attenuation_still_rejects_missing_main_input",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::headroom_attenuation_still_rejects_missing_main_input",
+      "ignored": false,
+      "original_function_sha256": "fa2d489679be0bc1bfea4a5c7b7de1c412150ab407c6b8d2f58af084d3f9ec27",
+      "moved_function_sha256": "fa2d489679be0bc1bfea4a5c7b7de1c412150ab407c6b8d2f58af084d3f9ec27",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::identity_definition_matches_primary_check_thresholds",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::identity_definition_matches_primary_check_thresholds",
+      "ignored": false,
+      "original_function_sha256": "ad550905d44d59e0ea9205ff7fe0eb88a3a823cda666870b5c71da957bdccfc0",
+      "moved_function_sha256": "ad550905d44d59e0ea9205ff7fe0eb88a3a823cda666870b5c71da957bdccfc0",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::identity_phase_exemption_rejects_processing_and_structural_graphs",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::identity_phase_exemption_rejects_processing_and_structural_graphs",
+      "ignored": false,
+      "original_function_sha256": "04080f885c5f125f1e2952b829e7e5c86e7bc96ec4be350fb8769b26dda116d8",
+      "moved_function_sha256": "04080f885c5f125f1e2952b829e7e5c86e7bc96ec4be350fb8769b26dda116d8",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::magnitude_only_identity_fallback_preserves_requested_safety_budgets",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::magnitude_only_identity_fallback_preserves_requested_safety_budgets",
+      "ignored": false,
+      "original_function_sha256": "6cea8f4124edaac2737824f66fdd462f8ab920bd9067b95c501baddd6eaf7403",
+      "moved_function_sha256": "6cea8f4124edaac2737824f66fdd462f8ab920bd9067b95c501baddd6eaf7403",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::non_routed_refresh_preserves_generic_driver_sentinel",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::non_routed_refresh_preserves_generic_driver_sentinel",
+      "ignored": false,
+      "original_function_sha256": "a014e5df79c1d0fe87fd4883b732eb0303102b8918ebd3671fd4cfcb83e15d9e",
+      "moved_function_sha256": "a014e5df79c1d0fe87fd4883b732eb0303102b8918ebd3671fd4cfcb83e15d9e",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::non_routed_refresh_replaces_stale_deployed_cache_before_level_alignment",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::non_routed_refresh_replaces_stale_deployed_cache_before_level_alignment",
+      "ignored": false,
+      "original_function_sha256": "3743a7ca7e202b4c220848bae629a017ae7617c898f97b55507b117bd37cbb6c",
+      "moved_function_sha256": "3743a7ca7e202b4c220848bae629a017ae7617c898f97b55507b117bd37cbb6c",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::opt_in_zero_strength_capture_replays_exact_useful_output_inputs_without_changing_result",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::opt_in_zero_strength_capture_replays_exact_useful_output_inputs_without_changing_result",
+      "ignored": false,
+      "original_function_sha256": "4ce36657f3c44805266301dda3c007f96a4f49bcc0f7aad1af7f1b6ab2b99497",
+      "moved_function_sha256": "66d12ef0e41223332ae9fe5405988dadd93cdacd96cb3f15976561e690654208",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::output_safety_budget_records_over_limit_stage_diagnostic",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::output_safety_budget_records_over_limit_stage_diagnostic",
+      "ignored": false,
+      "original_function_sha256": "dbf50b7feeed98765403d84f73c765870acb19401f9b276fe874b5c0dbc10d96",
+      "moved_function_sha256": "dbf50b7feeed98765403d84f73c765870acb19401f9b276fe874b5c0dbc10d96",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::over_budget_structural_fallback_keeps_diagnostics_but_is_rejected",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::over_budget_structural_fallback_keeps_diagnostics_but_is_rejected",
+      "ignored": false,
+      "original_function_sha256": "d2b3b9b10e06b16eecb0ec0f7769aadefe64979962b5a34e37e1afba41c059cf",
+      "moved_function_sha256": "d2b3b9b10e06b16eecb0ec0f7769aadefe64979962b5a34e37e1afba41c059cf",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::parallel_fir_refinements_reserve_distinct_paths_and_exact_store_bytes",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::parallel_fir_refinements_reserve_distinct_paths_and_exact_store_bytes",
+      "ignored": false,
+      "original_function_sha256": "d87dc838cc9d8d4154e696d8699122163500802c20ccc040527e0bc1b5899906",
+      "moved_function_sha256": "d2b0745168798e9e17a0c98d18745f271b747692b5138d6bf836cd30c9dd2b42",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::physical_drive_spectral_candidate_replays_samples_and_respects_cut_budget",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::physical_drive_spectral_candidate_replays_samples_and_respects_cut_budget",
+      "ignored": false,
+      "original_function_sha256": "48915c439864565f2079df2eb59b459cccba092296418add6d54151013b1fd02",
+      "moved_function_sha256": "48915c439864565f2079df2eb59b459cccba092296418add6d54151013b1fd02",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::playback_hash_ignores_evidence_metadata_but_tracks_executable_graph",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::playback_hash_ignores_evidence_metadata_but_tracks_executable_graph",
+      "ignored": false,
+      "original_function_sha256": "801b3cd0f346e524ec8ddd0de541fbc7173542ede66084b39243c5bc663d3677",
+      "moved_function_sha256": "801b3cd0f346e524ec8ddd0de541fbc7173542ede66084b39243c5bc663d3677",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::published_baseline_replays_identity_and_clears_candidate_evidence",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::published_baseline_replays_identity_and_clears_candidate_evidence",
+      "ignored": false,
+      "original_function_sha256": "b231abcd04499ed7ced91f425c90aa1ed4459089a685313e9304f4bfadaccf5a",
+      "moved_function_sha256": "b231abcd04499ed7ced91f425c90aa1ed4459089a685313e9304f4bfadaccf5a",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::rebuild_keeps_canonical_scorecard_and_scalar_metrics_in_sync",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::rebuild_keeps_canonical_scorecard_and_scalar_metrics_in_sync",
+      "ignored": false,
+      "original_function_sha256": "8b54889529f5bd03440197b9c2910ef4aa182aa3987208ec1bed1edd19c4185d",
+      "moved_function_sha256": "8b54889529f5bd03440197b9c2910ef4aa182aa3987208ec1bed1edd19c4185d",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::refined_fir_registers_exact_replayed_bytes_in_memory_store",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::refined_fir_registers_exact_replayed_bytes_in_memory_store",
+      "ignored": false,
+      "original_function_sha256": "fcf3a68b7156b34c8f61e8ae5943ffde4cb4b291ce76882a4aeb5bc05a7c9543",
+      "moved_function_sha256": "27dadfac035d6c54d9703a16556b8b1e34fea67d4947b5e41de8d34032e44f62",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::refinement_reference_preserves_fractional_delay_without_extra_latency",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::refinement_reference_preserves_fractional_delay_without_extra_latency",
+      "ignored": false,
+      "original_function_sha256": "f417209c149fc4d352c077820878d4525fd24364bee07a41f03ff8f97121668c",
+      "moved_function_sha256": "f417209c149fc4d352c077820878d4525fd24364bee07a41f03ff8f97121668c",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::selection_defers_without_acceptance_evidence",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::selection_defers_without_acceptance_evidence",
+      "ignored": false,
+      "original_function_sha256": "9e18898507d3f80778d5852553ed33200c0d399eb6f727a7c9a17b51b392e101",
+      "moved_function_sha256": "9e18898507d3f80778d5852553ed33200c0d399eb6f727a7c9a17b51b392e101",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::selection_identity_is_unchanged_not_an_accepted_improvement",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::selection_identity_is_unchanged_not_an_accepted_improvement",
+      "ignored": false,
+      "original_function_sha256": "a856e4b621dce0d9f3bf7009fab25547cb2f8657ec95f1c201658a90ee3875a9",
+      "moved_function_sha256": "a856e4b621dce0d9f3bf7009fab25547cb2f8657ec95f1c201658a90ee3875a9",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::selection_reconciles_metrics_after_final_seat_replay",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::selection_reconciles_metrics_after_final_seat_replay",
+      "ignored": false,
+      "original_function_sha256": "688c1a1ccc49d0a7e292a40d796a2fc6961de1cc0feb34ab72350252feb63a38",
+      "moved_function_sha256": "688c1a1ccc49d0a7e292a40d796a2fc6961de1cc0feb34ab72350252feb63a38",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::shared_stereo_eq_is_not_serial_overcorrection",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::shared_stereo_eq_is_not_serial_overcorrection",
+      "ignored": false,
+      "original_function_sha256": "7561eaaf421107e12aa6094af05201a2517a8f5be40bc2aa22c32699ab4f653e",
+      "moved_function_sha256": "7561eaaf421107e12aa6094af05201a2517a8f5be40bc2aa22c32699ab4f653e",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::spectral_headroom_attenuation_handles_implicit_lfe",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::spectral_headroom_attenuation_handles_implicit_lfe",
+      "ignored": false,
+      "original_function_sha256": "bea02e18351d6b15827b3ab1d8252728bdecba025f4093df7745714f6ba8a96c",
+      "moved_function_sha256": "d36037326de0e53762e2834ede24107a1ae15530539f8830b03e51aafddba451",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::subwoofer_output_headroom_does_not_attenuate_main_input",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::subwoofer_output_headroom_does_not_attenuate_main_input",
+      "ignored": false,
+      "original_function_sha256": "9d395f80c8457e678167f3b978bcc52b431e41c19e3e7afacb764ad9a11e06a9",
+      "moved_function_sha256": "6550ed13623671191c560067592ac7ae2231c7a57713d5c461b650149558506e",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::successful_final_replay_supersedes_historical_stage_reversion",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::successful_final_replay_supersedes_historical_stage_reversion",
+      "ignored": false,
+      "original_function_sha256": "53e2817e40bb1b5b1ea2b0a2586f9ca65c00cead3ddd57b22054d6a3e87ed66e",
+      "moved_function_sha256": "53e2817e40bb1b5b1ea2b0a2586f9ca65c00cead3ddd57b22054d6a3e87ed66e",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::temporal_reuse_requires_unchanged_chain_measurement_and_fir",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::temporal_reuse_requires_unchanged_chain_measurement_and_fir",
+      "ignored": false,
+      "original_function_sha256": "74bbb1367547fa5dab88b52ffd237c9bb4f4fd2a5feda1938addeaea54bc1ce4",
+      "moved_function_sha256": "74bbb1367547fa5dab88b52ffd237c9bb4f4fd2a5feda1938addeaea54bc1ce4",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::terminal_alignment_replays_serialized_graph_instead_of_trusting_cached_success",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::terminal_alignment_replays_serialized_graph_instead_of_trusting_cached_success",
+      "ignored": false,
+      "original_function_sha256": "04d41685ca20f8ed1f68250e70e69af148fd971089264ddf3928060ffa76fc29",
+      "moved_function_sha256": "04d41685ca20f8ed1f68250e70e69af148fd971089264ddf3928060ffa76fc29",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::tiny_realized_improvement_returns_unchanged_baseline",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::tiny_realized_improvement_returns_unchanged_baseline",
+      "ignored": false,
+      "original_function_sha256": "0a96b96237a0b772df27459389c1a893432cd732221cf1da8f4065ed9fdb57d7",
+      "moved_function_sha256": "0a96b96237a0b772df27459389c1a893432cd732221cf1da8f4065ed9fdb57d7",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::unknown_output_safety_budget_id_fails_before_selection_search",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::unknown_output_safety_budget_id_fails_before_selection_search",
+      "ignored": false,
+      "original_function_sha256": "db05fad00a43f4feec85df004af78ec6878cd56890858c27f6bdd26de752d2a0",
+      "moved_function_sha256": "db05fad00a43f4feec85df004af78ec6878cd56890858c27f6bdd26de752d2a0",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::finalization::tests::without_post_eq_retains_prior_eq_routing_and_sub_correction",
+      "new_owner": "roomeq-finalization",
+      "new_name": "room_optimization::finalization::tests::without_post_eq_retains_prior_eq_routing_and_sub_correction",
+      "ignored": false,
+      "original_function_sha256": "a0539976b5ff0cf204e13ad2f5fc4efe08f0b56c657c12cb191df39a68133fa9",
+      "moved_function_sha256": "a0539976b5ff0cf204e13ad2f5fc4efe08f0b56c657c12cb191df39a68133fa9",
+      "assertions_budgets_and_seed_logic_unchanged": true
+    }
+  ],
+  "compiler_verified": false,
+  "runtime_verified": false,
+  "performance_acceptance": false,
+  "files": 15,
+  "old_child_files_deleted": 6,
+  "moved_cases": 64,
+  "retained_canonical_cases": 3,
+  "retained_original_ignored_states": 3,
+  "canonical_maxiter_unchanged": 600000,
+  "canonical_seed_sets_and_assertions_byte_identical": true,
+  "normal_dependency_sibling_backedges_absent_in_manifest": true,
+  "optional_test_support_helper_body_unchanged": true,
+  "production_environment_or_include_macros": 0,
+  "fixture_helpers_byte_identical": true,
+  "patch_sha256": "134d0fc24cad660c7bccc35da7042923c84a4d4bbf56ff04177252224a06fb0e",
+  "independent_roundtrip": "/Volumes/home_tmp/tmp/autoeq-finalization-candidate-roundtrip-ji2s6m7u",
+  "predicted_scope_cases": {
+    "workflow": 785,
+    "playback": 324,
+    "finalization": 64,
+    "qa_library": 23,
+    "qa_contract": 8,
+    "total": 1204,
+    "ignored": 7
+  }
+}

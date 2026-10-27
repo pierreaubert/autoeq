@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "roomeq-qa"
 version = "0.5.68"
 edition = "2024"
@@ -11,6 +12,7 @@ homepage = "https://github.com/pierreaubert/autoeq"
 workspace = true
 
 [dependencies]
+autoeq-plot = { workspace = true }
 anyhow = { workspace = true }
 autoeq-core = { workspace = true }
 autoeq-optim = { workspace = true }
@@ -33,6 +35,43 @@ sha2 = { workspace = true }
 tempfile = { workspace = true }
 
 [dev-dependencies]
+serial_test = { workspace = true }
 hound = { workspace = true }
 autoeq-measurements = { workspace = true }
 roomeq-analysis = { workspace = true }
+
+[[bin]]
+name = "roomeq-fuzzer"
+path = "src/bin/roomeq-fuzzer.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "roomeq-qa-quality"
+path = "src/bin/roomeq-qa-quality.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "roomeq-qa-coverage"
+path = "src/bin/roomeq-qa-coverage.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "roomeq-qa-features"
+path = "src/bin/roomeq-qa-features.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "roomeq-qa-synthetic"
+path = "src/bin/roomeq-qa-synthetic.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "roomeq-qa-acoustic"
+path = "src/bin/roomeq-qa-acoustic.rs"
+test = false
+bench = false

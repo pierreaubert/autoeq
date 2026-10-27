@@ -1,0 +1,345 @@
+{
+  "semantics": "Physical source-tree and external-test-tree lines, including blank/comment lines. Embedded unit tests remain in source-tree totals; these are maintenance ratchets, not production-only coverage or performance evidence.",
+  "head": "5aa31fc5afafaefaed3ca97e71751ac046e46a5b",
+  "current": {
+    "autoeq-artifacts": {
+      "source_tree_lines": 920,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 547,
+      "source_files": 2,
+      "external_test_files": 0
+    },
+    "autoeq-cli": {
+      "source_tree_lines": 11794,
+      "external_test_tree_lines": 2452,
+      "largest_source_file_lines": 1530,
+      "source_files": 37,
+      "external_test_files": 12
+    },
+    "autoeq-core": {
+      "source_tree_lines": 11207,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 1038,
+      "source_files": 32,
+      "external_test_files": 0
+    },
+    "autoeq-fir": {
+      "source_tree_lines": 1264,
+      "external_test_tree_lines": 639,
+      "largest_source_file_lines": 1264,
+      "source_files": 1,
+      "external_test_files": 5
+    },
+    "autoeq-measurements": {
+      "source_tree_lines": 12746,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 2068,
+      "source_files": 41,
+      "external_test_files": 0
+    },
+    "autoeq-objective": {
+      "source_tree_lines": 12648,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 1717,
+      "source_files": 65,
+      "external_test_files": 0
+    },
+    "autoeq-optim": {
+      "source_tree_lines": 19893,
+      "external_test_tree_lines": 512,
+      "largest_source_file_lines": 2512,
+      "source_files": 43,
+      "external_test_files": 2
+    },
+    "autoeq-optim-types": {
+      "source_tree_lines": 1228,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 502,
+      "source_files": 5,
+      "external_test_files": 0
+    },
+    "autoeq-plot": {
+      "source_tree_lines": 1527,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 293,
+      "source_files": 14,
+      "external_test_files": 0
+    },
+    "autoeq-qa": {
+      "source_tree_lines": 4474,
+      "external_test_tree_lines": 23186,
+      "largest_source_file_lines": 2028,
+      "source_files": 5,
+      "external_test_files": 147
+    },
+    "autoeq-report-gpui": {
+      "source_tree_lines": 501,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 501,
+      "source_files": 1,
+      "external_test_files": 0
+    },
+    "autoeq-report-wasm": {
+      "source_tree_lines": 25354,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 3833,
+      "source_files": 48,
+      "external_test_files": 0
+    },
+    "autoeq-report-wasm-shell": {
+      "source_tree_lines": 509,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 509,
+      "source_files": 1,
+      "external_test_files": 0
+    },
+    "autoeq-workflow": {
+      "source_tree_lines": 6917,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 2420,
+      "source_files": 13,
+      "external_test_files": 0
+    },
+    "roomeq-analysis": {
+      "source_tree_lines": 12469,
+      "external_test_tree_lines": 112,
+      "largest_source_file_lines": 1082,
+      "source_files": 51,
+      "external_test_files": 1
+    },
+    "roomeq-cli": {
+      "source_tree_lines": 8600,
+      "external_test_tree_lines": 3300,
+      "largest_source_file_lines": 4126,
+      "source_files": 14,
+      "external_test_files": 4
+    },
+    "roomeq-dsp": {
+      "source_tree_lines": 1177,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 685,
+      "source_files": 6,
+      "external_test_files": 0
+    },
+    "roomeq-engine": {
+      "source_tree_lines": 75744,
+      "external_test_tree_lines": 177,
+      "largest_source_file_lines": 7052,
+      "source_files": 185,
+      "external_test_files": 1
+    },
+    "roomeq-export": {
+      "source_tree_lines": 11880,
+      "external_test_tree_lines": 268,
+      "largest_source_file_lines": 1539,
+      "source_files": 27,
+      "external_test_files": 1
+    },
+    "roomeq-model": {
+      "source_tree_lines": 26321,
+      "external_test_tree_lines": 578,
+      "largest_source_file_lines": 3225,
+      "source_files": 97,
+      "external_test_files": 3
+    },
+    "roomeq-qa": {
+      "source_tree_lines": 29554,
+      "external_test_tree_lines": 962,
+      "largest_source_file_lines": 2844,
+      "source_files": 74,
+      "external_test_files": 5
+    },
+    "roomeq-quality": {
+      "source_tree_lines": 22770,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 2544,
+      "source_files": 34,
+      "external_test_files": 0
+    },
+    "roomeq-synthetic": {
+      "source_tree_lines": 4337,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 784,
+      "source_files": 10,
+      "external_test_files": 0
+    },
+    "roomeq-workflow": {
+      "source_tree_lines": 108788,
+      "external_test_tree_lines": 7704,
+      "largest_source_file_lines": 11332,
+      "source_files": 123,
+      "external_test_files": 9
+    }
+  },
+  "limits": {
+    "autoeq-artifacts": {
+      "source_tree_lines": 973,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 574,
+      "source_files": 4,
+      "external_test_files": 2
+    },
+    "autoeq-cli": {
+      "source_tree_lines": 12173,
+      "external_test_tree_lines": 2551,
+      "largest_source_file_lines": 1586,
+      "source_files": 39,
+      "external_test_files": 14
+    },
+    "autoeq-core": {
+      "source_tree_lines": 11569,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 1080,
+      "source_files": 34,
+      "external_test_files": 2
+    },
+    "autoeq-fir": {
+      "source_tree_lines": 1327,
+      "external_test_tree_lines": 684,
+      "largest_source_file_lines": 1312,
+      "source_files": 3,
+      "external_test_files": 7
+    },
+    "autoeq-measurements": {
+      "source_tree_lines": 13154,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 2141,
+      "source_files": 43,
+      "external_test_files": 2
+    },
+    "autoeq-objective": {
+      "source_tree_lines": 13053,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 1779,
+      "source_files": 67,
+      "external_test_files": 2
+    },
+    "autoeq-optim": {
+      "source_tree_lines": 20515,
+      "external_test_tree_lines": 553,
+      "largest_source_file_lines": 2598,
+      "source_files": 45,
+      "external_test_files": 4
+    },
+    "autoeq-optim-types": {
+      "source_tree_lines": 1290,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 528,
+      "source_files": 7,
+      "external_test_files": 2
+    },
+    "autoeq-plot": {
+      "source_tree_lines": 1598,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 312,
+      "source_files": 16,
+      "external_test_files": 2
+    },
+    "autoeq-qa": {
+      "source_tree_lines": 4634,
+      "external_test_tree_lines": 23907,
+      "largest_source_file_lines": 2099,
+      "source_files": 7,
+      "external_test_files": 149
+    },
+    "autoeq-report-gpui": {
+      "source_tree_lines": 542,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 527,
+      "source_files": 3,
+      "external_test_files": 2
+    },
+    "autoeq-report-wasm": {
+      "source_tree_lines": 26140,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 3958,
+      "source_files": 50,
+      "external_test_files": 2
+    },
+    "autoeq-report-wasm-shell": {
+      "source_tree_lines": 550,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 535,
+      "source_files": 3,
+      "external_test_files": 2
+    },
+    "autoeq-workflow": {
+      "source_tree_lines": 7150,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 2503,
+      "source_files": 15,
+      "external_test_files": 2
+    },
+    "roomeq-analysis": {
+      "source_tree_lines": 12869,
+      "external_test_tree_lines": 141,
+      "largest_source_file_lines": 1125,
+      "source_files": 53,
+      "external_test_files": 3
+    },
+    "roomeq-cli": {
+      "source_tree_lines": 8883,
+      "external_test_tree_lines": 3424,
+      "largest_source_file_lines": 4260,
+      "source_files": 16,
+      "external_test_files": 6
+    },
+    "roomeq-dsp": {
+      "source_tree_lines": 1238,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 716,
+      "source_files": 8,
+      "external_test_files": 2
+    },
+    "roomeq-engine": {
+      "source_tree_lines": 78042,
+      "external_test_tree_lines": 208,
+      "largest_source_file_lines": 7274,
+      "source_files": 187,
+      "external_test_files": 3
+    },
+    "roomeq-export": {
+      "source_tree_lines": 12262,
+      "external_test_tree_lines": 302,
+      "largest_source_file_lines": 1596,
+      "source_files": 29,
+      "external_test_files": 3
+    },
+    "roomeq-model": {
+      "source_tree_lines": 27136,
+      "external_test_tree_lines": 621,
+      "largest_source_file_lines": 3332,
+      "source_files": 99,
+      "external_test_files": 5
+    },
+    "roomeq-qa": {
+      "source_tree_lines": 30466,
+      "external_test_tree_lines": 1016,
+      "largest_source_file_lines": 2940,
+      "source_files": 76,
+      "external_test_files": 7
+    },
+    "roomeq-quality": {
+      "source_tree_lines": 23479,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 2631,
+      "source_files": 36,
+      "external_test_files": 2
+    },
+    "roomeq-synthetic": {
+      "source_tree_lines": 4493,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 818,
+      "source_files": 12,
+      "external_test_files": 2
+    },
+    "roomeq-workflow": {
+      "source_tree_lines": 112077,
+      "external_test_tree_lines": 7961,
+      "largest_source_file_lines": 11682,
+      "source_files": 125,
+      "external_test_files": 11
+    }
+  },
+  "headroom": "3% plus 25 lines per tree, 10 lines for largest source file; two files per tree. Ownership review required before raising limits."
+}

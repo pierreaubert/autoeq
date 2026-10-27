@@ -2067,3 +2067,80 @@ fn hybrid_linear_fir_impossible_ceiling_refuses_explicitly() {
         .expect_err("impossible ceiling must refuse");
     assert!(error.to_string().contains("refused"), "{error}");
 }
+
+#[test]
+fn kirkeby_spatial_aligns_reference_to_common_seat_grid() {
+    use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
+    let frequencies = Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 96);
+    let flat = Curve {
+        freq: frequencies.clone(),
+        spl: Array1::from_elem(96, 80.0),
+        ..Default::default()
+    };
+    let peak = Curve {
+        freq: frequencies.clone(),
+        spl: frequencies.mapv(|f| 80.0 + 6.0 * (-((f - 120.0) / 30.0).powi(2)).exp()),
+        ..Default::default()
+    };
+    let representative = Curve {
+        freq: frequencies.clone(),
+        spl: (&peak.spl + &flat.spl) / 2.0,
+        ..Default::default()
+    };
+    // A representative can use a different FFT grid from the per-seat bank.
+    let reference_grid = Array1::logspace(10.0, 20.0_f64.log10(), 500.0_f64.log10(), 127);
+    let representative = autoeq_core::interpolate_log_space(&reference_grid, &representative);
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(representative.clone(), vec![peak, flat], true),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
+    );
+    let mut room_config = config();
+    room_config.optimizer.algorithm = "autoeq:cobyla".into();
+    room_config.optimizer.max_iter = 10;
+    room_config.optimizer.seed = Some(42);
+    let fir_config = room_config.optimizer.fir.as_mut().unwrap();
+    fir_config.phase = "kirkeby".into();
+    fir_config.correct_excess_phase = true;
+    fir_config.taps = 256;
+    room_config.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+        strategy: MultiMeasurementStrategy::WeightedSum,
+        weights: Some(vec![0.5, 0.5]),
+        ..Default::default()
+    });
+    let target = build_target_context("left", &room_config, &representative, None);
+    let features = preprocessed(&representative);
+    let resources = EqResources::default();
+    let result = process_fir_channel(FirChannelRequest {
+        mode: FirChannelMode::Hybrid,
+        channel_name: "left",
+        prepared: &prepared,
+        room_config: &room_config,
+        sample_rate: 48_000.0,
+        target: &target,
+        preprocessed: &features,
+        optimizer: &room_config.optimizer,
+        eq_resources: &resources,
+        sidecar_reference: reference("aligned_spatial_reference.wav"),
+        callback: None,
+    });
+    let result =
+        result.expect("a supported reference must align to the common seat objective grid");
+    let coefficients = result.fir_coeffs.as_ref().unwrap();
+    assert_eq!(coefficients.len(), 256);
+    assert!(coefficients.iter().all(|value| value.is_finite()));
+    let unsupported_grid = Array1::logspace(10.0, 50.0_f64.log10(), 400.0_f64.log10(), 64);
+    let unsupported = autoeq_core::interpolate_log_space(&unsupported_grid, &representative);
+    let refusal =
+        spatial_realized::reference_on_objective_grid(&prepared, &unsupported, &frequencies);
+    let error = match refusal {
+        Err(error) => error,
+        Ok(_) => panic!("reference support must not be extrapolated"),
+    };
+    assert!(
+        error
+            .to_string()
+            .contains("exceeds phase-reference support")
+    );
+}

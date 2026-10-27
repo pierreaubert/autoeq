@@ -1380,9 +1380,11 @@ fn build_invalid_candidate_result(
 }
 
 fn initial_parameters(spec: &BenchmarkCellSpec) -> Result<Vec<f64>, String> {
-    let mut args = autoeq_optim::cli::Args::parse_from(["autoeq"]);
-    args.num_filters = spec.filter_count;
-    args.sample_rate = spec.sample_rate_hz();
+    let mut args = autoeq_optim::OptimizationConfig {
+        num_filters: spec.filter_count,
+        sample_rate: spec.sample_rate_hz(),
+        ..autoeq_optim::OptimizationConfig::default()
+    };
     let [min_frequency, max_frequency] = spec.frequency_bounds_hz();
     let [min_q, max_q] = spec.q_bounds();
     let [min_gain, max_gain] = spec.gain_bounds_db();

@@ -15,6 +15,7 @@ import shlex
 import subprocess
 import sys
 import tarfile
+import tomllib
 from collections import defaultdict
 from typing import Any
 
@@ -56,7 +57,6 @@ def cargo_metadata(repo_root: pathlib.Path) -> dict[str, Any]:
         "metadata",
         "--format-version",
         "1",
-        "--no-deps",
         "--locked",
     ]
     completed = subprocess.run(
@@ -193,9 +193,12 @@ def check_dependency_policy(
             errors.append(
                 f"temporary exception {edge[0]} -> {edge[1]} has invalid dependency kind {kind!r}"
             )
-        if not re.fullmatch(r"WP(?:[1-9]|1[01])", exception.get("remove_by", "")):
+        if not re.fullmatch(
+            r"(?:WP(?:[1-9]|1[01])|phase-[0-6][a-d]?)",
+            exception.get("remove_by", ""),
+        ):
             errors.append(
-                f"temporary exception {edge[0]} -> {edge[1]} has no valid remove_by WP"
+                f"temporary exception {edge[0]} -> {edge[1]} has no valid remove_by WP or refactor phase"
             )
         if not exception.get("reason", "").strip():
             errors.append(
@@ -226,10 +229,21 @@ def check_dependency_policy(
             f"forbidden {kind} workspace edge: {source} -> {destination}"
         )
 
-    for cycle in dependency_cycles(set(packages), edges):
+    cycle_kinds = frozenset({"normal", "build", "dev"}) if policy.get("virtual_workspace") else frozenset({"normal", "build"})
+    cycle_label = "normal/build/dev" if policy.get("virtual_workspace") else "normal/build"
+    for cycle in dependency_cycles(set(packages), edges, cycle_kinds):
         errors.append(
-            "workspace dependency cycle (normal/build): " + " -> ".join(cycle)
+            f"workspace dependency cycle ({cycle_label}): " + " -> ".join(cycle)
         )
+
+    for owner, forbidden in policy.get("forbidden_direct_external_dependencies", {}).items():
+        if owner not in packages:
+            errors.append(f"forbidden dependency policy names absent package: {owner}")
+            continue
+        for dependency in packages[owner]["dependencies"]:
+            kind = dependency.get("kind") or "normal"
+            if kind in {"normal", "build"} and dependency["name"] in forbidden:
+                errors.append(f"forbidden direct {kind} dependency: {owner} -> {dependency['name']}")
 
     required_external = policy.get("required_external_dependencies", {})
     for package_name, required_by_kind in required_external.items():
@@ -256,6 +270,41 @@ def check_dependency_policy(
                         f"required external dependency is missing: {package_name} -> {dependency_name} ({kind})"
                     )
     return edges, errors
+
+
+def check_forbidden_dependency_closures(metadata: dict[str, Any], policy: dict[str, Any]) -> list[str]:
+    """Check resolved normal/build closures, including dependencies outside this workspace."""
+    if policy.get("forbidden_dependency_closures") and not metadata.get("resolve"):
+        return ["resolved dependency graph missing for closure policy"]
+    names = {package["id"]: package["name"] for package in metadata["packages"]}
+    graph = {}
+    for node in metadata.get("resolve", {}).get("nodes", []):
+        graph[node["id"]] = {
+            dependency["pkg"] for dependency in node["deps"]
+            if any(kind.get("kind") in (None, "normal", "build")
+                   for kind in dependency.get("dep_kinds", [{"kind": None}]))
+        }
+    errors = []
+    for owner, forbidden in policy.get("forbidden_dependency_closures", {}).items():
+        roots = [identity for identity, name in names.items() if name == owner]
+        if not roots:
+            errors.append(f"dependency-closure owner absent: {owner}")
+            continue
+        for root in roots:
+            if root not in graph:
+                errors.append(f"resolved dependency node missing: {owner}")
+                continue
+            seen = set()
+            queue = list(graph.get(root, []))
+            while queue:
+                dependency = queue.pop()
+                if dependency in seen:
+                    continue
+                seen.add(dependency)
+                queue.extend(graph.get(dependency, []))
+            for name in sorted(set(forbidden) & {names[identity] for identity in seen}):
+                errors.append(f"forbidden dependency closure: {owner} -> {name}")
+    return errors
 
 
 def rust_files(path: pathlib.Path) -> list[pathlib.Path]:
@@ -298,6 +347,33 @@ def check_metric_budgets(
         value = metrics[name]
         if value > budget:
             errors.append(f"metric increased: {name}={value}, budget={budget}")
+    return errors
+
+
+def owner_size_metrics(package: dict[str, Any]) -> dict[str, int]:
+    root = pathlib.Path(package['manifest_path']).parent
+    source_files = rust_files(root / 'src')
+    source_sizes = [len(path.read_text(encoding='utf-8').splitlines()) for path in source_files]
+    return {'source_tree_lines': sum(source_sizes),
+            'external_test_tree_lines': rust_line_count(root / 'tests'),
+            'largest_source_file_lines': max(source_sizes, default=0),
+            'source_files': len(source_files), 'external_test_files': len(rust_files(root / 'tests'))}
+
+
+def check_owner_size_budgets(packages: dict, policy: dict) -> list[str]:
+    budgets = policy.get('owner_size_budgets')
+    if budgets is None:
+        return []
+    errors = []
+    if set(budgets) != set(packages):
+        errors.append('owner size budgets must cover exactly the workspace packages')
+    for name in sorted(set(packages) & set(budgets)):
+        for metric, value in owner_size_metrics(packages[name]).items():
+            ceiling = budgets[name].get(metric)
+            if not isinstance(ceiling, int) or ceiling < 0:
+                errors.append(f'invalid owner size budget: {name}/{metric}')
+            elif value > ceiling:
+                errors.append(f'owner size increased: {name}/{metric}={value}, budget={ceiling}; review ownership before raising the ratchet')
     return errors
 
 
@@ -364,7 +440,37 @@ def baseline_lines(path: pathlib.Path) -> list[str]:
     ]
 
 
+def check_virtual_workspace(
+    repo_root: pathlib.Path, packages: dict[str, dict[str, Any]], policy: dict[str, Any]
+) -> list[str]:
+    """Prevent facade resurrection and dependencies on terminal packages."""
+    if not policy.get("virtual_workspace"):
+        return []
+    errors = []
+    manifest = tomllib.loads((repo_root / "Cargo.toml").read_text(encoding="utf-8"))
+    retired = policy["root_package"]
+    if "package" in manifest or retired in packages:
+        errors.append(f"retired root package must not exist: {retired}")
+    if rust_files(repo_root / "src"):
+        errors.append("virtual workspace must not contain root Rust facade sources")
+    terminals = set(policy.get("terminal_packages", []))
+    for name in sorted(terminals):
+        if name not in packages:
+            errors.append(f"terminal package absent: {name}")
+        elif packages[name].get("publish") != []:
+            errors.append(f"terminal package must set publish = false: {name}")
+    for name, package in packages.items():
+        if name in terminals:
+            continue
+        for dependency in package["dependencies"]:
+            if dependency["name"] in terminals:
+                errors.append(f"production package depends on terminal: {name} -> {dependency['name']}")
+    return errors
+
+
 def check_public_api(repo_root: pathlib.Path, policy: dict[str, Any]) -> list[str]:
+    if "public_api" not in policy:
+        return [] if policy.get("virtual_workspace") else ["root public API policy missing for packaged workspace"]
     source_path = repo_root / policy["public_api"]["source"]
     baseline_path = repo_root / policy["public_api"]["baseline"]
     actual = extract_root_public_api(source_path.read_text(encoding="utf-8"))
@@ -583,13 +689,79 @@ def policy_from_git(
     return json.loads(shown.stdout, object_pairs_hook=unique_json_object), None
 
 
+def allowed_edge_pairs(policy: dict[str, Any]) -> set[WorkspaceEdge]:
+    by_kind = {
+        "normal": policy.get("allowed_direct_dependencies", {}),
+        "dev": policy.get("allowed_dev_dependencies", {}),
+        "build": policy.get("allowed_build_dependencies", {}),
+    }
+    return {
+        (source, destination, kind)
+        for kind, package_dependencies in by_kind.items()
+        for source, destinations in package_dependencies.items()
+        for destination in destinations
+    }
+
+
+def check_build_lanes(
+    package_names: set[str],
+    default_member_names: list[str],
+    policy: dict[str, Any],
+) -> list[str]:
+    """Validate the `build_lanes` manifest against Cargo metadata.
+
+    Keeps the Justfile lane selections (mirrored in policy), the
+    workspace `default-members`, and real package names in agreement so
+    a lane cannot silently select nothing or a renamed package.
+    """
+    errors: list[str] = []
+    lanes = policy.get("build_lanes")
+    if lanes is None:
+        return errors
+    for lane_name, lane in sorted(lanes.items()):
+        selection = lane.get("selection")
+        lane_packages = lane.get("packages", [])
+        for package_name in lane_packages:
+            if package_name not in package_names:
+                errors.append(
+                    f"build lane {lane_name} names absent package: {package_name}"
+                )
+        if selection == "default-members":
+            if sorted(lane_packages) != sorted(default_member_names):
+                errors.append(
+                    f"build lane {lane_name} packages do not match workspace default-members"
+                )
+        elif selection == "workspace":
+            if lane_packages:
+                errors.append(
+                    f"build lane {lane_name} selects the workspace but also lists packages"
+                )
+        elif selection == "packages":
+            if not lane_packages:
+                errors.append(f"build lane {lane_name} selects no packages")
+        else:
+            errors.append(
+                f"build lane {lane_name} has invalid selection {selection!r}"
+            )
+        if not str(lane.get("cargo_profile", "")).strip():
+            errors.append(f"build lane {lane_name} has no cargo_profile")
+    return errors
+
+
 def check_monotonic_ratchets(
     current: dict[str, Any],
     baseline: dict[str, Any],
     baseline_source_metrics: dict[str, int],
 ) -> list[str]:
     errors: list[str] = []
-    added_exceptions = exception_pairs(current) - exception_pairs(baseline)
+    # Reclassifying a baseline-allowed edge as a temporary exception is a
+    # tightening (the edge gains a removal deadline), not new slack, so
+    # only exceptions for previously forbidden edges fail the ratchet.
+    added_exceptions = (
+        exception_pairs(current)
+        - exception_pairs(baseline)
+        - allowed_edge_pairs(baseline)
+    )
     for source, destination, kind in sorted(added_exceptions):
         kind_suffix = "" if kind == "normal" else f" ({kind})"
         errors.append(
@@ -605,10 +777,27 @@ def check_monotonic_ratchets(
                     f"metric budget increase exceeds measured base source: {name} "
                     f"{baseline_budget} -> {current_budget}, base source {observed_base}"
                 )
+    if baseline.get('owner_size_budgets') and 'owner_size_budgets' not in current:
+        errors.append('owner size ratchets cannot be disabled')
+    for owner, ceilings in baseline.get('owner_size_budgets', {}).items():
+        proposed = current.get('owner_size_budgets', {}).get(owner)
+        if proposed is None:
+            continue  # Exact workspace coverage separately checks active owners.
+        for metric, ceiling in ceilings.items():
+            if proposed.get(metric, ceiling + 1) > ceiling:
+                errors.append(f'owner size budget may only shrink: {owner}/{metric} {ceiling} -> {proposed.get(metric)}')
     return errors
 
 
 def source_metrics_at_git_ref(repo_root: pathlib.Path, reference: str) -> dict[str, int]:
+    tree = subprocess.run(
+        ["git", "ls-tree", "--name-only", reference, "--", "src"],
+        cwd=repo_root, check=False, capture_output=True,
+    )
+    if tree.returncode:
+        raise RuntimeError(f"cannot read source tree at baseline ref {reference!r}")
+    if not tree.stdout.strip():
+        return {name: 0 for name in ("root_rust_loc", "root_roomeq_rust_loc", "root_binary_rust_loc", "root_unit_tests")}
     completed = subprocess.run(
         ["git", "archive", "--format=tar", reference, "src"],
         cwd=repo_root,
@@ -644,6 +833,24 @@ def source_metrics_at_git_ref(repo_root: pathlib.Path, reference: str) -> dict[s
     return metrics
 
 
+def check_explicit_library_exports(packages: dict, policy: dict) -> list[str]:
+    if not policy.get("explicit_library_exports"):
+        return []
+    errors = []
+    library_kinds = {"lib", "rlib", "dylib", "cdylib", "staticlib", "proc-macro"}
+    for name, package in sorted(packages.items()):
+        for target in package.get("targets", []):
+            if not library_kinds.intersection(target["kind"]):
+                continue
+            source = pathlib.Path(target["src_path"])
+            text = source.read_text()
+            for match in re.finditer(r"(?m)^[ \t]*pub\s+use\s+[^;]+;", text):
+                if "*" in match.group():
+                    line = text.count("\n", 0, match.start()) + 1
+                    errors.append(f"wildcard public export in library root: {name} {source.name}:{line}")
+    return errors
+
+
 def print_report(
     packages: dict[str, dict[str, Any]],
     policy: dict[str, Any],
@@ -655,10 +862,9 @@ def print_report(
         f"workspace: {len(packages)} packages, {len(edges)} direct internal edges, "
         f"{len(policy['temporary_exceptions'])} temporary exceptions"
     )
-    print(
-        "normal/build dependency cycles: "
-        f"{len(dependency_cycles(set(packages), edges))}"
-    )
+    cycle_kinds = frozenset({"normal", "build", "dev"}) if policy.get("virtual_workspace") else frozenset({"normal", "build"})
+    cycle_label = "normal/build/dev" if policy.get("virtual_workspace") else "normal/build"
+    print(f"{cycle_label} dependency cycles: {len(dependency_cycles(set(packages), edges, cycle_kinds))}")
     print("temporary dependency exceptions:")
     for exception in policy["temporary_exceptions"]:
         print(
@@ -697,12 +903,23 @@ def main() -> int:
     metadata = cargo_metadata(REPO_ROOT)
     packages = workspace_packages(metadata)
     edges, errors = check_dependency_policy(packages, policy)
+    errors.extend(check_forbidden_dependency_closures(metadata, policy))
+    default_member_ids = set(metadata.get("workspace_default_members", []))
+    default_member_names = sorted(
+        package["name"]
+        for package in packages.values()
+        if package["id"] in default_member_ids
+    )
+    errors.extend(check_build_lanes(set(packages), default_member_names, policy))
     metrics = root_metrics(REPO_ROOT)
     errors.extend(check_metric_budgets(metrics, policy))
+    errors.extend(check_owner_size_budgets(packages, policy))
     errors.extend(check_focused_tests(packages, policy))
     errors.extend(check_crate_documentation(packages))
     errors.extend(check_workspace_safety(REPO_ROOT, packages))
+    errors.extend(check_virtual_workspace(REPO_ROOT, packages, policy))
     errors.extend(check_public_api(REPO_ROOT, policy))
+    errors.extend(check_explicit_library_exports(packages, policy))
     errors.extend(check_schema_baseline_files(REPO_ROOT, policy))
 
     duplicates = duplicate_source_ownership(REPO_ROOT)

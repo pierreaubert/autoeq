@@ -1,12 +1,12 @@
 //! Shared optimization parameters used by both AutoEQ CLI and RoomEQ.
 //!
 //! [`OptimParams`] decouples the optimization infrastructure from the CLI
-//! argument struct (`cli::Args`), allowing roomeq to use the same
-//! optimization functions without constructing fake `Args` values.
+//! argument struct (`autoeq_optim_types::OptimizationConfig`), allowing roomeq to use the same
+//! optimization functions without constructing fake `OptimizationConfig` values.
 
-use crate::cli::Args;
 use crate::loss::LossType;
 use crate::optim::SmoothnessPenaltyConfig;
+use autoeq_optim_types::OptimizationConfig;
 
 pub use autoeq_core::PeqModel;
 
@@ -40,12 +40,12 @@ pub struct FrequencyQPolicy {
     pub high_max_q: Option<f64>,
 }
 
-/// Optimization-relevant parameters extracted from either `cli::Args`
+/// Optimization-relevant parameters extracted from either `autoeq_optim_types::OptimizationConfig`
 /// (for the autoeq binary) or `roomeq::OptimizerConfig` (for room EQ).
 ///
 /// The optimization functions (`setup_objective_data`, `setup_bounds`,
 /// `initial_guess`, `perform_optimization`, etc.) accept this struct
-/// instead of the full CLI `Args`.
+/// instead of the full CLI `OptimizationConfig`.
 #[derive(Debug, Clone)]
 pub struct OptimParams {
     // -- Filter topology --
@@ -107,8 +107,8 @@ pub struct OptimParams {
     pub quiet: bool,
 }
 
-impl From<&Args> for OptimParams {
-    fn from(args: &Args) -> Self {
+impl From<&OptimizationConfig> for OptimParams {
+    fn from(args: &OptimizationConfig) -> Self {
         Self {
             num_filters: args.num_filters,
             peq_model: args.effective_peq_model(),

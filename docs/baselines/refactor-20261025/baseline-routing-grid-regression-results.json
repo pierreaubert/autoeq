@@ -1,0 +1,22 @@
+{
+  "status": "three runtime red-to-green regressions",
+  "before": "baseline-routing-grid-regressions-red.log",
+  "after": "baseline-routing-grid-regressions-green.log",
+  "before_exit": 100,
+  "after_exit": 0,
+  "test_count": 3,
+  "broader_validation": {
+    "enabled_library_tests_passed": 2147,
+    "preexisting_ignored": 9,
+    "strict_clippy": "passed",
+    "final_test_placement": "covered by broad run"
+  },
+  "spatial_green": "Full historical supported-grid and unsupported-grid refusal assertions pass",
+  "followup": "Moved restored LFE test beside related routing tests after focused green run; full library validation will cover final placement.",
+  "local_commits": [
+    "230ad047",
+    "81599b9a",
+    "16953d50"
+  ],
+  "port": "All substantive hunks ported; two whitespace-only deletions already present were omitted; full refactor validation running."
+}

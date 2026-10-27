@@ -23,7 +23,6 @@ mod conformance;
 mod evidence;
 mod identity;
 mod make;
-mod realized_transfer;
 mod roundtrip;
 
 #[test]

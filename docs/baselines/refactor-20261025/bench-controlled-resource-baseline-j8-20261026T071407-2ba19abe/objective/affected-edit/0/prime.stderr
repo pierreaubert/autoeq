@@ -1,0 +1,163 @@
+   Compiling unicode-ident v1.0.27
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling prettyplease v0.2.37
+   Compiling synstructure v0.14.0
+   Compiling serde_derive_internals v0.30.0
+   Compiling bindgen v0.72.1
+   Compiling zerocopy-derive v0.8.63
+   Compiling tracing-attributes v0.1.31
+   Compiling pin-project-internal v1.1.13
+   Compiling sotf-derive_more-impl v2.1.2 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling profiling-procmacros v1.0.18
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling zerofrom-derive v0.1.8
+   Compiling bytemuck v1.25.2
+   Compiling num-complex v0.4.6
+   Compiling yoke-derive v0.8.4
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+   Compiling thiserror-impl v2.0.21
+   Compiling serde v1.0.229
+   Compiling zerocopy v0.8.63
+   Compiling futures-macro v0.3.34
+   Compiling ndarray v0.17.2
+   Compiling zerofrom v0.1.8
+   Compiling clap_derive v4.6.7
+   Compiling ref-cast-impl v1.0.27
+   Compiling schemars_derive v1.2.3
+   Compiling rustfft v6.4.1
+   Compiling tracing v0.1.44
+   Compiling ref-cast v1.0.27
+   Compiling tokio-macros v2.7.2
+   Compiling ppv-lite86 v0.2.21
+   Compiling oxiblas-core v0.2.2
+   Compiling wide v1.7.1
+   Compiling oxiblas-matrix v0.2.2
+   Compiling oxiblas-blas v0.2.2
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling tinystr v0.8.4
+   Compiling futures-util v0.3.34
+   Compiling icu_locale_core v2.3.0
+   Compiling thiserror v2.0.21
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling icu_provider v2.3.1
+   Compiling icu_collections v2.3.0
+   Compiling math-iir-fir v0.5.27 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/math-audio/crates/math-iir-fir)
+   Compiling icu_normalizer v2.3.0
+   Compiling icu_properties v2.3.0
+   Compiling simba v0.10.2
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling oxiblas-lapack v0.2.2
+   Compiling tokio v1.53.3
+   Compiling url v2.5.8
+   Compiling sotf-nalgebra v0.35.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling clap v4.6.7
+   Compiling oxiblas-ndarray v0.2.2
+   Compiling tokio-util v0.7.20
+   Compiling h2 v0.4.20
+   Compiling schemars v1.2.3
+   Compiling tokio-rustls v0.26.6
+   Compiling tower v0.5.3
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-core)
+   Compiling tower-http v0.6.11
+   Compiling rand_chacha v0.10.0
+   Compiling hyper v1.12.0
+   Compiling realfft v3.5.0
+   Compiling math-dsp v0.5.35 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/math-audio/crates/math-dsp)
+   Compiling hyper-util v0.1.21
+   Compiling hyper-rustls v0.27.10
+   Compiling roomeq-model v0.5.15 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-model)
+   Compiling reqwest v0.13.5
+   Compiling math-test-functions v0.5.4 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/math-audio/crates/math-test-functions)
+   Compiling async-trait v0.1.92
+   Compiling sotf-metaheuristics-nature v10.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling math-optimisation v0.5.15 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/math-audio/crates/math-optimisation)
+   Compiling chrono v0.4.45
+   Compiling half v2.7.1
+   Compiling foreign-types-macros v0.2.4
+   Compiling math-rir v0.5.13 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/math-audio/crates/math-rir)
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling autoeq-fir v0.5.3 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-fir)
+   Compiling futures-executor v0.3.34
+   Compiling font-types v0.12.7
+   Compiling read-fonts v0.41.0
+   Compiling foreign-types v0.5.0
+   Compiling toml_edit v0.22.27
+   Compiling roomeq-analysis v0.5.10 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-analysis)
+   Compiling roomeq-quality v0.5.62 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-quality)
+   Compiling toml v0.8.23
+   Compiling bincode v2.0.1
+   Compiling tiny-skia-path v0.12.0
+   Compiling sofa-reader v0.2.1 (https://github.com/pierreaubert/sofa-reader#c2ba490d)
+   Compiling cbindgen v0.28.0
+   Compiling skrifa v0.44.0
+   Compiling harfrust v0.12.0
+   Compiling autoeq-measurements v0.5.4 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-measurements)
+   Compiling metal v0.33.0
+   Compiling autoeq-optim v0.5.64 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-optim)
+   Compiling core-graphics v0.24.0
+   Compiling futures v0.3.34
+   Compiling autoeq-artifacts v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-artifacts)
+   Compiling rand_chacha v0.9.0
+   Compiling sotf-media v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling rand v0.9.5
+   Compiling roomeq-engine v0.5.84 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-engine)
+   Compiling core-video v0.5.2
+   Compiling usvg v0.48.1
+   Compiling tiny-skia v0.12.0
+   Compiling sotf-gpui-toolkit-perf v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling tiff v0.11.3
+   Compiling sotf-derive_more v2.1.2 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling roomeq-export v0.5.9 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-export)
+   Compiling serde_urlencoded v0.7.1
+   Compiling pin-project v1.1.13
+   Compiling rgb v0.8.53
+   Compiling stacksafe-macro v1.0.3
+   Compiling strum_macros v0.28.0
+   Compiling sotf-derive_refineable v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling resvg v0.48.1
+   Compiling stacksafe v1.0.3
+   Compiling futures-concurrency v7.7.1
+   Compiling sotf-gpui-toolkit-http-client v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-refineable v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling roomeq-workflow v0.5.36 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-workflow)
+   Compiling image v0.25.10
+   Compiling sotf-gpui-toolkit-util-macros v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-gpui-toolkit-scheduler v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-gpui-toolkit-gpui v0.2.3 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling cocoa v0.26.0
+   Compiling core-text v21.0.0
+   Compiling sotf-gpui_shared_string v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-gpui-toolkit-sum-tree v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling profiling v1.0.18
+   Compiling sotf-gpui-toolkit-gpui-macros v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling autoeq-workflow v0.5.6 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-workflow)
+   Compiling roomeq-synthetic v0.5.25 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-synthetic)
+   Compiling serial_test_derive v4.0.1
+   Compiling ciborium-ll v0.2.2
+   Compiling ciborium v0.2.2
+   Compiling tinytemplate v1.2.1
+   Compiling criterion v0.8.2
+   Compiling strum v0.28.0
+   Compiling roomeq-cli v0.5.9 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-cli)
+   Compiling roomeq-qa v0.5.68 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/roomeq-qa)
+   Compiling serial_test v4.0.1
+   Compiling gpui-design v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling gpui-d3rs v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-report-wasm)
+   Compiling autoeq-plot v0.5.5 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-plot)
+   Compiling autoeq-cli v0.5.3 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-cli)
+   Compiling autoeq-qa v0.5.2 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq/crates/autoeq-qa)
+   Compiling autoeq v0.5.78 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/source/autoeq)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-ufr0oev_/targets/primed/0/test/affected/cargo-timings/cargo-timing-20261026T062213154Z-939484ed383169c0.html
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 53s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

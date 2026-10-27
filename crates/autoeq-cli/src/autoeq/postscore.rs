@@ -58,7 +58,7 @@ pub(super) struct PostOptMetrics {
 /// Compute post-optimization metrics and compare with pre-optimization
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn compute_post_optimization_metrics(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     objective_data: &autoeq::optim::ObjectiveData,
     use_cea: bool,
     opt_params: &[f64],
@@ -128,7 +128,7 @@ pub(super) async fn compute_post_optimization_metrics(
 
 /// Print pre and post optimization scores
 pub(super) fn print_optimization_scores(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
     post: &PostOptMetrics,
     pre_objective: Option<f64>,
     post_objective: Option<f64>,

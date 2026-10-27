@@ -1,11 +1,11 @@
-//! Program-version handling for the root-package command launchers.
+//! Program-version handling for the product command launchers.
 
 use clap::Parser;
 use std::ffi::OsString;
 
 /// Print the AutoEQ executable version when the shared CLI flag is present.
 ///
-/// The version is supplied by the root-package launcher so it identifies the
+/// The version is supplied by the product launcher so it identifies the
 /// installed executable rather than this adapter crate or the optimizer crate.
 pub fn print_autoeq_version_if_requested(version: &str) -> bool {
     if !autoeq_version_requested(std::env::args_os()) {
@@ -25,7 +25,7 @@ pub fn print_benchmark_version_if_requested(version: &str) -> bool {
 }
 
 fn autoeq_version_requested(args: impl IntoIterator<Item = OsString>) -> bool {
-    autoeq::cli::Args::try_parse_from(args).is_ok_and(|parsed| parsed.program_version)
+    crate::cli::Args::try_parse_from(args).is_ok_and(|parsed| parsed.program_version)
 }
 
 fn benchmark_version_requested(args: impl IntoIterator<Item = OsString>) -> bool {

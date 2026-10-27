@@ -1,0 +1,31 @@
+{
+  "autoeq_golden_tests": "autoeq-cli",
+  "autoeq_integration_test": "autoeq-cli",
+  "broadband_matching_test": "roomeq-cli",
+  "channel_matching_defaults_test": "roomeq-model",
+  "cli_de_parameters": "autoeq-cli",
+  "fir_tests": "autoeq-fir",
+  "multi_measurement_test": "roomeq-cli",
+  "multiseat_continuous_area_test": "roomeq-engine",
+  "option_precedence_test": "roomeq-model",
+  "packaging_excludes": {
+    "retired": "Root package removed; terminal publication boundaries are checked by partition policy."
+  },
+  "peq_model_bounds": "autoeq-cli",
+  "product_renderer_capabilities": "autoeq-cli",
+  "property_tests": "autoeq-cli",
+  "public_api_workflows": "autoeq-cli",
+  "roomeq_admission_correction": "roomeq-workflow",
+  "roomeq_capture_verification": "roomeq-cli",
+  "roomeq_generated_data_test": "roomeq-qa",
+  "roomeq_integration_test": "roomeq-cli",
+  "roomeq_pipeline_test": "roomeq-workflow",
+  "roomeq_supporting_source": "roomeq-workflow",
+  "spatial_robustness_bootstrap_test": "roomeq-analysis",
+  "system_config_test": "roomeq-workflow",
+  "test_free_filters": "autoeq-cli",
+  "test_mh_callback": "autoeq-cli",
+  "validator_warnings_test": "roomeq-model",
+  "workflow_feature_parity_test": "roomeq-workflow",
+  "workflow_test": "roomeq-workflow"
+}

@@ -895,7 +895,7 @@ src/roomeq/                   # compatibility re-exports only
   every major configuration family documented.
 * [`ROOMEQ_OUTPUT_FORMAT.md`](ROOMEQ_OUTPUT_FORMAT.md) — full output guide for
   `DspChainOutput` consumers.
-* [`INPUT_FORMAT.md`](../src/bin/roomeq/INPUT_FORMAT.md) — focused examples for
+* [`INPUT_FORMAT.md`](../crates/roomeq-cli/schemas/INPUT_FORMAT.md) — focused examples for
   newly added configuration blocks.
 * [`REFERENCES.md`](REFERENCES.md) — references for every cited algorithm.
 * `crates/math-audio/math-iir-fir/REFERENCES.md` — RBJ cookbook,

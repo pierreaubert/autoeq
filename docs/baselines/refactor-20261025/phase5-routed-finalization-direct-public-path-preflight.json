@@ -1,0 +1,155 @@
+{
+  "verified_utc": "2026-10-26T14:17:39.328080+00:00",
+  "scope": "Only fully-qualified shared references matched by the listed production namespace patterns. Curly imports, reexports, associated types, generics and Rust type/feature resolution require actual compiler checks.",
+  "references": [
+    {
+      "reference": "roomeq_playback::assessment::configured_acceptance::configured_acceptance_graph",
+      "public_definition": "crates/roomeq-playback/src/assessment/configured_acceptance.rs",
+      "definition_file_sha256": "1a83adf514e629a7397143a64ae29a0876e49a8efe60e30509b688e7a2da4e24"
+    },
+    {
+      "reference": "roomeq_playback::assessment::configured_acceptance::refresh_configured_native_acceptance",
+      "public_definition": "crates/roomeq-playback/src/assessment/configured_acceptance.rs",
+      "definition_file_sha256": "1a83adf514e629a7397143a64ae29a0876e49a8efe60e30509b688e7a2da4e24"
+    },
+    {
+      "reference": "roomeq_playback::assessment::room_optimization_result::evaluate_preserved_target_passband",
+      "public_definition": "crates/roomeq-playback/src/assessment/room_optimization_result.rs",
+      "definition_file_sha256": "11ee5db23435ebd6dd106d4c46600f5205469c98aec7808e75759197d231dc67"
+    },
+    {
+      "reference": "roomeq_playback::assessment::room_optimization_result::remove_routing_transfer",
+      "public_definition": "crates/roomeq-playback/src/assessment/room_optimization_result.rs",
+      "definition_file_sha256": "11ee5db23435ebd6dd106d4c46600f5205469c98aec7808e75759197d231dc67"
+    },
+    {
+      "reference": "roomeq_playback::assessment::seat_replay::crossover_phase_advisories",
+      "public_definition": "crates/roomeq-playback/src/assessment/seat_replay.rs",
+      "definition_file_sha256": "6db92ac939422abc9cdc3c657472a8548f8e063c1838daeab27ca483e104c9f9"
+    },
+    {
+      "reference": "roomeq_playback::chain::apply_channel_dsp_chain_to_curve",
+      "public_definition": "crates/roomeq-playback/src/chain.rs",
+      "definition_file_sha256": "c4ffff23c8acd2b11c46cad3cefdf19ddcb9416cb2fea227aa6b57f0d370eba3"
+    },
+    {
+      "reference": "roomeq_playback::chain::apply_channel_dsp_chain_to_curve_with_embedded_irs",
+      "public_definition": "crates/roomeq-playback/src/chain.rs",
+      "definition_file_sha256": "c4ffff23c8acd2b11c46cad3cefdf19ddcb9416cb2fea227aa6b57f0d370eba3"
+    },
+    {
+      "reference": "roomeq_playback::eq_resources::prepare_eq_resources",
+      "public_definition": "crates/roomeq-playback/src/eq_resources.rs",
+      "definition_file_sha256": "aaa840025efe427c296401dc9ca79bdafcae11003220b242a9d49eeef8c46d47"
+    },
+    {
+      "reference": "roomeq_playback::evidence_intake::crossover_timing_reference",
+      "public_definition": "crates/roomeq-playback/src/evidence_intake.rs",
+      "definition_file_sha256": "310310c831b407c14e8af94d194805c47bd54b108033fb42488e021b505675d8"
+    },
+    {
+      "reference": "roomeq_playback::final_resources::bind_final_convolution_artifacts",
+      "public_definition": "crates/roomeq-playback/src/final_resources.rs",
+      "definition_file_sha256": "feadea5c818cebfc314074f1cd85250c9495de824f8ac5ab336426a3cf395aae"
+    },
+    {
+      "reference": "roomeq_playback::group_measurements::load_multisub_seat_measurements_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/group_measurements.rs",
+      "definition_file_sha256": "19eb8b9c03b26fc949c19a0232ca8bc87fbd74787be9149ffe0e9b0423d7234a"
+    },
+    {
+      "reference": "roomeq_playback::group_measurements::load_primary_measurements_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/group_measurements.rs",
+      "definition_file_sha256": "19eb8b9c03b26fc949c19a0232ca8bc87fbd74787be9149ffe0e9b0423d7234a"
+    },
+    {
+      "reference": "roomeq_playback::group_measurements::multisub_reference_scope",
+      "public_definition": "crates/roomeq-playback/src/group_measurements.rs",
+      "definition_file_sha256": "19eb8b9c03b26fc949c19a0232ca8bc87fbd74787be9149ffe0e9b0423d7234a"
+    },
+    {
+      "reference": "roomeq_playback::group_measurements::routed_seat_identity_order",
+      "public_definition": "crates/roomeq-playback/src/group_measurements.rs",
+      "definition_file_sha256": "19eb8b9c03b26fc949c19a0232ca8bc87fbd74787be9149ffe0e9b0423d7234a"
+    },
+    {
+      "reference": "roomeq_playback::measurement::load_source_individual_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/measurement.rs",
+      "definition_file_sha256": "ea1ce8b4915d9a9ec76a0b29ebc7c329d0f6b4095032e19cd0d1c9e90bf70868"
+    },
+    {
+      "reference": "roomeq_playback::measurement::load_source_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/measurement.rs",
+      "definition_file_sha256": "ea1ce8b4915d9a9ec76a0b29ebc7c329d0f6b4095032e19cd0d1c9e90bf70868"
+    },
+    {
+      "reference": "roomeq_playback::multiseat_channel::all_channel_multiseat_acceptance_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/multiseat_channel.rs",
+      "definition_file_sha256": "792be84704362af5e1b05fec40f6ca6d86258086b8f2e06d6071d6d2c7adf49d"
+    },
+    {
+      "reference": "roomeq_playback::multiseat_channel::derive_all_channel_multiseat_config_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/multiseat_channel.rs",
+      "definition_file_sha256": "792be84704362af5e1b05fec40f6ca6d86258086b8f2e06d6071d6d2c7adf49d"
+    },
+    {
+      "reference": "roomeq_playback::multiseat_report::multi_seat_correction_report_with_frequency_samples",
+      "public_definition": "crates/roomeq-playback/src/multiseat_report.rs",
+      "definition_file_sha256": "e3cbabb30450004835db772832a863fe96a780f25dd4915775ab0a44ab68e24a"
+    },
+    {
+      "reference": "roomeq_playback::multiseat_report::multi_seat_coverage",
+      "public_definition": "crates/roomeq-playback/src/multiseat_report.rs",
+      "definition_file_sha256": "e3cbabb30450004835db772832a863fe96a780f25dd4915775ab0a44ab68e24a"
+    },
+    {
+      "reference": "roomeq_playback::resource::checked_sample_rate",
+      "public_definition": "crates/roomeq-playback/src/resource.rs",
+      "definition_file_sha256": "4da36867102d33a35cc1af7bb46721f5f8160cb22987355143b8bf28b0fb1b64"
+    },
+    {
+      "reference": "roomeq_playback::resource::read_wav_channels_f64",
+      "public_definition": "crates/roomeq-playback/src/resource.rs",
+      "definition_file_sha256": "4da36867102d33a35cc1af7bb46721f5f8160cb22987355143b8bf28b0fb1b64"
+    },
+    {
+      "reference": "roomeq_playback::routed::CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    },
+    {
+      "reference": "roomeq_playback::routed::RoleSpliceOutcome",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    },
+    {
+      "reference": "roomeq_playback::routed::collect_routed_splice_outcomes",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    },
+    {
+      "reference": "roomeq_playback::routed::crossover_timing_refused",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    },
+    {
+      "reference": "roomeq_playback::routed::recalibrate_post_dsp_levels",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    },
+    {
+      "reference": "roomeq_playback::routed::reconstruct_deployed_source_curves_unenforced",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    },
+    {
+      "reference": "roomeq_playback::routed::reconstruct_deployed_source_curves_with_evidence",
+      "public_definition": "crates/roomeq-playback/src/routed.rs",
+      "definition_file_sha256": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a"
+    }
+  ],
+  "direct_paths_checked": 29,
+  "compiler_verified": false,
+  "runtime_verified": false,
+  "performance_acceptance": false
+}

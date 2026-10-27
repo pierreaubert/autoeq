@@ -1,14 +1,14 @@
-# autoeq (crate: `autoeq`, version: 0.5.74)
+# AutoEQ / RoomEQ virtual workspace
 
 Core automatic equalization stack for speakers, headphones, and RoomEQ workflows.
 
 ## High-level workflow
 
-1. `read/`: ingest + normalize measurement data (CSV / API / recording artifacts)
-2. `loss/`: compute objective losses (`flat`, `score`, `epa`, multi-driver, multi-sub)
-3. `optim/`: run optimizer backends over PEQ params
-4. `x2peq.rs` + `response.rs`: turn solution vectors into DSP filters and responses
-5. `roomeq/`: multi-channel orchestration, reporting, routing, and export
+1. `autoeq-measurements`: ingest and normalize measurements (CSV / API / capture artifacts)
+2. `autoeq-objective`: evaluate losses (`flat`, `score`, `epa`, multi-driver, multi-sub)
+3. `autoeq-optim`: run optimizer backends over PEQ parameters
+4. `autoeq-core`: turn parameter vectors into filters and responses
+5. `roomeq-workflow`: multi-channel orchestration, reporting, routing, and export
 
 ## Loss types
 
@@ -41,7 +41,7 @@ Notes:
 - `ObjectiveData` carries single-curve and multi-objective paths.
 - `multi_objective` delegates scalarization over per-curve objectives.
 - The scalar objective is selected through the `Objective` strategy trait
-  (`crates/autoeq-optim/src/optim/loss/`). `ObjectiveData` caches the strategy
+  (`crates/autoeq-objective/src/optim/loss/`). `ObjectiveData` caches the strategy
   so it is built once.
 - `PeqLayout` (`crates/autoeq-core/src/param_utils.rs`) abstracts the
   parameter-vector layout for
@@ -54,8 +54,8 @@ Notes:
 
 ## RoomEQ highlights
 
-Production code is partitioned across `crates/roomeq-{model,analysis,quality,engine,export,workflow}`;
-the root `src/roomeq/` tree is a compatibility facade.
+Production code is partitioned across `crates/roomeq-{model,analysis,quality,dsp,engine,export,workflow}`.
+The root is a virtual workspace; import the owning crates directly.
 
 - Multi-seat strategies include:
   - `minimize_variance`
@@ -78,27 +78,39 @@ the root `src/roomeq/` tree is a compatibility facade.
 
 ## Binary entry points
 
-From `Cargo.toml`: CLI commands require `--features cli`; QA/fuzzer commands
-require `--features qa` (which includes `cli`). Default builds provide the library.
+Executables belong to terminal packages and need no root-package feature:
 
-- `autoeq`
-- `benchmark-autoeq-speaker`
-- `autoeq-download-speakers`
-- `roomeq`
-- `roomeq-fuzzer`
-- `roomeq-qa-quality`
-- `roomeq-qa-coverage`
-- `roomeq-qa-features`
-- `roomeq-qa-synthetic`
-- `roomeq-qa-acoustic`
-- `convert-recording`
+- `autoeq-cli`: `autoeq`, `benchmark-autoeq-speaker`, `autoeq-download-speakers`.
+- `roomeq-cli`: `roomeq`, `convert-recording`; schemas and input manual live in
+  `crates/roomeq-cli/schemas/`.
+- `roomeq-qa`: `roomeq-fuzzer`, `roomeq-qa-quality`, `roomeq-qa-coverage`,
+  `roomeq-qa-features`, `roomeq-qa-synthetic`, `roomeq-qa-acoustic`.
+- `autoeq-measurements`: `migrate_provenance`.
+
+User-facing launcher versions use `autoeq_core::PRODUCT_VERSION`; serialized
+library and optimizer versions keep their existing identities.
 
 ## Useful commands
 
+Bare `cargo build/test/check` selects the workspace `default-members`
+library set; executable builds select `autoeq-cli`, `roomeq-cli`, or `roomeq-qa`.
+
 ```bash
-cargo check -p autoeq
-cargo clippy -p autoeq --no-deps
-cargo test -p autoeq --lib
+cargo check -p autoeq-optim
+cargo clippy -p roomeq-workflow --no-deps
+cargo test -p autoeq-core --lib
+```
+
+Test lanes (Cargo profiles `test`/`qa`, nextest profiles in
+`.config/nextest.toml`):
+
+```bash
+just test                 # default-member libraries, fast feedback
+just test-crate <package> # one package and its owning tests
+just test-pr [base]       # changed packages + reverse dependencies
+just test-cli             # real executable tests on the qa profile
+just ntest                # complete native inventory (unchanged scope)
+just qa-autoeq-quick      # bounded flat+score AutoEQ smoke
 ```
 
 RoomEQ QA:
@@ -112,7 +124,7 @@ just qa-roomeq-coverage-gate  # hard 90% library line-coverage gate
 Targeted RoomEQ run:
 
 ```bash
-cargo run --release --features cli --bin roomeq -- \
+cargo run -p roomeq-cli --release --bin roomeq -- \
   --config tests/data/roomeq/test_config_stereo.json \
   --output /tmp/out.json
 ```
@@ -121,5 +133,5 @@ cargo run --release --features cli --bin roomeq -- \
 
 - `CHANGELOG.md`
 - `docs/ROOMEQ_MANUAL.md`
-- `src/bin/roomeq/INPUT_FORMAT.md`
-- `src/bin/roomeq/input_schema.json`
+- `crates/roomeq-cli/schemas/INPUT_FORMAT.md`
+- `crates/roomeq-cli/schemas/input_schema.json`

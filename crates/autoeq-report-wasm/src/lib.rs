@@ -72,7 +72,11 @@ pub use gain_summary::gain_summary_html;
 pub use prepared_report::{PREPARED_REPORT_SCHEMA_VERSION, PreparedReplay, PreparedReportData};
 #[doc(inline)]
 pub use report_sections::build_shared_sections;
-pub use schema::*;
+pub use schema::{
+    Annotation, AxisSpec, BarChart, BarGroup, DashOption, Figure, GridData, LineMark, RangeMark,
+    ReportPayload, ReportProvenance, SCHEMA_VERSION, SankeyChart, SankeyLink, Section, Series,
+    XScale,
+};
 #[doc(inline)]
 pub use signal_flow::signal_flow_sections;
 #[doc(inline)]

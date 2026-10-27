@@ -3,11 +3,12 @@ use super::misc::colormap_to_color_scale;
 use super::misc::interpolate_spl_at_freq;
 use super::plot_section::PlotSection;
 use super::types::LoadState;
-use autoeq::read::{
+use autoeq_measurements::read::{
     extract_cea2034_curves_original, fetch_available_speakers, fetch_directivity_data,
     fetch_measurement_plot_data,
 };
-use autoeq::{Curve, DirectivityData};
+use autoeq_core::Curve;
+use autoeq_measurements::cea2034::DirectivityData;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use gpui_design::DesignExt;

@@ -1,0 +1,23 @@
+{
+  "checked_utc": "2026-10-26T11:39:20.167686+00:00",
+  "source": "/Volumes/home_tmp/tmp/autoeq-playback-shared-trial-20261026/autoeq",
+  "status": "compiler corrections pending recheck",
+  "extra_moved_case": {
+    "old_owner": "roomeq-workflow",
+    "old_name": "evidence_intake::tests::roadmap_correction_assessments_respect_declared_usable_band",
+    "new_owner": "autoeq-qa/qa_contract",
+    "new_name": "workflow_evidence::roadmap_correction_assessments_respect_declared_usable_band",
+    "ignored": false
+  },
+  "new_public_shared_operation": "is_source_post_route_plugin",
+  "changes": [
+    "Result standard-library qualification",
+    "normal roomeq-quality dependency",
+    "one plugin-stage predicate moved once with workflow import",
+    "unused imports removed",
+    "fourth cross-boundary evidence test moved intact plus existing test-only inline_single helper",
+    "QA Array1 import restored"
+  ],
+  "algorithm_changes": false,
+  "performance_acceptance": false
+}

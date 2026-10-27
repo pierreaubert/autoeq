@@ -1,0 +1,612 @@
+{
+  "status": "failed",
+  "errors": [
+    "('config', 'test-build'): investigate material regressions: ['wall_seconds', 'max_process_rss_bytes']",
+    "('core', 'test-build'): investigate material regressions: ['max_process_rss_bytes']",
+    "('engine', 'test-build'): investigate material regressions: ['max_process_rss_bytes']",
+    "('engine', 'test-edit'): investigate material regressions: ['wall_seconds']",
+    "('workflow', 'test-build'): investigate material regressions: ['max_process_rss_bytes']",
+    "('workspace', 'execution'): investigate material regressions: ['target_dir_bytes']",
+    "('workspace', 'full-native'): investigate material regressions: ['target_dir_bytes']"
+  ],
+  "required_improvements": [
+    {
+      "scenario": "private-edit",
+      "before_seconds": 5.295834166230634,
+      "after_seconds": 4.329750792123377,
+      "observed_noise_floor_seconds": 0.2647917083115317,
+      "passed": true
+    },
+    {
+      "scenario": "test-build",
+      "before_seconds": 441.33734104107134,
+      "after_seconds": 338.44403595943004,
+      "observed_noise_floor_seconds": 58.45627262466587,
+      "passed": true
+    },
+    {
+      "scenario": "full-native",
+      "before_seconds": 1626.7354439580813,
+      "after_seconds": 356.2935117499437,
+      "observed_noise_floor_seconds": 100.41969312517904,
+      "passed": true
+    }
+  ],
+  "rows": [
+    {
+      "case": "config",
+      "scenario": "affected-edit",
+      "before_seconds": 41.165914041921496,
+      "after_seconds": 10.56500287516974,
+      "ratio": 0.256644438027316,
+      "investigate": []
+    },
+    {
+      "case": "config",
+      "scenario": "clean-build",
+      "before_seconds": 21.487533499952406,
+      "after_seconds": 17.834685999900103,
+      "ratio": 0.8300015448464388,
+      "investigate": []
+    },
+    {
+      "case": "config",
+      "scenario": "clean-check",
+      "before_seconds": 15.981275792000815,
+      "after_seconds": 13.3209519169759,
+      "ratio": 0.8335349499220519,
+      "investigate": []
+    },
+    {
+      "case": "config",
+      "scenario": "private-edit",
+      "before_seconds": 1.3709058340173215,
+      "after_seconds": 1.2909748340025544,
+      "ratio": 0.9416947553716829,
+      "investigate": []
+    },
+    {
+      "case": "config",
+      "scenario": "public-edit",
+      "before_seconds": 44.850512167206034,
+      "after_seconds": 10.357848665909842,
+      "ratio": 0.23094159164325737,
+      "investigate": []
+    },
+    {
+      "case": "config",
+      "scenario": "test-build",
+      "before_seconds": 26.113813958130777,
+      "after_seconds": 31.123467334080487,
+      "ratio": 1.191839207554357,
+      "investigate": [
+        "wall_seconds",
+        "max_process_rss_bytes"
+      ]
+    },
+    {
+      "case": "config",
+      "scenario": "test-edit",
+      "before_seconds": 1.9926984589546919,
+      "after_seconds": 1.9747925829142332,
+      "ratio": 0.9910142570944469,
+      "investigate": []
+    },
+    {
+      "case": "config",
+      "scenario": "warm-noop",
+      "before_seconds": 0.16446295799687505,
+      "after_seconds": 0.1717114169150591,
+      "ratio": 1.0440735044928584,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "affected-edit",
+      "before_seconds": 26.77202224987559,
+      "after_seconds": 12.386408333899453,
+      "ratio": 0.4626624099700579,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "clean-build",
+      "before_seconds": 17.610777457943186,
+      "after_seconds": 13.65835504210554,
+      "ratio": 0.7755679767530683,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "clean-check",
+      "before_seconds": 11.357745124958456,
+      "after_seconds": 8.247884416021407,
+      "ratio": 0.7261903067270649,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "private-edit",
+      "before_seconds": 0.37102199997752905,
+      "after_seconds": 0.34769591595977545,
+      "ratio": 0.9371301862984773,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "public-edit",
+      "before_seconds": 29.04931970918551,
+      "after_seconds": 12.011780458968133,
+      "ratio": 0.41349610177514623,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "test-build",
+      "before_seconds": 20.828607166884467,
+      "after_seconds": 19.239936833037063,
+      "ratio": 0.9237265208797427,
+      "investigate": [
+        "max_process_rss_bytes"
+      ]
+    },
+    {
+      "case": "core",
+      "scenario": "test-edit",
+      "before_seconds": 0.7140520000830293,
+      "after_seconds": 0.711377666098997,
+      "ratio": 0.9962547069629084,
+      "investigate": []
+    },
+    {
+      "case": "core",
+      "scenario": "warm-noop",
+      "before_seconds": 0.17144574993290007,
+      "after_seconds": 0.1642234588507563,
+      "ratio": 0.9578741900282135,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "affected-edit",
+      "before_seconds": 50.45856225001626,
+      "after_seconds": 8.094048792030662,
+      "ratio": 0.16040981809837546,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "clean-build",
+      "before_seconds": 55.19992774981074,
+      "after_seconds": 18.099001833004877,
+      "ratio": 0.3278808971460462,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "clean-check",
+      "before_seconds": 34.778903583064675,
+      "after_seconds": 13.327453208854422,
+      "ratio": 0.38320509952315246,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "private-edit",
+      "before_seconds": 0.5624668749514967,
+      "after_seconds": 0.2107532920781523,
+      "ratio": 0.3746945846301193,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "public-edit",
+      "before_seconds": 55.98685595788993,
+      "after_seconds": 8.015706665813923,
+      "ratio": 0.14317122347150327,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "test-build",
+      "before_seconds": 58.64118783315644,
+      "after_seconds": 20.70007033413276,
+      "ratio": 0.35299541327552525,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "test-edit",
+      "before_seconds": 1.7055640830658376,
+      "after_seconds": 0.604103249963373,
+      "ratio": 0.3541955743330774,
+      "investigate": []
+    },
+    {
+      "case": "dsp",
+      "scenario": "warm-noop",
+      "before_seconds": 0.21271875011734664,
+      "after_seconds": 0.16245350008830428,
+      "ratio": 0.7637008961301557,
+      "investigate": []
+    },
+    {
+      "case": "engine",
+      "scenario": "affected-edit",
+      "before_seconds": 44.175464041065425,
+      "after_seconds": 7.622569791041315,
+      "ratio": 0.17255211589753508,
+      "investigate": []
+    },
+    {
+      "case": "engine",
+      "scenario": "clean-build",
+      "before_seconds": 54.07297149999067,
+      "after_seconds": 34.592620791867375,
+      "ratio": 0.639739593224932,
+      "investigate": []
+    },
+    {
+      "case": "engine",
+      "scenario": "clean-check",
+      "before_seconds": 34.80597254191525,
+      "after_seconds": 23.54853070899844,
+      "ratio": 0.6765658014767442,
+      "investigate": []
+    },
+    {
+      "case": "engine",
+      "scenario": "private-edit",
+      "before_seconds": 0.5383607500698417,
+      "after_seconds": 0.512180290883407,
+      "ratio": 0.9513700447459471,
+      "investigate": []
+    },
+    {
+      "case": "engine",
+      "scenario": "public-edit",
+      "before_seconds": 47.56904754205607,
+      "after_seconds": 7.397697709035128,
+      "ratio": 0.15551494283115047,
+      "investigate": []
+    },
+    {
+      "case": "engine",
+      "scenario": "test-build",
+      "before_seconds": 59.509925707941875,
+      "after_seconds": 44.57551079103723,
+      "ratio": 0.7490432942195461,
+      "investigate": [
+        "max_process_rss_bytes"
+      ]
+    },
+    {
+      "case": "engine",
+      "scenario": "test-edit",
+      "before_seconds": 1.698151667136699,
+      "after_seconds": 2.0674548340030015,
+      "ratio": 1.217473606164398,
+      "investigate": [
+        "wall_seconds"
+      ]
+    },
+    {
+      "case": "engine",
+      "scenario": "warm-noop",
+      "before_seconds": 0.2122481248807162,
+      "after_seconds": 0.18690508394502103,
+      "ratio": 0.8805971032727002,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "affected-edit",
+      "before_seconds": 25.708971332991496,
+      "after_seconds": 7.410168249858543,
+      "ratio": 0.2882327788957201,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "clean-build",
+      "before_seconds": 47.90726975002326,
+      "after_seconds": 28.80622091703117,
+      "ratio": 0.6012912250549862,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "clean-check",
+      "before_seconds": 32.434621167136356,
+      "after_seconds": 16.43870420800522,
+      "ratio": 0.5068258427714076,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "private-edit",
+      "before_seconds": 0.5803427079226822,
+      "after_seconds": 0.29135720804333687,
+      "ratio": 0.5020433686265147,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "public-edit",
+      "before_seconds": 29.013080999953672,
+      "after_seconds": 7.96212291601114,
+      "ratio": 0.2744321747843276,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "test-build",
+      "before_seconds": 57.370066249975935,
+      "after_seconds": 53.14220929215662,
+      "ratio": 0.9263055242188938,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "test-edit",
+      "before_seconds": 1.2488166249822825,
+      "after_seconds": 0.6681513751391321,
+      "ratio": 0.5350276107579938,
+      "investigate": []
+    },
+    {
+      "case": "objective",
+      "scenario": "warm-noop",
+      "before_seconds": 0.22971991705708206,
+      "after_seconds": 0.17522945813834667,
+      "ratio": 0.7627961057238442,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "affected-edit",
+      "before_seconds": 31.72223775018938,
+      "after_seconds": 7.754333999939263,
+      "ratio": 0.24444473498383543,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "clean-build",
+      "before_seconds": 48.453191459178925,
+      "after_seconds": 29.838138250168413,
+      "ratio": 0.6158136822691358,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "clean-check",
+      "before_seconds": 32.96440466702916,
+      "after_seconds": 18.30007370794192,
+      "ratio": 0.5551464949174577,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "private-edit",
+      "before_seconds": 0.5742172920145094,
+      "after_seconds": 0.43068666593171656,
+      "ratio": 0.7500412682118146,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "public-edit",
+      "before_seconds": 34.59591154195368,
+      "after_seconds": 7.918990458128974,
+      "ratio": 0.22889960417796168,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "test-build",
+      "before_seconds": 58.17429624986835,
+      "after_seconds": 55.0232607498765,
+      "ratio": 0.9458345746640815,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "test-edit",
+      "before_seconds": 1.2896850411780179,
+      "after_seconds": 1.0391897500958294,
+      "ratio": 0.8057701818008354,
+      "investigate": []
+    },
+    {
+      "case": "optimizer",
+      "scenario": "warm-noop",
+      "before_seconds": 0.20983691699802876,
+      "after_seconds": 0.17569312499836087,
+      "ratio": 0.8372841514823217,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "affected-edit",
+      "before_seconds": 65.18717583315447,
+      "after_seconds": 6.435390583937988,
+      "ratio": 0.09872172711407634,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "clean-build",
+      "before_seconds": 77.91608158382587,
+      "after_seconds": 17.790448624873534,
+      "ratio": 0.22832832790408888,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "clean-check",
+      "before_seconds": 50.287339667091146,
+      "after_seconds": 10.651957749854773,
+      "ratio": 0.2118218585507236,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "private-edit",
+      "before_seconds": 0.5310799579601735,
+      "after_seconds": 0.4382475840393454,
+      "ratio": 0.8252007583238723,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "public-edit",
+      "before_seconds": 68.8461463751737,
+      "after_seconds": 6.486034665955231,
+      "ratio": 0.09421056961721434,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "test-build",
+      "before_seconds": 81.94031299999915,
+      "after_seconds": 23.180264041060582,
+      "ratio": 0.28289206121364,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "test-edit",
+      "before_seconds": 1.1431057918816805,
+      "after_seconds": 1.935390334110707,
+      "ratio": 1.6930981785376462,
+      "investigate": []
+    },
+    {
+      "case": "renderer",
+      "scenario": "warm-noop",
+      "before_seconds": 0.2548069169279188,
+      "after_seconds": 0.1699818328488618,
+      "ratio": 0.6671005438088136,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "affected-edit",
+      "before_seconds": 57.81988970795646,
+      "after_seconds": 7.7455589168239385,
+      "ratio": 0.13396011227185184,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "clean-build",
+      "before_seconds": 65.95714229205623,
+      "after_seconds": 65.32872483297251,
+      "ratio": 0.990472336471142,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "clean-check",
+      "before_seconds": 39.25687295780517,
+      "after_seconds": 39.923689250135794,
+      "ratio": 1.0169859757563304,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "private-edit",
+      "before_seconds": 0.75029749982059,
+      "after_seconds": 0.7765945421997458,
+      "ratio": 1.0350488204818007,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "public-edit",
+      "before_seconds": 60.892477167071775,
+      "after_seconds": 7.003744291141629,
+      "ratio": 0.11501821927732274,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "test-build",
+      "before_seconds": 75.67259620805271,
+      "after_seconds": 92.00847220909782,
+      "ratio": 1.2158757174939734,
+      "investigate": [
+        "max_process_rss_bytes"
+      ]
+    },
+    {
+      "case": "workflow",
+      "scenario": "test-edit",
+      "before_seconds": 2.4393817079253495,
+      "after_seconds": 2.4663025001063943,
+      "ratio": 1.0110359080309497,
+      "investigate": []
+    },
+    {
+      "case": "workflow",
+      "scenario": "warm-noop",
+      "before_seconds": 0.2195392909925431,
+      "after_seconds": 0.23486912483349442,
+      "ratio": 1.0698272904665254,
+      "investigate": []
+    },
+    {
+      "case": "workspace",
+      "scenario": "execution",
+      "before_seconds": 125.8514461251907,
+      "after_seconds": 144.57178487489,
+      "ratio": 1.1487494925650457,
+      "investigate": [
+        "target_dir_bytes"
+      ]
+    },
+    {
+      "case": "workspace",
+      "scenario": "full-native",
+      "before_seconds": 1626.7354439580813,
+      "after_seconds": 356.2935117499437,
+      "ratio": 0.21902363600256375,
+      "investigate": [
+        "target_dir_bytes"
+      ]
+    },
+    {
+      "case": "workspace",
+      "scenario": "product-cli",
+      "before_seconds": 126.57398333307356,
+      "after_seconds": 101.19468074990436,
+      "ratio": 0.7994903698623063,
+      "investigate": []
+    },
+    {
+      "case": "workspace",
+      "scenario": "report-gpui",
+      "before_seconds": 45.65012804209255,
+      "after_seconds": 44.011678375070915,
+      "ratio": 0.9641085416997983,
+      "investigate": []
+    },
+    {
+      "case": "workspace",
+      "scenario": "report-native",
+      "before_seconds": 35.70940749999136,
+      "after_seconds": 15.353665542090312,
+      "ratio": 0.42996136360128706,
+      "investigate": []
+    },
+    {
+      "case": "workspace",
+      "scenario": "report-wasm",
+      "before_seconds": 31.88544033304788,
+      "after_seconds": 16.93443891708739,
+      "ratio": 0.5311025577882823,
+      "investigate": []
+    }
+  ]
+}

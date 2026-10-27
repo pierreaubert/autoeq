@@ -1,6 +1,30 @@
 # --------------------------------------------------------- -*- just -*-
 alias qa-autoeq := qa-autoeq-all
 
+# Bounded AutoEQ smoke (refactor-20261025 Phase 1): one flat and one
+# score case over checked-in curve data, same --qa thresholds as the
+# full recipes below, bounded --maxeval. Uses `--algo autoeq:cobyla`
+# because DE cannot report convergence below its ~1.5M-evaluation
+# generation floor, which would make a bounded DE smoke fail its own
+# convergence gate. This is a smoke lane only; `qa-autoeq-all` keeps
+# the full DE budgets and verdicts.
+[group('qa-autoeq')]
+qa-autoeq-quick:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	target_dir="$({{cargo}} metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+	{{cargo}} build -p autoeq-cli --locked --release --bin autoeq
+	curve='./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic DT1990 Pro Headphone Frequency Response Measurement.csv'
+	"$target_dir/release/autoeq" -n 5 \
+	--curve "$curve" \
+	--target ./data_tests/targets/harman-over-ear-2018.csv \
+	--loss headphone-flat --max-db 6 --max-q 6 --maxeval 20000 --algo autoeq:cobyla --seed 42 --min-freq=20 --max-freq 10000 --peq-model pk \
+	--qa 0.5
+	"$target_dir/release/autoeq" -n 5 \
+	--curve "$curve" \
+	--target ./data_tests/targets/harman-over-ear-2018.csv --loss headphone-score \
+	--maxeval 20000 --algo autoeq:cobyla --seed 42 --qa 3.0
+
 [group('qa-autoeq')]
 qa-autoeq-all: prod-autoeq \
 	qa-ascilab-6b \

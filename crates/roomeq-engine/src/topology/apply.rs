@@ -37,7 +37,12 @@ pub fn apply_curve_delta_to_reference_curve(
         freq: reference_curve.freq.clone(),
         spl: &reference_curve.spl + &(&final_on_reference.spl - &initial_on_reference.spl),
         phase,
-        ..Default::default()
+        // Transfer changes invalidate decomposition caches; capture confidence
+        // and native resolution remain properties of the measured reference.
+        min_phase: None,
+        excess_phase: None,
+        excess_delay_ms: None,
+        ..reference_curve.clone()
     }
 }
 
@@ -61,6 +66,34 @@ pub fn apply_crossover_response_to_curve(
 mod tests {
     use super::*;
     use ndarray::Array1;
+
+    #[test]
+    fn representative_delta_preserves_capture_confidence_and_resolution() {
+        let mut reference = Curve {
+            freq: Array1::from(vec![100.0, 200.0, 400.0]),
+            spl: Array1::from(vec![80.0, 80.0, 80.0]),
+            coherence: Some(Array1::from(vec![1.0, 1.0, 1.0])),
+            noise_floor_db: Some(Array1::zeros(3)),
+            ..Default::default()
+        };
+        reference.resolution = Some(reference.retained_resolution());
+        reference.min_phase = Some(Array1::zeros(3));
+        reference.excess_phase = Some(Array1::zeros(3));
+        reference.excess_delay_ms = Some(1.0);
+        let mut final_curve = reference.clone();
+        final_curve.spl = Array1::from(vec![83.0, 74.0, 81.0]);
+        let adjusted = apply_curve_delta_to_reference_curve(&reference, &reference, &final_curve);
+        let confidence = autoeq_core::assess_measurement_quality(&adjusted);
+        assert_eq!(confidence.quality, autoeq_core::MeasurementQuality::Good);
+        assert_eq!(confidence.median_snr_db, Some(81.0));
+        assert_eq!(adjusted.coherence, reference.coherence);
+        assert_eq!(adjusted.resolution, reference.resolution);
+        assert_eq!(adjusted.spl, final_curve.spl);
+        assert_eq!(adjusted.noise_floor_db, reference.noise_floor_db);
+        assert!(adjusted.min_phase.is_none());
+        assert!(adjusted.excess_phase.is_none());
+        assert!(adjusted.excess_delay_ms.is_none());
+    }
 
     #[test]
     fn delay_handles_phase_vectors_longer_than_frequency_grid() {

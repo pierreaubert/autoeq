@@ -72,12 +72,12 @@ fn summarize(groups: [Vec<f64>; 4], rate: f64) -> CamillaDspDelayRealization {
         additional_latency_ms: common_padding_samples as f64 * 1000.0 / rate,
         fractional_delay_present: fractional,
         usable_band_upper_hz: if fractional {
-            roomeq_engine::fir::GD_DELAY_MAX_NORMALIZED_FREQUENCY * rate
+            roomeq_dsp::fir::GD_DELAY_MAX_NORMALIZED_FREQUENCY * rate
         } else {
             rate / 2.0
         },
         magnitude_tolerance_db: if fractional {
-            roomeq_engine::fir::GD_DELAY_MAGNITUDE_TOLERANCE_DB
+            roomeq_dsp::fir::GD_DELAY_MAGNITUDE_TOLERANCE_DB
         } else {
             0.0
         },
@@ -93,7 +93,7 @@ pub(super) fn total_delay(plugins: &[PluginConfigWrapper]) -> f64 {
 }
 
 pub(super) fn padding(delays: impl IntoIterator<Item = f64>, rate: f64) -> usize {
-    roomeq_engine::fir::gd_delay_padding_samples(&delays.into_iter().collect::<Vec<_>>(), rate)
+    roomeq_dsp::fir::gd_delay_padding_samples(&delays.into_iter().collect::<Vec<_>>(), rate)
 }
 
 pub(super) fn write_delay(
@@ -113,7 +113,7 @@ pub(super) fn write_delay(
             samples.round()
         )?;
     } else {
-        let realized = roomeq_engine::fir::realize_gd_fir_delay(&[1.0], delay_ms, rate, padding)
+        let realized = roomeq_dsp::fir::realize_gd_fir_delay(&[1.0], delay_ms, rate, padding)
             .map_err(anyhow::Error::msg)?;
         writeln!(
             out,

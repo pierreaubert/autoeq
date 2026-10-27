@@ -1,17 +1,22 @@
-use super::backend::{
-    FsMeasurementCache, MeasurementBackend, MeasurementCache, ReqwestMeasurementBackend,
-};
+#[cfg(feature = "api")]
+use super::backend::{FsMeasurementCache, ReqwestMeasurementBackend};
 #[cfg(test)]
 use super::backend::{InMemoryMeasurementCache, MockMeasurementBackend};
+use super::backend::{MeasurementBackend, MeasurementCache};
+#[cfg(feature = "api")]
 use super::extract::extract_contour_data;
+#[cfg(feature = "api")]
 use super::extract::extract_curve_by_name;
+#[cfg(feature = "api")]
 use super::extract::extract_directivity_curves;
 use super::parse::parse_headphone_csv;
+#[cfg(feature = "api")]
 use super::types::ContourPlotData;
 use crate::read::directory::{
     cache_root, data_dir_for_cache_root, headphone_cache_dir_for_cache_root, measurement_filename,
 };
 use crate::read::plot::{normalize_plotly_json_from_str, normalize_plotly_value_with_suggestions};
+#[cfg(feature = "api")]
 use crate::{DirectivityData, MeasurementRecord};
 use serde_json::Value;
 use std::error::Error;
@@ -28,6 +33,7 @@ use urlencoding;
 ///
 /// # Returns
 /// * Result containing a Curve struct or an error
+#[cfg(feature = "api")]
 pub async fn read_spinorama(
     speaker: &str,
     version: &str,
@@ -38,6 +44,7 @@ pub async fn read_spinorama(
 }
 
 /// Fetch a frequency response curve using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn read_spinorama_at_cache_root(
     speaker: &str,
     version: &str,
@@ -58,6 +65,7 @@ pub async fn read_spinorama_at_cache_root(
 ///
 /// # Returns
 /// * Result containing a Curve struct or an error
+#[cfg(feature = "api")]
 pub async fn fetch_curve_from_api(
     speaker: &str,
     version: &str,
@@ -70,6 +78,7 @@ pub async fn fetch_curve_from_api(
 }
 
 /// Fetch a frequency response curve using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn fetch_curve_from_api_at_cache_root(
     speaker: &str,
     version: &str,
@@ -84,6 +93,7 @@ pub async fn fetch_curve_from_api_at_cache_root(
 }
 
 /// Fetch a curve together with an API-origin provenance record.
+#[cfg(feature = "api")]
 pub async fn fetch_record_from_api(
     speaker: &str,
     version: &str,
@@ -110,6 +120,7 @@ pub async fn fetch_record_from_api(
 ///
 /// # Returns
 /// * Result containing the Plotly JSON data or an error
+#[cfg(feature = "api")]
 pub async fn fetch_measurement_plot_data(
     speaker: &str,
     version: &str,
@@ -120,6 +131,7 @@ pub async fn fetch_measurement_plot_data(
 }
 
 /// Fetch and parse Plotly JSON using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn fetch_measurement_plot_data_at_cache_root(
     speaker: &str,
     version: &str,
@@ -230,6 +242,7 @@ pub async fn fetch_measurement_plot_data_with_backend_at_cache_root(
 /// # Details
 /// Fetches both "SPL Horizontal" and "SPL Vertical" measurements, extracting
 /// all angle traces (typically -60° to +60° in 10° increments).
+#[cfg(feature = "api")]
 pub async fn fetch_directivity_data(
     speaker: &str,
     version: &str,
@@ -239,6 +252,7 @@ pub async fn fetch_directivity_data(
 }
 
 /// Fetch directivity data using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn fetch_directivity_data_at_cache_root(
     speaker: &str,
     version: &str,
@@ -283,6 +297,7 @@ pub async fn fetch_directivity_data_at_cache_root(
 /// # Details
 /// Fetches "SPL Horizontal Contour" or "SPL Vertical Contour" measurements, which are
 /// pre-computed heatmaps with full angle range (typically -180° to +180°).
+#[cfg(feature = "api")]
 pub async fn fetch_contour_data(
     speaker: &str,
     version: &str,
@@ -293,6 +308,7 @@ pub async fn fetch_contour_data(
 }
 
 /// Fetch contour data using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn fetch_contour_data_at_cache_root(
     speaker: &str,
     version: &str,
@@ -318,6 +334,7 @@ pub async fn fetch_contour_data_at_cache_root(
 /// Uses `GET /v1/headphone/{name}/frequency_response`.
 /// The API returns CSV data (4-column: L_freq, L_spl, R_freq, R_spl with header rows).
 /// Caches the raw CSV and also writes a simplified 2-column CSV for the optimization pipeline.
+#[cfg(feature = "api")]
 pub async fn fetch_headphone_frequency_response(
     headphone: &str,
 ) -> Result<(String, crate::Curve), Box<dyn Error>> {
@@ -326,6 +343,7 @@ pub async fn fetch_headphone_frequency_response(
 }
 
 /// Fetch a headphone response using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn fetch_headphone_frequency_response_at_cache_root(
     headphone: &str,
     cache_root: &Path,
@@ -419,9 +437,9 @@ async fn fetch_headphone_csv_from_backend(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::read::{
-        data_dir_for_cache_root, headphone_cache_dir_for_cache_root, measurement_filename,
-    };
+    #[cfg(feature = "api")]
+    use crate::read::headphone_cache_dir_for_cache_root;
+    use crate::read::{data_dir_for_cache_root, measurement_filename};
     use serde_json::json;
     use tempfile::TempDir;
 
@@ -453,6 +471,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "api")]
     #[tokio::test]
     async fn fetch_measurement_plot_data_uses_local_cache() {
         let tmp = setup_cache();
@@ -477,6 +496,7 @@ mod tests {
         assert!(plot.get("data").is_some());
     }
 
+    #[cfg(feature = "api")]
     #[tokio::test]
     async fn fetch_curve_from_api_uses_cache() {
         let tmp = setup_cache();
@@ -500,6 +520,7 @@ mod tests {
         assert_eq!(curve.freq.len(), 2);
     }
 
+    #[cfg(feature = "api")]
     #[tokio::test]
     async fn fetch_directivity_data_uses_cache() {
         let tmp = setup_cache();
@@ -525,6 +546,7 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[cfg(feature = "api")]
     #[tokio::test]
     async fn fetch_contour_data_uses_cache() {
         let tmp = setup_cache();
@@ -552,6 +574,7 @@ mod tests {
         assert_eq!(contour.angle_count, 3);
     }
 
+    #[cfg(feature = "api")]
     #[tokio::test]
     async fn fetch_headphone_frequency_response_uses_cache() {
         let tmp = setup_cache();

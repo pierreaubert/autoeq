@@ -17,7 +17,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-pub use roomeq_model::reference_registry::{
+pub use autoeq_optim_types::reference_registry::{
     ApprovedReferenceEntry, ApprovedReferenceRegistry, VerifiedReferenceEvidence,
 };
 

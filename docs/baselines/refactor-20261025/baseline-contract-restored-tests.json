@@ -1,0 +1,20 @@
+[
+  {
+    "file": "crates/autoeq-optim/src/optim/scalar.rs",
+    "test": "cmaes_scores_and_returns_exact_parameter_rails",
+    "restored_from": "151338b1",
+    "exact_test_source_sha256": "f9a3f5b5caa75680aaf626475ffaf36fb255b08b6c400a9d50053374d0606802"
+  },
+  {
+    "file": "crates/autoeq-optim/src/optim/optimize.rs",
+    "test": "finalized_bound_projection_reports_the_returned_parameters_loss",
+    "restored_from": "151338b1",
+    "exact_test_source_sha256": "839bd1d6eae2a7885506b417f8571efcca052055cd639cdb511fd522482fbff0"
+  },
+  {
+    "file": "crates/roomeq-engine/src/topology/apply.rs",
+    "test": "representative_delta_preserves_capture_confidence_and_resolution",
+    "restored_from": "151338b1",
+    "exact_test_source_sha256": "90a2f933ce4a26e012ff1b024109ba2544798295a84c4157c56b2d674a208ff8"
+  }
+]

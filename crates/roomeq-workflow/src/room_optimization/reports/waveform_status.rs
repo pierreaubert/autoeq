@@ -29,17 +29,17 @@ pub(super) fn record(
             None
         } else {
             match result.channel_results.get(name) {
-            None => Some("initial measurement unavailable".to_owned()),
-            Some(channel) => match channel
-                .initial_curve
-                .validate("waveform initial measurement")
-            {
-                Err(error) => Some(error.to_string()),
-                Ok(()) if channel.initial_curve.phase.is_none() => {
-                    Some("initial measurement phase unavailable".to_owned())
-                }
-                Ok(()) => None,
-            },
+                None => Some("initial measurement unavailable".to_owned()),
+                Some(channel) => match channel
+                    .initial_curve
+                    .validate("waveform initial measurement")
+                {
+                    Err(error) => Some(error.to_string()),
+                    Ok(()) if channel.initial_curve.phase.is_none() => {
+                        Some("initial measurement phase unavailable".to_owned())
+                    }
+                    Ok(()) => None,
+                },
             }
         };
         for (view, available) in [
@@ -118,7 +118,11 @@ mod tests {
                 .count(),
             1
         );
-        record(&mut result, &BTreeMap::new(), &std::collections::BTreeSet::new());
+        record(
+            &mut result,
+            &BTreeMap::new(),
+            &std::collections::BTreeSet::new(),
+        );
         assert!(replay_error_changed(&result, "L", reason));
     }
 

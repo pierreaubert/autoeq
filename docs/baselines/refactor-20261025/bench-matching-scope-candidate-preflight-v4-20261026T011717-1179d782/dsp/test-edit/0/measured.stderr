@@ -1,0 +1,3 @@
+   Compiling roomeq-dsp v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-n626f5nv/source/autoeq/crates/roomeq-dsp)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-n626f5nv/targets/primed/0/test/dsp/test/cargo-timings/cargo-timing-20261026T014645218Z-820c780ad094f58f.html
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.58s

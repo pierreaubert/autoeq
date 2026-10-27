@@ -1,0 +1,70 @@
+{
+  "original_revision": "5aa31fc5",
+  "scope": "Separate user-authorized baseline harness/fixture repairs; no production algorithms changed",
+  "files": [
+    {
+      "path": "scripts/test_advanced_eq.py",
+      "before_sha256": "93a2c9475db5264850cffd925449a5cc25c2a76071bbe2ad029cbc623a3f2871",
+      "after_sha256": "4963731285f9093f1926e19e6a6ba7e972719d960c782ebe7fe82d20b4c00f6d",
+      "removed_test_names": [],
+      "added_test_names": []
+    },
+    {
+      "path": "scripts/test_payload_binding.py",
+      "before_sha256": "54a2579ec28504efe10e0457f124a935e51771507dd8fc0a28c1a62621d6a173",
+      "after_sha256": "d6769680f368e3af120ed6577baacaf4e87e6e8f7a2fbfed90f4f13738eed6a8",
+      "removed_test_names": [],
+      "added_test_names": []
+    },
+    {
+      "path": "scripts/test_roomeq_suite_report.py",
+      "before_sha256": "07eb05831f55d17c112040c1732c979f4bf3e21dbb2bc08d44502c5ec093c7f8",
+      "after_sha256": "84fc6e5d304219237db551f9b0e3bf3690c9cd2c7e2afa90fca6875eeaaa40a5",
+      "removed_test_names": [
+        "test_default_matrix_includes_all_22_scenarios"
+      ],
+      "added_test_names": [
+        "test_default_matrix_includes_all_23_scenarios"
+      ]
+    },
+    {
+      "path": "scripts/tests/fixtures/comparison_payload_python_goldens.json",
+      "before_sha256": "d67bf0e27bc1b0572a029f7f4dcbceb5aac3756d14e1c096b6589094bea1b950",
+      "after_sha256": "d67bf0e27bc1b0572a029f7f4dcbceb5aac3756d14e1c096b6589094bea1b950"
+    },
+    {
+      "path": "scripts/test_roomeq_synthetic_exit.py",
+      "before_sha256": "d524259527fdd7561ab5b2c08686263584b1d4213a3daa7c161228404bb173a6",
+      "after_sha256": "f1f793d9d05bb6d864bc519401abb75d977d957e4340005c3328cacc7f365f23",
+      "removed_test_names": [],
+      "added_test_names": []
+    },
+    {
+      "path": "crates/roomeq-qa/src/coverage/home_cinema.rs",
+      "before_sha256": "3c8d04b8c17c9c48a81c144a45e6d0e6a4f016d4d4e474840f793852eb3a8c6b",
+      "after_sha256": "ddca2feb4362c0156f4f0cd66b9753ce11362acdff2046577fbdde79a03f0bc4"
+    },
+    {
+      "path": "crates/roomeq-qa/src/coverage/run.rs",
+      "before_sha256": "5fb493b14942f4157db41d08bba5b098522c66db6c2f260c403a18cef9029014",
+      "after_sha256": "661b38062ae6ae8339579711bcb7b434918a83511d41666980c27721bdfe3bff"
+    },
+    {
+      "path": "crates/roomeq-qa/src/synthetic.rs",
+      "before_sha256": "99061034f830ab57654c72cadc78e2c3ae7c0ab91918aa9c69169cc8772a2cd3",
+      "after_sha256": "312b857dc40c687d33f0cfe6ac45da4733f2d9a7a17eb2897eaa134bd19815a9"
+    },
+    {
+      "path": "crates/roomeq-qa/src/coverage/home_cinema/delivered_safety.rs",
+      "before_sha256": null,
+      "after_sha256": "1acd0948096a828600b960853830cc2707c4977e6eb187918b86f23a46816af5"
+    },
+    {
+      "path": "scripts/test_comparison_payload_python_goldens.py",
+      "before_sha256": "958282c185c151e95fe55efceead23e2a6558e6909525dd3b30d15375035216c",
+      "after_sha256": "dada67ae9e1b4625af1cea2e5a4ae9822086b9a9bc527c1d0eefb0640e5ff1a8",
+      "removed_test_names": [],
+      "added_test_names": []
+    }
+  ]
+}

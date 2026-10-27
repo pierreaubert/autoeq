@@ -70,7 +70,7 @@ impl VisualizationGridConfig {
 /// Domain configuration for selecting an input measurement.
 ///
 /// This is the CLI-independent counterpart of the API/file selection fields
-/// from [`crate::cli::Args`].
+/// from [`crate::OptimizationConfig`].
 #[derive(Debug, Clone)]
 pub struct InputConfig {
     pub speaker: Option<String>,
@@ -87,8 +87,8 @@ pub struct TargetConfig {
     pub curve_name: String,
 }
 
-impl From<&crate::cli::Args> for InputConfig {
-    fn from(args: &crate::cli::Args) -> Self {
+impl From<&crate::OptimizationConfig> for InputConfig {
+    fn from(args: &crate::OptimizationConfig) -> Self {
         Self {
             speaker: args.speaker.clone(),
             version: args.version.clone(),
@@ -99,8 +99,8 @@ impl From<&crate::cli::Args> for InputConfig {
     }
 }
 
-impl From<&crate::cli::Args> for TargetConfig {
-    fn from(args: &crate::cli::Args) -> Self {
+impl From<&crate::OptimizationConfig> for TargetConfig {
+    fn from(args: &crate::OptimizationConfig) -> Self {
         Self {
             target_path: args.target.clone(),
             curve_name: args.curve_name.clone(),

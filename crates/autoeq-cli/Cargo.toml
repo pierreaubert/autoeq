@@ -1,4 +1,5 @@
 [package]
+publish = false
 name = "autoeq-cli"
 version = "0.5.3"
 edition = "2024"
@@ -14,6 +15,9 @@ workspace = true
 default = []
 
 [dependencies]
+autoeq-optim = { workspace = true }
+autoeq-optim-types = { workspace = true }
+autoeq-core = { workspace = true }
 anyhow = { workspace = true }
 autoeq-plot = { workspace = true }
 autoeq-workflow = { workspace = true }
@@ -31,4 +35,27 @@ tokio = { workspace = true }
 urlencoding = { workspace = true }
 
 [dev-dependencies]
+autoeq-objective = { workspace = true }
+autoeq-measurements = { workspace = true }
+proptest = { workspace = true }
+roomeq-model = { workspace = true }
+assert_fs = { workspace = true }
 tempfile = { workspace = true }
+
+[[bin]]
+name = "autoeq"
+path = "src/bin/autoeq.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "benchmark-autoeq-speaker"
+path = "src/bin/benchmark-autoeq-speaker.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "autoeq-download-speakers"
+path = "src/bin/autoeq-download-speakers.rs"
+test = false
+bench = false

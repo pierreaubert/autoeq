@@ -1,0 +1,7 @@
+{
+  "recorded_utc": "2026-10-26T02:56:15.774086+00:00",
+  "pre_contract_coverage_binary_sha256": "780c75413d91d0630b18dbd69dd2c43c29213ac0f3f045822611c7faae97bf95",
+  "active_long_run": "session51949, weekly step1 of9, pre-contract binary already executing",
+  "transition": "Source changed after step1 binary started. Existing long run is diagnostic, not a final single-source acceptance run. Later commands may build patched source; final affected weekly scope must rerun.",
+  "new_check": "Build patched roomeq-qa owner and run exact four-case small-stereo comparison in a separate process."
+}

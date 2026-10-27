@@ -14,7 +14,7 @@ workspace = true
 anyhow = { workspace = true }
 autoeq-core = { workspace = true }
 autoeq-artifacts = { workspace = true }
-autoeq-measurements = { workspace = true }
+autoeq-measurements = { workspace = true, features = ["api"] }
 chrono = { workspace = true }
 hound = { workspace = true }
 log = { workspace = true }
@@ -41,6 +41,7 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 
 [dev-dependencies]
+roomeq-synthetic = { workspace = true }
 criterion = { workspace = true }
 stats_alloc = "0.1.10"
 

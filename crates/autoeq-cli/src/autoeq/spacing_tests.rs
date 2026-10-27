@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::autoeq_command::spacing::{check_spacing_constraints, print_freq_spacing};
-    use autoeq::cli::Args;
+    use crate::cli::Args;
     use clap::Parser;
 
     fn create_test_args() -> Args {

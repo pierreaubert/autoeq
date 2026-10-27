@@ -1,7 +1,6 @@
 //! CLI support for deterministic measurement-provenance sidecar upgrades.
 //!
-//! The root `migrate_provenance` binary delegates to [`run`], keeping command
-//! ownership in the measurements crate without changing Cargo invocation.
+//! The measurements-owned `migrate_provenance` executable delegates to [`run`].
 
 use crate::{PROVENANCE_SCHEMA_VERSION, read_sidecar_file};
 use std::path::PathBuf;

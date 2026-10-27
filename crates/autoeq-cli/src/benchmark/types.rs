@@ -57,7 +57,7 @@ impl Default for ShutdownSignal {
 )]
 pub struct BenchArgs {
     #[command(flatten)]
-    pub base: autoeq::cli::Args,
+    pub base: crate::cli::Args,
 
     /// Limit to first 5 speakers for quick smoke run
     #[arg(long, default_value_t = false)]

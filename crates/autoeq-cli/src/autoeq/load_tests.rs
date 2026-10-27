@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::autoeq_command::load::load_and_prepare;
-    use autoeq::cli::Args;
+    use crate::cli::Args;
     use clap::Parser;
     use std::fs;
     use tempfile::TempDir;

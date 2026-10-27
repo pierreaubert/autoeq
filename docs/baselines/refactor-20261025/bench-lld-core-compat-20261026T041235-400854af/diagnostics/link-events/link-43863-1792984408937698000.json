@@ -1,0 +1,11 @@
+{
+  "command_sha256": "a42cfb70b0b6f2752b86a8dd2571235ef204288a75cde9de4c1488605b68ada4",
+  "output": "/Volumes/home_tmp/tmp/autoeq-build-bench-7n8b2h_9/targets/diagnostics/release/debug/build/proc-macro2-470461956943061f/build_script_build-470461956943061f",
+  "driver_wall_seconds": 0.05368041689507663,
+  "exit_code": 0,
+  "max_process_rss_bytes": 62701568,
+  "apple_linker_timers": {},
+  "lto_timers": {},
+  "raw_stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-lld-core-compat-20261026T041235-400854af/diagnostics/link-events/link-43863-1792984408937698000.stderr",
+  "arguments": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-lld-core-compat-20261026T041235-400854af/diagnostics/link-events/link-43863-1792984408937698000.argv.json"
+}

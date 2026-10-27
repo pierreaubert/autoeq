@@ -1453,16 +1453,20 @@ fn replay_output(
                             .plugins
                             .iter()
                             .filter(|plugin| match plugin.plugin_type.as_str() {
-                                "gain" => plugin
-                                    .parameters
-                                    .get("room_eq_correction_gain")
-                                    .and_then(serde_json::Value::as_bool)
-                                    == Some(true),
-                                "delay" => plugin
-                                    .parameters
-                                    .get("room_eq_correction_delay")
-                                    .and_then(serde_json::Value::as_bool)
-                                    == Some(true),
+                                "gain" => {
+                                    plugin
+                                        .parameters
+                                        .get("room_eq_correction_gain")
+                                        .and_then(serde_json::Value::as_bool)
+                                        == Some(true)
+                                }
+                                "delay" => {
+                                    plugin
+                                        .parameters
+                                        .get("room_eq_correction_delay")
+                                        .and_then(serde_json::Value::as_bool)
+                                        == Some(true)
+                                }
                                 _ => true,
                             })
                             .cloned()
@@ -1614,7 +1618,6 @@ pub(super) fn validate_candidate_final_seats(
         },
     )
 }
-
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn validate_candidate_final_seats_with_diagnostic_trace(
@@ -2920,7 +2923,6 @@ fn concealment_stage(findings: Vec<String>) -> roomeq_model::StageOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     #[test]
     fn transplant_matches_post_route_safety_but_not_common_input_safety() {
@@ -5373,8 +5375,7 @@ mod tests {
                 phase: Some(ndarray::Array1::zeros(5)),
                 ..Default::default()
             };
-            let mut driver_gain =
-                roomeq_engine::output::create_gain_plugin_with_invert(3.0, true);
+            let mut driver_gain = roomeq_engine::output::create_gain_plugin_with_invert(3.0, true);
             driver_gain.parameters["room_eq_stage"] = serde_json::json!("post_route");
             let mut driver_delay = roomeq_engine::output::create_delay_plugin(5.0);
             driver_delay.parameters["room_eq_stage"] = serde_json::json!("post_route");
@@ -5448,8 +5449,8 @@ mod tests {
             );
             let driver_delay_ms = if correction_tagged { 0.005 } else { 0.0 };
             let driver_polarity = if correction_tagged { 180.0 } else { 0.0 };
-            let expected_phase = -180.0 + 180.0 - 360.0 * 80.0 * (0.002 + driver_delay_ms)
-                + driver_polarity;
+            let expected_phase =
+                -180.0 + 180.0 - 360.0 * 80.0 * (0.002 + driver_delay_ms) + driver_polarity;
             let phase_error = (replayed.curve.phase.as_ref().unwrap()[index] - expected_phase
                 + 180.0)
                 .rem_euclid(360.0)

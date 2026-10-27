@@ -1,0 +1,12 @@
+{
+  "status": "passed",
+  "logical_test": "room_optimization::room_optimization_result::tests::sanity_check_result_detects_non_finite_spl",
+  "condition": "#[cfg(not(debug_assertions))]",
+  "original_and_current_guard_and_body_identical": true,
+  "guarded_source_sha256": "a7350fe2ee68590c0be2d5d9848246299c0fc8e503fe2c81b6ee1fad48017edd",
+  "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+  "current_file": "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+  "development_scope_cases": 3273,
+  "release_scope_cases": 3274,
+  "note": "The case remains in the complete native qa/release inventory. It is not compiled in development test artifacts with debug_assertions=true. Scope selection uses the actual Cargo compiler-artifact profile, never missing-name inference."
+}

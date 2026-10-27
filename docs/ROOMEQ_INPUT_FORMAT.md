@@ -2,7 +2,7 @@
 
 This document describes the JSON input format for the `roomeq` command-line tool.
 
-**JSON Schema:** [`input_schema.json`](../src/bin/roomeq/input_schema.json)
+**JSON Schema:** [`input_schema.json`](../crates/roomeq-cli/schemas/input_schema.json)
 
 To validate your configuration against the schema:
 ```bash
@@ -87,7 +87,7 @@ supported with unavailable high-frequency bands. A driver capture is never
 substituted for a measured whole-speaker response. Independent acoustic reports
 can omit unknown timing IDs; coherent sums and relative timing still require
 separate, explicit shared-clock evidence. See the measured-IR section in
-[`INPUT_FORMAT.md`](../src/bin/roomeq/INPUT_FORMAT.md) for details.
+[`INPUT_FORMAT.md`](../crates/roomeq-cli/schemas/INPUT_FORMAT.md) for details.
 
 ```json
 {
@@ -144,7 +144,7 @@ the recording-level declaration, so reports can use the same room volume.
 
 Device names and setup notes are provenance, not proof of calibration or a shared
 timing reference. Merely filling this object does not turn an arbitrary WAV into
-a valid room IR. See the [generated schema](../src/bin/roomeq/input_schema.json)
+a valid room IR. See the [generated schema](../crates/roomeq-cli/schemas/input_schema.json)
 for nested evidence objects and exact accepted types.
 
 ## Cross-talk Cancellation (CTC)
@@ -974,7 +974,7 @@ The EPA metrics (`pre`/`post` per channel) are always emitted in the output
 JSON under `metadata.epa_per_channel`, with a whole-system BS.1770-style
 aggregate under `metadata.epa_multichannel`, regardless of which `loss_type`
 is selected — EPA is usable as a diagnostic even when the optimizer is
-minimizing a different objective. See [`OUTPUT_FORMAT.md`](./OUTPUT_FORMAT.md)
+minimizing a different objective. See [`ROOMEQ_OUTPUT_FORMAT.md`](./ROOMEQ_OUTPUT_FORMAT.md)
 for the EPA score fields.
 
 ### PEQ Models

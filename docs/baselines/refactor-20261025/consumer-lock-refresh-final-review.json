@@ -1,0 +1,32 @@
+{
+  "sotf": {
+    "status": "passed",
+    "retained_versions_unchanged": true,
+    "added_packages": [],
+    "removed_packages": [],
+    "before_lock_sha256": "ae31a5a56129f510064a4600a402b58c9e9e3c6dbfcaa996d04fd33f9ff30d67",
+    "after_lock_sha256": "9d20a77e2f93cacc74826197f0967f607c8e017f4ad087bc55fde95956d36384",
+    "no_root_package": true,
+    "resolved_package_count": 1334
+  },
+  "sotf-capture": {
+    "status": "passed",
+    "retained_versions_unchanged": true,
+    "added_packages": [],
+    "removed_packages": [],
+    "before_lock_sha256": "fe437dc27e94ffc11b93a2d967ce2f28f7777bbcac2a0d7be84e759fb04ecc6d",
+    "after_lock_sha256": "c90d909990b9b9296cdf2ac76ef57a19ea71efe43d9f1986e1b1b05f8b20c17d",
+    "no_root_package": true,
+    "resolved_package_count": 383
+  },
+  "sotf-daw": {
+    "status": "passed",
+    "retained_versions_unchanged": true,
+    "added_packages": [],
+    "removed_packages": [],
+    "before_lock_sha256": "4cdd75710ec5c1e37d76cfcdaa9f8a373c06302ed00161e8938f4858ce7ef1fd",
+    "after_lock_sha256": "e96b1c08b0f7a63488c1ca8f5bfdb9b99f82aefab7c2629d4ed21f9263710b47",
+    "no_root_package": true,
+    "resolved_package_count": 1082
+  }
+}

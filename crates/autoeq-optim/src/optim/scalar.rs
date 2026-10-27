@@ -10,7 +10,7 @@ use math_audio_optimisation::cobra::{CobraConfig, CobraIntermediate, cobra};
 use math_audio_optimisation::cobyla::{CobylaRhoBegin, cobyla};
 use math_audio_optimisation::{
     CmaEsConfig, CobylaConfig, CobylaStopTols, DEConfigBuilder, Init, IsresConfig, Mutation,
-    Strategy, cma_es, differential_evolution, isres,
+    Strategy, differential_evolution, isres,
 };
 use ndarray::Array1;
 use std::str::FromStr;
@@ -311,7 +311,7 @@ where
     F: Fn(&Array1<f64>) -> f64 + Sync,
 {
     let lambda = config.population.max(4);
-    let report = cma_es(
+    let report = super::cmaes::run_bounded_cma_es(
         f,
         CmaEsConfig {
             bounds: bounds.to_vec(),
@@ -826,6 +826,30 @@ mod tests {
     #[test]
     fn cmaes_solves_bounded_scalar_quadratic() {
         assert_solves_quadratic("autoeq:cmaes");
+    }
+
+    #[test]
+    fn cmaes_scores_and_returns_exact_parameter_rails() {
+        let lower = -4.199999999999999_f64;
+        let upper = 0.7_f64;
+        let result = optimize_bounded_scalar(
+            &[(lower, upper)],
+            &[upper],
+            &ScalarOptimConfig {
+                algorithm: "autoeq:cmaes".into(),
+                max_iter: 32,
+                population: 4,
+                seed: Some(7),
+                ..Default::default()
+            },
+            |point| {
+                assert!(point[0] >= lower && point[0] <= upper);
+                -point[0]
+            },
+        )
+        .expect("a bounded optimum on the upper rail must remain usable");
+        assert_eq!(result.x, [upper]);
+        assert_eq!(result.fun, -upper);
     }
 
     #[test]

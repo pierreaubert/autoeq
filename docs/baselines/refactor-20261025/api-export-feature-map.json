@@ -1,0 +1,30 @@
+{
+  "feature": "api",
+  "owner": "autoeq-measurements",
+  "compatibility_forwarders": [
+    "autoeq-objective",
+    "autoeq-optim",
+    "autoeq-plot"
+  ],
+  "names": [
+    "FsMeasurementCache",
+    "ReqwestMeasurementBackend",
+    "fetch_available_headphones",
+    "fetch_available_speakers",
+    "fetch_contour_data",
+    "fetch_contour_data_at_cache_root",
+    "fetch_curve_from_api",
+    "fetch_curve_from_api_at_cache_root",
+    "fetch_directivity_data",
+    "fetch_directivity_data_at_cache_root",
+    "fetch_headphone_frequency_response",
+    "fetch_headphone_frequency_response_at_cache_root",
+    "fetch_measurement_plot_data",
+    "fetch_measurement_plot_data_at_cache_root",
+    "fetch_record_from_api",
+    "load_spinorama_with_spin",
+    "load_spinorama_with_spin_at_cache_root",
+    "read_spinorama",
+    "read_spinorama_at_cache_root"
+  ]
+}

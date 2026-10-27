@@ -1,0 +1,44 @@
+{
+  "source": "/Volumes/home_worktrees/autoeq-baseline-contract-fixes",
+  "candidate": "/Volumes/home_worktrees/autoeq-refactor",
+  "files": [
+    {
+      "path": "crates/roomeq-qa/src/coverage/home_cinema.rs",
+      "sha256": "bcdc432d26568933596e8f9a76dab21a37a1a1b1d10e2f0758b70a3de730b819"
+    },
+    {
+      "path": "crates/roomeq-qa/src/coverage/run.rs",
+      "sha256": "661b38062ae6ae8339579711bcb7b434918a83511d41666980c27721bdfe3bff"
+    },
+    {
+      "path": "crates/roomeq-qa/src/synthetic.rs",
+      "sha256": "312b857dc40c687d33f0cfe6ac45da4733f2d9a7a17eb2897eaa134bd19815a9"
+    },
+    {
+      "path": "crates/roomeq-qa/src/coverage/home_cinema/delivered_safety.rs",
+      "sha256": "1acd0948096a828600b960853830cc2707c4977e6eb187918b86f23a46816af5"
+    },
+    {
+      "path": "scripts/test_advanced_eq.py",
+      "sha256": "4963731285f9093f1926e19e6a6ba7e972719d960c782ebe7fe82d20b4c00f6d"
+    },
+    {
+      "path": "scripts/test_comparison_payload_python_goldens.py",
+      "sha256": "dada67ae9e1b4625af1cea2e5a4ae9822086b9a9bc527c1d0eefb0640e5ff1a8"
+    },
+    {
+      "path": "scripts/test_payload_binding.py",
+      "sha256": "d6769680f368e3af120ed6577baacaf4e87e6e8f7a2fbfed90f4f13738eed6a8"
+    },
+    {
+      "path": "scripts/test_roomeq_suite_report.py",
+      "sha256": "84fc6e5d304219237db551f9b0e3bf3690c9cd2c7e2afa90fca6875eeaaa40a5"
+    },
+    {
+      "path": "scripts/test_roomeq_synthetic_exit.py",
+      "sha256": "f1f793d9d05bb6d864bc519401abb75d977d957e4340005c3328cacc7f365f23"
+    }
+  ],
+  "equal": true,
+  "note": "Old frozen comparison inputs deliberately remain immutable; their QA source is superseded."
+}

@@ -12,11 +12,12 @@ use super::utils::{
     CEA2034_CURVES, ChartTheme, cea2034_colors, format_frequency, get_angle_range,
     interpolate_spl_at_frequency,
 };
-use autoeq::read::{
+use autoeq_measurements::read::{
     ContourPlotData, extract_cea2034_curves_original, fetch_available_speakers, fetch_contour_data,
     fetch_directivity_data, fetch_measurement_plot_data,
 };
-use autoeq::{Curve, DirectivityData};
+use autoeq_core::Curve;
+use autoeq_measurements::cea2034::DirectivityData;
 use d3rs::axis::{AxisConfig, render_axis};
 use d3rs::brush::{BrushSelection, BrushState};
 use d3rs::color::D3Color;

@@ -165,10 +165,7 @@ pub fn envelope_bound_at(knots: &[(f64, f64)], freq_hz: f64) -> f64 {
 ///
 /// Driver and multi-sub layouts carry gains/delays/crossovers rather than
 /// frequency/Q/gain triplets, so per-filter and composite PEQ envelope rules
-/// do not apply to them. Mirrors the guard in `compute.rs`.
-pub fn is_peq_layout_loss(loss: LossType) -> bool {
-    !matches!(loss, LossType::DriversFlat | LossType::MultiSubFlat)
-}
+pub use autoeq_objective::loss::is_peq_layout_loss;
 
 /// One per-filter gain projection onto its center-frequency envelope.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -271,43 +268,21 @@ pub fn project_gains_onto_envelopes(
     (projected, adjustments)
 }
 
-/// One local-Q projection at a decoded filter center.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct QAdjustment {
-    /// Index of the adjusted filter.
-    pub filter_index: usize,
-    /// Decoded filter center in Hz.
-    pub center_hz: f64,
-    /// Q before projection.
-    pub q_before: f64,
-    /// Q after projection (the effective cap).
-    pub q_after: f64,
-    /// Global cap supplied by the caller.
-    pub global_cap: f64,
-    /// Local envelope cap at the center (`+inf` when unconfigured).
-    pub local_cap: f64,
-}
+pub use autoeq_optim_types::QAdjustment;
 
-impl QAdjustment {
-    /// Whether the global cap bound this filter rather than the local one.
-    pub fn bound_by_global(&self) -> bool {
-        self.global_cap <= self.local_cap
-    }
-
-    /// Neutral diagnostic reporting the binding bound.
-    pub fn diagnostic(&self, candidate_id: &str) -> ConstraintDiagnostic {
-        ConstraintDiagnostic {
-            candidate_id: String::from(candidate_id),
-            kind: if self.bound_by_global() {
-                ConstraintKind::GlobalQ
-            } else {
-                ConstraintKind::LocalQ
-            },
-            frequency_hz: Some(self.center_hz),
-            band_hz: None,
-            observed: self.q_before,
-            bound: self.q_after,
-        }
+/// Neutral diagnostic reporting the binding bound.
+fn q_adjustment_diagnostic(adjustment: &QAdjustment, candidate_id: &str) -> ConstraintDiagnostic {
+    ConstraintDiagnostic {
+        candidate_id: String::from(candidate_id),
+        kind: if adjustment.bound_by_global() {
+            ConstraintKind::GlobalQ
+        } else {
+            ConstraintKind::LocalQ
+        },
+        frequency_hz: Some(adjustment.center_hz),
+        band_hz: None,
+        observed: adjustment.q_before,
+        bound: adjustment.q_after,
     }
 }
 
@@ -758,7 +733,7 @@ impl ConstrainedCandidate {
             out.push(adjustment.diagnostic(&self.candidate_id));
         }
         for adjustment in &self.q_adjustments {
-            out.push(adjustment.diagnostic(&self.candidate_id));
+            out.push(q_adjustment_diagnostic(adjustment, &self.candidate_id));
         }
         for breach in &self.composite_breaches {
             out.push(breach.diagnostic(&self.candidate_id));
@@ -2154,5 +2129,291 @@ mod constraint_envelope_tests {
             )
             .is_err()
         );
+    }
+
+    // Resolution-guard x envelope integration tests (moved with the
+    // guard to autoeq-objective in Phase 3c; they exercise
+    // constrain_candidate, which stays in this crate).
+
+    use super::super::resolution_guard::guarded_parameters;
+    use super::super::{PeakResolutionGuard, compute_fitness_penalties_ref};
+    use autoeq_core::resolution::MeasurementResolution;
+    use std::borrow::Cow;
+    use std::sync::Arc;
+
+    fn resolution_guard_objective() -> ObjectiveData {
+        let grid = Array1::linspace(20.0, 160.0, 512);
+        let mut data = ObjectiveDataBuilder::speaker_flat(
+            grid.clone(),
+            Array1::zeros(512),
+            Array1::from_elem(512, -3.0),
+            48000.0,
+            PeqModel::Pk,
+        )
+        .freq_range(20.0, 160.0)
+        .smoothing(false, 0)
+        .build()
+        .unwrap();
+        data.peak_resolution_guard = Some(PeakResolutionGuard {
+            support: Arc::new(
+                MeasurementResolution::from_grid(&[20.0, 40.0, 80.0, 160.0]).unwrap(),
+            ),
+            minimum_q: 0.1,
+            maximum_q: 6.0,
+            smoothing_octaves: 0.0,
+        });
+        data
+    }
+
+    #[test]
+    fn every_seat_scores_one_common_bandwidth_in_scalar_and_pareto_paths() {
+        let coarse = resolution_guard_objective();
+        let mut fine = coarse.clone();
+        fine.peak_resolution_guard.as_mut().unwrap().support =
+            Arc::new(MeasurementResolution::from_grid(fine.freqs.as_slice().unwrap()).unwrap());
+        fine.deviation = Arc::new(Array1::from_elem(fine.freqs.len(), -1.0));
+        let mut multi = coarse.clone();
+        multi.peak_resolution_guard = None;
+        multi.multi_objective = Some(crate::optim::MultiObjectiveData {
+            objectives: vec![fine.clone(), coarse.clone()],
+            strategy: crate::roomeq::MultiMeasurementStrategy::WeightedSum,
+            weights: vec![0.5, 0.5],
+            variance_lambda: 0.0,
+            uncertainty_cvar_alpha: None,
+        });
+        let x = [60.0_f64.log10(), 6.0, -3.0];
+        let emitted = constrain_candidate(
+            "all-seats",
+            &x,
+            &multi,
+            &ConstraintSpec {
+                global_max_q: 6.0,
+                subdivisions_per_bin: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        fine.peak_resolution_guard = None;
+        let mut plain_coarse = coarse;
+        plain_coarse.peak_resolution_guard = None;
+        let losses = [
+            compute_fitness_penalties_ref(&emitted.params, &fine),
+            compute_fitness_penalties_ref(&emitted.params, &plain_coarse),
+        ];
+        assert_eq!(
+            crate::optim::compute_pareto_objectives(&x, &multi),
+            losses.to_vec()
+        );
+        assert_eq!(
+            compute_fitness_penalties_ref(&x, &multi),
+            (losses[0] + losses[1]) / 2.0
+        );
+        assert!(emitted.params[1] < 0.7);
+    }
+
+    #[test]
+    fn incompatible_minimum_q_and_extrapolated_centers_are_refused() {
+        let mut data = resolution_guard_objective();
+        data.peak_resolution_guard.as_mut().unwrap().minimum_q = 1.0;
+        let x = [60.0_f64.log10(), 6.0, -3.0];
+        assert!(compute_fitness_penalties_ref(&x, &data).is_infinite());
+        let refusal = constrain_candidate(
+            "incompatible",
+            &x,
+            &data,
+            &ConstraintSpec {
+                global_max_q: 6.0,
+                subdivisions_per_bin: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap_err();
+        assert!(refusal.contains("incompatible with minimum Q"), "{refusal}");
+        data.peak_resolution_guard.as_mut().unwrap().minimum_q = 0.1;
+        assert!(
+            compute_fitness_penalties_ref(&[200.0_f64.log10(), 1.0, -3.0], &data).is_infinite()
+        );
+        assert!(compute_fitness_penalties_ref(&[60.0_f64.log10(), 6.0, 0.0], &data).is_finite());
+    }
+
+    #[test]
+    fn matched_peaks_use_actual_extremum_width_in_scoring_and_emission() {
+        let mut data = resolution_guard_objective();
+        data.peq_model = PeqModel::Free;
+        // This is dense ORIGINAL support with an explicit half-octave smoother.
+        // Both signs must widen to at least the smoothed half-octave width.
+        data.peak_resolution_guard.as_mut().unwrap().support =
+            Arc::new(MeasurementResolution::from_grid(data.freqs.as_slice().unwrap()).unwrap());
+        data.peak_resolution_guard
+            .as_mut()
+            .unwrap()
+            .smoothing_octaves = 0.5;
+        for gain in [-3.0, 3.0] {
+            let x = [11.0, 60.0_f64.log10(), 6.0, gain];
+            let emitted = constrain_candidate(
+                "matched-width",
+                &x,
+                &data,
+                &ConstraintSpec {
+                    global_max_q: 6.0,
+                    subdivisions_per_bin: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(emitted.feasible);
+            assert!(emitted.params[2] < 6.0 && emitted.params[2] >= 0.1);
+            let feature = autoeq_objective::optim::matched_resolution::feature(
+                60.0,
+                48_000.0,
+                emitted.params[2],
+                gain,
+            )
+            .unwrap();
+            assert!(feature.width_octaves >= 0.5);
+            let mut plain = data.clone();
+            plain.peak_resolution_guard = None;
+            assert_eq!(
+                compute_fitness_penalties_ref(&x, &data),
+                compute_fitness_penalties_ref(&emitted.params, &plain)
+            );
+            assert!(matches!(
+                guarded_parameters(&emitted.params, &data, |_| {}).unwrap(),
+                Cow::Borrowed(_)
+            ));
+            // Independently measure half-gain crossings from direct complex
+            // transfer samples, bypassing the analytic polynomial assessor.
+            let filter = crate::iir::Biquad::new(
+                crate::iir::BiquadFilterType::PeakMatched,
+                60.0,
+                48_000.0,
+                emitted.params[2],
+                gain,
+            );
+            let frequencies = Array1::logspace(10.0, 1.0_f64.log10(), 23_999.0_f64.log10(), 32_768);
+            let levels: Vec<_> = frequencies
+                .iter()
+                .map(|frequency| 20.0 * filter.complex_response(*frequency).norm().log10())
+                .collect();
+            let peak = levels
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.abs().total_cmp(&b.abs()))
+                .unwrap()
+                .0;
+            assert!((frequencies[peak] / feature.center_hz).log2().abs() < 0.001);
+            let half = levels[peak].abs() * 0.5;
+            let left = (0..peak)
+                .rev()
+                .find(|index| levels[*index].abs() < half)
+                .unwrap();
+            let right = (peak + 1..levels.len())
+                .find(|index| levels[*index].abs() < half)
+                .unwrap();
+            let sampled_width = (frequencies[right] / frequencies[left]).log2();
+            assert!(
+                (sampled_width - feature.width_octaves).abs() < 0.002,
+                "analytic half-gain width must match independent dense transfer: {sampled_width} vs {}",
+                feature.width_octaves
+            );
+        }
+    }
+
+    #[test]
+    fn search_and_emission_use_the_same_resolution_broadened_response() {
+        let data = resolution_guard_objective();
+        let x = [60.0_f64.log10(), 6.0, -3.0];
+        let candidate = constrain_candidate(
+            "resolution",
+            &x,
+            &data,
+            &ConstraintSpec {
+                global_max_q: 6.0,
+                subdivisions_per_bin: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(candidate.feasible);
+        assert_eq!(candidate.q_adjustments.len(), 1);
+        assert!(candidate.params[1] < 0.7);
+        let mut ordinary = data.clone();
+        ordinary.peak_resolution_guard = None;
+        assert_eq!(
+            compute_fitness_penalties_ref(&x, &data),
+            compute_fitness_penalties_ref(&candidate.params, &ordinary)
+        );
+        assert_ne!(
+            compute_fitness_penalties_ref(&x, &ordinary),
+            compute_fitness_penalties_ref(&candidate.params, &ordinary)
+        );
+        assert!(matches!(
+            guarded_parameters(&candidate.params, &data, |_| {}).unwrap(),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn zero_gain_pass_notch_and_allpass_topologies_obey_the_same_bandwidth_floor() {
+        use crate::iir::BiquadFilterType;
+        let mut data = resolution_guard_objective();
+        data.peq_model = PeqModel::Free;
+        for kind in [
+            BiquadFilterType::Lowpass,
+            BiquadFilterType::Highpass,
+            BiquadFilterType::HighpassVariableQ,
+            BiquadFilterType::Bandpass,
+            BiquadFilterType::Notch,
+            BiquadFilterType::AllPass,
+        ] {
+            let x = [
+                crate::param_utils::encode_filter_type(kind),
+                60.0_f64.log10(),
+                6.0,
+                0.0,
+            ];
+            let candidate = constrain_candidate(
+                "zero-gain-q-controlled",
+                &x,
+                &data,
+                &ConstraintSpec {
+                    global_max_q: 6.0,
+                    subdivisions_per_bin: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert!(candidate.feasible);
+            assert_eq!(
+                candidate.q_adjustments.len(),
+                1,
+                "{kind:?} must not bypass projection through an unused gain field"
+            );
+            assert!(candidate.params[2] < 0.7);
+            let mut plain = data.clone();
+            plain.peak_resolution_guard = None;
+            assert_eq!(
+                compute_fitness_penalties_ref(&x, &data),
+                compute_fitness_penalties_ref(&candidate.params, &plain)
+            );
+            // Verify the actual complex transfer uses the projected Q, including
+            // phase-only all-pass changes invisible to a magnitude objective.
+            let guarded = crate::x2peq::x2peq(&candidate.params, data.srate, data.peq_model);
+            let raw = crate::x2peq::x2peq(&x, data.srate, data.peq_model);
+            assert!(guarded[0].1.q < raw[0].1.q);
+            assert!(
+                (guarded[0].1.complex_response(40.0) - raw[0].1.complex_response(40.0)).norm()
+                    > 0.01
+            );
+            let mut invalid = x;
+            invalid[2] = 0.0;
+            assert!(
+                guarded_parameters(&invalid, &data, |_| {}).is_err(),
+                "do not activate implicit native-Q defaults"
+            );
+            let mut unsupported = x;
+            unsupported[1] = 200.0_f64.log10();
+            assert!(guarded_parameters(&unsupported, &data, |_| {}).is_err());
+        }
     }
 }

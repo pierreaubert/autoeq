@@ -27,7 +27,7 @@ def main() -> int:
         for file_report in files:
             filename = file_report["filename"].replace("\\", "/")
             marker = filename.find(prefix)
-            if marker < 0:
+            if marker < 0 and not filename.endswith(prefix.rstrip("/") + ".rs"):
                 continue
             lines = file_report["summary"]["lines"]
             covered += lines["covered"]

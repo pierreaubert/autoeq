@@ -63,12 +63,12 @@ pub async fn run_command() -> Result<(), Box<dyn Error>> {
 
     // Check if user wants to see algorithm list
     if args.base.algo_list {
-        autoeq::cli::display_algorithm_list();
+        crate::cli::display_algorithm_list();
     }
 
     // Validate before starting the signal listener, whose lifetime is then
     // bounded by the result of `run_benchmark` below.
-    autoeq::cli::validate_args_or_exit(&args.base);
+    crate::cli::validate_args_or_exit(&args.base);
 
     // Set up signal handling for graceful shutdown
     let shutdown = ShutdownSignal::new();

@@ -99,6 +99,25 @@ class DependencyPolicyTests(unittest.TestCase):
             "stale temporary exception must be removed: core -> engine", errors
         )
 
+    def test_accepts_refactor_phase_remove_by(self) -> None:
+        current_policy = policy()
+        current_policy["allowed_direct_dependencies"]["engine"] = []
+        current_policy["temporary_exceptions"] = [
+            {
+                "from": "engine",
+                "to": "core",
+                "remove_by": "phase-3d",
+                "reason": "scheduled dependency cut",
+            }
+        ]
+        packages = {
+            "app": package("app", []),
+            "core": package("core", []),
+            "engine": package("engine", ["core"]),
+        }
+        _, errors = checker.check_dependency_policy(packages, current_policy)
+        self.assertEqual(errors, [])
+
     def test_detects_cycle_even_when_edges_are_allowed(self) -> None:
         current_policy = policy()
         current_policy["allowed_direct_dependencies"]["core"] = ["engine"]
@@ -206,6 +225,42 @@ class RatchetTests(unittest.TestCase):
             errors,
         )
 
+    def test_allowed_edge_reclassified_as_exception_is_a_tightening(self) -> None:
+        baseline = policy()
+        current = policy()
+        # engine -> core was allowed in the baseline; demoting it to a
+        # temporary exception with a removal phase must not fail the
+        # ratchet, while an exception for a forbidden edge still does.
+        current["allowed_direct_dependencies"]["engine"] = []
+        current["temporary_exceptions"] = [
+            {
+                "from": "engine",
+                "to": "core",
+                "remove_by": "phase-3c",
+                "reason": "scheduled dependency cut",
+            }
+        ]
+        self.assertEqual(
+            checker.check_monotonic_ratchets(
+                current, baseline, {"root_rust_loc": 100}
+            ),
+            [],
+        )
+        current["temporary_exceptions"].append(
+            {
+                "from": "core",
+                "to": "app",
+                "remove_by": "phase-3c",
+                "reason": "previously forbidden",
+            }
+        )
+        self.assertIn(
+            "temporary exception list may only shrink: added core -> app",
+            checker.check_monotonic_ratchets(
+                current, baseline, {"root_rust_loc": 100}
+            ),
+        )
+
     def test_budget_increase_cannot_exceed_actual_baseline_source(self) -> None:
         baseline = policy()
         baseline["metric_budgets"]["root_rust_loc"] = 100
@@ -248,6 +303,54 @@ class RatchetTests(unittest.TestCase):
         self.assertEqual(
             checker.check_metric_budgets(metrics, policy()),
             ["metric increased: root_rust_loc=101, budget=100"],
+        )
+
+
+class BuildLaneTests(unittest.TestCase):
+    def lanes_policy(self) -> dict:
+        current = policy()
+        current["build_lanes"] = {
+            "test": {
+                "selection": "default-members",
+                "packages": ["core", "engine"],
+                "cargo_profile": "test",
+                "nextest_profile": "fast",
+            },
+            "ntest": {
+                "selection": "workspace",
+                "cargo_profile": "qa",
+                "nextest_profile": "full",
+            },
+        }
+        return current
+
+    def test_accepts_lanes_matching_default_members(self) -> None:
+        self.assertEqual(
+            checker.check_build_lanes(
+                {"app", "core", "engine"},
+                ["core", "engine"],
+                self.lanes_policy(),
+            ),
+            [],
+        )
+
+    def test_rejects_default_member_drift_and_absent_package(self) -> None:
+        current = self.lanes_policy()
+        current["build_lanes"]["test"]["packages"] = ["core", "renamed"]
+        errors = checker.check_build_lanes(
+            {"app", "core", "engine"}, ["core", "engine"], current
+        )
+        self.assertIn(
+            "build lane test names absent package: renamed", errors
+        )
+        self.assertIn(
+            "build lane test packages do not match workspace default-members",
+            errors,
+        )
+
+    def test_missing_build_lanes_is_a_bootstrap_noop(self) -> None:
+        self.assertEqual(
+            checker.check_build_lanes({"app"}, [], policy()), []
         )
 
 
@@ -345,6 +448,116 @@ class FocusedTestMatrixTests(unittest.TestCase):
 
         self.assertEqual(errors, [])
 
+
+class VirtualWorkspaceTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = pathlib.Path(self.directory.name)
+        (self.root / "Cargo.toml").write_text('[workspace]\nmembers = []\n')
+        self.packages = {"core": package("core", []), "cli": package("cli", ["core"])}
+        self.packages["cli"]["publish"] = []
+        self.policy = {"virtual_workspace": True, "root_package": "autoeq", "terminal_packages": ["cli"]}
+
+    def check(self):
+        return checker.check_virtual_workspace(self.root, self.packages, self.policy)
+
+    def test_accepts_virtual_workspace_with_terminal_ownership(self):
+        self.assertEqual(self.check(), [])
+
+    def test_rejects_root_package_resurrection(self):
+        (self.root / "Cargo.toml").write_text('[workspace]\n[package]\nname = "autoeq"\n')
+        self.assertTrue(any("retired root package" in error for error in self.check()))
+
+    def test_rejects_root_source_resurrection(self):
+        (self.root / "src").mkdir()
+        (self.root / "src/lib.rs").write_text('pub use core::*;')
+        self.assertTrue(any("facade sources" in error for error in self.check()))
+
+    def test_rejects_production_to_terminal_edge(self):
+        self.packages["core"] = package("core", ["cli"])
+        self.assertTrue(any("production package depends on terminal" in error for error in self.check()))
+
+    def test_rejects_publishable_terminal_package(self):
+        self.packages["cli"]["publish"] = None
+        self.assertTrue(any("publish = false" in error for error in self.check()))
+
+    def test_rejects_new_dev_cycle(self):
+        current = policy()
+        current["virtual_workspace"] = True
+        current["allowed_dev_dependencies"] = {"core": ["engine"]}
+        packages = {"app": package("app", []), "core": package("core", [("engine", "dev")]), "engine": package("engine", ["core"])}
+        errors = checker.check_dependency_policy(packages, current)[1]
+        self.assertTrue(any("normal/build/dev" in error for error in errors))
+
+
+class DependencyClosureTests(unittest.TestCase):
+    def setUp(self):
+        self.metadata = {
+            "packages": [{"id": name, "name": name} for name in ("objective", "helper", "backend")],
+            "resolve": {"nodes": [
+                {"id": "objective", "deps": [{"pkg": "helper", "dep_kinds": [{"kind": None}]}]},
+                {"id": "helper", "deps": [{"pkg": "backend", "dep_kinds": [{"kind": None}]}]},
+                {"id": "backend", "deps": []},
+            ]},
+        }
+        self.policy = {"forbidden_dependency_closures": {"objective": ["backend"]}}
+
+    def test_rejects_transitive_backend_dependency(self):
+        self.assertIn("forbidden dependency closure: objective -> backend",
+                      checker.check_forbidden_dependency_closures(self.metadata, self.policy))
+
+    def test_dev_only_dependency_is_not_a_production_closure(self):
+        self.metadata["resolve"]["nodes"][1]["deps"][0]["dep_kinds"] = [{"kind": "dev"}]
+        self.assertEqual(checker.check_forbidden_dependency_closures(self.metadata, self.policy), [])
+
+    def test_missing_graph_cannot_pass(self):
+        self.metadata["resolve"] = None
+        self.assertTrue(checker.check_forbidden_dependency_closures(self.metadata, self.policy))
+
+    def test_missing_owner_node_cannot_pass(self):
+        self.metadata["resolve"]["nodes"].pop(0)
+        self.assertTrue(checker.check_forbidden_dependency_closures(self.metadata, self.policy))
+
+
+
+class ExplicitLibraryExportTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.source = pathlib.Path(self.temporary.name) / "lib.rs"
+        self.packages = {"owner": {"targets": [{"kind": ["rlib", "cdylib"], "src_path": str(self.source)}]}}
+
+    def test_multiline_and_grouped_wildcards_fail(self):
+        for statement in ("pub use source::*;", "pub use source::{\n A, *\n};"):
+            self.source.write_text(statement)
+            self.assertTrue(checker.check_explicit_library_exports(self.packages, {"explicit_library_exports": True}))
+
+    def test_explicit_names_and_doc_examples_pass(self):
+        self.source.write_text("//! pub use source::*;\npub use source::{A, B};\n")
+        self.assertEqual(checker.check_explicit_library_exports(self.packages, {"explicit_library_exports": True}), [])
+
+    def test_legacy_policy_does_not_apply_new_ratchet(self):
+        self.source.write_text("pub use source::*;\n")
+        self.assertEqual(checker.check_explicit_library_exports(self.packages, {}), [])
+
+
+class TerminalDependencyTests(unittest.TestCase):
+    def check(self, kind):
+        current = policy()
+        current["forbidden_direct_external_dependencies"] = {"engine": ["clap"]}
+        packages = {"app": package("app", []), "core": package("core", []),
+                    "engine": package("engine", ["core", ("clap", kind)])}
+        return checker.check_dependency_policy(packages, current)[1]
+
+    def test_normal_parser_dependency_is_rejected(self):
+        self.assertTrue(any("forbidden direct normal" in error for error in self.check("normal")))
+
+    def test_build_parser_dependency_is_rejected(self):
+        self.assertTrue(any("forbidden direct build" in error for error in self.check("build")))
+
+    def test_example_and_test_parser_dependency_is_allowed(self):
+        self.assertEqual(self.check("dev"), [])
 
 if __name__ == "__main__":
     unittest.main()

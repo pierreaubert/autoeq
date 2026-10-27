@@ -6,8 +6,7 @@ use ndarray::Array1;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::cli::Args;
-use clap::Parser;
+use crate::OptimizationConfig as Args;
 
 fn zero_curve(freqs: Vec<f64>) -> Curve {
     let n = freqs.len();
@@ -22,8 +21,10 @@ fn zero_curve(freqs: Vec<f64>) -> Curve {
 #[test]
 fn build_target_curve_respects_smoothing_flag() {
     // Prepare a simple input curve and default args
-    let mut args = Args::parse_from(["autoeq-test"]);
-    args.curve_name = "Listening Window".to_string();
+    let mut args = Args {
+        curve_name: "Listening Window".to_string(),
+        ..Args::default()
+    };
     let curve = zero_curve(vec![100.0, 1000.0, 10000.0, 20000.0]);
 
     // No smoothing
@@ -47,10 +48,12 @@ fn build_target_curve_respects_smoothing_flag() {
 
 #[test]
 fn setup_objective_data_sets_use_cea_when_expected() {
-    let mut args = Args::parse_from(["autoeq-test"]);
-    args.speaker = Some("spk".to_string());
-    args.version = Some("v".to_string());
-    args.measurement = Some("CEA2034".to_string());
+    let args = Args {
+        speaker: Some("spk".to_string()),
+        version: Some("v".to_string()),
+        measurement: Some("CEA2034".to_string()),
+        ..Args::default()
+    };
 
     // Minimal input/target curves
     let input_curve = zero_curve(vec![100.0, 1000.0]);
@@ -300,7 +303,11 @@ fn visualization_curves_reject_mismatched_frequency_grids() {
 
 #[test]
 fn initial_guess_respects_fixed_bounds_for_special_filters() {
-    let mut args = Args::parse_from(["autoeq-test", "--peq-model", "hp-pk-lp", "-n", "3"]);
+    let mut args = Args {
+        peq_model: autoeq_core::PeqModel::HpPkLp,
+        num_filters: 3,
+        ..Args::default()
+    };
     args.min_freq = 20.0;
     args.max_freq = 20_000.0;
 
@@ -341,7 +348,7 @@ fn setup_bounds_gain_lower_is_minus_3x_max_db() {
         max_q: 10.0,
         min_db: 1.0, // min gain magnitude (constraint, not bound)
         max_db: 12.0,
-        ..Args::parse_from(["autoeq-test"])
+        ..Args::default()
     };
     let params = crate::OptimParams::from(&args);
     let (lower, upper) = setup_bounds(&params);
@@ -377,7 +384,7 @@ fn setup_bounds_gain_scales_with_max_db() {
             max_q: 5.0,
             min_db: 1.0,
             max_db,
-            ..Args::parse_from(["autoeq-test"])
+            ..Args::default()
         };
         let params = crate::OptimParams::from(&args);
         let (lower, _upper) = setup_bounds(&params);

@@ -1,0 +1,58 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling autocfg v1.5.1
+   Compiling crossbeam-utils v0.8.23
+   Compiling serde_core v1.0.229
+   Compiling crossbeam-epoch v0.9.21
+   Compiling crossbeam-deque v0.8.8
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.9
+   Compiling num-integer v0.1.47
+   Compiling serde v1.0.229
+   Compiling rayon-core v1.13.0
+   Compiling typenum v1.20.1
+   Compiling libc v0.2.191
+   Compiling zmij v1.0.23
+   Compiling hybrid-array v0.4.15
+   Compiling matrixmultiply v0.3.11
+   Compiling serde_json v1.0.154
+   Compiling num-complex v0.4.6
+   Compiling strength_reduce v0.2.4
+   Compiling ref-cast v1.0.27
+   Compiling thiserror v2.0.21
+   Compiling either v1.19.0
+   Compiling memchr v2.8.3
+   Compiling rawpointer v0.2.1
+   Compiling itoa v1.0.18
+   Compiling rayon v1.12.0
+   Compiling transpose v0.2.3
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling serde_derive_internals v0.30.0
+   Compiling primal-check v0.3.4
+   Compiling const-oid v0.10.2
+   Compiling libm v0.2.16
+   Compiling digest v0.11.3
+   Compiling rustfft v6.4.1
+   Compiling cpufeatures v0.3.1
+   Compiling dyn-clone v1.0.20
+   Compiling cfg-if v1.0.5
+   Compiling hound v3.5.1
+   Compiling byteorder v1.5.0
+   Compiling base64 v0.23.1
+   Compiling sha2 v0.11.1
+   Compiling log v0.4.34
+   Compiling num_cpus v1.17.0
+   Compiling serde_derive v1.0.229
+   Compiling ref-cast-impl v1.0.27
+   Compiling thiserror-impl v2.0.21
+   Compiling schemars_derive v1.2.3
+   Compiling ndarray v0.17.2
+   Compiling schemars v1.2.3
+   Compiling math-iir-fir v0.5.27 (/Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/source/math-audio/crates/math-iir-fir)
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/source/autoeq/crates/autoeq-core)
+   Compiling autoeq-optim-types v0.5.0 (/Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/source/autoeq/crates/autoeq-optim-types)
+   Compiling roomeq-model v0.5.15 (/Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/source/autoeq/crates/roomeq-model)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/targets/primed/0/test/config/test/cargo-timings/cargo-timing-20261026T052902380Z-a094431a4462e3fb.html
+    Finished `test` profile [optimized + debuginfo] target(s) in 37.46s

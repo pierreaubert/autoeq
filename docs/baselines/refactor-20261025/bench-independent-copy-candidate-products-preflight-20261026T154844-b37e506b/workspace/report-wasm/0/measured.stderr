@@ -1,0 +1,96 @@
+   Compiling unicode-ident v1.0.27
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling autocfg v1.5.1
+   Compiling wasm-bindgen-shared v0.2.129
+   Compiling rustversion v1.0.23
+   Compiling serde_core v1.0.229
+   Compiling memchr v2.8.3
+   Compiling crossbeam-utils v0.8.23
+   Compiling num-traits v0.2.19
+   Compiling cfg-if v1.0.5
+   Compiling bumpalo v3.20.3
+   Compiling crossbeam-epoch v0.9.21
+   Compiling zmij v1.0.23
+   Compiling crossbeam-deque v0.8.8
+   Compiling serde v1.0.229
+   Compiling wasm-bindgen v0.2.129
+   Compiling syn v3.0.9
+   Compiling serde_json v1.0.154
+   Compiling itoa v1.0.18
+   Compiling hashbrown v0.17.1
+   Compiling pin-project-lite v0.2.17
+   Compiling futures-core v0.3.34
+   Compiling rayon-core v1.13.0
+   Compiling typenum v1.20.1
+   Compiling num-integer v0.1.47
+   Compiling equivalent v1.0.3
+   Compiling once_cell v1.21.4
+   Compiling slab v0.4.12
+   Compiling futures-task v0.3.34
+   Compiling futures-util v0.3.34
+   Compiling matrixmultiply v0.3.11
+   Compiling indexmap v2.14.2
+   Compiling thiserror v2.0.21
+   Compiling foldhash v0.2.0
+   Compiling hybrid-array v0.4.15
+   Compiling num-complex v0.4.6
+   Compiling rawpointer v0.2.1
+   Compiling ref-cast v1.0.27
+   Compiling strength_reduce v0.2.4
+   Compiling either v1.19.0
+   Compiling transpose v0.2.3
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling rayon v1.12.0
+   Compiling primal-check v0.3.4
+   Compiling aho-corasick v1.1.5
+   Compiling regex-syntax v0.8.11
+   Compiling libm v0.2.16
+   Compiling robust v1.2.0
+   Compiling const-oid v0.10.2
+   Compiling rustfft v6.4.1
+   Compiling wasm-bindgen-macro-support v0.2.129
+   Compiling serde_derive_internals v0.30.0
+   Compiling digest v0.11.3
+   Compiling delaunator v1.1.0
+   Compiling regex-automata v0.4.18
+   Compiling byteorder v1.5.0
+   Compiling dyn-clone v1.0.20
+   Compiling hound v3.5.1
+   Compiling base64 v0.23.1
+   Compiling math-delaunay v0.5.4
+   Compiling sha2 v0.11.1
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling ref-cast-impl v1.0.27
+   Compiling schemars_derive v1.2.3
+   Compiling csv-core v0.1.13
+   Compiling log v0.4.34
+   Compiling smallvec v1.16.3
+   Compiling gpui-profiler v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling ryu v1.0.23
+   Compiling csv v1.4.0
+   Compiling regex v1.13.1
+   Compiling wasm-bindgen-macro v0.2.129
+   Compiling ndarray v0.17.2
+   Compiling schemars v1.2.3
+   Compiling js-sys v0.3.106
+   Compiling math-iir-fir v0.5.27 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-96mh64ap/source/math-audio/crates/math-iir-fir)
+warning: function `uses_f64_simd` is never used
+  --> /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-96mh64ap/source/math-audio/crates/math-iir-fir/src/fir.rs:66:4
+   |
+66 | fn uses_f64_simd<T: 'static>() -> bool {
+   |    ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-96mh64ap/source/autoeq/crates/autoeq-core)
+warning: `math-iir-fir` (lib) generated 1 warning
+   Compiling web-time v1.1.0
+   Compiling wasm-bindgen-futures v0.4.79
+   Compiling web-sys v0.3.106
+   Compiling gpui-d3rs v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-96mh64ap/source/autoeq/crates/autoeq-report-wasm)
+   Compiling autoeq-report-wasm-shell v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-96mh64ap/source/autoeq/crates/autoeq-report-wasm-shell)
+    Finished `release` profile [optimized] target(s) in 17.00s

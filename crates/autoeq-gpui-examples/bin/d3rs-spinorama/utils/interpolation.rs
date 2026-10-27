@@ -1,4 +1,4 @@
-use autoeq::DirectivityData;
+use autoeq_measurements::cea2034::DirectivityData;
 
 /// Extract SPL values at a specific frequency from directivity data.
 /// Uses linear interpolation in log-frequency space if exact frequency not found.

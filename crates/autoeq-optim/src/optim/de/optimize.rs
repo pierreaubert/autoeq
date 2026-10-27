@@ -2,6 +2,7 @@ use super::super::ObjectiveData;
 use super::super::constraint_envelope::{
     OwnedConstraintSpec, finalize_candidate, project_gains_onto_envelopes,
 };
+use super::super::types::OptimProgressCallback;
 use super::create::create_de_callback;
 use super::create::create_de_objective;
 use super::misc::process_de_results;
@@ -17,6 +18,7 @@ use crate::de::{
     Mutation, ParallelConfig, Strategy, differential_evolution,
 };
 use crate::initial_guess::{SmartInitConfig, create_smart_initial_guesses};
+use crate::x2peq::x2spl;
 use ndarray::Array1;
 
 /// AutoEQ DE result together with same-invocation completion counters.
@@ -621,6 +623,90 @@ fn choose_best_initial_guess(
     } else {
         Array1::from(current.to_vec())
     }
+}
+
+pub(super) fn epa_progress_input_spl(
+    objective_data: &ObjectiveData,
+    epa_freqs: &Array1<f64>,
+) -> Option<Vec<f64>> {
+    objective_data.input_curve.as_ref().map(|curve| {
+        let aligned = if curve.freq.len() == epa_freqs.len()
+            && curve
+                .freq
+                .iter()
+                .zip(epa_freqs.iter())
+                .all(|(left, right)| (left - right).abs() <= 1.0e-9 * left.abs().max(1.0))
+        {
+            curve.clone()
+        } else {
+            autoeq_core::interpolate_log_space(epa_freqs, curve)
+        };
+        aligned.spl.to_vec()
+    })
+}
+
+/// Run the AutoEQ DE backend with an EPA-aware per-iteration callback.
+///
+/// EPA preference is recomputed every [`EPA_INTERVAL`] generations from the
+/// current best parameter vector. This matches the previous behaviour in
+/// `optimize_filters_with_callback`'s `AlgorithmCategory::AutoEQ` arm.
+pub(crate) fn run_autoeq_de_with_epa_callback(
+    x: &mut [f64],
+    lower_bounds: &[f64],
+    upper_bounds: &[f64],
+    objective_data: ObjectiveData,
+    params: &crate::OptimParams,
+    autoeq_name: &str,
+    mut callback: OptimProgressCallback,
+) -> AutoeqDeCompletionResult {
+    const EPA_INTERVAL: usize = 10;
+
+    let epa_config = objective_data.epa_config.clone();
+    let epa_freqs =
+        ndarray::Array1::from(objective_data.freqs.iter().copied().collect::<Vec<f64>>());
+    let epa_normalized = epa_progress_input_spl(&objective_data, &epa_freqs);
+    let epa_srate = objective_data.srate;
+    let epa_model = objective_data.peq_model;
+    let mut epa_gen_counter: usize = 0;
+
+    let de_cb: Box<dyn FnMut(&crate::de::DEIntermediate) -> crate::de::CallbackAction + Send> =
+        Box::new(move |intermediate| {
+            epa_gen_counter += 1;
+            let epa = if epa_gen_counter.is_multiple_of(EPA_INTERVAL) {
+                epa_normalized.as_ref().map(|epa_normalized| {
+                    let peq_spl = x2spl(
+                        &epa_freqs,
+                        intermediate.x.as_slice().unwrap(),
+                        epa_srate,
+                        epa_model,
+                    );
+                    let corrected: Vec<f64> = epa_normalized
+                        .iter()
+                        .enumerate()
+                        .map(|(i, &n)| n + peq_spl[i])
+                        .collect();
+                    let cfg = epa_config.clone().unwrap_or_default();
+                    let score = crate::loss::epa::score::compute_epa_normalized(
+                        epa_freqs.as_slice().unwrap(),
+                        &corrected,
+                        &cfg,
+                    );
+                    score.preference
+                })
+            } else {
+                None
+            };
+            callback(intermediate.iter, intermediate.fun, epa)
+        });
+    optimize_filters_autoeq_with_callback_and_completion(
+        x,
+        lower_bounds,
+        upper_bounds,
+        objective_data,
+        autoeq_name,
+        params,
+        de_cb,
+    )
 }
 
 #[cfg(test)]

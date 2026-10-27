@@ -708,7 +708,7 @@ and 20–2000 Hz. Missing baseline evidence cannot authorize an above-limit resu
 `metadata.bass_management.crossover_cancellation` records per-source baseline and
 final deficits, worst frequencies, evaluated band, configured limit, improvement,
 and acceptance reason. Above-limit acceptance still requires all other acoustic
-and electrical checks. See `src/bin/roomeq/INPUT_FORMAT.md` for initialization of
+and electrical checks. See `crates/roomeq-cli/schemas/INPUT_FORMAT.md` for initialization of
 automatic crossover ranges and structured array baselines.
 
 ## Final convolution resource integrity
@@ -964,7 +964,7 @@ dependency on SOTF's player, engine, or plugins.
 ## Usage
 
 ```bash
-cargo run --features cli --bin roomeq -- --config <config.json> --output <output.json> [OPTIONS]
+cargo run -p roomeq-cli --bin roomeq -- --config <config.json> --output <output.json> [OPTIONS]
 ```
 
 ### Options
@@ -1094,7 +1094,7 @@ acoustic diagnostics can omit unknown timing IDs; this does not establish a
 shared clock for sums or alignment. Driver IRs and diagnostics are exported
 as acoustic sidecars and shown on their report tabs, with bands above Nyquist
 unavailable. See [measured-case imports](MEASURED_IR_IMPORT.md) and the
-[input format](../src/bin/roomeq/INPUT_FORMAT.md) for mappings and details.
+[input format](../crates/roomeq-cli/schemas/INPUT_FORMAT.md) for mappings and details.
 
 `ui/display-roomeq room-output.json -o room-report.html` writes a
 self-contained HTML file: the plots render from an embedded versioned JSON
@@ -1148,7 +1148,7 @@ The measured-room-IR report includes full IR-only Speech Transmission Index
 (STI), computed by `math-rir` using the IEC 60268-16:2020 model. Each channel or
 physical driver with a declared native measured IR gets its own STI section,
 with octave columns from 125 Hz to 8 kHz, 14 modulation-frequency rows,
-per-octave MTI and overall STI. See [measured IR input](../src/bin/roomeq/INPUT_FORMAT.md#speech-transmission-index).
+per-octave MTI and overall STI. See [measured IR input](../crates/roomeq-cli/schemas/INPUT_FORMAT.md#speech-transmission-index).
 
 Full octave coverage, complete decay and sufficient measurement SNR are required.
 Speech/noise SPL, auditory masking and hearing thresholds are not inferred from
@@ -2498,23 +2498,14 @@ When multiple features are enabled, the optimization follows this order:
 The features are also available programmatically:
 
 ```rust
-use autoeq::roomeq::{
-    // Target Response
-    build_complete_target_curve,
+use roomeq_model::{
     TargetResponseConfig, TargetShape, UserPreference,
-
-    // Excursion Protection
-    detect_f3, generate_excursion_protection,
-    ExcursionProtectionConfig, ExcursionProtectionResult,
-
-    // Phase Alignment
-    optimize_phase_alignment,
-    PhaseAlignmentConfig, PhaseAlignmentResult,
-
-    // Multi-Seat
-    optimize_multiseat,
-    MultiSeatMeasurements, MultiSeatConfig, MultiSeatOptimizationResult,
+    ExcursionProtectionConfig, PhaseAlignmentConfig, MultiSeatConfig,
 };
+use roomeq_model::target_tilt::build_complete_target_curve;
+use roomeq_engine::excursion::{detect_f3, generate_excursion_protection, ExcursionProtectionResult};
+use roomeq_engine::phase_alignment::{optimize_phase_alignment, PhaseAlignmentResult};
+use roomeq_engine::multiseat::{optimize_multiseat, MultiSeatMeasurements, MultiSeatOptimizationResult};
 ```
 
 ## Output Format
@@ -2574,8 +2565,8 @@ Detailed format documentation with examples:
 - [`ROOMEQ_OUTPUT_FORMAT.md`](ROOMEQ_OUTPUT_FORMAT.md): Complete DSP chain output format
 
 JSON Schemas for validation:
-- [`input_schema.json`](../src/bin/roomeq/input_schema.json): Input configuration schema
-- [`output_schema.json`](../src/bin/roomeq/output_schema.json): Output DSP chain schema
+- [`input_schema.json`](../crates/roomeq-cli/schemas/input_schema.json): Input configuration schema
+- [`output_schema.json`](../crates/roomeq-cli/schemas/output_schema.json): Output DSP chain schema
 
 Configuration validation is also exposed as a versioned five-stage runtime
 report: `schema_version`, `structural`, `resolved_resource`, `acoustic`, and
@@ -2587,12 +2578,12 @@ optimizer reruns the required resource/acoustic gates after path resolution.
 
 Run the integration tests:
 ```bash
-cargo test -p autoeq --test roomeq_integration_test
+cargo test -p roomeq-cli --test roomeq_integration_test
 ```
 
 Run the unit tests:
 ```bash
-cargo test -p autoeq --bin roomeq
+cargo test -p roomeq-workflow --lib
 ```
 
 ## Architecture
@@ -2602,13 +2593,14 @@ Production RoomEQ code is partitioned by responsibility:
 - `roomeq-model`: configuration, validation, and output contracts.
 - `roomeq-analysis`: measurement, phase, spatial, and acoustic analysis.
 - `roomeq-quality`: perceptual metrics and acoustic-corpus acceptance.
-- `roomeq-engine`: DSP, filter design, optimization, routing, and safety gates.
+- `roomeq-dsp`: path-free shared routing and realization primitives.
+- `roomeq-engine`: DSP execution, filter design, optimization, and safety gates.
 - `roomeq-workflow`: configuration loading and complete run orchestration.
 - `roomeq-export`: export-target conformance and artifact generation.
 - `roomeq-cli`: command-line parsing, schemas, and result serialization.
 
-The historical root `src/roomeq/` tree is a compatibility facade, not the
-production implementation boundary.
+The root is a virtual workspace. The former `autoeq` facade/package is removed;
+applications depend directly on the owning libraries.
 
 ### QA tiers and scenario registry
 
@@ -2934,7 +2926,7 @@ Explicit calibrated `optimizer.upper_band_acoustic_bounds` declarations take
 precedence for their physical output, partition, and seat. Reports retain
 magnitude and phase uncertainty and use a conservative improvement lower bound.
 If neither measured support nor an adequate bound is available, replay retains
-the insufficient-evidence outcome. See `src/bin/roomeq/INPUT_FORMAT.md` for the
+the insufficient-evidence outcome. See `crates/roomeq-cli/schemas/INPUT_FORMAT.md` for the
 configuration and calibration contract.
 
 `optimizer.correction_band` is an optional explicit active-correction range.
@@ -3018,7 +3010,7 @@ boolean cannot authorize detailed correction. Short-gate support cannot authoriz
 coherent crossover/joint-sub work below its valid band. Missing facts refuse those
 claims while preserving independently supported magnitude processing; ordinary
 stationary room IR timing does not require a quasi-anechoic declaration. See
-`src/bin/roomeq/INPUT_FORMAT.md` for the schema and a synthetic example. Policy
+`crates/roomeq-cli/schemas/INPUT_FORMAT.md` for the schema and a synthetic example. Policy
 values are explicit engineering choices, not universal psychoacoustic thresholds;
 consistent declarations are not independently authenticated captures.
 
@@ -3072,7 +3064,7 @@ resource-reference rewriting. The digest is an artifact-consistency check, not
 a signature, acoustic playback verification, physical-safety proof, or listening result.
 
 The cross-language production-report regression runs with
-`cargo test -p autoeq --test roomeq_admission_correction report_binds`.
+`cargo test -p roomeq-workflow --test roomeq_admission_correction report_binds`.
 It uses `ROOMEQ_REPORT_PYTHON` when set, otherwise `venv/bin/python` when
 available, then `python3`; install the normal report dependencies for that
 interpreter. Its temporary files are explicitly under `/Volumes/home_tmp/tmp`.
@@ -3633,10 +3625,13 @@ refinement, all-channel multi-seat, routed single/two-sub playback, and hybrid
 IIR/FIR. These static software checks do not establish continuous-transition
 safety or replace Stage 2 listening validation.
 
-Engineering gate results and unresolved defects are tracked in
-[the 2026-09-16 review evidence log](ROOMEQ_REVIEW_20260916.md). The all-channel
-multi-seat export rows pass, including zero-weight seats. Kautz/warped reports
-now use the serialized topology, including the Kautz playback consumer's
+Current refactor verification and unresolved work are tracked in the
+[completion audit](baselines/refactor-20261025/completion-audit.md). The all-channel
+multi-seat export rows pass, including zero-weight seats.
+
+#### Kautz replay and gain limits
+
+Kautz/warped reports use the serialized topology, including the Kautz playback consumer's
 unity dry path (`x + bank(x)`). Kautz section weights are linear coefficients,
 not PEQ dB gains; a zero-weight bank therefore passes the dry input unchanged.
 The evaluator also preserves legacy single-section settings and rejects malformed
@@ -3835,7 +3830,7 @@ logical-input transfer. This constrained shared-kernel design is not independent
 multi-input matrix inversion. Pre-route source filters remain on their owner.
 The default, `shared`,
 is unchanged. Phase mode is independent of placement. See
-[the input contract](../src/bin/roomeq/INPUT_FORMAT.md#configuration-schema-version)
+[the input contract](../crates/roomeq-cli/schemas/INPUT_FORMAT.md#configuration-schema-version)
 for the JSON fragment, supported group types, safeguards and limitations.
 
 The engine retains crossover, gain, delay and intentional IIR stages, then

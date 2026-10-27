@@ -43,10 +43,22 @@ mod psycho_fast;
 pub use alignment::{
     align_evidence_support, timing_uncertainty_to_phase_deg, validate_alignment_grid,
 };
-pub use auditory_frequency::*;
+pub use auditory_frequency::{
+    AUDITORY_FREQUENCY_MEASURE_VERSION, erb_rate, erb_rate_cell_widths, erb_rate_weighted_rms,
+    try_erb_rate_cell_widths,
+};
 pub use constraint_envelope::{LocalQEnvelope, LocalQKnot, effective_max_q};
 pub use curve::Curve;
-pub use curve_transforms::*;
+pub use curve_transforms::{
+    NORMALIZE_HIGH_FREQ, NORMALIZE_LOW_FREQ, PsychoacousticSmoothingConfig,
+    ResolutionMagnitudeBasis, build_target_curve_by_name, calculate_variable_n,
+    create_log_frequency_grid, curve_slope_per_octave_in_range, interpolate, interpolate_log_space,
+    interpolate_log_space_hold_edges, interpolate_response, interpolate_response_hold_edges,
+    mean_over_log_frequency, normalize_and_interpolate_response,
+    normalize_and_interpolate_response_with_range, normalize_response,
+    regression_slope_per_octave_in_range, smooth_correction_to_resolution, smooth_gaussian,
+    smooth_one_over_n_octave, smooth_psychoacoustic,
+};
 pub use error::{AutoeqError, Result};
 pub use evidence::{
     CalibrationStatus, CaptureKind, CommonReferenceScope, EVIDENCE_ENVELOPE_VERSION, EvidenceBand,
@@ -71,3 +83,9 @@ pub mod serialized_chain;
 pub mod crossover;
 
 pub mod runtime_limiter;
+
+/// Released product version printed by the command-line executables.
+///
+/// This preserves the former root-package version independently of library
+/// versions serialized in optimizer, model, and report contracts.
+pub const PRODUCT_VERSION: &str = "0.5.78";

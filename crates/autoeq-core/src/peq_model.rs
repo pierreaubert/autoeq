@@ -1,24 +1,15 @@
-use clap::ValueEnum;
 use std::fmt;
 
 /// PEQ model types that define the structure and constraints of the equalizer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeqModel {
-    #[value(name = "pk")]
     Pk,
-    #[value(name = "hp-pk")]
     HpPk,
-    #[value(name = "hp-pk-lp")]
     HpPkLp,
-    #[value(name = "ls-pk")]
     LsPk,
-    #[value(name = "ls-pk-hs")]
     LsPkHs,
-    #[value(name = "pk-ls-hs")]
     PkLsHs,
-    #[value(name = "free-pk-free")]
     FreePkFree,
-    #[value(name = "free")]
     Free,
 }
 

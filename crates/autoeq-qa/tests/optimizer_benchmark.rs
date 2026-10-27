@@ -1,11 +1,10 @@
 use autoeq_optim::optim::registry::all_algorithms;
 use autoeq_optim::optim::setup::setup_bounds;
-use autoeq_optim::{OptimParams, cli::Args};
+use autoeq_optim::{OptimParams, OptimizationConfig as Args};
 use autoeq_qa::optimizer_benchmark::{
     BenchmarkCancellation, BenchmarkRunOptions, benchmark_manifest, run_optimizer_benchmark,
     run_optimizer_benchmark_cell, run_optimizer_benchmark_cell_with_time_budget,
 };
-use clap::Parser;
 
 #[test]
 fn fixed_manifest_and_measurement_sources_are_identified() {
@@ -193,19 +192,21 @@ fn pre_cancelled_matrix_returns_an_explicit_partial_report() {
 
 #[test]
 fn every_registered_backend_reports_a_complete_batch_profile() {
-    let mut args = Args::parse_from(["autoeq"]);
-    args.num_filters = 4;
-    args.sample_rate = 48_000.0;
-    args.min_freq = 20.0;
-    args.max_freq = 20_000.0;
-    args.min_q = 0.5;
-    args.max_q = 6.0;
-    args.min_db = -9.0;
-    args.max_db = 6.0;
-    args.population = 8;
-    args.maxeval = 128;
-    args.no_parallel = true;
-    args.parallel_threads = 1;
+    let args = Args {
+        num_filters: 4,
+        sample_rate: 48_000.0,
+        min_freq: 20.0,
+        max_freq: 20_000.0,
+        min_q: 0.5,
+        max_q: 6.0,
+        min_db: -9.0,
+        max_db: 6.0,
+        population: 8,
+        maxeval: 128,
+        no_parallel: true,
+        parallel_threads: 1,
+        ..Args::default()
+    };
     let params = OptimParams::from(&args);
     let (lower, upper) = setup_bounds(&params);
 
@@ -245,18 +246,20 @@ fn fresh_de_profile_counts_x0_and_refuses_incomplete_search_units() {
     use autoeq_optim::optim::registry;
 
     let backend = registry::resolve("autoeq:de").expect("DE backend is registered");
-    let mut args = Args::parse_from(["autoeq"]);
-    args.num_filters = 4;
-    args.sample_rate = 48_000.0;
-    args.min_freq = 20.0;
-    args.max_freq = 20_000.0;
-    args.min_q = 0.5;
-    args.max_q = 6.0;
-    args.min_db = -9.0;
-    args.max_db = 6.0;
-    args.population = 48;
-    args.no_parallel = true;
-    args.parallel_threads = 1;
+    let mut args = Args {
+        num_filters: 4,
+        sample_rate: 48_000.0,
+        min_freq: 20.0,
+        max_freq: 20_000.0,
+        min_q: 0.5,
+        max_q: 6.0,
+        min_db: -9.0,
+        max_db: 6.0,
+        population: 48,
+        no_parallel: true,
+        parallel_threads: 1,
+        ..Args::default()
+    };
 
     for (budget, expected_generations) in [(48, 1), (49, 1), (96, 1), (97, 1), (128, 1)] {
         args.maxeval = budget;

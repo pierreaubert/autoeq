@@ -20,6 +20,7 @@ RUNNER_COMMANDS = {
     "acoustic": "roomeq-qa-acoustic",
     "integration": "roomeq_generated_data_test",
     "quality": "roomeq-qa-quality",
+    "public_workflows": "public_workflows::public_workflow_contract_runner",
     "fuzzer": "roomeq-fuzzer",
 }
 

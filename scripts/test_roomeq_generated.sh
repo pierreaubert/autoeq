@@ -15,7 +15,7 @@ command -v jq >/dev/null || {
     exit 1
 }
 
-$CARGO build --release --features cli --bin roomeq
+$CARGO build --release -p roomeq-cli --bin roomeq
 
 # Validate the complete checked-in fixture set before starting expensive runs.
 while IFS= read -r -d '' json; do

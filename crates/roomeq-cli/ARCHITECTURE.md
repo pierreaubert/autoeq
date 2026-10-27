@@ -7,7 +7,7 @@ Owns the `roomeq` CLI surface; execution lives downstream.
 
 Thin adapter over `roomeq-workflow` + `roomeq-engine` + `roomeq-export` (+
 `autoeq-optim` types for optimizer flags). Input files are validated against
-`src/bin/roomeq/input_schema.json` before anything runs.
+`crates/roomeq-cli/schemas/input_schema.json` before anything runs.
 
 ## Key modules
 
@@ -31,15 +31,16 @@ Thin adapter over `roomeq-workflow` + `roomeq-engine` + `roomeq-export` (+
 
 ```bash
 # Canonical run: config in, result JSON out.
-cargo run --release --bin roomeq -- \
+cargo run -p roomeq-cli --release --bin roomeq -- \
   --config tests/data/roomeq/test_config_stereo.json \
   --output /tmp/out.json
 
 # Targeted corpus QA through the same CLI surface:
-cargo run --features qa --bin roomeq-qa-acoustic -- \
+cargo run -p roomeq-qa --bin roomeq-qa-acoustic -- \
   --tier nightly --scenario measured_stereo_ascilab1
 ```
 
 ## Consumers
 
-Root binaries `roomeq` and `convert-recording`.
+Owns `roomeq` and `convert-recording` under `src/bin/`, their executable
+integration tests under `tests/`, and compatibility schemas under `schemas/`.

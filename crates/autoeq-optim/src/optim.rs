@@ -16,6 +16,13 @@
 //! along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub use backend::{AlgorithmType, ConstraintCapabilities, FilterOptimizer, FilterOptimizerOutput};
+// Objective evaluation lives in `autoeq-objective` (refactor-20261025
+// Phase 3c); these re-exports preserve every historical module path.
+use autoeq_objective::optim::{
+    clamp, compute, misc, objective_data, objective_data_builder, penalty_mode, resolution_guard,
+    smoothness_penalty_config,
+};
+pub use autoeq_objective::optim::{loss, prepared_objective, run_control};
 
 /// Optimizer termination message and objective value, for success or failure.
 ///
@@ -45,9 +52,8 @@ pub mod constraints_install;
 pub mod de;
 /// Pure-Rust ISRES backend.
 pub mod isres;
-/// Strategy-based objective functions.
-pub mod loss;
-/// Metaheuristics-specific optimization code
+/// Metaheuristics-specific optimization code.
+#[cfg(feature = "backend-metaheuristics")]
 pub mod mh;
 /// Pure-Rust NSGA-II/III Pareto backends.
 pub mod nsga;
@@ -57,30 +63,19 @@ pub mod optimizer_backend;
 pub mod params;
 /// Pareto front analysis
 pub mod pareto;
-pub mod prepared_objective;
 /// Algorithm registry — string name → backend.
 pub mod registry;
-/// Hard objective-evaluation budgets and cooperative cancellation.
-pub mod run_control;
 /// Shared bounded scalar-objective optimizer dispatch.
 pub mod scalar;
 /// Shared optimization setup (bounds, initial guess, objective data)
 pub mod setup;
+/// Backend progress callbacks and shared objective inputs.
+pub mod types;
 
 mod algorithm_info;
-mod clamp;
-mod compute;
-mod matched_resolution;
-mod misc;
-mod objective_data;
-mod objective_data_builder;
 mod optimize;
-mod penalty_mode;
-mod resolution_guard;
-mod smoothness_penalty_config;
 #[cfg(test)]
 mod tests;
-mod types;
 
 pub use algorithm_info::*;
 pub use clamp::*;
@@ -102,7 +97,7 @@ pub use objective_data_builder::*;
 pub use optimize::*;
 pub use optimizer_backend::*;
 pub use penalty_mode::*;
-pub use resolution_guard::PeakResolutionGuard;
+pub use resolution_guard::{PeakResolutionGuard, guarded_parameters};
 pub use smoothness_penalty_config::*;
 pub use types::*;
 pub mod run_descriptor;

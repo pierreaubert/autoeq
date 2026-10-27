@@ -63,7 +63,7 @@ pub enum FilterOptimizerOutput {
         /// Historical backend tuple.
         result: Result<(String, f64), (String, f64)>,
         /// Validated Pareto evidence from this invocation, when available.
-        pareto_report: Option<roomeq_model::ParetoDispatchReport>,
+        pareto_report: Option<autoeq_optim_types::ParetoDispatchReport>,
     },
     /// Backend completed with statistics observed during the same search.
     CompletedWithSearchEvidence {

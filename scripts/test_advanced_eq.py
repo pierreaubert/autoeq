@@ -18,19 +18,26 @@ class AdvancedEqTests(unittest.TestCase):
         from scripts.src.figures import create_comparison_eq_overlay_figure
         from scripts.src.report import create_comparison_html_report
         from scripts.test_figures import two_sub_overview_data
+        from scripts.test_report import report_payload
         low = two_sub_overview_data()
         high = copy.deepcopy(low)
         low["sample_rate"], high["sample_rate"] = 32000.0, 96000.0
         with tempfile.TemporaryDirectory() as directory, patch(
-            "scripts.src.report.create_comparison_eq_overlay_figure",
+            "scripts.src.figures.create_comparison_eq_overlay_figure",
             wraps=create_comparison_eq_overlay_figure,
         ) as figure:
             output = Path(directory) / "comparison.html"
             create_comparison_html_report([("iir_auto", low), ("fir", high)], output)
             self.assertGreater(figure.call_count, 0)
+            expected_rates = {"iir_auto": 32000.0, "fir": 96000.0}
+            observed_modes = set()
             for call in figure.call_args_list:
-                self.assertEqual(call.kwargs["sample_rates"], {"iir_auto": 32000.0, "fir": 96000.0})
-            self.assertIn("EQ sections</th>", output.read_text())
+                mode_name = call.args[1][0][0]
+                observed_modes.add(mode_name)
+                self.assertEqual(call.kwargs["sample_rates"], {mode_name: expected_rates[mode_name]})
+            self.assertEqual(observed_modes, set(expected_rates))
+            sections = report_payload(output.read_text())["sections"]
+            self.assertIn("EQ sections</th>", "\n".join(section.get("html", "") for section in sections))
 
     def test_comparison_eq_uses_each_output_rate(self):
         from scripts.src.figures import create_comparison_eq_overlay_figure
@@ -75,7 +82,7 @@ class AdvancedEqTests(unittest.TestCase):
         table = _eq_filter_table_html([{"label": None, "filters": [filt]}])
         for html in (line, table):
             self.assertIn("KAUTZ bank", html)
-            self.assertIn("weight=-0.2 (linear)", html)
+            self.assertIn("weight=-0.200000 (linear)", html)
             self.assertNotIn("dB", html)
         escaped = _format_eq_filter_line({"filter_type": "<script>"}, 1)
         self.assertNotIn("<SCRIPT>", escaped)

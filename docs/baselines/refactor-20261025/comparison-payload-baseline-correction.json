@@ -1,0 +1,26 @@
+{
+  "status": "superseded; original fixture restored byte-for-byte",
+  "source_revision": "5aa31fc5",
+  "changes": [
+    {
+      "path": "/cases/0/payload/sections/24/figure/series/0/y/430",
+      "before": 0.7140938658855447,
+      "after": 0.7140938658855429
+    },
+    {
+      "path": "/cases/0/payload/sections/24/figure/series/0/y/456",
+      "before": 1.6956412250905952,
+      "after": 1.6956412250905921
+    },
+    {
+      "path": "/cases/0/payload/sections/24/figure/series/1/y/380",
+      "before": 0.0520561632243738,
+      "after": 0.05205616322437572
+    }
+  ],
+  "assertions_and_tolerances": "unchanged",
+  "independent_legacy_equation_max_error_db": 3.8573075736660946e-15,
+  "existing_serialized_DSP_contract": 1e-12,
+  "scope": "Only the three stale scalar fixture values; every other fixture byte is preserved.",
+  "reason": "Differences depend on the producer build profile. The exact comparison now builds/selects its original dev reference producer; no golden values or tolerances change."
+}

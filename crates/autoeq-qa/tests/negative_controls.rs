@@ -4,6 +4,67 @@
 //! to a copy, and asserts the resulting error exceeds the case tolerance.
 //! A control that cannot fail is worthless; these must keep failing.
 
+//! Grouped test target (refactor-20261025 Phase 2): the modules
+//! below are the remaining negative-control case files, kept at
+//! `tests/<module>.rs` and compiled into this single target.
+
+#[path = "negative_controls_app.rs"]
+mod negative_controls_app;
+
+#[path = "negative_controls_core1.rs"]
+mod negative_controls_core1;
+
+#[path = "negative_controls_core2.rs"]
+mod negative_controls_core2;
+
+#[path = "negative_controls_enga.rs"]
+mod negative_controls_enga;
+
+#[path = "negative_controls_engb.rs"]
+mod negative_controls_engb;
+
+#[path = "negative_controls_engc.rs"]
+mod negative_controls_engc;
+
+#[path = "negative_controls_engd.rs"]
+mod negative_controls_engd;
+
+#[path = "negative_controls_expquala.rs"]
+mod negative_controls_expquala;
+
+#[path = "negative_controls_meas.rs"]
+mod negative_controls_meas;
+
+#[path = "negative_controls_model.rs"]
+mod negative_controls_model;
+
+#[path = "negative_controls_optima.rs"]
+mod negative_controls_optima;
+
+#[path = "negative_controls_optimb.rs"]
+mod negative_controls_optimb;
+
+#[path = "negative_controls_optimc.rs"]
+mod negative_controls_optimc;
+
+#[path = "negative_controls_qqsa.rs"]
+mod negative_controls_qqsa;
+
+#[path = "negative_controls_raa.rs"]
+mod negative_controls_raa;
+
+#[path = "negative_controls_rab.rs"]
+mod negative_controls_rab;
+
+#[path = "negative_controls_rac.rs"]
+mod negative_controls_rac;
+
+#[path = "negative_controls_rw1.rs"]
+mod negative_controls_rw1;
+
+#[path = "negative_controls_rw2.rs"]
+mod negative_controls_rw2;
+
 use autoeq_qa::{complex_rel_error, golden_dir};
 use num_complex::Complex64;
 

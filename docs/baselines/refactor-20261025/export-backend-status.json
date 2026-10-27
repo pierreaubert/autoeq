@@ -1,0 +1,33 @@
+{
+  "portable": {
+    "status": "passed",
+    "tests": 30
+  },
+  "camilladsp": {
+    "status": "passed",
+    "tests": 22
+  },
+  "pipewire": {
+    "status": "passed",
+    "tests": 12,
+    "image": "sha256:3cd6d1a6912c1f0f6bf2f0e3d767d680d314fb996f0d2c19e7fc5af781b44343",
+    "toolchain": "1.95.0-aarch64-unknown-linux-gnu",
+    "sources": "read-only task autoeq and existing math-audio mounts"
+  },
+  "equalizer_apo": {
+    "status": "environment blocked",
+    "structural_tests_passed": 8,
+    "pcm_test_passed": false,
+    "reason": "Win11 ARM AutoEQ QEMU guest agent unavailable after 120-second and 300-second waits; VM stopped after diagnostics",
+    "logs": [
+      "export-native-backends-final.log",
+      "export-equalizer-apo-retry.log"
+    ],
+    "additional_vm_preflight": {
+      "name": "Win11 ARM GLL",
+      "guest_agent": "unavailable after two minutes",
+      "stopped_after_preflight": true,
+      "user_input": "Ready VM/guest tools requested asynchronously"
+    }
+  }
+}

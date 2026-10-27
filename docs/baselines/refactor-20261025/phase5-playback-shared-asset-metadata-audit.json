@@ -1,0 +1,52 @@
+{
+  "checked_utc": "2026-10-26T10:39:54.469359+00:00",
+  "status": "Bounded source-level asset/compile-time metadata seam audit completed; runtime qualification pending",
+  "source_preparation_sha256": "be3836638b0b8cdab603a06a0eced3adda298b0bc4b35b311977c1212a753e6e",
+  "compile_time_sites": [
+    {
+      "file": "crates/roomeq-playback/src/measurement.rs",
+      "line": 511,
+      "text": "application: Some(env!(\"CARGO_PKG_NAME\").into()),"
+    },
+    {
+      "file": "crates/roomeq-playback/src/measurement.rs",
+      "line": 512,
+      "text": "version: Some(env!(\"CARGO_PKG_VERSION\").into()),"
+    }
+  ],
+  "lower_owner_literal_include_sites": 0,
+  "lower_owner_manifest_relative_macro_sites": 0,
+  "lower_owner_feature_guard_sites": 0,
+  "application_identity_fix": {
+    "status": "source-only adapter fix; compiler and regression execution pending",
+    "problem": "CARGO_PKG_VERSION is evaluated in the compiling crate: a verbatim move would replace the workflow version in serialized dense-conditioning receipts with 0.1.0.",
+    "legacy_application": "roomeq-workflow",
+    "legacy_version_source": "workflow env!(CARGO_PKG_VERSION), currently 0.5.36; never a hard-coded historical version or blanket package bump",
+    "new_library_default": "the helper library identifies its own standalone receipt-producing entrypoint; application adapters supply explicit ToolIdentity",
+    "transformations": [
+      {
+        "old": "pub fn load_source_with_conditioning(\n    source: &MeasurementSource,\n    frequency_samples: usize,\n) -> Result<ConditionedSource> {",
+        "new": "/// Load conditioned curves using this library's tool identity.\n///\n/// # Errors\n/// Returns errors for invalid measurements, unsupported bands, or failed resource loading.\npub fn load_source_with_conditioning(\n    source: &MeasurementSource,\n    frequency_samples: usize,\n) -> Result<ConditionedSource> {\n    load_source_with_conditioning_for_tool(\n        source,\n        frequency_samples,\n        autoeq_measurements::ToolIdentity {\n            application: Some(env!(\"CARGO_PKG_NAME\").into()),\n            version: Some(env!(\"CARGO_PKG_VERSION\").into()),\n            ..Default::default()\n        },\n    )\n}\n\n/// Load conditioned curves using the caller's application identity.\n///\n/// # Errors\n/// Returns errors for invalid measurements, unsupported bands, or failed resource loading.\npub fn load_source_with_conditioning_for_tool(\n    source: &MeasurementSource,\n    frequency_samples: usize,\n    tool_identity: autoeq_measurements::ToolIdentity,\n) -> Result<ConditionedSource> {"
+      },
+      {
+        "old": "                tool: Some(autoeq_measurements::ToolIdentity {\n                    application: Some(\"roomeq-workflow\".into()),\n                    version: Some(env!(\"CARGO_PKG_VERSION\").into()),\n                    ..Default::default()\n                }),",
+        "new": "                tool: Some(tool_identity.clone()),"
+      }
+    ],
+    "workflow_adapter_sha256": "3b28a2371980cc4531cee4867143446452c7128395c8a5f5a7a692a5f4cdb14a",
+    "old_lower_file_sha256": "e6640fda9889003ab405e97947fed477b58d69070fc26d92a17549e547a30dc2",
+    "new_lower_file_sha256": "ea1ce8b4915d9a9ec76a0b29ebc7c329d0f6b4095032e19cd0d1c9e90bf70868",
+    "regression": {
+      "owner": "roomeq-workflow",
+      "name": "measurement::tests::conditioning_receipt_keeps_workflow_application_identity",
+      "kind": "test",
+      "ignored": false,
+      "status": "not compiled or executed",
+      "required_red_probe": "After materialization, route the workflow wrapper to the helper library default entrypoint; expect the version assertion to fail, restore the explicit application adapter, then verify green."
+    },
+    "future_extraction_requirement": "Any shared report/finalization caller that emits application conditioning receipts must receive and forward the application identity; moving its caller into the helper library must not silently switch back to the library default."
+  },
+  "relative_paths": "Existing sidecar current-directory defaults and intentionally missing test paths are retained; moved resource tests construct temporary or inline data. Workflow and QA files with manifest-relative paths retain their original owners.",
+  "qualification": "Lexical source seam audit, not compiler/provider/feature/working-directory execution proof. Full source-preservation record and later runtime/packaging gates remain required.",
+  "performance_acceptance": false
+}

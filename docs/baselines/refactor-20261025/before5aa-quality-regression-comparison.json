@@ -1,0 +1,73 @@
+{
+  "status": "historical regression reproduced",
+  "before": "151338b1",
+  "after": "5aa31fc5",
+  "relationship": "5aa31fc5 is the single subsequent local-main commit",
+  "same_current_math_and_fixture_inputs": true,
+  "external_dependency_versions_identical": true,
+  "lock_refresh_record": "before5aa-lock-refresh.json",
+  "source_record": "before5aa-diagnostic-source.json",
+  "cases": [
+    {
+      "name": "small_stereo_2_0 fem fir",
+      "revision151338b1": {
+        "passed": false,
+        "pre_score": 6.826012659035064,
+        "post_score": 6.826012659035064,
+        "error": "no improvement: post 6.8260 >= pre 6.8260; runtime acceptance reverted the proposed correction; this scenario does not declare expect.allow_safe_revert; violations: baseline_structural_alignment_changes_response, no_candidate_with_meaningful_improvement; reverted stages: L:fir, R:fir"
+      },
+      "revision5aa31fc5": {
+        "passed": false,
+        "pre_score": 6.826012659035064,
+        "post_score": 6.826012659035064,
+        "error": "no improvement: post 6.8260 >= pre 6.8260; runtime acceptance reverted the proposed correction; this scenario does not declare expect.allow_safe_revert; violations: baseline_structural_alignment_changes_response, no_candidate_with_meaningful_improvement; reverted stages: L:fir, R:fir"
+      }
+    },
+    {
+      "name": "small_stereo_2_0 fem iir",
+      "revision151338b1": {
+        "passed": true,
+        "pre_score": 5.230166806641261,
+        "post_score": 4.646027424353372,
+        "error": null
+      },
+      "revision5aa31fc5": {
+        "passed": false,
+        "pre_score": 5.230166806641261,
+        "post_score": 4.869293774628629,
+        "error": "insufficient improvement: 6.9% < 10.0% registry minimum"
+      }
+    },
+    {
+      "name": "small_stereo_2_0 fem mixed_phase",
+      "revision151338b1": {
+        "passed": true,
+        "pre_score": 7.251740915123932,
+        "post_score": 6.332950934642801,
+        "error": null
+      },
+      "revision5aa31fc5": {
+        "passed": true,
+        "pre_score": 7.251740915123932,
+        "post_score": 6.290180136040261,
+        "error": null
+      }
+    },
+    {
+      "name": "small_stereo_2_0 fem mixed",
+      "revision151338b1": {
+        "passed": true,
+        "pre_score": 6.826012659035064,
+        "post_score": 6.1051597226712575,
+        "error": null
+      },
+      "revision5aa31fc5": {
+        "passed": false,
+        "pre_score": 6.826012659035064,
+        "post_score": 6.3273562077105625,
+        "error": "insufficient improvement: 7.3% < 10.0% registry minimum"
+      }
+    }
+  ],
+  "limits": "This identifies the regressing commit, not the responsible subset of its48file changes. No algorithm or threshold was changed in the refactor."
+}

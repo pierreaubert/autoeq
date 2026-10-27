@@ -1,0 +1,804 @@
+{
+  "command": [
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/nightly-aarch64-apple-darwin/bin/rustc",
+    "--crate-name",
+    "xmlwriter",
+    "--edition=2018",
+    "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xmlwriter-0.1.0/src/lib.rs",
+    "--error-format=json",
+    "--json=diagnostic-rendered-ansi,artifacts,future-incompat,unused-externs-silent",
+    "--crate-type",
+    "lib",
+    "--emit=dep-info,metadata,link",
+    "-Z",
+    "embed-metadata=no",
+    "-C",
+    "opt-level=3",
+    "-C",
+    "embed-bitcode=no",
+    "-C",
+    "debuginfo=line-tables-only",
+    "-C",
+    "split-debuginfo=unpacked",
+    "-C",
+    "debug-assertions=on",
+    "--check-cfg",
+    "cfg(docsrs,test)",
+    "--check-cfg",
+    "cfg(feature, values())",
+    "-C",
+    "metadata=e8b242eb64d2c9d6",
+    "-C",
+    "extra-filename=-25a7625de600b387",
+    "--out-dir",
+    "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/diagnostics/release/debug/build/xmlwriter/25a7625de600b387/out",
+    "--cap-lints",
+    "allow",
+    "-C",
+    "target-cpu=native",
+    "-C",
+    "target-feature=+neon",
+    "-C",
+    "link-arg=-mmacosx-version-min=15.0",
+    "-C",
+    "link-arg=-framework",
+    "-C",
+    "link-arg=Accelerate",
+    "-C",
+    "link-arg=-L /Applications/Xcode.app/Contents/Frameworks",
+    "-C",
+    "link-arg=-L /opt/homebrew/Cellar/llvm/23.1.1_1/lib",
+    "-C",
+    "linker=/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/diagnostics/linker-shim",
+    "-Ztime-passes",
+    "-Ztime-passes-format=json",
+    "--force-warn=unused_crate_dependencies"
+  ],
+  "crate_name": "xmlwriter",
+  "crate_type": "lib",
+  "test": false,
+  "compiler_wall_seconds": 0.17773783416487277,
+  "exit_code": 0,
+  "max_process_rss_bytes": 124600320,
+  "stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-independent-copy-baseline-j8-20261026T155829-0eef9eee/diagnostics/compiler-events/compile-29861-1793051252479676000.stderr",
+  "phases": [
+    {
+      "pass": "parse_crate",
+      "time": 0.000789417,
+      "rss_start": 40058880,
+      "rss_end": 41287680
+    },
+    {
+      "pass": "crate_injection",
+      "time": 1.3791e-05,
+      "rss_start": 45891584,
+      "rss_end": 46006272
+    },
+    {
+      "pass": "expand_crate",
+      "time": 0.002482084,
+      "rss_start": 46006272,
+      "rss_end": 54444032
+    },
+    {
+      "pass": "check_unused_macros",
+      "time": 9.59e-07,
+      "rss_start": 54444032,
+      "rss_end": 54444032
+    },
+    {
+      "pass": "macro_expand_crate",
+      "time": 0.002493292,
+      "rss_start": 46006272,
+      "rss_end": 54444032
+    },
+    {
+      "pass": "maybe_building_test_harness",
+      "time": 1.792e-06,
+      "rss_start": 54444032,
+      "rss_end": 54460416
+    },
+    {
+      "pass": "AST_validation",
+      "time": 2.8834e-05,
+      "rss_start": 54460416,
+      "rss_end": 54624256
+    },
+    {
+      "pass": "maybe_create_a_macro_crate",
+      "time": 8.75e-07,
+      "rss_start": 54624256,
+      "rss_end": 54624256
+    },
+    {
+      "pass": "finalize_imports",
+      "time": 0.000124375,
+      "rss_start": 54640640,
+      "rss_end": 54689792
+    },
+    {
+      "pass": "compute_effective_visibilities",
+      "time": 7e-06,
+      "rss_start": 54689792,
+      "rss_end": 54722560
+    },
+    {
+      "pass": "lint_reexports",
+      "time": 1.292e-06,
+      "rss_start": 54722560,
+      "rss_end": 54722560
+    },
+    {
+      "pass": "finalize_macro_resolutions",
+      "time": 6e-05,
+      "rss_start": 54722560,
+      "rss_end": 55214080
+    },
+    {
+      "pass": "late_resolve_crate",
+      "time": 0.00055225,
+      "rss_start": 55214080,
+      "rss_end": 59129856
+    },
+    {
+      "pass": "resolve_main",
+      "time": 7.5e-07,
+      "rss_start": 59129856,
+      "rss_end": 59129856
+    },
+    {
+      "pass": "resolve_check_unused",
+      "time": 5.166e-06,
+      "rss_start": 59129856,
+      "rss_end": 59129856
+    },
+    {
+      "pass": "resolve_report_errors",
+      "time": 1.333e-06,
+      "rss_start": 59129856,
+      "rss_end": 59129856
+    },
+    {
+      "pass": "resolve_postprocess",
+      "time": 2.2916e-05,
+      "rss_start": 59129856,
+      "rss_end": 59211776
+    },
+    {
+      "pass": "resolve_crate",
+      "time": 0.000812625,
+      "rss_start": 54624256,
+      "rss_end": 59211776
+    },
+    {
+      "pass": "write_dep_info",
+      "time": 0.000249625,
+      "rss_start": 59228160,
+      "rss_end": 59588608
+    },
+    {
+      "pass": "complete_gated_feature_checking",
+      "time": 1.725e-05,
+      "rss_start": 59768832,
+      "rss_end": 59850752
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.833e-06,
+      "rss_start": 60751872,
+      "rss_end": 60751872
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.792e-06,
+      "rss_start": 61046784,
+      "rss_end": 61063168
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.084e-06,
+      "rss_start": 61276160,
+      "rss_end": 61276160
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.5e-07,
+      "rss_start": 61325312,
+      "rss_end": 61325312
+    },
+    {
+      "pass": "drop_ast",
+      "time": 6.25e-07,
+      "rss_start": 61341696,
+      "rss_end": 61341696
+    },
+    {
+      "pass": "drop_ast",
+      "time": 6.67e-07,
+      "rss_start": 61358080,
+      "rss_end": 61358080
+    },
+    {
+      "pass": "drop_ast",
+      "time": 9.17e-07,
+      "rss_start": 61456384,
+      "rss_end": 61456384
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.375e-06,
+      "rss_start": 61472768,
+      "rss_end": 61472768
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.167e-06,
+      "rss_start": 61489152,
+      "rss_end": 61489152
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.334e-06,
+      "rss_start": 61702144,
+      "rss_end": 61702144
+    },
+    {
+      "pass": "drop_ast",
+      "time": 8.75e-07,
+      "rss_start": 61734912,
+      "rss_end": 61734912
+    },
+    {
+      "pass": "drop_ast",
+      "time": 8.33e-07,
+      "rss_start": 61751296,
+      "rss_end": 61751296
+    },
+    {
+      "pass": "drop_ast",
+      "time": 9.17e-07,
+      "rss_start": 61767680,
+      "rss_end": 61767680
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.042e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 9.58e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.833e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 9.17e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.91e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.209e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.5e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.92e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.166e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.5e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.125e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.5e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 9.17e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 8.34e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 9.16e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.5e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.08e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 7.5e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.166e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 8.75e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.417e-06,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 8.33e-07,
+      "rss_start": 61816832,
+      "rss_end": 61816832
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.583e-06,
+      "rss_start": 61833216,
+      "rss_end": 61833216
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.209e-06,
+      "rss_start": 61833216,
+      "rss_end": 61833216
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.334e-06,
+      "rss_start": 61833216,
+      "rss_end": 61833216
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.083e-06,
+      "rss_start": 61833216,
+      "rss_end": 61833216
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.083e-06,
+      "rss_start": 61833216,
+      "rss_end": 61833216
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.375e-06,
+      "rss_start": 61865984,
+      "rss_end": 61865984
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.334e-06,
+      "rss_start": 61964288,
+      "rss_end": 61964288
+    },
+    {
+      "pass": "drop_ast",
+      "time": 3.5e-06,
+      "rss_start": 61964288,
+      "rss_end": 61964288
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.375e-06,
+      "rss_start": 61964288,
+      "rss_end": 61964288
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.416e-06,
+      "rss_start": 61964288,
+      "rss_end": 61964288
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.625e-06,
+      "rss_start": 61980672,
+      "rss_end": 61980672
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.375e-06,
+      "rss_start": 61980672,
+      "rss_end": 61980672
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.75e-06,
+      "rss_start": 61997056,
+      "rss_end": 61997056
+    },
+    {
+      "pass": "drop_ast",
+      "time": 3.291e-06,
+      "rss_start": 62029824,
+      "rss_end": 62029824
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.042e-06,
+      "rss_start": 62046208,
+      "rss_end": 62046208
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.125e-06,
+      "rss_start": 62046208,
+      "rss_end": 62046208
+    },
+    {
+      "pass": "drop_ast",
+      "time": 3.291e-06,
+      "rss_start": 62046208,
+      "rss_end": 62046208
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.709e-06,
+      "rss_start": 62046208,
+      "rss_end": 62046208
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.916e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.042e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.125e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.584e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.2334e-05,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 2.083e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 8.75e-07,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.958e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "drop_ast",
+      "time": 1.583e-06,
+      "rss_start": 62062592,
+      "rss_end": 62062592
+    },
+    {
+      "pass": "looking_for_entry_point",
+      "time": 3.5e-06,
+      "rss_start": 62062592,
+      "rss_end": 62095360
+    },
+    {
+      "pass": "check_externally_implementable_items",
+      "time": 8.167e-06,
+      "rss_start": 62095360,
+      "rss_end": 62160896
+    },
+    {
+      "pass": "looking_for_derive_registrar",
+      "time": 2.084e-06,
+      "rss_start": 62160896,
+      "rss_end": 62177280
+    },
+    {
+      "pass": "unused_lib_feature_checking",
+      "time": 9.667e-06,
+      "rss_start": 63897600,
+      "rss_end": 64012288
+    },
+    {
+      "pass": "misc_checking_1",
+      "time": 0.000214667,
+      "rss_start": 62062592,
+      "rss_end": 64028672
+    },
+    {
+      "pass": "emit_ast_lowering_delayed_lints",
+      "time": 1.792e-06,
+      "rss_start": 64028672,
+      "rss_end": 64028672
+    },
+    {
+      "pass": "coherence_checking",
+      "time": 0.001801792,
+      "rss_start": 64077824,
+      "rss_end": 75825152
+    },
+    {
+      "pass": "type_check_crate",
+      "time": 0.005465917,
+      "rss_start": 64061440,
+      "rss_end": 85917696
+    },
+    {
+      "pass": "MIR_borrow_checking",
+      "time": 0.005450875,
+      "rss_start": 85917696,
+      "rss_end": 96649216
+    },
+    {
+      "pass": "layout_testing",
+      "time": 2.417e-06,
+      "rss_start": 96649216,
+      "rss_end": 96649216
+    },
+    {
+      "pass": "abi_testing",
+      "time": 1.5e-06,
+      "rss_start": 96649216,
+      "rss_end": 96649216
+    },
+    {
+      "pass": "crate_lints",
+      "time": 3.875e-06,
+      "rss_start": 96976896,
+      "rss_end": 97009664
+    },
+    {
+      "pass": "module_lints",
+      "time": 0.000290542,
+      "rss_start": 97009664,
+      "rss_end": 97615872
+    },
+    {
+      "pass": "lint_checking",
+      "time": 0.000307958,
+      "rss_start": 96960512,
+      "rss_end": 97615872
+    },
+    {
+      "pass": "privacy_checking_modules",
+      "time": 8.8875e-05,
+      "rss_start": 97615872,
+      "rss_end": 97648640
+    },
+    {
+      "pass": "check_lint_expectations",
+      "time": 3.166e-06,
+      "rss_start": 97648640,
+      "rss_end": 97648640
+    },
+    {
+      "pass": "misc_checking_3",
+      "time": 0.000542041,
+      "rss_start": 96649216,
+      "rss_end": 97697792
+    },
+    {
+      "pass": "monomorphization_collector_root_collections",
+      "time": 1.7542e-05,
+      "rss_start": 106151936,
+      "rss_end": 106283008
+    },
+    {
+      "pass": "monomorphization_collector_graph_walk",
+      "time": 0.005861166,
+      "rss_start": 106283008,
+      "rss_end": 111460352
+    },
+    {
+      "pass": "partition_and_assert_distinct_symbols",
+      "time": 0.000589083,
+      "rss_start": 111624192,
+      "rss_end": 112377856
+    },
+    {
+      "pass": "generate_crate_metadata_stub",
+      "time": 0.0001695,
+      "rss_start": 112558080,
+      "rss_end": 112574464
+    },
+    {
+      "pass": "generate_crate_metadata",
+      "time": 0.01197675,
+      "rss_start": 97746944,
+      "rss_end": 112574464
+    },
+    {
+      "pass": "find_cgu_reuse",
+      "time": 1.542e-06,
+      "rss_start": 112869376,
+      "rss_end": 112885760
+    },
+    {
+      "pass": "codegen_to_LLVM_IR",
+      "time": 0.008251583,
+      "rss_start": 112918528,
+      "rss_end": 119930880
+    },
+    {
+      "pass": "codegen_crate",
+      "time": 0.008427333,
+      "rss_start": 112574464,
+      "rss_end": 119996416
+    },
+    {
+      "pass": "serialize_dep_graph",
+      "time": 1.417e-06,
+      "rss_start": 120651776,
+      "rss_end": 120668160
+    },
+    {
+      "pass": "LLVM_passes",
+      "time": 0.052078292,
+      "rss_start": 119832576,
+      "rss_end": 108986368
+    },
+    {
+      "pass": "LLVM_thinlto",
+      "time": 0.063135458,
+      "rss_start": 107806720,
+      "rss_end": 118915072
+    },
+    {
+      "pass": "join_worker_thread",
+      "time": 7.6167e-05,
+      "rss_start": 118276096,
+      "rss_end": 112689152
+    },
+    {
+      "pass": "finish_ongoing_codegen",
+      "time": 0.114275208,
+      "rss_start": 99680256,
+      "rss_end": 112689152
+    },
+    {
+      "pass": "serialize_work_products",
+      "time": 3.916e-06,
+      "rss_start": 112689152,
+      "rss_end": 112705536
+    },
+    {
+      "pass": "check_externally_implementable_item_linkage",
+      "time": 2e-06,
+      "rss_start": 112721920,
+      "rss_end": 112738304
+    },
+    {
+      "pass": "link_binary_check_files_are_writeable",
+      "time": 1.3459e-05,
+      "rss_start": 112672768,
+      "rss_end": 112672768
+    },
+    {
+      "pass": "link_rlib",
+      "time": 0.000607375,
+      "rss_start": 112672768,
+      "rss_end": 113065984
+    },
+    {
+      "pass": "link_binary_remove_temps",
+      "time": 1.208e-06,
+      "rss_start": 113065984,
+      "rss_end": 113065984
+    },
+    {
+      "pass": "link_binary",
+      "time": 0.000858292,
+      "rss_start": 112721920,
+      "rss_end": 113065984
+    },
+    {
+      "pass": "link_crate",
+      "time": 0.000964292,
+      "rss_start": 112721920,
+      "rss_end": 113065984
+    },
+    {
+      "pass": "link",
+      "time": 0.000978833,
+      "rss_start": 112689152,
+      "rss_end": 113065984
+    },
+    {
+      "pass": "total",
+      "time": 0.156879792,
+      "rss_start": 27066368,
+      "rss_end": 92127232
+    }
+  ]
+}

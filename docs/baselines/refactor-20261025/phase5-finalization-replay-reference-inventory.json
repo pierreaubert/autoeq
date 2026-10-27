@@ -1,0 +1,734 @@
+{
+  "status": "source-bound lexical overapproximation for finalization/replay closure planning",
+  "checked_utc": "2026-10-26T09:26:13.115232+00:00",
+  "files": [
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "sha256": "5aa21fc91c54294e54d3bdf56e800a8aa9e6567f677e91498a2435ca32a9411a",
+      "lines": 1722,
+      "crate_references": [
+        {
+          "line": 37,
+          "path": "crate::evidence_intake::WorkflowOutcome"
+        },
+        {
+          "line": 1031,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1059,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1078,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1173,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1209,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1237,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        1026
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "sha256": "bfcc555224ad49ec76cc5b09af08eaa86187a0af6420575971115e0da6e35198",
+      "lines": 187,
+      "crate_references": [
+        {
+          "line": 19,
+          "path": "crate::electrical_headroom::independent_graph_output_ports"
+        },
+        {
+          "line": 134,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 169,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        4,
+        84
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/epa.rs",
+      "sha256": "787f7e007482b4b81181ddd57181b4455df1534e17d50f7100140eed56b422cc",
+      "lines": 111,
+      "crate_references": [
+        {
+          "line": 87,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        2,
+        83
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "sha256": "3adb6e384e5cd3f4be37e79b28b601d2a07388e9ab84f8f1ce9f077efc74782c",
+      "lines": 833,
+      "crate_references": [],
+      "parent_wildcard_import_lines": [
+        459
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "sha256": "b3c320979405106785e3b4d09cdd3f4c0f6e0a8b3b12081b9423dcfd585fd358",
+      "lines": 121,
+      "crate_references": [],
+      "parent_wildcard_import_lines": [
+        61
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/physical_drive.rs",
+      "sha256": "f9d2267b230c4fa0951e5307256969817e7ebbfee568c3dc1237f41b0addcbe4",
+      "lines": 171,
+      "crate_references": [
+        {
+          "line": 44,
+          "path": "crate::electrical_headroom::assess_final_graph_physical_drive"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        108
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/sub_output_limiter.rs",
+      "sha256": "8ad0b2f349ef3fe1790a3c78b935438417a05cd1cdbcbf9fbd2d6d57760abc31",
+      "lines": 148,
+      "crate_references": [],
+      "parent_wildcard_import_lines": [
+        3
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab",
+      "lines": 7503,
+      "crate_references": [
+        {
+          "line": 133,
+          "path": "crate::pipeline::FinalizationDiagnosticSink"
+        },
+        {
+          "line": 280,
+          "path": "crate::pipeline::FinalizationDiagnosticSink"
+        },
+        {
+          "line": 459,
+          "path": "crate::topology::recalibrate_post_dsp_levels"
+        },
+        {
+          "line": 619,
+          "path": "crate::electrical_headroom::room_eq_safety_attenuation_by_output"
+        },
+        {
+          "line": 766,
+          "path": "crate::pipeline::FinalizationDiagnosticTrial"
+        },
+        {
+          "line": 767,
+          "path": "crate::pipeline::FinalizationDiagnosticSink"
+        },
+        {
+          "line": 845,
+          "path": "crate::electrical_headroom::assess_final_graph_physical_drive"
+        },
+        {
+          "line": 1086,
+          "path": "crate::pipeline::FinalizationDiagnosticTrial"
+        },
+        {
+          "line": 1255,
+          "path": "crate::delay_compile::correction_strength_for_electrical_ceiling"
+        },
+        {
+          "line": 1259,
+          "path": "crate::delay_compile::applied_lfe_playback_gain_db"
+        },
+        {
+          "line": 1628,
+          "path": "crate::topology::crossover_timing_refused"
+        },
+        {
+          "line": 1636,
+          "path": "crate::topology::CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY"
+        },
+        {
+          "line": 1727,
+          "path": "crate::pipeline::FinalizationDiagnosticTrial"
+        },
+        {
+          "line": 1977,
+          "path": "crate::pipeline::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+        },
+        {
+          "line": 1978,
+          "path": "crate::pipeline::FinalizationDiagnosticTrial::FullStrengthOutput"
+        },
+        {
+          "line": 2153,
+          "path": "crate::topology::crossover_timing_refused"
+        },
+        {
+          "line": 2156,
+          "path": "crate::topology::reconstruct_deployed_source_curves_unenforced"
+        },
+        {
+          "line": 2167,
+          "path": "crate::topology::reconstruct_deployed_source_curves_with_evidence"
+        },
+        {
+          "line": 2184,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 2543,
+          "path": "crate::export::bind_final_convolution_artifacts"
+        },
+        {
+          "line": 2726,
+          "path": "crate::topology::crossover_timing_refused"
+        },
+        {
+          "line": 2729,
+          "path": "crate::topology::collect_routed_splice_outcomes"
+        },
+        {
+          "line": 2739,
+          "path": "crate::topology::RoleSpliceOutcome"
+        },
+        {
+          "line": 2830,
+          "path": "crate::final_ledger::processing_snapshot"
+        },
+        {
+          "line": 2900,
+          "path": "crate::final_ledger::processing_snapshot"
+        },
+        {
+          "line": 3023,
+          "path": "crate::topology::collect_routed_splice_outcomes"
+        },
+        {
+          "line": 3142,
+          "path": "crate::topology::recalibrate_post_dsp_levels"
+        },
+        {
+          "line": 3227,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 3397,
+          "path": "crate::export::bind_final_convolution_artifacts"
+        },
+        {
+          "line": 3398,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 3598,
+          "path": "crate::topology::recalibrate_post_dsp_levels"
+        },
+        {
+          "line": 3602,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 3736,
+          "path": "crate::topology::reconstruct_deployed_source_curves_unenforced"
+        },
+        {
+          "line": 3995,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 4175,
+          "path": "crate::electrical_headroom::independent_graph_output_ports"
+        },
+        {
+          "line": 4295,
+          "path": "crate::ctc::read_wav_channels_f64"
+        },
+        {
+          "line": 4297,
+          "path": "crate::ctc::checked_sample_rate"
+        },
+        {
+          "line": 4358,
+          "path": "crate::ctc::read_wav_channels_f64"
+        },
+        {
+          "line": 4360,
+          "path": "crate::ctc::checked_sample_rate"
+        },
+        {
+          "line": 4430,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4431,
+          "path": "crate::test_fixtures::flat_curve"
+        },
+        {
+          "line": 4652,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4682,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4707,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4741,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4772,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4844,
+          "path": "crate::ctc::read_wav_channels_f64"
+        },
+        {
+          "line": 4875,
+          "path": "crate::ctc::read_wav_channels_f64"
+        },
+        {
+          "line": 5084,
+          "path": "crate::FinalizationDiagnosticSink"
+        },
+        {
+          "line": 5145,
+          "path": "crate::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+        },
+        {
+          "line": 5169,
+          "path": "crate::FinalizationDiagnosticTrial::FullStrengthOutput"
+        },
+        {
+          "line": 5334,
+          "path": "crate::FinalizationDiagnosticSink"
+        },
+        {
+          "line": 5359,
+          "path": "crate::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+        },
+        {
+          "line": 5421,
+          "path": "crate::FinalizationDiagnosticSink"
+        },
+        {
+          "line": 5441,
+          "path": "crate::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+        },
+        {
+          "line": 5575,
+          "path": "crate::load_merged_config_strict"
+        },
+        {
+          "line": 5693,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 5728,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 6215,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 6240,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 6309,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 6324,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 6591,
+          "path": "crate::final_ledger::processing_snapshot"
+        },
+        {
+          "line": 7020,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 7211,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 7256,
+          "path": "crate::ctc::apply_channel_dsp_chain_to_curve"
+        },
+        {
+          "line": 7358,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        },
+        {
+          "line": 7401,
+          "path": "crate::electrical_headroom::assess_final_graph"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        5,
+        4472,
+        7438
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": true
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "sha256": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+      "lines": 374,
+      "crate_references": [
+        {
+          "line": 36,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        2
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "sha256": "a981973e93cfc799682a946f16d01bda377a86a5151d86c45b59a6b24e6e427e",
+      "lines": 862,
+      "crate_references": [],
+      "parent_wildcard_import_lines": [
+        1,
+        415
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "sha256": "3b6581e4e937518de1a8163f109cc3ecb1fb44e8e45fe4fb689a841e516054fe",
+      "lines": 459,
+      "crate_references": [
+        {
+          "line": 257,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 259,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 279,
+          "path": "crate::prepare_eq_resources"
+        },
+        {
+          "line": 314,
+          "path": "crate::prepare_eq_resources"
+        },
+        {
+          "line": 353,
+          "path": "crate::prepare_eq_resources"
+        },
+        {
+          "line": 385,
+          "path": "crate::prepare_eq_resources"
+        },
+        {
+          "line": 433,
+          "path": "crate::prepare_eq_resources"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        194
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "sha256": "b0bc19afa3bf59183428fcd6810debc467c6e4ab41634ff85c28f62f01fe86f2",
+      "lines": 1747,
+      "crate_references": [
+        {
+          "line": 605,
+          "path": "crate::prepare_eq_resources"
+        },
+        {
+          "line": 1187,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1230,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1316,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1351,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1353,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 1616,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        2,
+        1157
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "sha256": "470d798b6b6e7e7b1dfce46cc6bbb1ce34eeac923239cc5b81f370f4b118fd80",
+      "lines": 421,
+      "crate_references": [
+        {
+          "line": 117,
+          "path": "crate::evidence_intake::crossover_timing_reference"
+        },
+        {
+          "line": 345,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 347,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        242
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+      "sha256": "d60d8115cee2b6f7af3f3fa2209ed06621e7ed320b80b32e4e49f3dd90f1de85",
+      "lines": 226,
+      "crate_references": [
+        {
+          "line": 4,
+          "path": "crate::evidence_intake"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        122
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "sha256": "2a536e32f65d98c6eab42a087445746eac5f7ef753f7807e431b1f1aae1670a9",
+      "lines": 6265,
+      "crate_references": [
+        {
+          "line": 257,
+          "path": "crate::group_measurements::seat_labels"
+        },
+        {
+          "line": 663,
+          "path": "crate::ctc::read_wav_channels_f64"
+        },
+        {
+          "line": 665,
+          "path": "crate::ctc::checked_sample_rate"
+        },
+        {
+          "line": 689,
+          "path": "crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs"
+        },
+        {
+          "line": 840,
+          "path": "crate::export::validate_final_routed_stage_ownership"
+        },
+        {
+          "line": 2160,
+          "path": "crate::export::validate_final_routed_stage_ownership"
+        },
+        {
+          "line": 2255,
+          "path": "crate::prepare_eq_resources"
+        },
+        {
+          "line": 2664,
+          "path": "crate::evidence_intake::shared_timing_reference"
+        },
+        {
+          "line": 2671,
+          "path": "crate::delay_compile::electrical_boost_bound_db"
+        },
+        {
+          "line": 2679,
+          "path": "crate::delay_compile::applied_lfe_playback_gain_db"
+        },
+        {
+          "line": 2935,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 2972,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 2991,
+          "path": "crate::test_fixtures::flat_curve"
+        },
+        {
+          "line": 3060,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 3117,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 3274,
+          "path": "crate::test_fixtures::flat_curve"
+        },
+        {
+          "line": 3293,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 3312,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 3477,
+          "path": "crate::test_fixtures::flat_curve"
+        },
+        {
+          "line": 3599,
+          "path": "crate::test_fixtures::flat_curve"
+        },
+        {
+          "line": 3648,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 3672,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 3783,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4651,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 4747,
+          "path": "crate::topology::reconstruct_deployed_source_curves_unenforced"
+        },
+        {
+          "line": 4759,
+          "path": "crate::test_fixtures::flat_curve"
+        },
+        {
+          "line": 4780,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 5183,
+          "path": "crate::test_fixtures::single_channel_room_result"
+        },
+        {
+          "line": 5705,
+          "path": "crate::export::bind_final_convolution_artifacts"
+        }
+      ],
+      "parent_wildcard_import_lines": [
+        2925
+      ],
+      "literal_includes": [],
+      "uses_manifest_directory": false
+    }
+  ],
+  "crate_prefix_counts": {
+    "test_fixtures": 43,
+    "electrical_headroom": 21,
+    "topology": 14,
+    "ctc": 10,
+    "pipeline": 8,
+    "prepare_eq_resources": 7,
+    "export": 5,
+    "evidence_intake": 4,
+    "delay_compile": 4,
+    "FinalizationDiagnosticTrial": 4,
+    "final_ledger": 3,
+    "FinalizationDiagnosticSink": 3,
+    "load_merged_config_strict": 1,
+    "group_measurements": 1
+  },
+  "qualified_alias_counts": {
+    "seat_replay::capture_training": 19,
+    "seat_replay::Capture": 6,
+    "seat_replay::restore_structural_baseline": 4,
+    "seat_replay::validate_candidate_final_seats": 3,
+    "seat_replay::ConfiguredComparison::new": 3,
+    "seat_replay::validate_final_correlated_bass": 2,
+    "seat_replay::correlated_bass_stage": 2,
+    "seat_replay::configured_selection_metrics": 2,
+    "seat_replay::has_unmeasured_multi_branch_phase": 1,
+    "seat_replay::ConfiguredComparison": 1,
+    "seat_replay::validate_candidate_final_seats_with_diagnostic_trace": 1,
+    "seat_replay::restore_configured_bass_routes": 1
+  },
+  "scope": "finalization root/children, seat-replay root/children, final ledger",
+  "all_sources_match_current_native_proof": true,
+  "qualification": "References include comments and tests; parent wildcard imports and module aliases are not fully resolved. This is not a production/feature/compiler dependency closure or acceptance proof. Classify pure shared computations, resource adapters, data contracts and test-only dependencies separately before moving code.",
+  "performance_acceptance": false
+}

@@ -52,7 +52,7 @@ for scenario in "${scenarios[@]}"; do
     done
 done
 
-$CARGO build --release --locked --features cli --bin roomeq
+$CARGO build --release --locked -p roomeq-cli --bin roomeq
 # Freeze the executable for this run: a concurrent rebuild must not change
 # optimization behavior halfway through the measured matrix.
 BUILD_BIN=${CARGO_TARGET_DIR:-./target}/release/roomeq

@@ -1,0 +1,8 @@
+{
+  "status": "passed",
+  "recorded_utc": "2026-10-27T06:27:47.171706+00:00",
+  "controller_sha256": "ea51a4b7ff05b35f71c7a2bda348bdc12deab2460564740679f7aa5cb7441a2e",
+  "baseline_budget_binding_checked": true,
+  "source_tool_python_harness_domain_bindings_checked": true,
+  "measurement_launched": false
+}

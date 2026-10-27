@@ -139,6 +139,7 @@ class RustQaTargetTests(unittest.TestCase):
     CASE = {
         "id": "R01",
         "test": "wolfram_r01",
+        "target": "oracle_core",
         "tolerance_kind": "abs",
         "tolerance_value": 1e-4,
     }
@@ -153,14 +154,43 @@ class RustQaTargetTests(unittest.TestCase):
             "tolerance": 1e-4,
             "tolerance_kind": "abs",
             "provenance": "checked-in-golden",
-            "_cargo_target": "wolfram_r01",
+            "_cargo_target": "oracle_core",
         }
         result.update(updates)
         return result
 
+    def test_module_results_attribute_grouped_outcomes(self):
+        output = (
+            "Running tests/oracle_core.rs (target/debug/deps/oracle_core-abc)\n"
+            "test wolfram_r01::comparison ... QA_RESULT: {}\n"
+            "ok\n"
+            "test wolfram_r02::comparison ... FAILED\n"
+            "test wolfram_r02::other ... ok\n"
+            "test result: FAILED. 2 passed; 1 failed; 0 ignored;\n"
+        )
+        modules = matrix.parse_rust_module_results(output)
+        self.assertEqual(
+            modules["oracle_core"]["wolfram_r01"],
+            {"passed": 1, "failed": 0, "ignored": 0},
+        )
+        self.assertEqual(
+            modules["oracle_core"]["wolfram_r02"],
+            {"passed": 1, "failed": 1, "ignored": 0},
+        )
+        self.assertEqual(
+            matrix.rust_module_status(modules["oracle_core"]["wolfram_r01"], "failed"),
+            "passed",
+        )
+        self.assertEqual(
+            matrix.rust_module_status(modules["oracle_core"]["wolfram_r02"], "failed"),
+            "failed",
+        )
+        self.assertEqual(matrix.rust_module_status(None, "passed"), "failed")
+        self.assertEqual(matrix.rust_module_status(None, "not_run"), "not_run")
+
     def test_nocapture_result_prefix_is_parsed_after_libtest_text(self):
         output = (
-            "Running tests/wolfram_r01.rs (target/debug/deps/wolfram_r01-abc)\n"
+            "Running tests/oracle_core.rs (target/debug/deps/oracle_core-abc)\n"
             "test comparison ... QA_RESULT: "
             + json.dumps(self.record())
         )

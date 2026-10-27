@@ -1,0 +1,142 @@
+<!doctype html><meta charset="utf-8"><title>GPUI report runtime contract</title>
+<style>body{margin:0;font:16px system-ui}#status{padding:8px}#viewer{min-height:800px}</style>
+<div id="status">Loading GPUI report</div><div id="viewer"></div>
+<script id="report-payload" type="application/json">{
+  "schema": "autoeq-report-data-v1",
+  "title": "Renderer contract fixture",
+  "sections": [
+    {
+      "kind": "grid",
+      "figure": {
+        "title": "Synthetic surface: renderer contract only",
+        "x": {
+          "label": "Frequency (Hz)",
+          "scale": "log",
+          "min": 20,
+          "max": 20000
+        },
+        "y": {
+          "label": "Time from broadband peak (ms)",
+          "scale": "linear",
+          "min": 0,
+          "max": 20
+        },
+        "y2": null,
+        "series": [],
+        "hlines": [],
+        "vlines": [],
+        "xranges": [],
+        "annotations": [],
+        "legend": true
+      },
+      "tab": null,
+      "grid": {
+        "x": [
+          20,
+          50,
+          100,
+          250,
+          1000,
+          4000,
+          20000
+        ],
+        "y": [
+          0,
+          2,
+          5,
+          10,
+          20
+        ],
+        "z": [
+          [
+            -9,
+            -6,
+            -3,
+            0,
+            -3,
+            -6,
+            -9
+          ],
+          [
+            -19,
+            -16,
+            -13,
+            -10,
+            -13,
+            -16,
+            -19
+          ],
+          [
+            -29,
+            -26,
+            -23,
+            -20,
+            -23,
+            -26,
+            -29
+          ],
+          [
+            -39,
+            -36,
+            -33,
+            -30,
+            -33,
+            -36,
+            -39
+          ],
+          [
+            -49,
+            -46,
+            -43,
+            -40,
+            -43,
+            -46,
+            -49
+          ]
+        ],
+        "surface": true,
+        "zmin": -60,
+        "zmax": 0,
+        "highlights": [],
+        "colormap": "turbo",
+        "show_surface": true,
+        "show_contours": true
+      }
+    },
+    {
+      "kind": "bar",
+      "chart": {
+        "title": "Synthetic bars",
+        "categories": [
+          "A",
+          "B"
+        ],
+        "groups": [
+          {
+            "name": "Reference",
+            "values": [
+              1.0,
+              2.0
+            ],
+            "color": "#0066cc"
+          }
+        ],
+        "ylabel": "",
+        "ymin": null,
+        "ymax": null,
+        "legend": true,
+        "hlines": []
+      },
+      "tab": null
+    }
+  ]
+}
+</script>
+<script type="module">
+import init, {mount_report} from './reportgpui.js';
+try {
+ await init({module_or_path:new URL('./reportgpui.wasm',import.meta.url)});
+ await mount_report('viewer');
+ document.getElementById('status').textContent='GPUI mounted';
+} catch (error) { document.getElementById('status').textContent='GPUI error: '+error; console.error(error); }
+</script>

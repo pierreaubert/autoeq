@@ -1,0 +1,39 @@
+{
+  "status": "passed",
+  "checked_utc": "2026-10-26T08:01:50.213891+00:00",
+  "scope": "isolated roomeq-engine-channel --profile qa --lib",
+  "passed_exact_identities": [
+    "channel_execution::tests::clamping_clears_prepared_ssir_path",
+    "channel_execution::tests::clamping_limits_sub_and_applies_overrides",
+    "channel_execution::tests::declared_band_excludes_unusable_samples_from_channel_level_reference",
+    "channel_execution::tests::declared_band_keeps_delivered_correction_independent_of_unusable_samples",
+    "channel_execution::tests::declared_ir_populates_measured_room_acoustics",
+    "channel_execution::tests::hybrid_mixed_crossover_serializes_and_realizes_excursion_protection",
+    "channel_execution::tests::preparation_intersects_requested_band_with_measurement_before_dispatch",
+    "channel_execution::tests::preparation_rejects_disjoint_measurement_and_correction_bands",
+    "channel_execution::tests::sub_execution_does_not_reintroduce_first_peak_passband_clamp",
+    "channel_execution::tests::sub_upper_bound_is_the_tighter_of_measurement_and_crossover",
+    "channel_fir::tests::hybrid_narrow_band_preserves_fixed_target_in_direct_dtft"
+  ],
+  "expected_count": 11,
+  "ignored": 0,
+  "original_coordinator_sha256": "dc9d99f72821786c5f5500d5e7ff77f01405f3ea97fd98a83a45a675338bfe18",
+  "prototype_coordinator_sha256": "b7ccee61c5fb8871e542c933e87c716f13088db96e67d34c0b3430b20c5fb8f5",
+  "numeric_and_test_body_preservation": "Exact source equality after explicit import relocation, opaque Debug insertion, one equivalent expect_err assertion retaining its rejection/message, and rustfmt. No numerical implementation, input, tolerance or guard changes.",
+  "initial_compile_failure": "existing checked PreparedChannelInput::usable_curve was crate-private; exposed the operation with its implementation and private state preserved",
+  "initial_log": "phase5-channel-coordinator-tests.log",
+  "passing_log": "phase5-channel-combined-tests.log",
+  "passing_log_sha256": "282ba5a5db9b807593ba2d0a934021596a8fae21c1238b85ed6420fc1c13e5c0",
+  "performance_acceptance": false,
+  "qualification": "This proves the migrated 11-case pilot only; the 972-case engine scope, workflow callers, affected consumers, numerical coverage and measurements remain separate requirements.",
+  "workflow_selected_passed": 31,
+  "coordinator_passed": 11,
+  "clippy": {
+    "status": "passed",
+    "warnings_denied": true,
+    "scope": "coordinator and workflow; all targets/all features; no deps; qa profile",
+    "log": "phase5-channel-coordinator-clippy-v2.log",
+    "sha256": "3d8e4b6ff8e625d755994011b5031e57c1d52a409a940cdcbf939815f12ade5f"
+  },
+  "initial_clippy_failure": "Opaque Debug enables idiomatic expect_err in two existing rejection assertions; both are updated without changing rejection semantics or messages."
+}

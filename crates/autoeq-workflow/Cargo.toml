@@ -11,10 +11,10 @@ homepage = "https://github.com/pierreaubert/autoeq"
 workspace = true
 
 [dependencies]
+autoeq-optim-types = { workspace = true }
 autoeq-core = { workspace = true }
-autoeq-measurements = { workspace = true }
+autoeq-measurements = { workspace = true, features = ["api"] }
 autoeq-optim = { workspace = true }
-clap = { workspace = true }
 chrono = { workspace = true }
 hound = { workspace = true }
 log = { workspace = true }

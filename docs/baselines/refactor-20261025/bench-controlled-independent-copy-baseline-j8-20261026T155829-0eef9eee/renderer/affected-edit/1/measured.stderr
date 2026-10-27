@@ -1,0 +1,11 @@
+   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-wasm)
+   Compiling autoeq-plot v0.5.5 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-plot)
+   Compiling autoeq-report-gpui v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-gpui)
+   Compiling autoeq-report-wasm-shell v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-wasm-shell)
+   Compiling autoeq-cli v0.5.3 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-cli)
+   Compiling autoeq-qa v0.5.2 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-qa)
+   Compiling autoeq v0.5.78 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/primed/1/test/affected/cargo-timings/cargo-timing-20261026T181001856Z-ffda42dd0a9dc033.html
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 03s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

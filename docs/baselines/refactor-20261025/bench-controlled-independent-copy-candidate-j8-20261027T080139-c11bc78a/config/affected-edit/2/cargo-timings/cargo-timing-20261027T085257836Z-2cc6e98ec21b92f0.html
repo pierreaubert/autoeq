@@ -1,0 +1,4437 @@
+
+<html>
+<head>
+  <title>Cargo Build Timings — autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-cli 0.5.3, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, autoeq-qa 0.5.2, roomeq-analysis 0.5.10, roomeq-analysis 0.5.10, roomeq-cli 0.5.9, roomeq-cli 0.5.9, roomeq-cli 0.5.9, roomeq-cli 0.5.9, roomeq-cli 0.5.9, roomeq-dsp 0.5.0, roomeq-engine 0.5.84, roomeq-engine 0.5.84, roomeq-export 0.5.9, roomeq-export 0.5.9, roomeq-model 0.5.15, roomeq-model 0.5.15, roomeq-model 0.5.15, roomeq-model 0.5.15, roomeq-qa 0.5.68, roomeq-qa 0.5.68, roomeq-quality 0.5.62, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36, roomeq-workflow 0.5.36</title>
+  <meta charset="utf-8">
+<style type="text/css">
+:root {
+  --error-text: #e80000;
+  --text: #000;
+  --background: #fff;
+  --h1-border-bottom: #c0c0c0;
+  --table-box-shadow: rgba(0, 0, 0, 0.1);
+  --table-th: #d5dde5;
+  --table-th-background: #1b1e24;
+  --table-th-border-bottom: #9ea7af;
+  --table-th-border-right: #343a45;
+  --table-tr-border-top: #c1c3d1;
+  --table-tr-border-bottom: #c1c3d1;
+  --table-tr-odd-background: #ebebeb;
+  --table-td-background: #ffffff;
+  --table-td-border-right: #C1C3D1;
+  --canvas-background: #f7f7f7;
+  --canvas-axes: #303030;
+  --canvas-grid: #e6e6e6;
+  --canvas-codegen: #aa95e8;
+  --canvas-link: #95e8aa;
+  --canvas-other: #e895aa;
+  --canvas-custom-build: #f0b165;
+  --canvas-not-custom-build: #95cce8;
+  --canvas-dep-line: #ddd;
+  --canvas-dep-line-highlighted: #000;
+  --canvas-cpu: rgba(250, 119, 0, 0.2);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --error-text: #e80000;
+    --text: #fff;
+    --background: #121212;
+    --h1-border-bottom: #444;
+    --table-box-shadow: rgba(255, 255, 255, 0.1);
+    --table-th: #a0a0a0;
+    --table-th-background: #2c2c2c;
+    --table-th-border-bottom: #555;
+    --table-th-border-right: #444;
+    --table-tr-border-top: #333;
+    --table-tr-border-bottom: #333;
+    --table-tr-odd-background: #1e1e1e;
+    --table-td-background: #262626;
+    --table-td-border-right: #333;
+    --canvas-background: #1a1a1a;
+    --canvas-axes: #b0b0b0;
+    --canvas-grid: #333;
+    --canvas-block: #aa95e8;
+    --canvas-custom-build: #f0b165;
+    --canvas-not-custom-build: #95cce8;
+    --canvas-dep-line: #444;
+    --canvas-dep-line-highlighted: #fff;
+    --canvas-cpu: rgba(250, 119, 0, 0.2);
+  }
+}
+
+html {
+  font-family: sans-serif;
+  color: var(--text);
+  background: var(--background);
+}
+
+.canvas-container {
+  position: relative;
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.canvas-container.hidden {
+  display: none;
+}
+
+h1 {
+  border-bottom: 1px solid var(--h1-border-bottom);
+}
+
+.graph {
+  display: block;
+}
+
+.my-table {
+  margin-top: 20px;
+  margin-bottom: 20px;
+  border-collapse: collapse;
+  box-shadow: 0 5px 10px var(--table-box-shadow);
+}
+
+.my-table th {
+  color: var(--table-th);
+  background: var(--table-th-background);
+  border-bottom: 4px solid var(--table-th-border-bottom);
+  border-right: 1px solid var(--table-th-border-right);
+  font-size: 18px;
+  font-weight: 100;
+  padding: 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.my-table th:first-child {
+  border-top-left-radius: 3px;
+}
+
+.my-table th:last-child {
+  border-top-right-radius: 3px;
+  border-right:none;
+}
+
+.my-table tr {
+  border-top: 1px solid var(--table-tr-border-top);
+  border-bottom: 1px solid var(--table-tr-border-bottom);
+  font-size: 16px;
+  font-weight: normal;
+}
+
+.my-table tr:first-child {
+  border-top:none;
+}
+
+.my-table tr:last-child {
+  border-bottom:none;
+}
+
+.my-table tr:nth-child(odd) td {
+  background: var(--table-tr-odd-background);
+}
+
+.my-table tr:last-child td:first-child {
+  border-bottom-left-radius:3px;
+}
+
+.my-table tr:last-child td:last-child {
+  border-bottom-right-radius:3px;
+}
+
+.my-table td {
+  background: var(--table-td-background);
+  padding: 10px;
+  text-align: left;
+  vertical-align: middle;
+  font-weight: 300;
+  font-size: 14px;
+  border-right: 1px solid var(--table-td-border-right);
+}
+
+.my-table td:last-child {
+  border-right: 0px;
+}
+
+.summary-table td:first-child {
+  vertical-align: top;
+  text-align: right;
+}
+
+.input-table td {
+  text-align: center;
+}
+
+.error-text {
+  color: var(--error-text);
+}
+
+</style>
+</head>
+<body>
+
+<h1>Cargo Build Timings</h1>
+See <a href="https://doc.rust-lang.org/nightly/cargo/reference/timings.html">Documentation</a>
+
+<table class="my-table summary-table">
+<tr>
+<td>Targets:</td><td>autoeq-cli 0.5.3 (lib)<br>autoeq-cli 0.5.3 ( autoeq_golden_tests "test")<br>autoeq-cli 0.5.3 ( autoeq_integration_test "test")<br>autoeq-cli 0.5.3 ( cli_de_parameters "test")<br>autoeq-cli 0.5.3 ( peq_model_bounds "test")<br>autoeq-cli 0.5.3 ( product_renderer_capabilities "test")<br>autoeq-cli 0.5.3 ( property_tests "test")<br>autoeq-cli 0.5.3 ( public_api_workflows "test")<br>autoeq-cli 0.5.3 ( test_free_filters "test")<br>autoeq-cli 0.5.3 ( test_mh_callback "test")<br>autoeq-qa 0.5.2 (lib)<br>autoeq-qa 0.5.2 ( negative_controls "test")<br>autoeq-qa 0.5.2 ( optimizer_benchmark "test")<br>autoeq-qa 0.5.2 ( oracle_analysis_quality "test")<br>autoeq-qa 0.5.2 ( oracle_core "test")<br>autoeq-qa 0.5.2 ( oracle_engine "test")<br>autoeq-qa 0.5.2 ( oracle_export "test")<br>autoeq-qa 0.5.2 ( oracle_optim "test")<br>autoeq-qa 0.5.2 ( oracle_workflow "test")<br>autoeq-qa 0.5.2 ( qa_contract "test")<br>roomeq-analysis 0.5.10 (lib)<br>roomeq-analysis 0.5.10 ( spatial_robustness_bootstrap_test "test")<br>roomeq-cli 0.5.9 (lib)<br>roomeq-cli 0.5.9 ( broadband_matching_test "test")<br>roomeq-cli 0.5.9 ( multi_measurement_test "test")<br>roomeq-cli 0.5.9 ( roomeq_capture_verification "test")<br>roomeq-cli 0.5.9 ( roomeq_integration_test "test")<br>roomeq-dsp 0.5.0 (lib)<br>roomeq-engine 0.5.84 (lib)<br>roomeq-engine 0.5.84 ( multiseat_continuous_area_test "test")<br>roomeq-export 0.5.9 (lib)<br>roomeq-export 0.5.9 ( harness_fixtures "test")<br>roomeq-model 0.5.15 (lib)<br>roomeq-model 0.5.15 ( channel_matching_defaults_test "test")<br>roomeq-model 0.5.15 ( option_precedence_test "test")<br>roomeq-model 0.5.15 ( validator_warnings_test "test")<br>roomeq-qa 0.5.68 (lib)<br>roomeq-qa 0.5.68 ( roomeq_generated_data_test "test")<br>roomeq-quality 0.5.62 (lib)<br>roomeq-workflow 0.5.36 (lib)<br>roomeq-workflow 0.5.36 ( dba_physical_outputs "test")<br>roomeq-workflow 0.5.36 ( joint_home_cinema "test")<br>roomeq-workflow 0.5.36 ( realized_transfer_conformance "test")<br>roomeq-workflow 0.5.36 ( roomeq_admission_correction "test")<br>roomeq-workflow 0.5.36 ( roomeq_pipeline_test "test")<br>roomeq-workflow 0.5.36 ( roomeq_supporting_source "test")<br>roomeq-workflow 0.5.36 ( system_config_test "test")<br>roomeq-workflow 0.5.36 ( workflow_feature_parity_test "test")<br>roomeq-workflow 0.5.36 ( workflow_test "test")</td>
+</tr>
+<tr>
+<td>Profile:</td><td>test</td>
+</tr>
+<tr>
+<td>Fresh units:</td><td>359</td>
+</tr>
+<tr>
+<td>Dirty units:</td><td>77</td>
+</tr>
+<tr>
+<td>Total units:</td><td>436</td>
+</tr>
+<tr>
+<td>Max concurrency:</td><td>9 (jobs=8 ncpu=14)</td>
+</tr>
+<tr>
+<td>Build start:</td><td>2026-10-27T08:52:57.836444Z</td>
+</tr>
+<tr>
+<td>Total time:</td><td>72.5s (1m 12.5s)</td>
+</tr>
+<tr>
+<td>rustc:</td><td>rustc 1.99.1 (58cf8f9c3 2026-10-13)<br>Host: aarch64-apple-darwin<br>Target: aarch64-apple-darwin</td>
+</tr>
+
+</table>
+
+<table class="input-table">
+  <tr>
+    <td><label for="min-unit-time">Min unit time:</label></td>
+    <td title="Scale corresponds to a number of pixels per second. It is automatically initialized based on your viewport width.">
+      <label for="scale">Scale:</label>
+    </td>
+  </tr>
+  <tr>
+    <td><input type="range" min="0" max="30" step="0.1" value="0" id="min-unit-time"></td>
+    <!--
+        The scale corresponds to some number of "pixels per second".
+        Its min, max, and initial values are automatically set by JavaScript on page load,
+        based on the client viewport.
+    -->
+    <td><input type="range" min="1" max="100" value="50" id="scale"></td>
+  </tr>
+  <tr>
+    <td><output for="min-unit-time" id="min-unit-time-output"></output></td>
+    <td><output for="scale" id="scale-output"></output></td>
+    <td></td>
+  </tr>
+</table>
+
+<div id="pipeline-container" class="canvas-container"></div>
+<div id="timing-container" class="canvas-container"></div>
+
+<table class="my-table">
+<thead>
+<tr>
+  <th></th>
+  <th>Unit</th>
+  <th>Total</th>
+  <th>Frontend</th>
+<th>Codegen</th>
+  <th>Features</th>
+</tr>
+</thead>
+<tbody>
+
+<tr>
+<td>1.</td>
+<td>roomeq-workflow v0.5.36 roomeq_workflow "lib" (test)</td>
+<td>56.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>2.</td>
+<td>roomeq-engine v0.5.84 roomeq_engine "lib" (test)</td>
+<td>43.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>3.</td>
+<td>roomeq-workflow v0.5.36</td>
+<td>36.6s</td>
+<td>6.9s (19%)</td>
+<td>29.6s (81%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>4.</td>
+<td>roomeq-qa v0.5.68</td>
+<td>22.6s</td>
+<td>2.9s (13%)</td>
+<td>19.7s (87%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>5.</td>
+<td>roomeq-workflow v0.5.36 roomeq_admission_correction "test" (test)</td>
+<td>22.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>6.</td>
+<td>roomeq-qa v0.5.68 roomeq_qa "lib" (test)</td>
+<td>21.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>7.</td>
+<td>roomeq-cli v0.5.9</td>
+<td>19.9s</td>
+<td>2.1s (11%)</td>
+<td>17.8s (89%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>8.</td>
+<td>roomeq-cli v0.5.9 roomeq_cli "lib" (test)</td>
+<td>19.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>9.</td>
+<td>roomeq-engine v0.5.84</td>
+<td>11.8s</td>
+<td>4.0s (33%)</td>
+<td>7.9s (67%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>10.</td>
+<td>autoeq-qa v0.5.2 oracle_optim "test" (test)</td>
+<td>8.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>11.</td>
+<td>roomeq-cli v0.5.9 roomeq_integration_test "test" (test)</td>
+<td>8.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>12.</td>
+<td>autoeq-cli v0.5.3 autoeq_cli "lib" (test)</td>
+<td>6.7s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>13.</td>
+<td>roomeq-workflow v0.5.36 joint_home_cinema "test" (test)</td>
+<td>6.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>14.</td>
+<td>autoeq-optim v0.5.64</td>
+<td>5.6s</td>
+<td>1.7s (29%)</td>
+<td>4.0s (71%)</td>
+<td>backend-metaheuristics, default</td>
+</tr>
+
+<tr>
+<td>15.</td>
+<td>roomeq-qa v0.5.68 roomeq_generated_data_test "test" (test)</td>
+<td>5.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>16.</td>
+<td>autoeq-qa v0.5.2 qa_contract "test" (test)</td>
+<td>5.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>17.</td>
+<td>autoeq-qa v0.5.2</td>
+<td>4.4s</td>
+<td>0.8s (18%)</td>
+<td>3.7s (82%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>18.</td>
+<td>autoeq-qa v0.5.2 oracle_engine "test" (test)</td>
+<td>3.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>19.</td>
+<td>autoeq-qa v0.5.2 autoeq_qa "lib" (test)</td>
+<td>3.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>20.</td>
+<td>autoeq-cli v0.5.3</td>
+<td>3.4s</td>
+<td>1.3s (38%)</td>
+<td>2.1s (62%)</td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>21.</td>
+<td>autoeq-qa v0.5.2 oracle_analysis_quality "test" (test)</td>
+<td>3.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>22.</td>
+<td>autoeq-qa v0.5.2 negative_controls "test" (test)</td>
+<td>3.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>23.</td>
+<td>autoeq-workflow v0.5.6</td>
+<td>2.6s</td>
+<td>0.8s (30%)</td>
+<td>1.8s (70%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>24.</td>
+<td>autoeq-qa v0.5.2 oracle_workflow "test" (test)</td>
+<td>2.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>25.</td>
+<td>roomeq-workflow v0.5.36 dba_physical_outputs "test" (test)</td>
+<td>2.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>26.</td>
+<td>roomeq-model v0.5.15 roomeq_model "lib" (test)</td>
+<td>2.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>27.</td>
+<td>roomeq-workflow v0.5.36 realized_transfer_conformance "test" (test)</td>
+<td>2.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>28.</td>
+<td>roomeq-model v0.5.15</td>
+<td>2.1s</td>
+<td>1.5s (74%)</td>
+<td>0.5s (26%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>29.</td>
+<td>roomeq-cli v0.5.9 roomeq_capture_verification "test" (test)</td>
+<td>2.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>30.</td>
+<td>autoeq-qa v0.5.2 oracle_core "test" (test)</td>
+<td>1.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>31.</td>
+<td>roomeq-workflow v0.5.36 roomeq_pipeline_test "test" (test)</td>
+<td>1.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>32.</td>
+<td>roomeq-quality v0.5.62 roomeq_quality "lib" (test)</td>
+<td>1.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>33.</td>
+<td>roomeq-workflow v0.5.36 system_config_test "test" (test)</td>
+<td>1.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>34.</td>
+<td>roomeq-cli v0.5.9 multi_measurement_test "test" (test)</td>
+<td>1.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>35.</td>
+<td>roomeq-export v0.5.9 roomeq_export "lib" (test)</td>
+<td>1.1s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>36.</td>
+<td>roomeq-quality v0.5.62</td>
+<td>1.1s</td>
+<td>0.8s (74%)</td>
+<td>0.3s (26%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>37.</td>
+<td>autoeq-cli v0.5.3 product_renderer_capabilities "test" (test)</td>
+<td>1.1s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>38.</td>
+<td>autoeq-qa v0.5.2 optimizer-benchmark "bin"</td>
+<td>1.0s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>39.</td>
+<td>autoeq-cli v0.5.3 property_tests "test" (test)</td>
+<td>0.9s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>40.</td>
+<td>autoeq-plot v0.5.5</td>
+<td>0.9s</td>
+<td>0.3s (29%)</td>
+<td>0.6s (71%)</td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>41.</td>
+<td>autoeq-cli v0.5.3 public_api_workflows "test" (test)</td>
+<td>0.9s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>42.</td>
+<td>autoeq-cli v0.5.3 autoeq_golden_tests "test" (test)</td>
+<td>0.8s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>43.</td>
+<td>roomeq-workflow v0.5.36 workflow_feature_parity_test "test" (test)</td>
+<td>0.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>44.</td>
+<td>autoeq-qa v0.5.2 oracle_export "test" (test)</td>
+<td>0.8s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>45.</td>
+<td>autoeq-cli v0.5.3 peq_model_bounds "test" (test)</td>
+<td>0.7s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>46.</td>
+<td>roomeq-workflow v0.5.36 workflow_test "test" (test)</td>
+<td>0.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>47.</td>
+<td>roomeq-workflow v0.5.36 roomeq_supporting_source "test" (test)</td>
+<td>0.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>48.</td>
+<td>autoeq-cli v0.5.3 test_free_filters "test" (test)</td>
+<td>0.7s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>49.</td>
+<td>roomeq-analysis v0.5.10 roomeq_analysis "lib" (test)</td>
+<td>0.7s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>50.</td>
+<td>autoeq-cli v0.5.3 autoeq_integration_test "test" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>51.</td>
+<td>roomeq-cli v0.5.9 broadband_matching_test "test" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>52.</td>
+<td>autoeq-cli v0.5.3 cli_de_parameters "test" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>53.</td>
+<td>autoeq-qa v0.5.2 optimizer_benchmark "test" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>54.</td>
+<td>autoeq-cli v0.5.3 test_mh_callback "test" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>55.</td>
+<td>roomeq-export v0.5.9 harness_fixtures "test" (test)</td>
+<td>0.6s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>56.</td>
+<td>roomeq-engine v0.5.84 multiseat_continuous_area_test "test" (test)</td>
+<td>0.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>57.</td>
+<td>autoeq-cli v0.5.3 benchmark-autoeq-speaker "bin"</td>
+<td>0.5s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>58.</td>
+<td>roomeq-qa v0.5.68 roomeq-qa-acoustic "bin"</td>
+<td>0.5s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>59.</td>
+<td>roomeq-export v0.5.9</td>
+<td>0.5s</td>
+<td>0.3s (70%)</td>
+<td>0.1s (30%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>60.</td>
+<td>roomeq-analysis v0.5.10</td>
+<td>0.5s</td>
+<td>0.3s (76%)</td>
+<td>0.1s (24%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>61.</td>
+<td>roomeq-qa v0.5.68 roomeq-qa-coverage "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>62.</td>
+<td>roomeq-cli v0.5.9 roomeq "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>63.</td>
+<td>roomeq-qa v0.5.68 roomeq-qa-quality "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>64.</td>
+<td>roomeq-qa v0.5.68 roomeq-qa-features "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>65.</td>
+<td>roomeq-qa v0.5.68 roomeq-qa-synthetic "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>66.</td>
+<td>roomeq-cli v0.5.9 convert-recording "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>67.</td>
+<td>roomeq-qa v0.5.68 roomeq-fuzzer "bin"</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>68.</td>
+<td>roomeq-dsp v0.5.0 roomeq_dsp "lib" (test)</td>
+<td>0.4s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>69.</td>
+<td>autoeq-cli v0.5.3 autoeq "bin"</td>
+<td>0.3s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>70.</td>
+<td>autoeq-cli v0.5.3 autoeq-download-speakers "bin"</td>
+<td>0.3s</td>
+<td></td>
+<td></td>
+<td>default</td>
+</tr>
+
+<tr>
+<td>71.</td>
+<td>roomeq-analysis v0.5.10 spatial_robustness_bootstrap_test "test" (test)</td>
+<td>0.3s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>72.</td>
+<td>autoeq-optim v0.5.64 build-script</td>
+<td>0.3s</td>
+<td></td>
+<td></td>
+<td>backend-metaheuristics, default</td>
+</tr>
+
+<tr>
+<td>73.</td>
+<td>roomeq-model v0.5.15 channel_matching_defaults_test "test" (test)</td>
+<td>0.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>74.</td>
+<td>roomeq-model v0.5.15 validator_warnings_test "test" (test)</td>
+<td>0.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>75.</td>
+<td>roomeq-model v0.5.15 option_precedence_test "test" (test)</td>
+<td>0.2s</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+
+<tr>
+<td>76.</td>
+<td>roomeq-dsp v0.5.0</td>
+<td>0.2s</td>
+<td>0.2s (91%)</td>
+<td>0.0s (9%)</td>
+<td></td>
+</tr>
+
+<tr>
+<td>77.</td>
+<td>autoeq-optim v0.5.64 build-script (run)</td>
+<td>0.0s</td>
+<td></td>
+<td></td>
+<td>backend-metaheuristics, default</td>
+</tr>
+</tbody>
+</table>
+<script>
+DURATION = 73;
+const UNIT_DATA = [
+  {
+    "i": 296,
+    "name": "roomeq-model",
+    "version": "0.5.15",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 0.34,
+    "duration": 2.07,
+    "unblocked_units": [
+      287,
+      299,
+      298,
+      297,
+      278,
+      276,
+      309
+    ],
+    "unblocked_rmeta_units": [
+      310,
+      288,
+      277
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 1.53
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 1.53,
+          "end": 2.07
+        }
+      ]
+    ]
+  },
+  {
+    "i": 295,
+    "name": "roomeq-model",
+    "version": "0.5.15",
+    "mode": "todo",
+    "target": " roomeq_model \"lib\" (test)",
+    "features": [],
+    "start": 0.35,
+    "duration": 2.36,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 38,
+    "name": "autoeq-optim",
+    "version": "0.5.64",
+    "mode": "todo",
+    "target": " build-script",
+    "features": [
+      "backend-metaheuristics",
+      "default"
+    ],
+    "start": 0.35,
+    "duration": 0.26,
+    "unblocked_units": [
+      39
+    ],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 39,
+    "name": "autoeq-optim",
+    "version": "0.5.64",
+    "mode": "run-custom-build",
+    "target": " build-script (run)",
+    "features": [
+      "backend-metaheuristics",
+      "default"
+    ],
+    "start": 0.61,
+    "duration": 0.03,
+    "unblocked_units": [
+      37
+    ],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 37,
+    "name": "autoeq-optim",
+    "version": "0.5.64",
+    "mode": "todo",
+    "target": "",
+    "features": [
+      "backend-metaheuristics",
+      "default"
+    ],
+    "start": 0.64,
+    "duration": 5.63,
+    "unblocked_units": [
+      289,
+      19
+    ],
+    "unblocked_rmeta_units": [
+      55,
+      41
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 1.66
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 1.66,
+          "end": 5.63
+        }
+      ]
+    ]
+  },
+  {
+    "i": 288,
+    "name": "roomeq-dsp",
+    "version": "0.5.0",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 1.87,
+    "duration": 0.22,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.2
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.2,
+          "end": 0.22
+        }
+      ]
+    ]
+  },
+  {
+    "i": 310,
+    "name": "roomeq-quality",
+    "version": "0.5.62",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 1.87,
+    "duration": 1.08,
+    "unblocked_units": [
+      292
+    ],
+    "unblocked_rmeta_units": [
+      293,
+      290
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.8
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.8,
+          "end": 1.08
+        }
+      ]
+    ]
+  },
+  {
+    "i": 277,
+    "name": "roomeq-analysis",
+    "version": "0.5.10",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 1.87,
+    "duration": 0.45,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.34
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.34,
+          "end": 0.45
+        }
+      ]
+    ]
+  },
+  {
+    "i": 41,
+    "name": "autoeq-plot",
+    "version": "0.5.5",
+    "mode": "todo",
+    "target": "",
+    "features": [
+      "default"
+    ],
+    "start": 2.29,
+    "duration": 0.9,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.26
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.26,
+          "end": 0.9
+        }
+      ]
+    ]
+  },
+  {
+    "i": 55,
+    "name": "autoeq-workflow",
+    "version": "0.5.6",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 2.29,
+    "duration": 2.58,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [
+      20
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.78
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.78,
+          "end": 2.58
+        }
+      ]
+    ]
+  },
+  {
+    "i": 276,
+    "name": "roomeq-analysis",
+    "version": "0.5.10",
+    "mode": "todo",
+    "target": " roomeq_analysis \"lib\" (test)",
+    "features": [],
+    "start": 2.4,
+    "duration": 0.65,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 290,
+    "name": "roomeq-engine",
+    "version": "0.5.84",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 2.71,
+    "duration": 11.85,
+    "unblocked_units": [
+      291,
+      312
+    ],
+    "unblocked_rmeta_units": [
+      313
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 3.96
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 3.96,
+          "end": 11.85
+        }
+      ]
+    ]
+  },
+  {
+    "i": 293,
+    "name": "roomeq-export",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 2.95,
+    "duration": 0.46,
+    "unblocked_units": [
+      294
+    ],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.32
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.32,
+          "end": 0.46
+        }
+      ]
+    ]
+  },
+  {
+    "i": 292,
+    "name": "roomeq-export",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " roomeq_export \"lib\" (test)",
+    "features": [],
+    "start": 3.05,
+    "duration": 1.13,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 20,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": "",
+    "features": [
+      "default"
+    ],
+    "start": 3.17,
+    "duration": 3.39,
+    "unblocked_units": [
+      30,
+      29,
+      28,
+      27,
+      26,
+      25,
+      24,
+      23,
+      22,
+      21,
+      32,
+      31
+    ],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 1.3
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 1.3,
+          "end": 3.39
+        }
+      ]
+    ]
+  },
+  {
+    "i": 299,
+    "name": "roomeq-model",
+    "version": "0.5.15",
+    "mode": "todo",
+    "target": " validator_warnings_test \"test\" (test)",
+    "features": [],
+    "start": 3.2,
+    "duration": 0.25,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 294,
+    "name": "roomeq-export",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " harness_fixtures \"test\" (test)",
+    "features": [],
+    "start": 3.41,
+    "duration": 0.56,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 309,
+    "name": "roomeq-quality",
+    "version": "0.5.62",
+    "mode": "todo",
+    "target": " roomeq_quality \"lib\" (test)",
+    "features": [],
+    "start": 3.45,
+    "duration": 1.49,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 298,
+    "name": "roomeq-model",
+    "version": "0.5.15",
+    "mode": "todo",
+    "target": " option_precedence_test \"test\" (test)",
+    "features": [],
+    "start": 3.95,
+    "duration": 0.25,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 287,
+    "name": "roomeq-dsp",
+    "version": "0.5.0",
+    "mode": "todo",
+    "target": " roomeq_dsp \"lib\" (test)",
+    "features": [],
+    "start": 3.97,
+    "duration": 0.36,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 297,
+    "name": "roomeq-model",
+    "version": "0.5.15",
+    "mode": "todo",
+    "target": " channel_matching_defaults_test \"test\" (test)",
+    "features": [],
+    "start": 4.18,
+    "duration": 0.25,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 278,
+    "name": "roomeq-analysis",
+    "version": "0.5.10",
+    "mode": "todo",
+    "target": " spatial_robustness_bootstrap_test \"test\" (test)",
+    "features": [],
+    "start": 4.2,
+    "duration": 0.29,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 19,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " autoeq_cli \"lib\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 6.27,
+    "duration": 6.69,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 289,
+    "name": "roomeq-engine",
+    "version": "0.5.84",
+    "mode": "todo",
+    "target": " roomeq_engine \"lib\" (test)",
+    "features": [],
+    "start": 6.28,
+    "duration": 43.57,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 23,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " benchmark-autoeq-speaker \"bin\"",
+    "features": [
+      "default"
+    ],
+    "start": 6.55,
+    "duration": 0.51,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 24,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " autoeq_golden_tests \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 6.55,
+    "duration": 0.8,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 27,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " peq_model_bounds \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 6.55,
+    "duration": 0.71,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 28,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " product_renderer_capabilities \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 6.55,
+    "duration": 1.05,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 31,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " test_free_filters \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 6.55,
+    "duration": 0.65,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 313,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 7.06,
+    "duration": 36.56,
+    "unblocked_units": [
+      50,
+      49,
+      48,
+      47,
+      46,
+      45,
+      44,
+      322,
+      42,
+      321,
+      320,
+      286,
+      319,
+      285,
+      318,
+      284,
+      317,
+      283,
+      316,
+      282,
+      308,
+      315,
+      281,
+      307,
+      314,
+      279,
+      306,
+      305,
+      304,
+      53,
+      303,
+      52,
+      302,
+      51,
+      300
+    ],
+    "unblocked_rmeta_units": [
+      280,
+      301
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 6.93
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 6.93,
+          "end": 36.56
+        }
+      ]
+    ]
+  },
+  {
+    "i": 30,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " public_api_workflows \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 7.21,
+    "duration": 0.86,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 26,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " cli_de_parameters \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 7.26,
+    "duration": 0.62,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 22,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " autoeq-download-speakers \"bin\"",
+    "features": [
+      "default"
+    ],
+    "start": 7.35,
+    "duration": 0.31,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 29,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " property_tests \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 7.6,
+    "duration": 0.91,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 25,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " autoeq_integration_test \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 7.66,
+    "duration": 0.64,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 21,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " autoeq \"bin\"",
+    "features": [
+      "default"
+    ],
+    "start": 7.88,
+    "duration": 0.35,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 32,
+    "name": "autoeq-cli",
+    "version": "0.5.3",
+    "mode": "todo",
+    "target": " test_mh_callback \"test\" (test)",
+    "features": [
+      "default"
+    ],
+    "start": 8.06,
+    "duration": 0.57,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 301,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 14.04,
+    "duration": 22.64,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [
+      43
+    ],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 2.94
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 2.94,
+          "end": 22.64
+        }
+      ]
+    ]
+  },
+  {
+    "i": 280,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 14.35,
+    "duration": 19.93,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 2.13
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 2.13,
+          "end": 19.93
+        }
+      ]
+    ]
+  },
+  {
+    "i": 312,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " roomeq_workflow \"lib\" (test)",
+    "features": [],
+    "start": 14.56,
+    "duration": 56.76,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 291,
+    "name": "roomeq-engine",
+    "version": "0.5.84",
+    "mode": "todo",
+    "target": " multiseat_continuous_area_test \"test\" (test)",
+    "features": [],
+    "start": 14.56,
+    "duration": 0.52,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 43,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": "",
+    "features": [],
+    "start": 18.49,
+    "duration": 4.44,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": [
+      [
+        "frontend",
+        {
+          "start": 0.0,
+          "end": 0.79
+        }
+      ],
+      [
+        "codegen",
+        {
+          "start": 0.79,
+          "end": 4.44
+        }
+      ]
+    ]
+  },
+  {
+    "i": 286,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " roomeq_integration_test \"test\" (test)",
+    "features": [],
+    "start": 43.61,
+    "duration": 8.07,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 321,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " workflow_feature_parity_test \"test\" (test)",
+    "features": [],
+    "start": 44.29,
+    "duration": 0.77,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 317,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " roomeq_admission_correction \"test\" (test)",
+    "features": [],
+    "start": 44.92,
+    "duration": 22.0,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 282,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " roomeq \"bin\"",
+    "features": [],
+    "start": 44.99,
+    "duration": 0.43,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 50,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " oracle_export \"test\" (test)",
+    "features": [],
+    "start": 45.05,
+    "duration": 0.75,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 46,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " optimizer_benchmark \"test\" (test)",
+    "features": [],
+    "start": 45.42,
+    "duration": 0.59,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 42,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " autoeq_qa \"lib\" (test)",
+    "features": [],
+    "start": 45.8,
+    "duration": 3.52,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 306,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq-qa-quality \"bin\"",
+    "features": [],
+    "start": 46.01,
+    "duration": 0.41,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 302,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq-fuzzer \"bin\"",
+    "features": [],
+    "start": 46.41,
+    "duration": 0.38,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 320,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " system_config_test \"test\" (test)",
+    "features": [],
+    "start": 46.8,
+    "duration": 1.43,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 285,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " roomeq_capture_verification \"test\" (test)",
+    "features": [],
+    "start": 48.23,
+    "duration": 1.98,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 316,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " realized_transfer_conformance \"test\" (test)",
+    "features": [],
+    "start": 49.32,
+    "duration": 2.14,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 281,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " convert-recording \"bin\"",
+    "features": [],
+    "start": 49.85,
+    "duration": 0.39,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 53,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " qa_contract \"test\" (test)",
+    "features": [],
+    "start": 49.91,
+    "duration": 5.04,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 49,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " oracle_engine \"test\" (test)",
+    "features": [],
+    "start": 50.21,
+    "duration": 3.84,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 45,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " negative_controls \"test\" (test)",
+    "features": [],
+    "start": 50.25,
+    "duration": 3.29,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 305,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq-qa-features \"bin\"",
+    "features": [],
+    "start": 50.84,
+    "duration": 0.41,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 300,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq_qa \"lib\" (test)",
+    "features": [],
+    "start": 51.25,
+    "duration": 21.3,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 284,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " multi_measurement_test \"test\" (test)",
+    "features": [],
+    "start": 51.46,
+    "duration": 1.17,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 315,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " joint_home_cinema \"test\" (test)",
+    "features": [],
+    "start": 51.68,
+    "duration": 6.32,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 279,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " roomeq_cli \"lib\" (test)",
+    "features": [],
+    "start": 52.63,
+    "duration": 19.83,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 52,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " oracle_workflow \"test\" (test)",
+    "features": [],
+    "start": 53.54,
+    "duration": 2.57,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 48,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " oracle_core \"test\" (test)",
+    "features": [],
+    "start": 54.05,
+    "duration": 1.72,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 319,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " roomeq_supporting_source \"test\" (test)",
+    "features": [],
+    "start": 54.95,
+    "duration": 0.66,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 44,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " optimizer-benchmark \"bin\"",
+    "features": [],
+    "start": 55.6,
+    "duration": 1.03,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 308,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq_generated_data_test \"test\" (test)",
+    "features": [],
+    "start": 55.77,
+    "duration": 5.46,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 304,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq-qa-coverage \"bin\"",
+    "features": [],
+    "start": 56.11,
+    "duration": 0.44,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 322,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " workflow_test \"test\" (test)",
+    "features": [],
+    "start": 56.55,
+    "duration": 0.68,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 318,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " roomeq_pipeline_test \"test\" (test)",
+    "features": [],
+    "start": 56.63,
+    "duration": 1.68,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 283,
+    "name": "roomeq-cli",
+    "version": "0.5.9",
+    "mode": "todo",
+    "target": " broadband_matching_test \"test\" (test)",
+    "features": [],
+    "start": 57.23,
+    "duration": 0.63,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 314,
+    "name": "roomeq-workflow",
+    "version": "0.5.36",
+    "mode": "todo",
+    "target": " dba_physical_outputs \"test\" (test)",
+    "features": [],
+    "start": 57.86,
+    "duration": 2.56,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 51,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " oracle_optim \"test\" (test)",
+    "features": [],
+    "start": 58.0,
+    "duration": 8.1,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 47,
+    "name": "autoeq-qa",
+    "version": "0.5.2",
+    "mode": "todo",
+    "target": " oracle_analysis_quality \"test\" (test)",
+    "features": [],
+    "start": 58.31,
+    "duration": 3.39,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 307,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq-qa-synthetic \"bin\"",
+    "features": [],
+    "start": 60.42,
+    "duration": 0.41,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  },
+  {
+    "i": 303,
+    "name": "roomeq-qa",
+    "version": "0.5.68",
+    "mode": "todo",
+    "target": " roomeq-qa-acoustic \"bin\"",
+    "features": [],
+    "start": 60.83,
+    "duration": 0.49,
+    "unblocked_units": [],
+    "unblocked_rmeta_units": [],
+    "sections": null
+  }
+];
+const CONCURRENCY_DATA = [
+  {
+    "t": 0.34,
+    "active": 1,
+    "waiting": 0,
+    "inactive": 76
+  },
+  {
+    "t": 0.35,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 74
+  },
+  {
+    "t": 0.61,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 73
+  },
+  {
+    "t": 0.64,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 72
+  },
+  {
+    "t": 1.87,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 69
+  },
+  {
+    "t": 2.0900000000000003,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 69
+  },
+  {
+    "t": 2.29,
+    "active": 7,
+    "waiting": 0,
+    "inactive": 67
+  },
+  {
+    "t": 2.3200000000000003,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 67
+  },
+  {
+    "t": 2.4,
+    "active": 7,
+    "waiting": 0,
+    "inactive": 66
+  },
+  {
+    "t": 2.4099999999999997,
+    "active": 6,
+    "waiting": 6,
+    "inactive": 60
+  },
+  {
+    "t": 2.67,
+    "active": 6,
+    "waiting": 8,
+    "inactive": 58
+  },
+  {
+    "t": 2.71,
+    "active": 6,
+    "waiting": 7,
+    "inactive": 58
+  },
+  {
+    "t": 2.95,
+    "active": 6,
+    "waiting": 7,
+    "inactive": 57
+  },
+  {
+    "t": 3.05,
+    "active": 6,
+    "waiting": 6,
+    "inactive": 57
+  },
+  {
+    "t": 3.0700000000000003,
+    "active": 6,
+    "waiting": 7,
+    "inactive": 56
+  },
+  {
+    "t": 3.17,
+    "active": 7,
+    "waiting": 6,
+    "inactive": 56
+  },
+  {
+    "t": 3.19,
+    "active": 6,
+    "waiting": 6,
+    "inactive": 56
+  },
+  {
+    "t": 3.2,
+    "active": 7,
+    "waiting": 5,
+    "inactive": 56
+  },
+  {
+    "t": 3.41,
+    "active": 7,
+    "waiting": 5,
+    "inactive": 55
+  },
+  {
+    "t": 3.45,
+    "active": 7,
+    "waiting": 4,
+    "inactive": 55
+  },
+  {
+    "t": 3.95,
+    "active": 8,
+    "waiting": 3,
+    "inactive": 55
+  },
+  {
+    "t": 3.97,
+    "active": 8,
+    "waiting": 2,
+    "inactive": 55
+  },
+  {
+    "t": 4.18,
+    "active": 8,
+    "waiting": 1,
+    "inactive": 55
+  },
+  {
+    "t": 4.2,
+    "active": 8,
+    "waiting": 0,
+    "inactive": 55
+  },
+  {
+    "t": 4.33,
+    "active": 7,
+    "waiting": 0,
+    "inactive": 55
+  },
+  {
+    "t": 4.43,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 55
+  },
+  {
+    "t": 4.49,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 55
+  },
+  {
+    "t": 4.87,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 55
+  },
+  {
+    "t": 4.94,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 55
+  },
+  {
+    "t": 6.27,
+    "active": 3,
+    "waiting": 1,
+    "inactive": 53
+  },
+  {
+    "t": 6.28,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 53
+  },
+  {
+    "t": 6.55,
+    "active": 9,
+    "waiting": 0,
+    "inactive": 48
+  },
+  {
+    "t": 6.5600000000000005,
+    "active": 8,
+    "waiting": 7,
+    "inactive": 41
+  },
+  {
+    "t": 6.67,
+    "active": 8,
+    "waiting": 8,
+    "inactive": 40
+  },
+  {
+    "t": 7.06,
+    "active": 8,
+    "waiting": 7,
+    "inactive": 40
+  },
+  {
+    "t": 7.2,
+    "active": 7,
+    "waiting": 7,
+    "inactive": 40
+  },
+  {
+    "t": 7.21,
+    "active": 8,
+    "waiting": 6,
+    "inactive": 40
+  },
+  {
+    "t": 7.26,
+    "active": 8,
+    "waiting": 5,
+    "inactive": 40
+  },
+  {
+    "t": 7.35,
+    "active": 8,
+    "waiting": 4,
+    "inactive": 40
+  },
+  {
+    "t": 7.6,
+    "active": 8,
+    "waiting": 3,
+    "inactive": 40
+  },
+  {
+    "t": 7.659999999999999,
+    "active": 7,
+    "waiting": 3,
+    "inactive": 40
+  },
+  {
+    "t": 7.66,
+    "active": 8,
+    "waiting": 2,
+    "inactive": 40
+  },
+  {
+    "t": 7.88,
+    "active": 8,
+    "waiting": 1,
+    "inactive": 40
+  },
+  {
+    "t": 8.06,
+    "active": 9,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 8.07,
+    "active": 8,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 8.23,
+    "active": 7,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 8.3,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 8.51,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 8.63,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 12.96,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 40
+  },
+  {
+    "t": 13.989999999999998,
+    "active": 3,
+    "waiting": 2,
+    "inactive": 38
+  },
+  {
+    "t": 14.04,
+    "active": 4,
+    "waiting": 1,
+    "inactive": 38
+  },
+  {
+    "t": 14.35,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 38
+  },
+  {
+    "t": 14.559999999999999,
+    "active": 4,
+    "waiting": 2,
+    "inactive": 36
+  },
+  {
+    "t": 14.56,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 36
+  },
+  {
+    "t": 15.08,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 36
+  },
+  {
+    "t": 16.98,
+    "active": 5,
+    "waiting": 1,
+    "inactive": 35
+  },
+  {
+    "t": 18.49,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 35
+  },
+  {
+    "t": 22.93,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 35
+  },
+  {
+    "t": 34.28,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 35
+  },
+  {
+    "t": 36.68,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 35
+  },
+  {
+    "t": 43.61,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 34
+  },
+  {
+    "t": 43.620000000000005,
+    "active": 3,
+    "waiting": 34,
+    "inactive": 0
+  },
+  {
+    "t": 44.29,
+    "active": 4,
+    "waiting": 33,
+    "inactive": 0
+  },
+  {
+    "t": 44.92,
+    "active": 5,
+    "waiting": 32,
+    "inactive": 0
+  },
+  {
+    "t": 44.99,
+    "active": 6,
+    "waiting": 31,
+    "inactive": 0
+  },
+  {
+    "t": 45.05,
+    "active": 7,
+    "waiting": 30,
+    "inactive": 0
+  },
+  {
+    "t": 45.06,
+    "active": 6,
+    "waiting": 30,
+    "inactive": 0
+  },
+  {
+    "t": 45.42,
+    "active": 6,
+    "waiting": 29,
+    "inactive": 0
+  },
+  {
+    "t": 45.8,
+    "active": 6,
+    "waiting": 28,
+    "inactive": 0
+  },
+  {
+    "t": 46.01,
+    "active": 7,
+    "waiting": 27,
+    "inactive": 0
+  },
+  {
+    "t": 46.010000000000005,
+    "active": 6,
+    "waiting": 27,
+    "inactive": 0
+  },
+  {
+    "t": 46.41,
+    "active": 7,
+    "waiting": 26,
+    "inactive": 0
+  },
+  {
+    "t": 46.419999999999995,
+    "active": 6,
+    "waiting": 26,
+    "inactive": 0
+  },
+  {
+    "t": 46.79,
+    "active": 5,
+    "waiting": 26,
+    "inactive": 0
+  },
+  {
+    "t": 46.8,
+    "active": 6,
+    "waiting": 25,
+    "inactive": 0
+  },
+  {
+    "t": 48.23,
+    "active": 6,
+    "waiting": 24,
+    "inactive": 0
+  },
+  {
+    "t": 49.32,
+    "active": 6,
+    "waiting": 23,
+    "inactive": 0
+  },
+  {
+    "t": 49.85,
+    "active": 6,
+    "waiting": 22,
+    "inactive": 0
+  },
+  {
+    "t": 49.91,
+    "active": 7,
+    "waiting": 21,
+    "inactive": 0
+  },
+  {
+    "t": 50.209999999999994,
+    "active": 6,
+    "waiting": 21,
+    "inactive": 0
+  },
+  {
+    "t": 50.21,
+    "active": 7,
+    "waiting": 20,
+    "inactive": 0
+  },
+  {
+    "t": 50.24,
+    "active": 6,
+    "waiting": 20,
+    "inactive": 0
+  },
+  {
+    "t": 50.25,
+    "active": 7,
+    "waiting": 19,
+    "inactive": 0
+  },
+  {
+    "t": 50.84,
+    "active": 8,
+    "waiting": 18,
+    "inactive": 0
+  },
+  {
+    "t": 51.25,
+    "active": 8,
+    "waiting": 17,
+    "inactive": 0
+  },
+  {
+    "t": 51.46,
+    "active": 8,
+    "waiting": 16,
+    "inactive": 0
+  },
+  {
+    "t": 51.68,
+    "active": 8,
+    "waiting": 15,
+    "inactive": 0
+  },
+  {
+    "t": 52.63,
+    "active": 8,
+    "waiting": 14,
+    "inactive": 0
+  },
+  {
+    "t": 53.54,
+    "active": 8,
+    "waiting": 13,
+    "inactive": 0
+  },
+  {
+    "t": 54.05,
+    "active": 8,
+    "waiting": 12,
+    "inactive": 0
+  },
+  {
+    "t": 54.949999999999996,
+    "active": 7,
+    "waiting": 12,
+    "inactive": 0
+  },
+  {
+    "t": 54.95,
+    "active": 8,
+    "waiting": 11,
+    "inactive": 0
+  },
+  {
+    "t": 55.6,
+    "active": 9,
+    "waiting": 10,
+    "inactive": 0
+  },
+  {
+    "t": 55.61,
+    "active": 8,
+    "waiting": 10,
+    "inactive": 0
+  },
+  {
+    "t": 55.769999999999996,
+    "active": 7,
+    "waiting": 10,
+    "inactive": 0
+  },
+  {
+    "t": 55.77,
+    "active": 8,
+    "waiting": 9,
+    "inactive": 0
+  },
+  {
+    "t": 56.11,
+    "active": 8,
+    "waiting": 8,
+    "inactive": 0
+  },
+  {
+    "t": 56.55,
+    "active": 8,
+    "waiting": 7,
+    "inactive": 0
+  },
+  {
+    "t": 56.63,
+    "active": 8,
+    "waiting": 6,
+    "inactive": 0
+  },
+  {
+    "t": 57.23,
+    "active": 8,
+    "waiting": 5,
+    "inactive": 0
+  },
+  {
+    "t": 57.86,
+    "active": 8,
+    "waiting": 4,
+    "inactive": 0
+  },
+  {
+    "t": 58.0,
+    "active": 8,
+    "waiting": 3,
+    "inactive": 0
+  },
+  {
+    "t": 58.31,
+    "active": 8,
+    "waiting": 2,
+    "inactive": 0
+  },
+  {
+    "t": 60.42,
+    "active": 8,
+    "waiting": 1,
+    "inactive": 0
+  },
+  {
+    "t": 60.83,
+    "active": 8,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 61.230000000000004,
+    "active": 7,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 61.32,
+    "active": 6,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 61.7,
+    "active": 5,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 66.1,
+    "active": 4,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 66.92,
+    "active": 3,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 71.32,
+    "active": 2,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 72.46000000000001,
+    "active": 1,
+    "waiting": 0,
+    "inactive": 0
+  },
+  {
+    "t": 72.55,
+    "active": 0,
+    "waiting": 0,
+    "inactive": 0
+  }
+];
+const CPU_USAGE = [
+  [
+    0.351976833,
+    38.495575221238944
+  ],
+  [
+    0.60815475,
+    51.117318435754186
+  ],
+  [
+    1.146469416,
+    50.20080321285141
+  ],
+  [
+    1.654858,
+    53.71669004207574
+  ],
+  [
+    1.868907791,
+    46.48829431438127
+  ],
+  [
+    2.069484291,
+    65.0
+  ],
+  [
+    2.210300791,
+    64.43298969072166
+  ],
+  [
+    2.315506291,
+    65.98639455782313
+  ],
+  [
+    2.553868458,
+    74.3202416918429
+  ],
+  [
+    2.672007583,
+    89.50617283950618
+  ],
+  [
+    2.949941125,
+    75.25773195876289
+  ],
+  [
+    3.053435125,
+    88.65248226950355
+  ],
+  [
+    3.166607291,
+    76.68711656441718
+  ],
+  [
+    3.271053541,
+    78.16901408450704
+  ],
+  [
+    3.409751083,
+    80.42328042328043
+  ],
+  [
+    3.947121916,
+    84.2456608811749
+  ],
+  [
+    4.181550958,
+    84.92307692307692
+  ],
+  [
+    4.332959083,
+    92.3444976076555
+  ],
+  [
+    4.435522083,
+    97.22222222222223
+  ],
+  [
+    4.558269916,
+    98.84393063583815
+  ],
+  [
+    4.8784191660000005,
+    96.3963963963964
+  ],
+  [
+    5.448210291,
+    93.42604298356511
+  ],
+  [
+    5.9494125,
+    90.61166429587482
+  ],
+  [
+    6.270039791,
+    91.21621621621621
+  ],
+  [
+    6.551977958,
+    80.96446700507614
+  ],
+  [
+    6.668991083,
+    76.21951219512195
+  ],
+  [
+    7.057373958,
+    87.54646840148699
+  ],
+  [
+    7.20686975,
+    97.10144927536231
+  ],
+  [
+    7.3490715,
+    91.6256157635468
+  ],
+  [
+    7.600825375,
+    89.97134670487107
+  ],
+  [
+    7.877775291,
+    91.40625
+  ],
+  [
+    8.064352166,
+    93.93939393939394
+  ],
+  [
+    8.228701208,
+    94.39655172413794
+  ],
+  [
+    8.507388208,
+    93.7984496124031
+  ],
+  [
+    8.636229791,
+    97.25274725274726
+  ],
+  [
+    9.146394208,
+    91.56118143459915
+  ],
+  [
+    9.397614458,
+    91.37931034482759
+  ],
+  [
+    9.900667583,
+    90.75391180654339
+  ],
+  [
+    10.137598166,
+    89.42598187311178
+  ],
+  [
+    10.638706375,
+    88.23529411764706
+  ],
+  [
+    11.139510125,
+    88.74643874643874
+  ],
+  [
+    11.649592916,
+    90.97320169252468
+  ],
+  [
+    12.233103666,
+    85.18971848225215
+  ],
+  [
+    12.743163625,
+    84.52883263009845
+  ],
+  [
+    12.95777825,
+    94.31438127090301
+  ],
+  [
+    13.467042125,
+    89.32584269662921
+  ],
+  [
+    13.970411166,
+    87.67908309455588
+  ],
+  [
+    14.352452541,
+    84.61538461538461
+  ],
+  [
+    14.560379541,
+    85.12110726643598
+  ],
+  [
+    15.070689833,
+    84.63687150837988
+  ],
+  [
+    15.587076291,
+    86.78720445062586
+  ],
+  [
+    16.09714025,
+    84.65829846582984
+  ],
+  [
+    16.48326375,
+    82.80373831775701
+  ],
+  [
+    16.978216583,
+    81.59420289855072
+  ],
+  [
+    17.483215583,
+    84.25531914893617
+  ],
+  [
+    17.993271,
+    82.7247191011236
+  ],
+  [
+    18.486988666,
+    83.13953488372093
+  ],
+  [
+    18.987605916,
+    84.33908045977012
+  ],
+  [
+    19.280756708,
+    80.87167070217917
+  ],
+  [
+    19.782217458,
+    84.7919655667145
+  ],
+  [
+    20.283746625,
+    81.34863701578192
+  ],
+  [
+    20.793800041,
+    89.32584269662921
+  ],
+  [
+    21.296788,
+    83.76068376068376
+  ],
+  [
+    21.799951083,
+    82.62108262108262
+  ],
+  [
+    22.301696458,
+    85.61253561253561
+  ],
+  [
+    22.81175975,
+    84.24753867791843
+  ],
+  [
+    22.931556875,
+    85.20710059171597
+  ],
+  [
+    23.433070458,
+    80.59914407988587
+  ],
+  [
+    23.938858791,
+    88.82521489971347
+  ],
+  [
+    24.439601333,
+    93.71428571428571
+  ],
+  [
+    24.9421825,
+    91.42857142857143
+  ],
+  [
+    25.444650416,
+    84.06827880512091
+  ],
+  [
+    25.9458315,
+    82.09169054441261
+  ],
+  [
+    26.445972833,
+    77.12230215827338
+  ],
+  [
+    26.949435208,
+    76.31205673758865
+  ],
+  [
+    27.455662041,
+    73.6916548797737
+  ],
+  [
+    27.965721083,
+    79.68970380818054
+  ],
+  [
+    28.467143208,
+    83.3810888252149
+  ],
+  [
+    28.96757825,
+    88.80918220946916
+  ],
+  [
+    29.470324958,
+    87.0
+  ],
+  [
+    29.975239708,
+    87.88732394366197
+  ],
+  [
+    30.476483541,
+    86.35057471264368
+  ],
+  [
+    30.98048775,
+    90.05681818181819
+  ],
+  [
+    31.483639083,
+    86.80851063829788
+  ],
+  [
+    31.585985375,
+    83.21678321678321
+  ],
+  [
+    32.087038166,
+    82.97567954220315
+  ],
+  [
+    32.587123583,
+    81.98847262247838
+  ],
+  [
+    33.093848583,
+    84.7672778561354
+  ],
+  [
+    33.5940335,
+    83.9080459770115
+  ],
+  [
+    34.1001465,
+    82.57790368271955
+  ],
+  [
+    34.284520166,
+    82.17054263565892
+  ],
+  [
+    34.784946791,
+    83.98268398268398
+  ],
+  [
+    35.294998875,
+    82.18793828892005
+  ],
+  [
+    35.795063999999996,
+    82.13256484149856
+  ],
+  [
+    36.298394041,
+    82.41134751773049
+  ],
+  [
+    36.678795708,
+    93.58490566037736
+  ],
+  [
+    37.185808208,
+    86.64772727272728
+  ],
+  [
+    37.687522833,
+    81.31241084165478
+  ],
+  [
+    38.197577416,
+    81.11888111888112
+  ],
+  [
+    38.7076295,
+    84.88700564971751
+  ],
+  [
+    39.210517125,
+    85.75498575498575
+  ],
+  [
+    39.713099791,
+    86.93181818181819
+  ],
+  [
+    40.223153541,
+    90.014064697609
+  ],
+  [
+    40.733213666,
+    89.12429378531074
+  ],
+  [
+    41.243259958,
+    81.69014084507042
+  ],
+  [
+    41.749902291,
+    84.4851904090268
+  ],
+  [
+    42.259960583,
+    86.93820224719101
+  ],
+  [
+    42.760860416,
+    88.37876614060258
+  ],
+  [
+    43.265685458,
+    86.34423897581792
+  ],
+  [
+    43.614657416,
+    87.88501026694045
+  ],
+  [
+    44.124963,
+    84.44130127298445
+  ],
+  [
+    44.288448125,
+    79.39914163090128
+  ],
+  [
+    44.790039666,
+    82.90598290598291
+  ],
+  [
+    44.919272375,
+    90.0
+  ],
+  [
+    45.053638375,
+    91.93548387096774
+  ],
+  [
+    45.420370083,
+    91.05058365758755
+  ],
+  [
+    45.803016083,
+    89.7196261682243
+  ],
+  [
+    46.007979583,
+    89.27335640138408
+  ],
+  [
+    46.414642791,
+    90.97345132743362
+  ],
+  [
+    46.7950385,
+    89.51310861423221
+  ],
+  [
+    47.29806075,
+    85.32763532763533
+  ],
+  [
+    47.799585583,
+    85.71428571428572
+  ],
+  [
+    48.228859,
+    87.05882352941177
+  ],
+  [
+    48.730066666,
+    80.68181818181819
+  ],
+  [
+    49.240141333,
+    81.26760563380282
+  ],
+  [
+    49.821429125,
+    90.3584672435105
+  ],
+  [
+    50.210512708,
+    93.23583180987202
+  ],
+  [
+    50.748721375,
+    84.26666666666667
+  ],
+  [
+    51.245686333,
+    88.74458874458874
+  ],
+  [
+    51.464655208,
+    96.06557377049181
+  ],
+  [
+    51.681935166,
+    98.0
+  ],
+  [
+    52.186264916,
+    96.34317862165963
+  ],
+  [
+    52.631523375,
+    99.19354838709677
+  ],
+  [
+    53.132906541,
+    79.19655667144906
+  ],
+  [
+    53.5415435,
+    82.74647887323944
+  ],
+  [
+    54.041810041,
+    86.59058487874465
+  ],
+  [
+    54.547562625,
+    83.94886363636364
+  ],
+  [
+    54.94525375,
+    90.8273381294964
+  ],
+  [
+    55.456154916,
+    82.84106891701828
+  ],
+  [
+    55.602026208,
+    90.73170731707317
+  ],
+  [
+    55.767656125,
+    93.47826086956522
+  ],
+  [
+    56.110030875,
+    88.75
+  ],
+  [
+    56.550165625,
+    91.24797406807131
+  ],
+  [
+    57.130371875,
+    81.5136476426799
+  ],
+  [
+    57.737617833,
+    84.5336481700118
+  ],
+  [
+    57.862280208,
+    96.53179190751445
+  ],
+  [
+    58.0018235,
+    94.87179487179488
+  ],
+  [
+    58.313925333,
+    91.30434782608695
+  ],
+  [
+    58.818016291,
+    86.98727015558698
+  ],
+  [
+    59.318561,
+    88.39541547277938
+  ],
+  [
+    59.818685458,
+    88.6002886002886
+  ],
+  [
+    60.32064675,
+    90.10043041606886
+  ],
+  [
+    60.831936916,
+    91.55124653739612
+  ],
+  [
+    61.232549958,
+    95.35714285714286
+  ],
+  [
+    61.381439708,
+    88.57142857142857
+  ],
+  [
+    61.704569833,
+    92.90465631929047
+  ],
+  [
+    62.206066666,
+    88.23529411764706
+  ],
+  [
+    62.711447625,
+    87.5
+  ],
+  [
+    63.221505625,
+    88.18565400843882
+  ],
+  [
+    63.728983833,
+    87.72919605077574
+  ],
+  [
+    64.234348791,
+    88.4180790960452
+  ],
+  [
+    64.621315083,
+    86.21973929236499
+  ],
+  [
+    65.124368708,
+    86.48648648648648
+  ],
+  [
+    65.627960708,
+    86.34423897581792
+  ],
+  [
+    66.103463625,
+    87.08708708708708
+  ],
+  [
+    66.607855458,
+    86.44793152639087
+  ],
+  [
+    66.923007583,
+    92.98642533936652
+  ],
+  [
+    67.4333195,
+    84.88700564971751
+  ],
+  [
+    67.942706166,
+    86.25525946704067
+  ],
+  [
+    68.293140083,
+    83.95061728395062
+  ],
+  [
+    68.794341875,
+    84.35277382645803
+  ],
+  [
+    69.304390833,
+    85.49295774647888
+  ],
+  [
+    69.81216225,
+    85.9353023909986
+  ],
+  [
+    70.084470458,
+    86.8766404199475
+  ],
+  [
+    70.446360708,
+    85.20710059171597
+  ],
+  [
+    70.642424791,
+    87.17948717948718
+  ],
+  [
+    71.200101458,
+    88.73239436619718
+  ],
+  [
+    71.320511041,
+    92.5925925925926
+  ],
+  [
+    71.822509916,
+    86.48648648648648
+  ],
+  [
+    72.323237583,
+    78.74465049928673
+  ],
+  [
+    72.45871625,
+    73.93617021276596
+  ]
+];
+// Position of the vertical axis.
+const X_LINE = 50;
+// General-use margin size.
+const MARGIN = 5;
+// Position of the horizontal axis, relative to the bottom.
+const Y_LINE = 35;
+// Minimum distance between time tick labels.
+const MIN_TICK_DIST = 50;
+// Radius for rounded rectangle corners.
+const RADIUS = 3;
+// Height of unit boxes.
+const BOX_HEIGHT = 25;
+// Distance between Y tick marks on the unit graph.
+const Y_TICK_DIST = BOX_HEIGHT + 2;
+// Rects used for mouseover detection.
+// Objects of {x, y, x2, y2, i} where `i` is the index into UNIT_DATA.
+let HIT_BOXES = [];
+// Index into UNIT_DATA of the last unit hovered over by mouse.
+let LAST_HOVER = null;
+// Key is unit index, value is {x, y, width, sections} of the box.
+let UNIT_COORDS = {};
+// Map of unit index to the index it was unlocked by.
+let REVERSE_UNIT_DEPS = {};
+let REVERSE_UNIT_RMETA_DEPS = {};
+let UNIT_BY_INDEX = {};
+
+const MIN_GRAPH_WIDTH = 200;
+const MAX_GRAPH_WIDTH = 4096;
+
+// How many pixels per second is added by each scale value
+const SCALE_PIXELS_PER_SEC = 8;
+
+function scale_to_graph_width(scale) {
+  // The scale corresponds to `SCALE_PIXELS_PER_SEC` pixels per seconds.
+  // We thus multiply it by that, and the total duration, to get the graph width.
+  const width = scale * SCALE_PIXELS_PER_SEC * DURATION;
+
+  // We then cap the size of the graph. It is hard to view if it is too large, and
+  // browsers may not render a large graph because it takes too much memory.
+  // 4096 is still ridiculously large, and probably won't render on mobile
+  // browsers, but should be ok for many desktop environments.
+  // Also use a minimum width of 200.
+  return Math.max(MIN_GRAPH_WIDTH, Math.min(MAX_GRAPH_WIDTH, width));
+}
+
+// This function performs the reverse of `scale_to_graph_width`.
+function width_to_graph_scale(width) {
+  const maxWidth = Math.min(MAX_GRAPH_WIDTH, width);
+  const minWidth = Math.max(MIN_GRAPH_WIDTH, width);
+
+  const trimmedWidth = Math.max(minWidth, Math.min(maxWidth, width));
+
+  const scale = Math.round(trimmedWidth / (DURATION * SCALE_PIXELS_PER_SEC));
+  return Math.max(1, scale);
+}
+
+// Init scale value and limits based on the client's window width and min/max graph width.
+const scaleElement = document.getElementById('scale');
+scaleElement.min = width_to_graph_scale(MIN_GRAPH_WIDTH);
+scaleElement.max = width_to_graph_scale(MAX_GRAPH_WIDTH);
+scaleElement.value = width_to_graph_scale(window.innerWidth * 0.75);
+
+// Colors from css
+const getCssColor = name => getComputedStyle(document.body).getPropertyValue(name);
+const TEXT_COLOR = getCssColor('--text');
+const BG_COLOR = getCssColor('--background');
+const CANVAS_BG = getCssColor('--canvas-background');
+const AXES_COLOR = getCssColor('--canvas-axes');
+const GRID_COLOR = getCssColor('--canvas-grid');
+const CODEGEN_COLOR = getCssColor('--canvas-codegen');
+const LINK_COLOR = getCssColor('--canvas-link');
+// Final leftover section after link
+const OTHER_COLOR = getCssColor('--canvas-other');
+const CUSTOM_BUILD_COLOR = getCssColor('--canvas-custom-build');
+const NOT_CUSTOM_BUILD_COLOR = getCssColor('--canvas-not-custom-build');
+const DEP_LINE_COLOR = getCssColor('--canvas-dep-line');
+const DEP_LINE_HIGHLIGHTED_COLOR = getCssColor('--canvas-dep-line-highlighted');
+const CPU_COLOR = getCssColor('--canvas-cpu');
+
+for (const unit of UNIT_DATA) {
+  UNIT_BY_INDEX[unit.i] = unit;
+  for (let unblocked of unit.unblocked_units) {
+    REVERSE_UNIT_DEPS[unblocked] = unit.i;
+  }
+  for (let unblocked of unit.unblocked_rmeta_units) {
+    REVERSE_UNIT_RMETA_DEPS[unblocked] = unit.i;
+  }
+}
+
+// Compute x,y coordinate of each block.
+// We also populate a map with the count of each unit name to disambiguate if necessary
+function compute_unit_coords(units, px_per_sec) {
+  const unitCount = new Map();
+  UNIT_COORDS = {};
+  for (i = 0; i < units.length; i++) {
+    let unit = units[i];
+    let y = i * Y_TICK_DIST + 1;
+    let x = px_per_sec * unit.start;
+
+    const sections = [];
+    if (unit.sections !== null) {
+      // We have access to compilation sections
+      for (const section of unit.sections) {
+        const [name, { start, end }] = section;
+        sections.push({
+          name,
+          start: x + px_per_sec * start,
+          width: (end - start) * px_per_sec
+        });
+      }
+    }
+
+    let width = Math.max(px_per_sec * unit.duration, 1.0);
+    UNIT_COORDS[unit.i] = { x, y, width, sections };
+
+    const count = unitCount.get(unit.name) || 0;
+    unitCount.set(unit.name, count + 1);
+  }
+
+  return { UNIT_COORDS, unitCount }
+}
+
+class SvgRenderer {
+  constructor() {}
+
+  render_pipeline_graph() {
+    if (UNIT_DATA.length == 0) {
+      return;
+    }
+    HIT_BOXES.length = 0;
+    const min_time = document.getElementById('min-unit-time').valueAsNumber;
+
+    const units = UNIT_DATA.filter(unit => unit.duration >= min_time);
+
+    const graph_height = Y_TICK_DIST * units.length;
+    let { canvas_height, canvas_width, graph_width, px_per_sec } = graph_dimension(graph_height);
+    const axes = this._draw_graph_axes({ canvas_height, graph_height, graph_width, px_per_sec });
+
+    // Draw Y tick marks.
+    let y_ticks = '';
+    if (units.length != 0) {
+      const path_commands = Array(units.length - 1)
+        .fill(0)
+        .map((_, idx) => {
+          const n = idx + 1;
+          const y = MARGIN + Y_TICK_DIST * n;
+          return `M${X_LINE} ${y} h-5`;
+        });
+      y_ticks = `<path class="axis axis-y" d="${path_commands.join(" ")}"></path>`;
+    }
+
+    // Draw Y labels.
+    const y_labels = Array(units.length)
+      .fill(0)
+      .map((_, n) => {
+          let y = MARGIN + Y_TICK_DIST * n + Y_TICK_DIST / 2;
+          return `<text class="axis axis-y" x="${X_LINE - 4}" y="${y}">${n + 1}</text>`;
+      })
+      .join("");
+
+    // Draw the graph.
+    const { UNIT_COORDS, unitCount } = compute_unit_coords(units, px_per_sec);
+    const presentSections = new Set();
+
+    // Draw the blocks.
+    let blocks = Array(units.length)
+      .fill(0)
+      .map((_, i) => {
+        let unit = units[i];
+        let { x, y, width, sections } = UNIT_COORDS[unit.i];
+
+        const boxes = [this._roundedRect("", x, y, width, unit)].concat(
+          sections.map((section) => {
+            presentSections.add(section.name);
+            return this._roundedRect(
+              section.name,
+              section.start,
+              y,
+              section.width,
+              unit,
+            );
+          }),
+        );
+
+        const labelName = (unitCount.get(unit.name) || 0) > 1 ? `${unit.name} (v${unit.version})${unit.target}` : `${unit.name}${unit.target}`;
+        const label = `${labelName}: ${unit.duration}s`;
+
+        const text_info_width = measure_text_width(label);
+        const label_x = Math.min(x + 5.0, canvas_width - text_info_width - X_LINE);
+        const box_label = `<text class="box" x="${label_x}" y="${y + BOX_HEIGHT / 2}">${label}</text>`;
+
+        const dep_lines = this._draw_dep_lines(unit.i);
+        return boxes.concat(box_label).concat(dep_lines);
+      })
+      .flat()
+      .join("");
+
+    blocks = `
+<g id="boxes" transform="translate(${X_LINE} ${MARGIN})">${blocks}</g>
+<g id="hl-dep-lines" transform="translate(${X_LINE} ${MARGIN})"></g>`;
+
+    // Draw a legend.
+    const legend = `
+<g class="legend" transform="translate(${canvas_width-200},${MARGIN})">
+  ${this._draw_legend(160, get_legend_entries(presentSections))}
+</g>`;
+
+    const svg_container = document.getElementById("pipeline-container");
+    if (svg_container) {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", canvas_width);
+      svg.setAttribute("height", canvas_height);
+      Object.assign(svg.style, {
+        background: CANVAS_BG,
+        color: TEXT_COLOR,
+        fontFamily: 'sans-serif',
+        fontSize: '16px'
+      });
+      svg.innerHTML = `
+<style type="text/css">
+  path.axis {
+    fill: none;
+    stroke: ${AXES_COLOR};
+    stroke-width: 2;
+  }
+  text.axis {
+    fill: ${AXES_COLOR};
+    font-size: 16px;
+    stroke: none;
+    text-anchor: middle;
+  }
+  text.axis-y {
+    dominant-baseline: middle;
+    text-anchor: end;
+  }
+  .grid {
+    stroke: ${GRID_COLOR};
+    stroke-dasharray: 2 4;
+    stroke-width: 2;
+  }
+  rect.box {
+    fill: ${NOT_CUSTOM_BUILD_COLOR};
+    height: ${BOX_HEIGHT}px;
+    rx: ${RADIUS}px;
+    ry: ${RADIUS}px;
+  }
+  rect.box.run-custom-build {
+    fill: ${CUSTOM_BUILD_COLOR};
+  }
+  rect.box.codegen {
+    fill: ${CODEGEN_COLOR};
+  }
+  rect.box.link {
+    fill: ${LINK_COLOR};
+  }
+  rect.box.other {
+    fill: ${OTHER_COLOR}
+  }
+  text.box {
+    dominant-baseline: middle;
+    fill: ${TEXT_COLOR};
+    font-size: 14px;
+    text-anchor: start
+  }
+  .dep-line {
+    fill: none;
+    stroke: ${DEP_LINE_COLOR};
+    stroke-dasharray: 2;
+    stroke-width: 2;
+  }
+  #hl-dep-lines .dep-line{
+    stroke: ${DEP_LINE_HIGHLIGHTED_COLOR};
+  }
+  path.legend__cell {
+    stroke-width: 2;
+  }
+  .legend__desc {
+    fill: ${TEXT_COLOR};
+    dominant-baseline: middle;
+  }
+</style>
+${axes}
+${y_ticks}
+${y_labels}
+${blocks}
+${legend}`;
+      svg_container.innerHTML = svg.outerHTML;
+    }
+  }
+
+  // Draw a legend at the current position of the ctx.
+  // entries should be an array of objects with the following scheme:
+  // {
+  //   "name": <name of the legend entry> [string],
+  //   "color": <color of the legend entry> [string],
+  //   "line": <should the entry be a thin line or a rectangle> [bool]
+  // }
+  _draw_legend(width, entries) {
+    const entry_height = 20;
+
+    // Add a bit of margin to the bottom and top
+    const height = entries.length * entry_height + 4;
+
+    // Draw background
+    let legend = [];
+    legend.push(`<rect stroke="${TEXT_COLOR}" stroke-width="1" fill="${BG_COLOR}" width="${width}" height="${height}"></rect>`);
+
+    // Dimension of a block
+    const block_height = 15;
+    const block_width = 30;
+
+    // Margin from the left edge
+    const x_start = 5;
+    // Width of the "mark" section (line/block)
+    const mark_width = 45;
+
+    // Draw legend entries
+    let y = 12;
+    for (const entry of entries) {
+      const cell = entry.line ?
+        `<path class="legend__cell" stroke="${entry.color}" d="M${x_start} ${y} h ${mark_width}"></path>` :
+        `
+<rect class="legend__cell" fill="${entry.color}" width="${block_width}" height="${block_height}"
+  x="${x_start + (mark_width - block_width) / 2}" y="${y - (block_height / 2)}"
+></rect>`;
+      legend.push(cell);
+      legend.push(`<text class="legend__desc" x="${x_start + mark_width + 4}" y="${y + 1}">${entry.name}</text>`)
+      y += entry_height;
+    }
+    return legend.join("")
+  }
+
+  // Draws lines from the given unit to the units it unlocks.
+  _draw_dep_lines(unit_idx) {
+    const unit = UNIT_BY_INDEX[unit_idx];
+    const { x, y, sections } = UNIT_COORDS[unit_idx];
+    return unit.unblocked_units
+      .map((unblocked) => this._draw_one_dep_line(x, y, unblocked, unit_idx))
+      .concat(
+        unit.unblocked_rmeta_units.map((unblocked) => {
+          const codegen_x = get_codegen_section_x(sections);
+          return this._draw_one_dep_line(codegen_x, y, unblocked, unit_idx);
+        }),
+      )
+      .join("");
+  }
+
+  _draw_one_dep_line(from_x, from_y, to_unit, from_unit) {
+    if (to_unit in UNIT_COORDS) {
+      let { x: u_x, y: u_y } = UNIT_COORDS[to_unit];
+      // Use multiple path instead to avoid potential rendering issue while scrolling in Firefox.
+      return `
+<path class="dep-line" data-unblocked="${to_unit}" data-unblocked-by="${from_unit}" d="M ${from_x} ${from_y + BOX_HEIGHT / 2} h -5"></path>
+<path class="dep-line" data-unblocked="${to_unit}" data-unblocked-by="${from_unit}" d="M ${from_x - 5} ${from_y + BOX_HEIGHT / 2} V ${u_y + BOX_HEIGHT / 2}"></path>
+<path class="dep-line" data-unblocked="${to_unit}" data-unblocked-by="${from_unit}" d="M ${from_x - 5} ${u_y + BOX_HEIGHT / 2} H${u_x}"></path>
+`;
+    }
+  }
+
+  render_timing_graph() {
+    if (CONCURRENCY_DATA.length == 0) {
+      return;
+    }
+    const HEIGHT = 400;
+    const AXIS_HEIGHT = HEIGHT - MARGIN - Y_LINE;
+    const TOP_MARGIN = 10;
+    const GRAPH_HEIGHT = AXIS_HEIGHT - TOP_MARGIN;
+
+    let { canvas_height, canvas_width, graph_height, graph_width, px_per_sec } = graph_dimension(AXIS_HEIGHT);
+    const axis_bottom = this._draw_graph_axes({ canvas_height, graph_height, graph_width, px_per_sec });
+
+    // Draw Y tick marks and labels.
+    let max_v = 0;
+    for (let c of CONCURRENCY_DATA) {
+      max_v = Math.max(max_v, c.active, c.waiting, c.inactive);
+    }
+    const px_per_v = GRAPH_HEIGHT / max_v;
+    const { step, tick_dist, num_ticks } = split_ticks(max_v, px_per_v, GRAPH_HEIGHT);
+
+    const labels = [];
+    const ticks_path_commands = Array(num_ticks)
+      .fill(0)
+      .map((_, n) => {
+        const y = HEIGHT - Y_LINE - ((n + 1) * tick_dist);
+        labels.push( `<text class="axis axis-y" x="${X_LINE - 10}" y="${y}">${(n + 1) * step}</text>`);
+        return `M${X_LINE} ${y} h-5`;
+      })
+      .join(" ");
+    const ticks = `<path class="axis axis-y" d="${ticks_path_commands}"></path>`;
+    const ticks_labels = labels.join("");
+
+    // Label the Y axis.
+    let label_y = (HEIGHT - Y_LINE) / 2;
+
+    const y_axis_label = `<text class="axis axis-label" transform="translate(15, ${label_y}) rotate(270)"># Units</text>`
+    const axis_left = `${y_axis_label}${ticks}${ticks_labels}`;
+
+    // Draw the graph.
+
+    function coord(t, v) {
+      return {
+        x: graph_width * (t / DURATION),
+        y: TOP_MARGIN + GRAPH_HEIGHT * (1.0 - (v / max_v))
+      };
+    }
+
+    const cpuFillStyle = CPU_COLOR;
+    let cpu = "";
+    if (CPU_USAGE.length > 1) {
+      const bottomLeft = coord(CPU_USAGE[0][0], 0);
+      const bottomRight = coord(CPU_USAGE[CPU_USAGE.length - 1][0], 0);
+      const path_commands = [`M${bottomLeft.x} ${bottomLeft.y}`]
+      .concat(
+        Array(CPU_USAGE.length)
+          .fill(0)
+          .map((_, i) => {
+            let [time, usage] = CPU_USAGE[i];
+            let { x, y } = coord(time, (usage / 100.0) * max_v);
+            return `L${x} ${y}`;
+          }),
+      )
+      .concat(`L${bottomRight.x} ${bottomRight.y}`);
+      cpu = `<path stroke-width="0" fill="${cpuFillStyle}" d="${path_commands.join("")}"></path>`;
+    }
+
+    function draw_line(style, key) {
+      let first = CONCURRENCY_DATA[0];
+      let last = coord(first.t, key(first));
+      const path_commands = [];
+      path_commands.push(`M${last.x} ${last.y}`)
+      for (let i = 1; i < CONCURRENCY_DATA.length; i++) {
+        let c = CONCURRENCY_DATA[i];
+        let { x, y } = coord(c.t, key(c));
+        path_commands.push(`L${x} ${last.y} V${y}`);
+        last = { x, y };
+      }
+      return `<path class="status-line" stroke="${style}" d="${path_commands.join("")}"></path>`
+    }
+
+    const lines = [];
+    lines.push(draw_line('blue', function(c) { return c.inactive; }));
+    lines.push(draw_line('red', function(c) { return c.waiting; }));
+    lines.push(draw_line('green', function(c) { return c.active; }));
+
+    const timings = `<g class="graph-content" transform="translate(${X_LINE} ${MARGIN})">${cpu}${lines}</g>`;
+
+    // Draw a legend.
+    const legend = `
+<g class="legend" transform="translate(${canvas_width-200},${MARGIN})">
+${this._draw_legend(150, [{
+    name: "Waiting",
+    color: "red",
+    line: true
+  }, {
+    name: "Inactive",
+    color: "blue",
+    line: true
+  }, {
+    name: "Active",
+    color: "green",
+    line: true
+  }, {
+    name: "CPU Usage",
+    color: cpuFillStyle,
+    line: false
+}])}
+</g>`;
+
+    const svg_container = document.getElementById("timing-container");
+    if (svg_container) {
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", canvas_width);
+      svg.setAttribute("height", canvas_height);
+      Object.assign(svg.style, {
+        background: CANVAS_BG,
+        color: TEXT_COLOR,
+        fontFamily: 'sans-serif',
+        fontSize: '16px'
+      });
+      svg.innerHTML = `
+<style type="text/css">
+  path.axis {
+    fill: none;
+    stroke: ${AXES_COLOR};
+    stroke-width: 2;
+  }
+  text.axis {
+    fill: ${AXES_COLOR};
+    font-size: 16px;
+    stroke: none;
+    text-anchor: middle;
+  }
+  text.axis-y {
+    dominant-baseline: middle;
+    text-anchor: end;
+  }
+  .grid {
+    stroke: ${GRID_COLOR};
+    stroke-dasharray: 2 4;
+    stroke-width: 2;
+  }
+  .status-line {
+    fill: none;
+    stroke-width: 2;
+  }
+  path.legend__cell {
+    stroke-width: 2;
+  }
+  .legend__desc {
+    fill: ${TEXT_COLOR};
+    dominant-baseline: middle;
+  }
+</style>
+${axis_bottom}
+${axis_left}
+${timings}
+${legend}
+`;
+      svg_container.innerHTML = svg.outerHTML;
+    }
+  }
+
+  _draw_graph_axes({ canvas_height, graph_height, graph_width, px_per_sec }) {
+    // Draw main axes.
+    const main_axes = `
+<path class="axis" d="
+  M${X_LINE} ${MARGIN}
+  V${graph_height + MARGIN}
+  H${X_LINE + graph_width + 20}"
+></path>`;
+
+    // Draw X tick marks.
+    const { step, tick_dist, num_ticks } = split_ticks(DURATION, px_per_sec, graph_width);
+    const TICK_LENGTH = 5;
+    const grid_height = canvas_height - Y_LINE;
+    const labels = [];
+    const ticks_path_commands = Array(num_ticks)
+        .fill(0)
+        .map((_, n) => {
+          const x = X_LINE + ((n + 1) * tick_dist);
+          const label = `
+  <text class="axis" x="${x}" y="${grid_height + 20}">
+    ${(n + 1) * step}s
+  </text>`;
+          labels.push(label);
+          return `M${x} ${grid_height} v${TICK_LENGTH}`;
+        })
+        .join(" ");
+
+    const ticks = `<path class="axis"  d="${ticks_path_commands}"></path>`;
+    const ticks_labels = labels.join("")
+
+    // Draw vertical lines.
+    const vertical_lines = Array(num_ticks)
+      .fill(0)
+      .map((_, n) => {
+        const x = X_LINE + ((n + 1) * tick_dist);
+        return `<path class="grid" d="M${x} ${grid_height - 1} V${MARGIN}"></path>`;
+      })
+      .join("");
+    return `${main_axes}${ticks}${vertical_lines}${ticks_labels}`;
+  }
+
+  _roundedRect(section_name, x, y, width, unit) {
+    return `
+<rect class="box ${unit.mode} ${section_name}" data-i="${unit.i}" x="${x}" y="${y}" width="${width}"
+  onmousemove="hl(${unit.i})"
+>
+</rect>`
+  }
+}
+
+// Determine the width of text for svg.
+function measure_text_width(text) {
+  let ctx;
+  let canvas = measure_text_width.canvas;
+  if (!canvas) {
+    canvas = (measure_text_width.canvas = document.createElement("canvas"));
+  }
+  ctx = canvas.getContext("2d");
+  ctx.font = '14px sans-serif';
+  const text_info = ctx.measureText(text);
+  return text_info.width;
+}
+
+// Gets the x-coordinate of the codegen section of a unit.
+//
+// This is for drawing rmeta dependency lines.
+function get_codegen_section_x(sections) {
+    const codegen_section = sections.find(s => s.name === "codegen")
+    if (!codegen_section) {
+        // This happens only when type-checking (e.g., `cargo check`)
+        return null;
+    }
+    return codegen_section.start;
+}
+
+function get_legend_entries(presentSections) {
+    let frontend_name = "Frontend/rest";
+    if (presentSections.has("other")) {
+      frontend_name = "Frontend";
+    }
+
+    const legend_entries = [{
+      name: frontend_name,
+      color: NOT_CUSTOM_BUILD_COLOR,
+      line: false
+    }];
+    if (presentSections.has("codegen")) {
+      legend_entries.push({
+        name: "Codegen",
+        color: CODEGEN_COLOR,
+        line: false
+      });
+    }
+    if (presentSections.has("link")) {
+      legend_entries.push({
+        name: "Linking",
+        color: LINK_COLOR,
+        line: false
+      });
+    }
+    if (presentSections.has("other")) {
+      legend_entries.push({
+        name: "Other",
+        color: OTHER_COLOR,
+        line: false
+      });
+    }
+  return legend_entries
+}
+
+function graph_dimension(graph_height) {
+  const scale = document.getElementById('scale').valueAsNumber;
+  const graph_width = scale_to_graph_width(scale);
+  const px_per_sec = graph_width / DURATION;
+  const canvas_width = Math.max(graph_width + X_LINE + 30, X_LINE + 250);
+  const canvas_height = graph_height + MARGIN + Y_LINE;
+  return { canvas_height, canvas_width, graph_height, graph_width, px_per_sec, scale }
+}
+
+// Determine the spacing and number of ticks along an axis.
+function split_ticks(max_value, px_per_v, max_px) {
+  const max_ticks = Math.floor(max_px / MIN_TICK_DIST);
+  if (max_ticks <= 1) {
+    // Graph is too small for even 1 tick.
+    return {step: max_value, tick_dist: max_px, num_ticks: 1};
+  }
+  let step;
+  if (max_value <= max_ticks) {
+    step = 1;
+  } else if (max_value <= max_ticks * 2) {
+    step = 2;
+  } else if (max_value <= max_ticks * 4) {
+    step = 4;
+  } else if (max_value <= max_ticks * 5) {
+    step = 5;
+  } else {
+    step = 10;
+    let count = 0;
+    while (true) {
+      if (count > 100) {
+        throw Error("tick loop too long");
+      }
+      count += 1;
+      if (max_value <= max_ticks * step) {
+        break;
+      }
+      step += 10;
+    }
+  }
+  const tick_dist = px_per_v * step;
+  const num_ticks = Math.floor(max_value / step);
+  return {step, tick_dist, num_ticks};
+}
+
+function hl(i) {
+  // Highlight dependency lines on mouse hover.
+  if (i === undefined || i == LAST_HOVER) {
+    return
+  }
+  LAST_HOVER = i;
+  let g = document.getElementById("hl-dep-lines");
+
+  if (g) {
+    const selector = '#boxes .dep-line[data-unblocked="'+i+'"],#boxes .dep-line[data-unblocked-by="' + i + '"]';
+    const lines = Array.from(document.querySelectorAll(selector)).map(el => el.outerHTML);
+    g.innerHTML = lines.join("");
+  }
+}
+
+let renderer = new SvgRenderer();
+try {
+  renderer.render_pipeline_graph();
+  renderer.render_timing_graph();
+} catch (err) {
+  console.error(err);
+}
+
+// Set up and handle controls.
+{
+  const range = document.getElementById('min-unit-time');
+  const time_output = document.getElementById('min-unit-time-output');
+  time_output.innerHTML = `${range.value}s`;
+  range.oninput = event => {
+    time_output.innerHTML = `${range.value}s`;
+    try {
+      renderer.render_pipeline_graph();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const scale = document.getElementById('scale');
+  const scale_output = document.getElementById('scale-output');
+  scale_output.innerHTML = `${scale.value}`;
+  scale.oninput = event => {
+    scale_output.innerHTML = `${scale.value}`;
+    try {
+      renderer.render_pipeline_graph();
+      renderer.render_timing_graph();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  Array.from(document.querySelectorAll("input[name='renderer']")).forEach(function(el) {
+    el.addEventListener("change", function(event) {
+      renderer = setupRenderer(event.target.value);
+      try {
+        renderer.render_pipeline_graph();
+        renderer.render_timing_graph();
+      } catch (err) {
+        console.error(err);
+      }
+    });
+  });
+}
+
+</script>
+</body>
+</html>

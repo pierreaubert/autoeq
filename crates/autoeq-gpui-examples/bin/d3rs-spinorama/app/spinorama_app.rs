@@ -2,11 +2,12 @@ use super::super::render::freq_spl_plot_margins;
 use super::super::types::{
     ChartId, Colormap, ContourRenderMode, DirectivityPlane, LoadState, PlotSection,
 };
-use autoeq::read::{
+use autoeq_measurements::read::{
     ContourPlotData, extract_cea2034_curves_original, fetch_available_speakers, fetch_contour_data,
     fetch_directivity_data, fetch_measurement_plot_data,
 };
-use autoeq::{Curve, DirectivityData};
+use autoeq_core::Curve;
+use autoeq_measurements::cea2034::DirectivityData;
 use d3rs::brush::{BrushSelection, BrushState};
 use d3rs::gpu3d::{Surface3DState, SurfacePlotType};
 use d3rs::scale::{LinearScale, LogScale};

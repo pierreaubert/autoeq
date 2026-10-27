@@ -2,6 +2,9 @@
 
 import json
 import math
+import os
+import shlex
+import subprocess
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -18,6 +21,26 @@ class ComparisonPayloadPythonGoldenTests(unittest.TestCase):
         cls.fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))
         if cls.fixture.get("schema_version") != 1:
             raise AssertionError("unsupported comparison payload golden schema")
+        # This fixture records the source-checkout dev producer. Optimized
+        # profiles can differ by a few floating-point bits, so select the
+        # reference build explicitly and keep the exact payload assertion.
+        built = subprocess.run(
+            [*shlex.split(os.environ.get("CARGO", "cargo")), "build", "--offline", "--locked",
+             "-p", "autoeq-report-wasm", "--bin", "report-producer", "--profile", "dev",
+             "--message-format=json-render-diagnostics"],
+            cwd=FIXTURE.parents[3], text=True, capture_output=True, check=False,
+        )
+        if built.returncode:
+            raise RuntimeError("Reference report producer build failed: " + built.stderr)
+        producers = []
+        for line in built.stdout.splitlines():
+            event = json.loads(line)
+            if (event.get("reason") == "compiler-artifact"
+                    and event["target"]["name"] == "report-producer" and event.get("executable")):
+                producers.append(Path(event["executable"]))
+        if len(producers) != 1 or not producers[0].is_file():
+            raise RuntimeError("Cargo did not identify the reference report producer")
+        cls.reference_producer = str(producers[0])
 
     def capture_payload(self, case):
         captured = {}
@@ -27,6 +50,7 @@ class ComparisonPayloadPythonGoldenTests(unittest.TestCase):
 
         expected_provenance = case["payload"].get("provenance")
         with (
+            patch.dict(os.environ, {"AUTOEQ_REPORT_PRODUCER": self.reference_producer}),
             patch(
                 "scripts.src.native_dataset_adapter._prepared_header_provenance",
                 return_value=expected_provenance,

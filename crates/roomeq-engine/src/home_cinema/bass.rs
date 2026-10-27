@@ -170,6 +170,19 @@ pub fn bass_management_routing_graph(
     let input_channels = channel_order.clone();
     channel_order.retain(|channel| role_for_channel(channel) != HomeCinemaRole::Lfe);
     let sub_outputs = resolved_bass_sub_outputs(config, &bass_role, optimization);
+    // Matching the array to bass-managed mains introduces a common output
+    // gain. LFE has its own configured playback reference, so compensate only
+    // that common change on its input while retaining relative driver gains.
+    let lfe_matching_offset_db = optimization.map_or(0.0, |_| {
+        let maximum = |outputs: &[BassManagementSubOutputReport]| {
+            outputs
+                .iter()
+                .map(|output| output.gain_db)
+                .reduce(f64::max)
+                .unwrap_or(0.0)
+        };
+        maximum(&sub_outputs) - maximum(&resolved_bass_sub_outputs(config, &bass_role, None))
+    });
     for output in &sub_outputs {
         if !channel_order.contains(&output.output_role) {
             channel_order.push(output.output_role.clone());
@@ -279,7 +292,7 @@ pub fn bass_management_routing_graph(
                     .iter()
                     .position(|name| name == &sub_output.output_role)
                     .unwrap_or(destination_index);
-                let output_gain_db = route_gain_db + sub_output.gain_db;
+                let output_gain_db = route_gain_db + sub_output.gain_db - lfe_matching_offset_db;
                 routes.push(BassManagementRoute {
                     group_id: Some("lfe".to_string()),
                     source_channel: source_channel.clone(),
@@ -326,6 +339,12 @@ pub fn bass_management_routing_graph(
     });
 
     let mut advisories = Vec::new();
+    if lfe_matching_offset_db.abs() > 1e-9 {
+        advisories.push(format!(
+            "lfe_common_bass_matching_compensation_db:{:.6}",
+            -lfe_matching_offset_db
+        ));
+    }
     if effective.config.apply_lfe_gain_to_chain {
         advisories.push("legacy_lfe_gain_applied_to_shared_sub_chain".to_string());
     }
@@ -910,6 +929,58 @@ mod tests {
                 route.gain_db, 10.0,
                 "explicit opt-in inserts the playback gain into the chain"
             );
+        }
+    }
+
+    #[test]
+    fn common_bass_matching_gain_preserves_lfe_reference_and_relative_driver_controls() {
+        let mut config = routed_home_cinema_config();
+        let outputs = [6.0, 4.0]
+            .into_iter()
+            .enumerate()
+            .map(|(index, gain_db)| BassManagementSubOutputReport {
+                output_role: format!("sub{index}"),
+                gain_db,
+                delay_ms: index as f64,
+                polarity_inverted: index == 1,
+                strategy_source: "mso".into(),
+                headroom_contribution_db: 0.0,
+                selected_low_pass_hz: None,
+            })
+            .collect::<Vec<_>>();
+        let optimization =
+            crate::bass_management::joint_bass_management_report_from_parts(&[], &[], &outputs);
+        for playback_gain in [0.0, 10.0] {
+            config
+                .system
+                .as_mut()
+                .unwrap()
+                .bass_management
+                .as_mut()
+                .unwrap()
+                .apply_lfe_gain_to_chain = playback_gain != 0.0;
+            let graph = bass_management_routing_graph(&config, Some(&optimization)).unwrap();
+            for (index, output) in outputs.iter().enumerate() {
+                let lfe = graph
+                    .routes
+                    .iter()
+                    .find(|route| {
+                        route.source_channel == "LFE" && route.destination == output.output_role
+                    })
+                    .unwrap();
+                let redirected = graph
+                    .routes
+                    .iter()
+                    .find(|route| {
+                        route.source_channel == "L" && route.destination == output.output_role
+                    })
+                    .unwrap();
+                assert_eq!(lfe.gain_db, playback_gain - 2.0 * index as f64);
+                assert_eq!(redirected.gain_db, output.gain_db);
+                assert_eq!(lfe.delay_ms, output.delay_ms);
+                assert_eq!(lfe.polarity_inverted, output.polarity_inverted);
+                assert!((lfe.gain_linear - 10.0_f64.powf(lfe.gain_db / 20.0)).abs() < 1e-12);
+            }
         }
     }
 

@@ -1,0 +1,3070 @@
+{
+  "status": "source-verified test attribute ranges separate conservative lexical references",
+  "checked_utc": "2026-10-26T09:35:54.632757+00:00",
+  "graph_database": "/Volumes/home_worktrees/autoeq-refactor/.tokensave/branches/refactor.db",
+  "graph_access": "SQLite mode=ro; no indexing or writes",
+  "fallback_reason": "Native direct-call queries do not expose a complete file annotation-to-item range join; large native signature/map output has a previously documented JSON truncation/EOF limitation. The active branch database was selected from branch-meta.json.",
+  "annotations_verified_against_current_source": [
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1448,
+      "kind": "function",
+      "name": "roadmap_correction_finalize_attaches_bound_ledger",
+      "start_line": 1449,
+      "end_line": 1481
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 1024,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 1025,
+      "end_line": 1722
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1075,
+      "kind": "function",
+      "name": "roadmap_correction_phase_resource_replacement_is_not_delivery",
+      "start_line": 1076,
+      "end_line": 1116
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1541,
+      "kind": "function",
+      "name": "workflow_reversion_supersedes_applied_candidate",
+      "start_line": 1542,
+      "end_line": 1591
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1118,
+      "kind": "function",
+      "name": "roadmap_correction_stale_reversion_binding_is_refused",
+      "start_line": 1119,
+      "end_line": 1132
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1366,
+      "kind": "function",
+      "name": "workflow_final_ledger_matches_delivered_graph",
+      "start_line": 1367,
+      "end_line": 1443
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1664,
+      "kind": "function",
+      "name": "workflow_ledger_grouping_preserves_gaps_and_seats",
+      "start_line": 1665,
+      "end_line": 1721
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1171,
+      "kind": "function",
+      "name": "roadmap_correction_public_snapshot_invalidates_later_mutation",
+      "start_line": 1172,
+      "end_line": 1205
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1134,
+      "kind": "function",
+      "name": "roadmap_correction_reconciled_ledger_carries_operational_summaries",
+      "start_line": 1135,
+      "end_line": 1169
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1253,
+      "kind": "function",
+      "name": "roadmap_correction_acceptance_failure_does_not_invent_processing_reversion",
+      "start_line": 1254,
+      "end_line": 1283
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1485,
+      "kind": "function",
+      "name": "roadmap_correction_finalize_replaces_stale_attachment",
+      "start_line": 1486,
+      "end_line": 1513
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1029,
+      "kind": "function",
+      "name": "roadmap_correction_joint_phase_requires_every_resource",
+      "start_line": 1030,
+      "end_line": 1055
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1530,
+      "kind": "function",
+      "name": "roadmap_correction_finalize_refuses_invalid_provisional",
+      "start_line": 1531,
+      "end_line": 1539
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1593,
+      "kind": "function",
+      "name": "workflow_identity_fallback_reports_unchanged",
+      "start_line": 1594,
+      "end_line": 1634
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1517,
+      "kind": "function",
+      "name": "roadmap_correction_finalize_empty_provisional_is_explicitly_empty",
+      "start_line": 1518,
+      "end_line": 1526
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1636,
+      "kind": "function",
+      "name": "workflow_post_eq_gain_does_not_hide_output_regression",
+      "start_line": 1637,
+      "end_line": 1662
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1235,
+      "kind": "function",
+      "name": "roadmap_correction_report_only_updates_preserve_processing_claim",
+      "start_line": 1236,
+      "end_line": 1251
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1207,
+      "kind": "function",
+      "name": "roadmap_correction_final_mutation_does_not_promote_candidate_claims",
+      "start_line": 1208,
+      "end_line": 1233
+    },
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1057,
+      "kind": "function",
+      "name": "amendment4_final_ledger_refuses_negative_shipped_delay",
+      "start_line": 1058,
+      "end_line": 1073
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 82,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 83,
+      "end_line": 187
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "attribute": "#[test]",
+      "attribute_line": 155,
+      "kind": "function",
+      "name": "sub_attenuation_preserves_main_transfer_and_enforces_output_ceiling",
+      "start_line": 156,
+      "end_line": 186
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "attribute": "#[test]",
+      "attribute_line": 86,
+      "kind": "function",
+      "name": "sub_cut_is_unbounded_but_main_and_common_cuts_are_bounded",
+      "start_line": 87,
+      "end_line": 105
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "attribute": "#[test]",
+      "attribute_line": 107,
+      "kind": "function",
+      "name": "structural_fallback_allows_large_sub_cut_and_rechecks_ceiling",
+      "start_line": 108,
+      "end_line": 153
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/epa.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 81,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 82,
+      "end_line": 111
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/epa.rs",
+      "attribute": "#[test]",
+      "attribute_line": 85,
+      "kind": "function",
+      "name": "delivered_epa_requires_complete_finite_spectral_evidence",
+      "start_line": 86,
+      "end_line": 110
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 641,
+      "kind": "function",
+      "name": "delay_proposals_use_emitted_controls_not_historical_array_values",
+      "start_line": 642,
+      "end_line": 683
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 685,
+      "kind": "function",
+      "name": "routed_aliases_require_configured_group_order_and_valid_routing",
+      "start_line": 686,
+      "end_line": 832
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 580,
+      "kind": "function",
+      "name": "joint_drive_gain_delay_trials_keep_both_post_route_controls",
+      "start_line": 581,
+      "end_line": 639
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 461,
+      "kind": "function",
+      "name": "joint_drive_pairs_independent_nonreference_gain_trials",
+      "start_line": 462,
+      "end_line": 527
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 457,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 458,
+      "end_line": 833
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 529,
+      "kind": "function",
+      "name": "joint_drive_delay_trials_realize_advances_with_nonnegative_physical_delays",
+      "start_line": 530,
+      "end_line": 578
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "attribute": "#[test]",
+      "attribute_line": 64,
+      "kind": "function",
+      "name": "kautz_strength_preserves_aliases_defaults_poles_and_order",
+      "start_line": 65,
+      "end_line": 83
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "attribute": "#[test]",
+      "attribute_line": 100,
+      "kind": "function",
+      "name": "kautz_strength_rejects_malformed_weights_without_partial_mutation",
+      "start_line": 101,
+      "end_line": 120
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 59,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 60,
+      "end_line": 121
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "attribute": "#[test]",
+      "attribute_line": 85,
+      "kind": "function",
+      "name": "kautz_strength_scales_legacy_fallback_linear_weight",
+      "start_line": 86,
+      "end_line": 98
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/physical_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 111,
+      "kind": "function",
+      "name": "declared_drive_ranking_is_separate_and_fail_closed",
+      "start_line": 112,
+      "end_line": 130
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/physical_drive.rs",
+      "attribute": "#[test]",
+      "attribute_line": 132,
+      "kind": "function",
+      "name": "physical_requirements_use_amplitude_ratios_and_declared_linear_domain",
+      "start_line": 133,
+      "end_line": 170
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/physical_drive.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 106,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 107,
+      "end_line": 171
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6751,
+      "kind": "function",
+      "name": "shared_stereo_eq_is_not_serial_overcorrection",
+      "start_line": 6752,
+      "end_line": 6769
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4965,
+      "kind": "function",
+      "name": "selection_reconciles_metrics_after_final_seat_replay",
+      "start_line": 4966,
+      "end_line": 5008
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6850,
+      "kind": "function",
+      "name": "selection_identity_is_unchanged_not_an_accepted_improvement",
+      "start_line": 6851,
+      "end_line": 6872
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6464,
+      "kind": "function",
+      "name": "configured_fallback_replaces_worse_optimized_structural_controls",
+      "start_line": 6465,
+      "end_line": 6533
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4503,
+      "kind": "function",
+      "name": "without_post_eq_retains_prior_eq_routing_and_sub_correction",
+      "start_line": 4504,
+      "end_line": 4577
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5833,
+      "kind": "function",
+      "name": "tiny_realized_improvement_returns_unchanged_baseline",
+      "start_line": 5834,
+      "end_line": 5930
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5417,
+      "kind": "function",
+      "name": "diagnostic_sink_failure_rolls_back_finalization_result",
+      "start_line": 5418,
+      "end_line": 5449
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4739,
+      "kind": "function",
+      "name": "explicit_over_budget_without_acceptance_evidence_fails_closed",
+      "start_line": 4740,
+      "end_line": 4768
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 7478,
+      "kind": "function",
+      "name": "configured_changes_flag_marginal_identity_without_granting_benefit",
+      "start_line": 7479,
+      "end_line": 7502
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6031,
+      "kind": "function",
+      "name": "terminal_alignment_replays_serialized_graph_instead_of_trusting_cached_success",
+      "start_line": 6032,
+      "end_line": 6148
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 542,
+      "kind": "function",
+      "name": "run_full_strength_output_attenuation_trial_for_test",
+      "start_line": 543,
+      "end_line": 606
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6150,
+      "kind": "function",
+      "name": "non_routed_refresh_replaces_stale_deployed_cache_before_level_alignment",
+      "start_line": 6151,
+      "end_line": 6198
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5932,
+      "kind": "function",
+      "name": "successful_final_replay_supersedes_historical_stage_reversion",
+      "start_line": 5933,
+      "end_line": 5989
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4929,
+      "kind": "function",
+      "name": "rebuild_keeps_canonical_scorecard_and_scalar_metrics_in_sync",
+      "start_line": 4930,
+      "end_line": 4963
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5327,
+      "kind": "function",
+      "name": "diagnostic_capture_refuses_when_selection_stops_before_target_trial",
+      "start_line": 5328,
+      "end_line": 5377
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5379,
+      "kind": "function",
+      "name": "playback_hash_ignores_evidence_metadata_but_tracks_executable_graph",
+      "start_line": 5380,
+      "end_line": 5415
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 7180,
+      "kind": "function",
+      "name": "declared_gain_allowance_delivers_electrically_bounded_final_graph",
+      "start_line": 7181,
+      "end_line": 7230
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4623,
+      "kind": "function",
+      "name": "benefit_floor_rejects_uncertainty_bound_training_seats",
+      "start_line": 4624,
+      "end_line": 4645
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 7055,
+      "kind": "function",
+      "name": "over_budget_structural_fallback_keeps_diagnostics_but_is_rejected",
+      "start_line": 7056,
+      "end_line": 7111
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6336,
+      "kind": "function",
+      "name": "headroom_attenuation_still_rejects_missing_main_input",
+      "start_line": 6337,
+      "end_line": 6342
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4705,
+      "kind": "function",
+      "name": "output_safety_budget_records_over_limit_stage_diagnostic",
+      "start_line": 4706,
+      "end_line": 4737
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6996,
+      "kind": "function",
+      "name": "fallback_with_structural_gain_is_safe_and_not_reported_unchanged",
+      "start_line": 6997,
+      "end_line": 7053
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 4426,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 4427,
+      "end_line": 7336
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4602,
+      "kind": "function",
+      "name": "identity_definition_matches_primary_check_thresholds",
+      "start_line": 4603,
+      "end_line": 4621
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5750,
+      "kind": "function",
+      "name": "physical_drive_spectral_candidate_replays_samples_and_respects_cut_budget",
+      "start_line": 5751,
+      "end_line": 5831
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6535,
+      "kind": "function",
+      "name": "alignment_strength_preserves_manual_calibration_and_safety_gains",
+      "start_line": 6536,
+      "end_line": 6574
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4647,
+      "kind": "function",
+      "name": "selection_defers_without_acceptance_evidence",
+      "start_line": 4648,
+      "end_line": 4678
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4886,
+      "kind": "function",
+      "name": "refinement_reference_preserves_fractional_delay_without_extra_latency",
+      "start_line": 4887,
+      "end_line": 4905
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6344,
+      "kind": "function",
+      "name": "magnitude_only_identity_fallback_preserves_requested_safety_budgets",
+      "start_line": 6345,
+      "end_line": 6419
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6235,
+      "kind": "function",
+      "name": "subwoofer_output_headroom_does_not_attenuate_main_input",
+      "start_line": 6236,
+      "end_line": 6280
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4680,
+      "kind": "function",
+      "name": "unknown_output_safety_budget_id_fails_before_selection_search",
+      "start_line": 4681,
+      "end_line": 4703
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6210,
+      "kind": "function",
+      "name": "headroom_attenuation_reaches_implicit_lfe_routes",
+      "start_line": 6211,
+      "end_line": 6233
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4770,
+      "kind": "function",
+      "name": "ctc_over_budget_without_acceptance_evidence_fails_closed",
+      "start_line": 4771,
+      "end_line": 4822
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5451,
+      "kind": "function",
+      "name": "correction_strength_keeps_retained_biquads_equal_to_emitted_filters",
+      "start_line": 5452,
+      "end_line": 5502
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4428,
+      "kind": "function",
+      "name": "deployed_acceptance_comparison_detects_physical_target_mutation",
+      "start_line": 4429,
+      "end_line": 4470
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6810,
+      "kind": "function",
+      "name": "baseline_removes_spectral_level_fit_but_preserves_calibration_and_safety",
+      "start_line": 6811,
+      "end_line": 6848
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5010,
+      "kind": "function",
+      "name": "ctc_with_room_seat_captures_goes_through_final_seat_selection",
+      "start_line": 5011,
+      "end_line": 5074
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5076,
+      "kind": "function",
+      "name": "opt_in_zero_strength_capture_replays_exact_useful_output_inputs_without_changing_result",
+      "start_line": 5077,
+      "end_line": 5325
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6576,
+      "kind": "function",
+      "name": "changed_configured_fallback_requires_actual_replay_qualification",
+      "start_line": 6577,
+      "end_line": 6640
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4907,
+      "kind": "function",
+      "name": "canonical_mso_cumulative_finalization",
+      "start_line": 4909,
+      "end_line": 4911
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 7338,
+      "kind": "function",
+      "name": "runtime_sub_output_protection_is_terminal_and_keeps_linear_overload_evidence",
+      "start_line": 7339,
+      "end_line": 7434
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4859,
+      "kind": "function",
+      "name": "refined_fir_registers_exact_replayed_bytes_in_memory_store",
+      "start_line": 4860,
+      "end_line": 4884
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 7113,
+      "kind": "function",
+      "name": "electrical_attenuation_cannot_hide_in_single_seat_baseline",
+      "start_line": 7114,
+      "end_line": 7178
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 4155,
+      "kind": "function",
+      "name": "install_output_attenuation",
+      "start_line": 4156,
+      "end_line": 4163
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6642,
+      "kind": "function",
+      "name": "published_baseline_replays_identity_and_clears_candidate_evidence",
+      "start_line": 6643,
+      "end_line": 6749
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4913,
+      "kind": "function",
+      "name": "canonical_mso_seed59_cumulative_finalization",
+      "start_line": 4915,
+      "end_line": 4917
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 7232,
+      "kind": "function",
+      "name": "cumulative_eq_refinement_preserves_useful_sub_correction",
+      "start_line": 7233,
+      "end_line": 7335
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4919,
+      "kind": "function",
+      "name": "canonical_mso_selected_seed_cumulative_finalization",
+      "start_line": 4921,
+      "end_line": 4927
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 7436,
+      "kind": "module",
+      "name": "configured_fallback_classification_tests",
+      "start_line": 7437,
+      "end_line": 7503
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6771,
+      "kind": "function",
+      "name": "baseline_removes_complete_hybrid_stage_and_preserves_protection",
+      "start_line": 6772,
+      "end_line": 6808
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4824,
+      "kind": "function",
+      "name": "parallel_fir_refinements_reserve_distinct_paths_and_exact_store_bytes",
+      "start_line": 4825,
+      "end_line": 4857
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6421,
+      "kind": "function",
+      "name": "identity_phase_exemption_rejects_processing_and_structural_graphs",
+      "start_line": 6422,
+      "end_line": 6462
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6874,
+      "kind": "function",
+      "name": "aligned_structural_baseline_is_flagged_only_when_every_replay_gate_passes",
+      "start_line": 6875,
+      "end_line": 6994
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6282,
+      "kind": "function",
+      "name": "spectral_headroom_attenuation_handles_implicit_lfe",
+      "start_line": 6283,
+      "end_line": 6334
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4475,
+      "kind": "function",
+      "name": "temporal_reuse_requires_unchanged_chain_measurement_and_fir",
+      "start_line": 4476,
+      "end_line": 4501
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5504,
+      "kind": "function",
+      "name": "correction_strength_scales_kautz_playback_weights_not_db_placeholder",
+      "start_line": 5505,
+      "end_line": 5571
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6200,
+      "kind": "function",
+      "name": "non_routed_refresh_preserves_generic_driver_sentinel",
+      "start_line": 6201,
+      "end_line": 6208
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "attribute": "#[test]",
+      "attribute_line": 226,
+      "kind": "function",
+      "name": "asymmetric_driver_replay_matches_independent_complex_crossover_sum",
+      "start_line": 227,
+      "end_line": 374
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "attribute": "#[test]",
+      "attribute_line": 80,
+      "kind": "function",
+      "name": "driver_fir_is_not_mistaken_for_parent_retained_fir",
+      "start_line": 81,
+      "end_line": 177
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "attribute": "#[test]",
+      "attribute_line": 179,
+      "kind": "function",
+      "name": "explicit_requested_lower_bound_can_use_common_driver_support",
+      "start_line": 180,
+      "end_line": 196
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "attribute": "#[test]",
+      "attribute_line": 56,
+      "kind": "function",
+      "name": "missing_low_driver_support_cannot_silently_remove_measured_bass",
+      "start_line": 57,
+      "end_line": 78
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 501,
+      "kind": "function",
+      "name": "genuine_upper_gap_still_needs_declaration",
+      "start_line": 502,
+      "end_line": 509
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 486,
+      "kind": "function",
+      "name": "short_support_without_bound_is_not_scored",
+      "start_line": 487,
+      "end_line": 499
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 671,
+      "kind": "function",
+      "name": "inferred_subwoofer_bound_follows_measured_rolloff",
+      "start_line": 672,
+      "end_line": 749
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 783,
+      "kind": "function",
+      "name": "explicit_rising_rolloff_is_rejected",
+      "start_line": 784,
+      "end_line": 821
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 432,
+      "kind": "function",
+      "name": "one_lower_edge_bin_is_held_without_extrapolation",
+      "start_line": 433,
+      "end_line": 451
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 567,
+      "kind": "function",
+      "name": "subwoofer_tail_assumption_requires_crossover_coverage_and_negligible_output",
+      "start_line": 568,
+      "end_line": 627
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 629,
+      "kind": "function",
+      "name": "negligible_standalone_subwoofer_tail_has_no_relative_denominator",
+      "start_line": 630,
+      "end_line": 669
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 511,
+      "kind": "function",
+      "name": "low_pass_alone_cannot_establish_short_subwoofer_acoustic_support",
+      "start_line": 512,
+      "end_line": 565
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 413,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 414,
+      "end_line": 862
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 470,
+      "kind": "function",
+      "name": "sub_bin_past_assessment_edge_is_covered",
+      "start_line": 471,
+      "end_line": 484
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 823,
+      "kind": "function",
+      "name": "declining_bound_is_checked_at_frequency",
+      "start_line": 824,
+      "end_line": 861
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 453,
+      "kind": "function",
+      "name": "genuine_lower_gap_still_fails_closed",
+      "start_line": 454,
+      "end_line": 468
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "attribute": "#[test]",
+      "attribute_line": 751,
+      "kind": "function",
+      "name": "rising_tail_keeps_flat_peak_hold",
+      "start_line": 752,
+      "end_line": 781
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "attribute": "#[test]",
+      "attribute_line": 345,
+      "kind": "function",
+      "name": "narrowing_lfe_observation_does_not_recalibrate_its_array_target",
+      "start_line": 346,
+      "end_line": 379
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "attribute": "#[test]",
+      "attribute_line": 310,
+      "kind": "function",
+      "name": "configured_lfe_target_is_frozen_against_candidate_crossover_changes",
+      "start_line": 311,
+      "end_line": 343
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "attribute": "#[test]",
+      "attribute_line": 424,
+      "kind": "function",
+      "name": "legacy_one_element_crossover_keeps_only_the_programme_lfe_lowpass",
+      "start_line": 425,
+      "end_line": 458
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 192,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 193,
+      "end_line": 459
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "attribute": "#[test]",
+      "attribute_line": 381,
+      "kind": "function",
+      "name": "lfe_forward_target_retains_the_configured_relative_tilt",
+      "start_line": 382,
+      "end_line": 422
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "attribute": "#[test]",
+      "attribute_line": 275,
+      "kind": "function",
+      "name": "lfe_target_contains_both_declared_lowpasses_without_narrowing_the_band",
+      "start_line": 276,
+      "end_line": 308
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 1155,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 1156,
+      "end_line": 1747
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1159,
+      "kind": "function",
+      "name": "configured_excursion_reference_is_frozen_and_conditions_its_target",
+      "start_line": 1160,
+      "end_line": 1222
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1224,
+      "kind": "function",
+      "name": "explicit_topology_reference_rebuilds_declared_bands_without_optimized_alignment",
+      "start_line": 1225,
+      "end_line": 1303
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1305,
+      "kind": "function",
+      "name": "configured_reference_accepts_cardioid_and_dba_topologies",
+      "start_line": 1306,
+      "end_line": 1340
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1342,
+      "kind": "function",
+      "name": "configured_routed_reference_is_independent_of_candidate_controls",
+      "start_line": 1343,
+      "end_line": 1609
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "attribute": "#[test]",
+      "attribute_line": 1611,
+      "kind": "function",
+      "name": "configured_reference_does_not_inherit_candidate_output_safety",
+      "start_line": 1612,
+      "end_line": 1746
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "attribute": "#[test]",
+      "attribute_line": 293,
+      "kind": "function",
+      "name": "final_serialized_routes_reject_opposed_correlated_bass_at_every_seat",
+      "start_line": 294,
+      "end_line": 420
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 240,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 241,
+      "end_line": 421
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "attribute": "#[test]",
+      "attribute_line": 285,
+      "kind": "function",
+      "name": "phase_absence_is_not_a_coherent_acceptance",
+      "start_line": 286,
+      "end_line": 291
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "attribute": "#[test]",
+      "attribute_line": 274,
+      "kind": "function",
+      "name": "common_gain_and_phase_changes_preserve_efficiency",
+      "start_line": 275,
+      "end_line": 284
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "attribute": "#[test]",
+      "attribute_line": 251,
+      "kind": "function",
+      "name": "opposed_correlated_polarity_cannot_hide_behind_peak_buildup",
+      "start_line": 252,
+      "end_line": 273
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+      "attribute": "#[test]",
+      "attribute_line": 163,
+      "kind": "function",
+      "name": "receipt_preserves_declarations_without_inventing_acquisition_or_gain_reference",
+      "start_line": 164,
+      "end_line": 225
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 120,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 121,
+      "end_line": 226
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+      "attribute": "#[test]",
+      "attribute_line": 130,
+      "kind": "function",
+      "name": "receipt_retains_disjoint_support_gap",
+      "start_line": 131,
+      "end_line": 161
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5984,
+      "kind": "function",
+      "name": "qualified_sub_bound_keeps_full_main_band_and_rejects_upper_midrange_regression",
+      "start_line": 5985,
+      "end_line": 6138
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3849,
+      "kind": "function",
+      "name": "completed_routed_rejection_retains_native_gate_evidence",
+      "start_line": 3850,
+      "end_line": 3941
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3752,
+      "kind": "function",
+      "name": "training_labels_follow_source_and_original_index_without_inference",
+      "start_line": 3753,
+      "end_line": 3779
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5587,
+      "kind": "function",
+      "name": "routed_spl_budget_measures_main_output_not_redirected_sub_loss",
+      "start_line": 5588,
+      "end_line": 5664
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 2927,
+      "kind": "function",
+      "name": "transplant_matches_post_route_safety_but_not_common_input_safety",
+      "start_line": 2928,
+      "end_line": 2968
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4253,
+      "kind": "function",
+      "name": "final_seat_output_loss_requires_an_explicit_gain_allowance",
+      "start_line": 4254,
+      "end_line": 4318
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5666,
+      "kind": "function",
+      "name": "routed_finalization_and_replay_reject_unowned_channel_stages",
+      "start_line": 5667,
+      "end_line": 5715
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 2970,
+      "kind": "function",
+      "name": "replay_scorecard_temporal_carries_branch_fir_latency_prior",
+      "start_line": 2971,
+      "end_line": 3031
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5827,
+      "kind": "function",
+      "name": "bass_only_optimization_detects_out_of_band_damage_in_routed_playback",
+      "start_line": 5828,
+      "end_line": 5907
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 9,
+      "kind": "module",
+      "name": "asymmetric",
+      "start_line": 10,
+      "end_line": 10
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6140,
+      "kind": "function",
+      "name": "significant_or_unqualified_unmeasured_sub_is_insufficient_evidence",
+      "start_line": 6141,
+      "end_line": 6195
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4605,
+      "kind": "function",
+      "name": "routed_single_position_captures_do_not_compare_measurement_names",
+      "start_line": 4606,
+      "end_line": 4629
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5507,
+      "kind": "function",
+      "name": "diagnostic_trace_records_every_physical_contributor_to_a_logical_sum",
+      "start_line": 5508,
+      "end_line": 5537
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6197,
+      "kind": "function",
+      "name": "branch_sum_keeps_a_narrow_native_bass_cancellation",
+      "start_line": 6198,
+      "end_line": 6222
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4193,
+      "kind": "function",
+      "name": "final_seat_replay_rejects_sidecar_conflicting_with_retained_fir",
+      "start_line": 4194,
+      "end_line": 4251
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3817,
+      "kind": "function",
+      "name": "final_training_seat_replay_rejects_hidden_regression_after_post_pass",
+      "start_line": 3818,
+      "end_line": 3847
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5909,
+      "kind": "function",
+      "name": "routed_subwoofer_stopband_replays_full_main_band_without_declaration",
+      "start_line": 5910,
+      "end_line": 5982
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 1573,
+      "kind": "function",
+      "name": "validate_final_seats",
+      "start_line": 1574,
+      "end_line": 1594
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4550,
+      "kind": "function",
+      "name": "native_capture_is_not_reduced_and_missing_seats_are_not_broadcast",
+      "start_line": 4551,
+      "end_line": 4578
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3056,
+      "kind": "function",
+      "name": "transplant_matches_driver_safety_by_driver_name",
+      "start_line": 3057,
+      "end_line": 3113
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4420,
+      "kind": "function",
+      "name": "independent_bass_only_correction_still_checks_the_speaker_passband",
+      "start_line": 4421,
+      "end_line": 4465
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4507,
+      "kind": "function",
+      "name": "native_capture_preserves_distinct_grids_and_auxiliary_evidence",
+      "start_line": 4508,
+      "end_line": 4548
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3115,
+      "kind": "function",
+      "name": "native_routed_acceptance_recomputes_identity_and_refuses_in_band_damage",
+      "start_line": 3116,
+      "end_line": 3267
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3669,
+      "kind": "function",
+      "name": "standalone_subwoofer_replay_uses_measured_band_not_full_range_limit",
+      "start_line": 3670,
+      "end_line": 3751
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4039,
+      "kind": "function",
+      "name": "final_seat_overlap_preserves_per_input_support_and_reports_disjoint_inputs",
+      "start_line": 4040,
+      "end_line": 4150
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3522,
+      "kind": "function",
+      "name": "band_concealment_flags_only_passing_broadband_with_regressed_band",
+      "start_line": 3523,
+      "end_line": 3560
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4580,
+      "kind": "function",
+      "name": "named_seat_permutation_is_not_silently_coherently_summed",
+      "start_line": 4581,
+      "end_line": 4603
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4320,
+      "kind": "function",
+      "name": "useful_output_budget_does_not_waive_residual_regression",
+      "start_line": 4321,
+      "end_line": 4361
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 6224,
+      "kind": "function",
+      "name": "routed_replay_uses_each_seat_and_applies_route_delay_gain_and_post_eq_once",
+      "start_line": 6225,
+      "end_line": 6264
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4724,
+      "kind": "function",
+      "name": "native_main_target_isolated_from_shared_sub_and_preserves_calibration",
+      "start_line": 4725,
+      "end_line": 5147
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3943,
+      "kind": "function",
+      "name": "independent_group_replays_declared_physical_outputs_under_their_owner",
+      "start_line": 3944,
+      "end_line": 4037
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5539,
+      "kind": "function",
+      "name": "diagnostic_trace_does_not_turn_missing_routed_capture_into_acceptance",
+      "start_line": 5540,
+      "end_line": 5585
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3596,
+      "kind": "function",
+      "name": "grouped_physical_output_captures_keep_declared_branch_order",
+      "start_line": 3597,
+      "end_line": 3667
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3562,
+      "kind": "function",
+      "name": "mono_bass_sums_report_coherent_buildup_and_refuse_without_phase",
+      "start_line": 3563,
+      "end_line": 3594
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5465,
+      "kind": "function",
+      "name": "diagnostic_trace_uses_lfe_sub1_physical_capture_without_changing_validation",
+      "start_line": 5466,
+      "end_line": 5505
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 701,
+      "kind": "function",
+      "name": "sum",
+      "start_line": 702,
+      "end_line": 713
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5360,
+      "kind": "function",
+      "name": "routed_replay_realizes_driver_gain_delay_polarity_once_via_route",
+      "start_line": 5361,
+      "end_line": 5463
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4363,
+      "kind": "function",
+      "name": "subwoofer_useful_output_exemption_does_not_waive_residual_regression",
+      "start_line": 4364,
+      "end_line": 4418
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3033,
+      "kind": "function",
+      "name": "native_lfe_detects_correction_changes_on_its_physical_owner",
+      "start_line": 3034,
+      "end_line": 3054
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5717,
+      "kind": "function",
+      "name": "channel_matching_is_applied_to_the_complete_routed_source",
+      "start_line": 5718,
+      "end_line": 5777
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 3269,
+      "kind": "function",
+      "name": "physical_and_native_target_consumers_preserve_nonzero_calibration_planes",
+      "start_line": 3270,
+      "end_line": 3474
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4152,
+      "kind": "function",
+      "name": "final_seat_rejection_retains_both_shape_and_output_failures",
+      "start_line": 4153,
+      "end_line": 4191
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5273,
+      "kind": "function",
+      "name": "redirected_physical_lowpass_does_not_add_the_compatibility_lfe_filter",
+      "start_line": 5274,
+      "end_line": 5358
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[cfg(test)]",
+      "attribute_line": 2923,
+      "kind": "module",
+      "name": "tests",
+      "start_line": 2924,
+      "end_line": 6265
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4631,
+      "kind": "function",
+      "name": "branch_sum_preserves_each_native_grid_and_rejects_unknown_phase",
+      "start_line": 4632,
+      "end_line": 4643
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 4467,
+      "kind": "function",
+      "name": "held_out_replay_uses_final_chain_and_preserves_partition_identity",
+      "start_line": 4468,
+      "end_line": 4505
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[test]",
+      "attribute_line": 5779,
+      "kind": "function",
+      "name": "routed_observation_respects_limited_main_and_lfe_passbands",
+      "start_line": 5780,
+      "end_line": 5825
+    }
+  ],
+  "external_test_only_files": {
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs": {
+      "guarding_module": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "attribute": "#[cfg(test)]",
+      "line": 9
+    }
+  },
+  "counts_by_crate_prefix": {
+    "outside_test_ranges": {
+      "topology": 13,
+      "electrical_headroom": 10,
+      "pipeline": 8,
+      "ctc": 7,
+      "evidence_intake": 4,
+      "delay_compile": 4,
+      "export": 4,
+      "final_ledger": 2,
+      "prepare_eq_resources": 2,
+      "group_measurements": 1
+    },
+    "known_test_only": {
+      "test_fixtures": 43,
+      "electrical_headroom": 11,
+      "prepare_eq_resources": 5,
+      "FinalizationDiagnosticTrial": 4,
+      "ctc": 3,
+      "FinalizationDiagnosticSink": 3,
+      "load_merged_config_strict": 1,
+      "final_ledger": 1,
+      "topology": 1,
+      "export": 1
+    }
+  },
+  "files": [
+    {
+      "path": "crates/roomeq-workflow/src/final_ledger.rs",
+      "sha256": "5aa21fc91c54294e54d3bdf56e800a8aa9e6567f677e91498a2435ca32a9411a",
+      "test_attribute_ranges": [
+        [
+          1448,
+          1481
+        ],
+        [
+          1024,
+          1722
+        ],
+        [
+          1075,
+          1116
+        ],
+        [
+          1541,
+          1591
+        ],
+        [
+          1118,
+          1132
+        ],
+        [
+          1366,
+          1443
+        ],
+        [
+          1664,
+          1721
+        ],
+        [
+          1171,
+          1205
+        ],
+        [
+          1134,
+          1169
+        ],
+        [
+          1253,
+          1283
+        ],
+        [
+          1485,
+          1513
+        ],
+        [
+          1029,
+          1055
+        ],
+        [
+          1530,
+          1539
+        ],
+        [
+          1593,
+          1634
+        ],
+        [
+          1517,
+          1526
+        ],
+        [
+          1636,
+          1662
+        ],
+        [
+          1235,
+          1251
+        ],
+        [
+          1207,
+          1233
+        ],
+        [
+          1057,
+          1073
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 37,
+            "path": "crate::evidence_intake::WorkflowOutcome"
+          }
+        ],
+        "known_test_only": [
+          {
+            "line": 1031,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1059,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1078,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1173,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1209,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1237,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/attenuation_budget.rs",
+      "sha256": "bfcc555224ad49ec76cc5b09af08eaa86187a0af6420575971115e0da6e35198",
+      "test_attribute_ranges": [
+        [
+          82,
+          187
+        ],
+        [
+          155,
+          186
+        ],
+        [
+          86,
+          105
+        ],
+        [
+          107,
+          153
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 19,
+            "path": "crate::electrical_headroom::independent_graph_output_ports"
+          }
+        ],
+        "known_test_only": [
+          {
+            "line": 134,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 169,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/epa.rs",
+      "sha256": "787f7e007482b4b81181ddd57181b4455df1534e17d50f7100140eed56b422cc",
+      "test_attribute_ranges": [
+        [
+          81,
+          111
+        ],
+        [
+          85,
+          110
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": [
+          {
+            "line": 87,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+      "sha256": "3adb6e384e5cd3f4be37e79b28b601d2a07388e9ab84f8f1ce9f077efc74782c",
+      "test_attribute_ranges": [
+        [
+          641,
+          683
+        ],
+        [
+          685,
+          832
+        ],
+        [
+          580,
+          639
+        ],
+        [
+          461,
+          527
+        ],
+        [
+          457,
+          833
+        ],
+        [
+          529,
+          578
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": []
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/kautz.rs",
+      "sha256": "b3c320979405106785e3b4d09cdd3f4c0f6e0a8b3b12081b9423dcfd585fd358",
+      "test_attribute_ranges": [
+        [
+          64,
+          83
+        ],
+        [
+          100,
+          120
+        ],
+        [
+          59,
+          121
+        ],
+        [
+          85,
+          98
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": []
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/physical_drive.rs",
+      "sha256": "f9d2267b230c4fa0951e5307256969817e7ebbfee568c3dc1237f41b0addcbe4",
+      "test_attribute_ranges": [
+        [
+          111,
+          130
+        ],
+        [
+          132,
+          170
+        ],
+        [
+          106,
+          171
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 44,
+            "path": "crate::electrical_headroom::assess_final_graph_physical_drive"
+          }
+        ],
+        "known_test_only": []
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization/sub_output_limiter.rs",
+      "sha256": "8ad0b2f349ef3fe1790a3c78b935438417a05cd1cdbcbf9fbd2d6d57760abc31",
+      "test_attribute_ranges": [],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": []
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab",
+      "test_attribute_ranges": [
+        [
+          6751,
+          6769
+        ],
+        [
+          4965,
+          5008
+        ],
+        [
+          6850,
+          6872
+        ],
+        [
+          6464,
+          6533
+        ],
+        [
+          4503,
+          4577
+        ],
+        [
+          5833,
+          5930
+        ],
+        [
+          5417,
+          5449
+        ],
+        [
+          4739,
+          4768
+        ],
+        [
+          7478,
+          7502
+        ],
+        [
+          6031,
+          6148
+        ],
+        [
+          542,
+          606
+        ],
+        [
+          6150,
+          6198
+        ],
+        [
+          5932,
+          5989
+        ],
+        [
+          4929,
+          4963
+        ],
+        [
+          5327,
+          5377
+        ],
+        [
+          5379,
+          5415
+        ],
+        [
+          7180,
+          7230
+        ],
+        [
+          4623,
+          4645
+        ],
+        [
+          7055,
+          7111
+        ],
+        [
+          6336,
+          6342
+        ],
+        [
+          4705,
+          4737
+        ],
+        [
+          6996,
+          7053
+        ],
+        [
+          4426,
+          7336
+        ],
+        [
+          4602,
+          4621
+        ],
+        [
+          5750,
+          5831
+        ],
+        [
+          6535,
+          6574
+        ],
+        [
+          4647,
+          4678
+        ],
+        [
+          4886,
+          4905
+        ],
+        [
+          6344,
+          6419
+        ],
+        [
+          6235,
+          6280
+        ],
+        [
+          4680,
+          4703
+        ],
+        [
+          6210,
+          6233
+        ],
+        [
+          4770,
+          4822
+        ],
+        [
+          5451,
+          5502
+        ],
+        [
+          4428,
+          4470
+        ],
+        [
+          6810,
+          6848
+        ],
+        [
+          5010,
+          5074
+        ],
+        [
+          5076,
+          5325
+        ],
+        [
+          6576,
+          6640
+        ],
+        [
+          4907,
+          4911
+        ],
+        [
+          7338,
+          7434
+        ],
+        [
+          4859,
+          4884
+        ],
+        [
+          7113,
+          7178
+        ],
+        [
+          4155,
+          4163
+        ],
+        [
+          6642,
+          6749
+        ],
+        [
+          4913,
+          4917
+        ],
+        [
+          7232,
+          7335
+        ],
+        [
+          4919,
+          4927
+        ],
+        [
+          7436,
+          7503
+        ],
+        [
+          6771,
+          6808
+        ],
+        [
+          4824,
+          4857
+        ],
+        [
+          6421,
+          6462
+        ],
+        [
+          6874,
+          6994
+        ],
+        [
+          6282,
+          6334
+        ],
+        [
+          4475,
+          4501
+        ],
+        [
+          5504,
+          5571
+        ],
+        [
+          6200,
+          6208
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 133,
+            "path": "crate::pipeline::FinalizationDiagnosticSink"
+          },
+          {
+            "line": 280,
+            "path": "crate::pipeline::FinalizationDiagnosticSink"
+          },
+          {
+            "line": 459,
+            "path": "crate::topology::recalibrate_post_dsp_levels"
+          },
+          {
+            "line": 619,
+            "path": "crate::electrical_headroom::room_eq_safety_attenuation_by_output"
+          },
+          {
+            "line": 766,
+            "path": "crate::pipeline::FinalizationDiagnosticTrial"
+          },
+          {
+            "line": 767,
+            "path": "crate::pipeline::FinalizationDiagnosticSink"
+          },
+          {
+            "line": 845,
+            "path": "crate::electrical_headroom::assess_final_graph_physical_drive"
+          },
+          {
+            "line": 1086,
+            "path": "crate::pipeline::FinalizationDiagnosticTrial"
+          },
+          {
+            "line": 1255,
+            "path": "crate::delay_compile::correction_strength_for_electrical_ceiling"
+          },
+          {
+            "line": 1259,
+            "path": "crate::delay_compile::applied_lfe_playback_gain_db"
+          },
+          {
+            "line": 1628,
+            "path": "crate::topology::crossover_timing_refused"
+          },
+          {
+            "line": 1636,
+            "path": "crate::topology::CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY"
+          },
+          {
+            "line": 1727,
+            "path": "crate::pipeline::FinalizationDiagnosticTrial"
+          },
+          {
+            "line": 1977,
+            "path": "crate::pipeline::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+          },
+          {
+            "line": 1978,
+            "path": "crate::pipeline::FinalizationDiagnosticTrial::FullStrengthOutput"
+          },
+          {
+            "line": 2153,
+            "path": "crate::topology::crossover_timing_refused"
+          },
+          {
+            "line": 2156,
+            "path": "crate::topology::reconstruct_deployed_source_curves_unenforced"
+          },
+          {
+            "line": 2167,
+            "path": "crate::topology::reconstruct_deployed_source_curves_with_evidence"
+          },
+          {
+            "line": 2184,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 2543,
+            "path": "crate::export::bind_final_convolution_artifacts"
+          },
+          {
+            "line": 2726,
+            "path": "crate::topology::crossover_timing_refused"
+          },
+          {
+            "line": 2729,
+            "path": "crate::topology::collect_routed_splice_outcomes"
+          },
+          {
+            "line": 2739,
+            "path": "crate::topology::RoleSpliceOutcome"
+          },
+          {
+            "line": 2830,
+            "path": "crate::final_ledger::processing_snapshot"
+          },
+          {
+            "line": 2900,
+            "path": "crate::final_ledger::processing_snapshot"
+          },
+          {
+            "line": 3023,
+            "path": "crate::topology::collect_routed_splice_outcomes"
+          },
+          {
+            "line": 3142,
+            "path": "crate::topology::recalibrate_post_dsp_levels"
+          },
+          {
+            "line": 3227,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 3397,
+            "path": "crate::export::bind_final_convolution_artifacts"
+          },
+          {
+            "line": 3398,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 3598,
+            "path": "crate::topology::recalibrate_post_dsp_levels"
+          },
+          {
+            "line": 3602,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 3736,
+            "path": "crate::topology::reconstruct_deployed_source_curves_unenforced"
+          },
+          {
+            "line": 3995,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 4175,
+            "path": "crate::electrical_headroom::independent_graph_output_ports"
+          },
+          {
+            "line": 4295,
+            "path": "crate::ctc::read_wav_channels_f64"
+          },
+          {
+            "line": 4297,
+            "path": "crate::ctc::checked_sample_rate"
+          },
+          {
+            "line": 4358,
+            "path": "crate::ctc::read_wav_channels_f64"
+          },
+          {
+            "line": 4360,
+            "path": "crate::ctc::checked_sample_rate"
+          }
+        ],
+        "known_test_only": [
+          {
+            "line": 4430,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4431,
+            "path": "crate::test_fixtures::flat_curve"
+          },
+          {
+            "line": 4652,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4682,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4707,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4741,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4772,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4844,
+            "path": "crate::ctc::read_wav_channels_f64"
+          },
+          {
+            "line": 4875,
+            "path": "crate::ctc::read_wav_channels_f64"
+          },
+          {
+            "line": 5084,
+            "path": "crate::FinalizationDiagnosticSink"
+          },
+          {
+            "line": 5145,
+            "path": "crate::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+          },
+          {
+            "line": 5169,
+            "path": "crate::FinalizationDiagnosticTrial::FullStrengthOutput"
+          },
+          {
+            "line": 5334,
+            "path": "crate::FinalizationDiagnosticSink"
+          },
+          {
+            "line": 5359,
+            "path": "crate::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+          },
+          {
+            "line": 5421,
+            "path": "crate::FinalizationDiagnosticSink"
+          },
+          {
+            "line": 5441,
+            "path": "crate::FinalizationDiagnosticTrial::ZeroStrengthOutput"
+          },
+          {
+            "line": 5575,
+            "path": "crate::load_merged_config_strict"
+          },
+          {
+            "line": 5693,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 5728,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 6215,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 6240,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 6309,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 6324,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 6591,
+            "path": "crate::final_ledger::processing_snapshot"
+          },
+          {
+            "line": 7020,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 7211,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 7256,
+            "path": "crate::ctc::apply_channel_dsp_chain_to_curve"
+          },
+          {
+            "line": 7358,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          },
+          {
+            "line": 7401,
+            "path": "crate::electrical_headroom::assess_final_graph"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "sha256": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+      "test_attribute_ranges": [
+        [
+          226,
+          374
+        ],
+        [
+          80,
+          177
+        ],
+        [
+          179,
+          196
+        ],
+        [
+          56,
+          78
+        ]
+      ],
+      "external_test_only_guard": {
+        "guarding_module": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+        "attribute": "#[cfg(test)]",
+        "line": 9
+      },
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": [
+          {
+            "line": 36,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "sha256": "a981973e93cfc799682a946f16d01bda377a86a5151d86c45b59a6b24e6e427e",
+      "test_attribute_ranges": [
+        [
+          501,
+          509
+        ],
+        [
+          486,
+          499
+        ],
+        [
+          671,
+          749
+        ],
+        [
+          783,
+          821
+        ],
+        [
+          432,
+          451
+        ],
+        [
+          567,
+          627
+        ],
+        [
+          629,
+          669
+        ],
+        [
+          511,
+          565
+        ],
+        [
+          413,
+          862
+        ],
+        [
+          470,
+          484
+        ],
+        [
+          823,
+          861
+        ],
+        [
+          453,
+          468
+        ],
+        [
+          751,
+          781
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": []
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "sha256": "3b6581e4e937518de1a8163f109cc3ecb1fb44e8e45fe4fb689a841e516054fe",
+      "test_attribute_ranges": [
+        [
+          345,
+          379
+        ],
+        [
+          310,
+          343
+        ],
+        [
+          424,
+          458
+        ],
+        [
+          192,
+          459
+        ],
+        [
+          381,
+          422
+        ],
+        [
+          275,
+          308
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [],
+        "known_test_only": [
+          {
+            "line": 257,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 259,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 279,
+            "path": "crate::prepare_eq_resources"
+          },
+          {
+            "line": 314,
+            "path": "crate::prepare_eq_resources"
+          },
+          {
+            "line": 353,
+            "path": "crate::prepare_eq_resources"
+          },
+          {
+            "line": 385,
+            "path": "crate::prepare_eq_resources"
+          },
+          {
+            "line": 433,
+            "path": "crate::prepare_eq_resources"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "sha256": "b0bc19afa3bf59183428fcd6810debc467c6e4ab41634ff85c28f62f01fe86f2",
+      "test_attribute_ranges": [
+        [
+          1155,
+          1747
+        ],
+        [
+          1159,
+          1222
+        ],
+        [
+          1224,
+          1303
+        ],
+        [
+          1305,
+          1340
+        ],
+        [
+          1342,
+          1609
+        ],
+        [
+          1611,
+          1746
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 605,
+            "path": "crate::prepare_eq_resources"
+          }
+        ],
+        "known_test_only": [
+          {
+            "line": 1187,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1230,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1316,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1351,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1353,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 1616,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "sha256": "470d798b6b6e7e7b1dfce46cc6bbb1ce34eeac923239cc5b81f370f4b118fd80",
+      "test_attribute_ranges": [
+        [
+          293,
+          420
+        ],
+        [
+          240,
+          421
+        ],
+        [
+          285,
+          291
+        ],
+        [
+          274,
+          284
+        ],
+        [
+          251,
+          273
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 117,
+            "path": "crate::evidence_intake::crossover_timing_reference"
+          }
+        ],
+        "known_test_only": [
+          {
+            "line": 345,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 347,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          }
+        ]
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+      "sha256": "d60d8115cee2b6f7af3f3fa2209ed06621e7ed320b80b32e4e49f3dd90f1de85",
+      "test_attribute_ranges": [
+        [
+          163,
+          225
+        ],
+        [
+          120,
+          226
+        ],
+        [
+          130,
+          161
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 4,
+            "path": "crate::evidence_intake"
+          }
+        ],
+        "known_test_only": []
+      }
+    },
+    {
+      "path": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "sha256": "2a536e32f65d98c6eab42a087445746eac5f7ef753f7807e431b1f1aae1670a9",
+      "test_attribute_ranges": [
+        [
+          5984,
+          6138
+        ],
+        [
+          3849,
+          3941
+        ],
+        [
+          3752,
+          3779
+        ],
+        [
+          5587,
+          5664
+        ],
+        [
+          2927,
+          2968
+        ],
+        [
+          4253,
+          4318
+        ],
+        [
+          5666,
+          5715
+        ],
+        [
+          2970,
+          3031
+        ],
+        [
+          5827,
+          5907
+        ],
+        [
+          9,
+          10
+        ],
+        [
+          6140,
+          6195
+        ],
+        [
+          4605,
+          4629
+        ],
+        [
+          5507,
+          5537
+        ],
+        [
+          6197,
+          6222
+        ],
+        [
+          4193,
+          4251
+        ],
+        [
+          3817,
+          3847
+        ],
+        [
+          5909,
+          5982
+        ],
+        [
+          1573,
+          1594
+        ],
+        [
+          4550,
+          4578
+        ],
+        [
+          3056,
+          3113
+        ],
+        [
+          4420,
+          4465
+        ],
+        [
+          4507,
+          4548
+        ],
+        [
+          3115,
+          3267
+        ],
+        [
+          3669,
+          3751
+        ],
+        [
+          4039,
+          4150
+        ],
+        [
+          3522,
+          3560
+        ],
+        [
+          4580,
+          4603
+        ],
+        [
+          4320,
+          4361
+        ],
+        [
+          6224,
+          6264
+        ],
+        [
+          4724,
+          5147
+        ],
+        [
+          3943,
+          4037
+        ],
+        [
+          5539,
+          5585
+        ],
+        [
+          3596,
+          3667
+        ],
+        [
+          3562,
+          3594
+        ],
+        [
+          5465,
+          5505
+        ],
+        [
+          701,
+          713
+        ],
+        [
+          5360,
+          5463
+        ],
+        [
+          4363,
+          4418
+        ],
+        [
+          3033,
+          3054
+        ],
+        [
+          5717,
+          5777
+        ],
+        [
+          3269,
+          3474
+        ],
+        [
+          4152,
+          4191
+        ],
+        [
+          5273,
+          5358
+        ],
+        [
+          2923,
+          6265
+        ],
+        [
+          4631,
+          4643
+        ],
+        [
+          4467,
+          4505
+        ],
+        [
+          5779,
+          5825
+        ]
+      ],
+      "external_test_only_guard": null,
+      "references": {
+        "outside_test_ranges": [
+          {
+            "line": 257,
+            "path": "crate::group_measurements::seat_labels"
+          },
+          {
+            "line": 663,
+            "path": "crate::ctc::read_wav_channels_f64"
+          },
+          {
+            "line": 665,
+            "path": "crate::ctc::checked_sample_rate"
+          },
+          {
+            "line": 689,
+            "path": "crate::ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs"
+          },
+          {
+            "line": 840,
+            "path": "crate::export::validate_final_routed_stage_ownership"
+          },
+          {
+            "line": 2160,
+            "path": "crate::export::validate_final_routed_stage_ownership"
+          },
+          {
+            "line": 2255,
+            "path": "crate::prepare_eq_resources"
+          },
+          {
+            "line": 2664,
+            "path": "crate::evidence_intake::shared_timing_reference"
+          },
+          {
+            "line": 2671,
+            "path": "crate::delay_compile::electrical_boost_bound_db"
+          },
+          {
+            "line": 2679,
+            "path": "crate::delay_compile::applied_lfe_playback_gain_db"
+          }
+        ],
+        "known_test_only": [
+          {
+            "line": 2935,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 2972,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 2991,
+            "path": "crate::test_fixtures::flat_curve"
+          },
+          {
+            "line": 3060,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 3117,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 3274,
+            "path": "crate::test_fixtures::flat_curve"
+          },
+          {
+            "line": 3293,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 3312,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 3477,
+            "path": "crate::test_fixtures::flat_curve"
+          },
+          {
+            "line": 3599,
+            "path": "crate::test_fixtures::flat_curve"
+          },
+          {
+            "line": 3648,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 3672,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 3783,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4651,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 4747,
+            "path": "crate::topology::reconstruct_deployed_source_curves_unenforced"
+          },
+          {
+            "line": 4759,
+            "path": "crate::test_fixtures::flat_curve"
+          },
+          {
+            "line": 4780,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 5183,
+            "path": "crate::test_fixtures::single_channel_room_result"
+          },
+          {
+            "line": 5705,
+            "path": "crate::export::bind_final_convolution_artifacts"
+          }
+        ]
+      }
+    }
+  ],
+  "qualification": "Only unambiguous #[cfg(test)] and #[test] attributes are excluded. Remaining references can still be comments, strings, unused imports or feature-specific code; outside-test does not prove a production call closure. Compiler and consumer/feature/asset evidence remain mandatory.",
+  "performance_acceptance": false
+}

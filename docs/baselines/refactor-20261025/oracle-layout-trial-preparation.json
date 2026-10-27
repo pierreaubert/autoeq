@@ -1,0 +1,1177 @@
+{
+  "status": "prepared_not_compiled_or_measured",
+  "prepared_utc": "2026-10-26T05:20:34.620499+00:00",
+  "roots": {
+    "six": "/Volumes/home_tmp/tmp/autoeq-oracle-layout-trial-20261026/six/autoeq",
+    "one": "/Volumes/home_tmp/tmp/autoeq-oracle-layout-trial-20261026/one/autoeq"
+  },
+  "oracle_targets": {
+    "six": 6,
+    "one": 1
+  },
+  "all_integration_targets": {
+    "six": 9,
+    "one": 4
+  },
+  "rust_logical_cases": 118,
+  "python_cases_unchanged": 6,
+  "runtime_inputs_complete_and_equal": 2150,
+  "supplemental_targets_unchanged": true,
+  "case_bodies_oracles_goldens_byte_identical": true,
+  "manifest_changes_only_rust_target_fields": true,
+  "changes": [
+    "crates/autoeq-qa/Cargo.toml",
+    "crates/autoeq-qa/validation-manifest.toml",
+    "crates/autoeq-qa/tests/oracle_all.rs"
+  ],
+  "module_ownership": [
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_ar01_impulse_store",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c02_free_types",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c02_peq_layouts",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c03_logmean_slope",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c04_gaussian_smooth",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c04_octave_smooth",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c05_minphase_flat",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c05_unwrap_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c07_quality_geometry",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_c08_local_q",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_erb_quadrature",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_f01_fir_flat_designs",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_f02_target_grid_wav",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_fir_response",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_log_interp",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_m01_pir_prefscore",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_m02_avg_coherent",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_m03_mic_clock",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_m04_ingest_adapters",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_core",
+      "module": "wolfram_peq_response",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_aw01_workflow_correction",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o01_asymmetric_weights",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o01_scalar_weights",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o02_scalarization",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o03_tv2_stencil",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o04_bass_boost",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o04_deadband",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o05_constraint_penalties",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o06_initial_guess_bounds",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o07_crossover_sum",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o08_joint_multisub",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o09_group_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o10_bark_sharpness",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o11_temporal_ir",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o12_pareto_mixed",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o13_backend_objectives",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_optim",
+      "module": "wolfram_o14_rerank_ordering",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re01_dsp_gain_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re02_preference_shelves",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re03_candidate_loss",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re04_pruning_cumulative",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re05_fir_residual",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re06_fir_integer_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re07_null_mask",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re08_split_band_sum",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re09_kautz_bank",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re10_branch_sum_levels",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re11_summation_lattice",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re12_gd_coherence",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re13_mso_seat_response",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re14_combined_curves",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re15_modal_svd",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re16_spatial_quadrature",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re17_interchannel_deviation",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re18_dba_sum",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re19_bass_power",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re20_drr_velvet",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re21_eq_response_correction",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re22_limiter_gain_envelope",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re23_ctc_regularized",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_re24_cardioid",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_root01_facade_passthrough",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_rs01_flat_tilt",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_rs02_coherent_sum",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_engine",
+      "module": "wolfram_rs03_tone_bank",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra01_hybrid_grid",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra01_log_slope",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra01_lr24_crossover",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra02_arrival_alignment",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra02_phase_slope_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra02_probe_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra03_mode_null_masks",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra04_decay_severity",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra05_delay_excess_phase",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra06_reflection_cancel",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra07_spatial_stats",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra08_area_interp",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra09_rir_weights",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_ra10_evidence_stats",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rm01_schroeder_spl",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rm01_spl_level",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rm02_target_shape",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rm03_auto_tune",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rm03_band_gauss",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rm04_phase_thresholds",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq01_seat_bin_cvar",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq02_step_schroeder_t60",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq03_welch_noise_spl",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq04_headroom_drive_verdicts",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq05_capture_alignment",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq06_tone_render",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq07_abx_binomial",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_analysis_quality",
+      "module": "wolfram_rq08_delay_oracle",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_ac01_cli_spacing_score",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_ac02_apo_roundtrip_gap",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_ac03_benchmark_stats",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_h01_fir_bin_rounding",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_pl01_tonal_regression",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_pl02_plot_response_trace",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_qa01_clock_phase",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_qa02_heldout_perturb",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_qa03_seed_matrix",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rc01_wav_decode_dtft_calibration",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rc02_route_matrix_prediction",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw01_intake_overlap",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw02_windowed_matrix_dft",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw03_dsp_fir_convolution",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw04_crossover_bounded_sum",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw05_electrical_headroom",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw06_velvet_support",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw07_scorecard_pruning",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw08_stimulus_binding",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw09_scaled_replay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw10_from_measurement_slope",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_workflow",
+      "module": "wolfram_rw11_hybrid_grid_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_export",
+      "module": "wolfram_ex01_apo_biquad_gain_delay",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_export",
+      "module": "wolfram_ex02_delay_padding_matrix",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    },
+    {
+      "from_target": "oracle_export",
+      "module": "wolfram_ex03_rendered_convolution_taps",
+      "to_target": "oracle_all",
+      "test_names_unchanged": true
+    }
+  ],
+  "original_file_hashes": {
+    "crates/autoeq-qa/optimizer-benchmark/manifest.json": "0c6e5e6c5e43ffee9b38c2c6b915d18209a1dd538ebdb58ddaeea9bd71055390",
+    "crates/autoeq-qa/src/bin/optimizer_benchmark.rs": "8c2db6ef4d580e793038ae71e5735ee873cc7bc3a694b991a71fe5e5a8bbf4b5",
+    "crates/autoeq-qa/src/lib.rs": "f990659f044db2829339239eb182e11adf5b4c789954cf1730f9d1c22af2b0f0",
+    "crates/autoeq-qa/src/optimizer_benchmark/controlled_cell.rs": "804ea9d1893410077b89e0bd56f5f551078a3c6146951c9756ab111276213412",
+    "crates/autoeq-qa/src/optimizer_benchmark.rs": "2ce67bf0e18fce3bbfbb318309f5cfcf33397b7ed3226540b9862f43193d0990",
+    "crates/autoeq-qa/src/optimizer_benchmark_sources.rs": "81b84be516c9014cc4e9ac20208dc4d9d733c82c1270417fba3d35fb8b3e0407",
+    "crates/autoeq-qa/tests/negative_controls.rs": "23df82ff71ce7c28ec91c59cddaa77a032466646489478d8874909142e1718f3",
+    "crates/autoeq-qa/tests/negative_controls_app.rs": "864fb698162da03b1661ebade1c834b13dc46bdad26f6fea02fdc54aaca2b85e",
+    "crates/autoeq-qa/tests/negative_controls_core1.rs": "56ec187bacdb47a027cec0df3c21e08b3096445b2341bc4e16d25d61991481dc",
+    "crates/autoeq-qa/tests/negative_controls_core2.rs": "9810fc083e5060037aaa6f46638cc6a0fb4876719825fd6d5a58df752c9aafcd",
+    "crates/autoeq-qa/tests/negative_controls_enga.rs": "05fdf345e240270f3c5a249f3bf889e38e4aadefcea906df179a49d48da0c110",
+    "crates/autoeq-qa/tests/negative_controls_engb.rs": "e23e4a97087886b6d8d92fa0b25103a81576b48d8e994e834f96cf25ac12c848",
+    "crates/autoeq-qa/tests/negative_controls_engc.rs": "80ff555268452cb30904d813723d3381ee14ea8b619b7d6f8036d90ffed78eb4",
+    "crates/autoeq-qa/tests/negative_controls_engd.rs": "f33e4da52eb0e11f0e01409270df8a743c99b230ef3754db09ae07d15fcde9c3",
+    "crates/autoeq-qa/tests/negative_controls_expquala.rs": "1a168e8ed63a98d0069d339c57984ed9e6c28cdbceddaf923318258c82846df9",
+    "crates/autoeq-qa/tests/negative_controls_meas.rs": "6caca5dad906a759f8c923b1a2992fcb7b2249e0fa005e6ba5f7dd28ce3076ec",
+    "crates/autoeq-qa/tests/negative_controls_model.rs": "840a5c9edac1291fe86a7d72a64acc1df8b45ac5fffa45420d78fb631ff7e4a9",
+    "crates/autoeq-qa/tests/negative_controls_optima.rs": "8e33a1f6a0ffb7dae6ed8d7176a1bcab9ecbd2828872512a0a09208e876ea207",
+    "crates/autoeq-qa/tests/negative_controls_optimb.rs": "84c60b71fda4d179d1bc54faa199c03ffef0d574437a7b272897d1afecc5d918",
+    "crates/autoeq-qa/tests/negative_controls_optimc.rs": "de026151002dc00786f874b16973ec575c18805dcecc5baa9d21825806099de9",
+    "crates/autoeq-qa/tests/negative_controls_qqsa.rs": "1d7d31a44c9d895aaef16ce7f3acb98a7d8cba5fb09977134219bfc86654d6b1",
+    "crates/autoeq-qa/tests/negative_controls_raa.rs": "0da441d6bce85197a99b236442acc20912721788e9b037eb7baf79cfb6818e7d",
+    "crates/autoeq-qa/tests/negative_controls_rab.rs": "3e0107eed74dc5bbd53704a580932fbb731797df6219a3803b316750fd066a2a",
+    "crates/autoeq-qa/tests/negative_controls_rac.rs": "9edfc0dcb88a72c53906b1c5249f1b9570e64e3a19095b703067cbc2487875ed",
+    "crates/autoeq-qa/tests/negative_controls_rw1.rs": "f1a15dfbb8abbd5828b7e87f8c903ee5a21671dd9a15f89e5a8796db6285972b",
+    "crates/autoeq-qa/tests/negative_controls_rw2.rs": "5ad7409471ca1689f121665d8d5154b04ed8984f935171f6ebeaddf476347e5b",
+    "crates/autoeq-qa/tests/optimizer_benchmark.rs": "f05c168db16f30045c7c57c6c91fd9ae1e1a85c36be130738234ac4dfe7af593",
+    "crates/autoeq-qa/tests/oracle_analysis_quality.rs": "aee0ad799a1cc5f05dd119f8ed0f8493f234feae476bfee991011ffd44b721a9",
+    "crates/autoeq-qa/tests/oracle_core.rs": "aee096ffc0796fcb1ce46009aa9b0a7646dd652cd88918b7dd403ad503e3a622",
+    "crates/autoeq-qa/tests/oracle_engine.rs": "db0ecbca46be1412d111430fcac69ce814334da24c3b61c6cca597d3c7dbaa07",
+    "crates/autoeq-qa/tests/oracle_export.rs": "1518147ce37f303e0933f23fbefc72fb0ebe298beda1ac237214dadf3c422ac7",
+    "crates/autoeq-qa/tests/oracle_optim.rs": "0998a7ffb23b847fa8f8a1ba35a0176acd71bc1625fc51b0af9bf0b3f0385106",
+    "crates/autoeq-qa/tests/oracle_workflow.rs": "4e00edecf75c35eaa822f801361c56465f84e4e6572b9eb21090515fbd720baa",
+    "crates/autoeq-qa/tests/qa_contract/public_workflows.rs": "81975bfbca56e8868153df4e7984c3d071056d805dc7296955c8848c8b490133",
+    "crates/autoeq-qa/tests/qa_contract.rs": "9188b57a3c0b024acdb5f32839f3be06ee963368717ee43230b54440eaca12b1",
+    "crates/autoeq-qa/tests/wolfram_ac01_cli_spacing_score.rs": "00e0a9b9eec3fd6a981d3e9dbb05a5772230fc299457358c4adc58eb8e2416c8",
+    "crates/autoeq-qa/tests/wolfram_ac02_apo_roundtrip_gap.rs": "20ddf7290bb5ad1299d64d7addbcb82450262136ef84b82791d7cf1da0459213",
+    "crates/autoeq-qa/tests/wolfram_ac03_benchmark_stats.rs": "6b8d074f02f2c2148b42b5b0a3d7bc3127df57eee3c06a8cbbbb9a871f5042b2",
+    "crates/autoeq-qa/tests/wolfram_ar01_impulse_store.rs": "205a419f121a56b4c7dd579a16a4b0218bd919c5d2342e379222f98aedbca34a",
+    "crates/autoeq-qa/tests/wolfram_aw01_workflow_correction.rs": "c8fb89ee64b358482c8d133bb2177e19cf84b4d1ef2023bbe87128045c293135",
+    "crates/autoeq-qa/tests/wolfram_c02_free_types.rs": "fbc88aaa97ce17843786daf6721aae123df3b9810bbe6535d3277c6bd6fe3f23",
+    "crates/autoeq-qa/tests/wolfram_c02_peq_layouts.rs": "6564169122adbd93a431718e6b9788e12a194f95653cf04eba975261c836d2b3",
+    "crates/autoeq-qa/tests/wolfram_c03_logmean_slope.rs": "abda1dec11f96e894d37b5445a0bbe171f9d98048cd6a66f01e15bbbed262b26",
+    "crates/autoeq-qa/tests/wolfram_c04_gaussian_smooth.rs": "3437b7488394983a846e46335011f2c0eb937fc175d159c4fe44ab72a4e72f09",
+    "crates/autoeq-qa/tests/wolfram_c04_octave_smooth.rs": "6d2c2f6bf9af62507bf65f8e03852f0fbf864d01bbfc0ccb76cd6c0b964f5594",
+    "crates/autoeq-qa/tests/wolfram_c05_minphase_flat.rs": "2e7746a3ceb7b10e908f3725d3d57fe6aeaf66d555ad1c1d81f40e668bce9faa",
+    "crates/autoeq-qa/tests/wolfram_c05_unwrap_delay.rs": "e711ffff662e4d9c36e3d0332950cadad0a00b78226e2851cfe3b8e4080c7ab2",
+    "crates/autoeq-qa/tests/wolfram_c07_quality_geometry.rs": "21a46de87c323c3372d37ccadbfbbbd632803bcdcc8e0aca858df3da88d65ff2",
+    "crates/autoeq-qa/tests/wolfram_c08_local_q.rs": "f42fd121867aa1085d72a04ed3a054b2d2802f86a45fcaca87826aab49637726",
+    "crates/autoeq-qa/tests/wolfram_erb_quadrature.rs": "1efef2b7477283242d904771c04e04c3333857ea5f1dca63e7ef48210b1b3ce3",
+    "crates/autoeq-qa/tests/wolfram_ex01_apo_biquad_gain_delay.rs": "0eb43b8ff26df15c86f012a6161ece8e3dd1157898a8d74fe37de19db118c058",
+    "crates/autoeq-qa/tests/wolfram_ex02_delay_padding_matrix.rs": "2d80d0d157ed0efe45916f1296c56684ac08d9d531fe4e3faa9110aed725e67a",
+    "crates/autoeq-qa/tests/wolfram_ex03_rendered_convolution_taps.rs": "cf28865d2c19cc5afca4e6290067bd5572d2f54073c11be4174568d9d0661872",
+    "crates/autoeq-qa/tests/wolfram_f01_fir_flat_designs.rs": "22460a7b60e363426a47024a606b195eed75dd147d8a3b47252e3a885c66803d",
+    "crates/autoeq-qa/tests/wolfram_f02_target_grid_wav.rs": "0eb88ad4fdf08298c3a4910b1d9573f1401d9983fcaa41a9b0731aeac48d884a",
+    "crates/autoeq-qa/tests/wolfram_fir_response.rs": "9fbe01138741139c64e012da6eb43bf0035f23f482765318a8545d41f84e136d",
+    "crates/autoeq-qa/tests/wolfram_h01_fir_bin_rounding.rs": "abab8bb67fce1e7181daca0662ed409db9e8d74d1bc7883bbc2600496d7f5cd6",
+    "crates/autoeq-qa/tests/wolfram_log_interp.rs": "6373515f81e036066970d662ed4e09d38a7b86ab3d0de26242151a05c5b1b5cb",
+    "crates/autoeq-qa/tests/wolfram_m01_pir_prefscore.rs": "90bf433649b1100e24607fac6d7b4f1e55d9798b6b46a930639ee99191ccd5e2",
+    "crates/autoeq-qa/tests/wolfram_m02_avg_coherent.rs": "87fcbaee7afb43be4e31ad1eb2904857b467bfc89446884dff037e1a00686120",
+    "crates/autoeq-qa/tests/wolfram_m03_mic_clock.rs": "434d03efd211676acba5320d2509ea45a691a6f42dbd1e18d556a31b769e3d57",
+    "crates/autoeq-qa/tests/wolfram_m04_ingest_adapters.rs": "da745db2388f690cdad665328ae00c85586aac38ea52f4b0a10be1474500e929",
+    "crates/autoeq-qa/tests/wolfram_o01_asymmetric_weights.rs": "118643379ca513f44c598a9fd523bde681362892926cf3a695471f20e5670d43",
+    "crates/autoeq-qa/tests/wolfram_o01_scalar_weights.rs": "61231124c2387041e8bdac9d810a499d022c04325ec1aab59536b03e252b2991",
+    "crates/autoeq-qa/tests/wolfram_o02_scalarization.rs": "cd1b731e701d7a46a12cea3095ab0d2b56be66d6f6d6e2f06b4f5b198d97ee47",
+    "crates/autoeq-qa/tests/wolfram_o03_tv2_stencil.rs": "ce020ddbbdcffba507c0da86717e749fb33fc960872db81cd7373a31cbe8af16",
+    "crates/autoeq-qa/tests/wolfram_o04_bass_boost.rs": "d9b9ee3e887455c810a1739573344fac0f0b03f51ee7c42f87cc2bb5b12c0dfe",
+    "crates/autoeq-qa/tests/wolfram_o04_deadband.rs": "f56fe22e3ab9f1fbf6eca3ff7d98dcddf5cdf15cb825fd44717684afd0b12692",
+    "crates/autoeq-qa/tests/wolfram_o05_constraint_penalties.rs": "66bd3a8d0e188a7a79ffc6477941e9035d0cf8941aa7e324765c07680f442515",
+    "crates/autoeq-qa/tests/wolfram_o06_initial_guess_bounds.rs": "00b93f1dafca5d42e07d2a5fcbb98805309eba5447a570c76f768aa9f816db37",
+    "crates/autoeq-qa/tests/wolfram_o07_crossover_sum.rs": "07c58b42c8f7ccc526e3278985345f00dff26d2a4944a11d55e4dbcd29555852",
+    "crates/autoeq-qa/tests/wolfram_o08_joint_multisub.rs": "25ed8c50eef89655e22e269873dc4b8b90abb3884de79064d4734bf2a4c2fcfd",
+    "crates/autoeq-qa/tests/wolfram_o09_group_delay.rs": "789ea0122ac28e185fa2540173e00adf8044a4fffe46c54673f7dd83a9cffff2",
+    "crates/autoeq-qa/tests/wolfram_o10_bark_sharpness.rs": "f84782334630c02c0aa43dcd8dcffa709c5f5ef336e05d2daa59b99db29d3c61",
+    "crates/autoeq-qa/tests/wolfram_o11_temporal_ir.rs": "d9288d95c083a695b3bd968fdce6323a2072a7ec07f0e2acd1a8f7ca2ca51f39",
+    "crates/autoeq-qa/tests/wolfram_o12_pareto_mixed.rs": "d3adecd34821d522e3d7b2b6bdb73499d98a210ba95b1d2f7b7aa95399396ae3",
+    "crates/autoeq-qa/tests/wolfram_o13_backend_objectives.rs": "9bcaac19125026a302cdb2f7115a33712d03ebc78f62930d7548ce936203b4ab",
+    "crates/autoeq-qa/tests/wolfram_o14_rerank_ordering.rs": "299eaf8058ebd4030a54cf719712cb4f14561234a8ce6efb89a34fb9dedce9a1",
+    "crates/autoeq-qa/tests/wolfram_peq_response.rs": "4a52d2625a7c2b6e09c2cdbec5df408a88a761eec08ffd143c9708a6d6ddab7d",
+    "crates/autoeq-qa/tests/wolfram_pl01_tonal_regression.rs": "82295399ceb7a2d1720afde16cf410adb7959e49fa6453c20fbd4bebcf2badfa",
+    "crates/autoeq-qa/tests/wolfram_pl02_plot_response_trace.rs": "2159aa9ae7938ec724a675b3570eeae302f1be93a09c5e58fc9f300773cf3bff",
+    "crates/autoeq-qa/tests/wolfram_qa01_clock_phase.rs": "42ff2c134c62b8803b330e92a8323522284d8a21a831bb51e3975f7755d69bd8",
+    "crates/autoeq-qa/tests/wolfram_qa02_heldout_perturb.rs": "6ddd9c5aeef6e2d1adf250c7b121c6a708ebb17be9a9ec8c82bd59d29350747a",
+    "crates/autoeq-qa/tests/wolfram_qa03_seed_matrix.rs": "021a8196752406994a37d0a5dae728bbd5f5544beb652b336087c1c27b79f620",
+    "crates/autoeq-qa/tests/wolfram_ra01_hybrid_grid.rs": "52340e394eff6527f07ea32764823c61c3733e334a3a463435727572e52bf035",
+    "crates/autoeq-qa/tests/wolfram_ra01_log_slope.rs": "c4b4d68bb9236673a6fbd451ff4b4d860f722c15d5890c26957d7e081adab3c0",
+    "crates/autoeq-qa/tests/wolfram_ra01_lr24_crossover.rs": "3f53347002abded2e5b5ba630b3c5cefd8971f41c0e67425eede47a7f914d745",
+    "crates/autoeq-qa/tests/wolfram_ra02_arrival_alignment.rs": "228eb444839f8aca72f981a25bfe6c1ee87801d715cb4b2707b0493530b0bd35",
+    "crates/autoeq-qa/tests/wolfram_ra02_phase_slope_delay.rs": "65ead29528a7899e600f10e945ad6c1fcfb74f2b5f18f3c31f0caebe22978779",
+    "crates/autoeq-qa/tests/wolfram_ra02_probe_delay.rs": "c8d7027903c3106632d37641b121460854995c55fb83ae410eb99f995180da72",
+    "crates/autoeq-qa/tests/wolfram_ra03_mode_null_masks.rs": "d9a140659415f23d05bcbf8c227a690f32e9b6a6d099cd6fd777d64c7a8f0b66",
+    "crates/autoeq-qa/tests/wolfram_ra04_decay_severity.rs": "b2e9f6eea960b67d285b43604e2393afde19d229b391252c6038348a64e5dd21",
+    "crates/autoeq-qa/tests/wolfram_ra05_delay_excess_phase.rs": "c70fbc099b2b45584c0f0c88d379773180256dc8a33d705cd6a7d422e15d865d",
+    "crates/autoeq-qa/tests/wolfram_ra06_reflection_cancel.rs": "8550107dda2340083c97c2841b4bfdb5c8f4a0ed1a0c87b5181ceeda26a038e8",
+    "crates/autoeq-qa/tests/wolfram_ra07_spatial_stats.rs": "3cffdc4a2b8201448a4be8e02c80448be86471c22011e20531da77e4de794f31",
+    "crates/autoeq-qa/tests/wolfram_ra08_area_interp.rs": "a77f8b4241d3b1163139968ee3ec5cadd58d6d7da5a3d0c2681c445acbcbb7d3",
+    "crates/autoeq-qa/tests/wolfram_ra09_rir_weights.rs": "3f53e5a3a628f7519c22098d3a19f3f06f0b5b323d27e7ead8713ee608cfd14f",
+    "crates/autoeq-qa/tests/wolfram_ra10_evidence_stats.rs": "15a12955ed60fdd0ed830dc2fa44df5d91e48f64c0b5e82caae25d1c3052c2ec",
+    "crates/autoeq-qa/tests/wolfram_rc01_wav_decode_dtft_calibration.rs": "918b6797b83b7dd2197c19f24cc4abd4bd95e382ccd70f20cff8b91c696831cc",
+    "crates/autoeq-qa/tests/wolfram_rc02_route_matrix_prediction.rs": "73f44afcc4409539eb47b1c3ee64162ef81589b06ec7d438a661f2b922b99b53",
+    "crates/autoeq-qa/tests/wolfram_re01_dsp_gain_delay.rs": "334be17e01dea18f17030b22fa07fdb976fe96322bebadb16e8c824e0fa1b8da",
+    "crates/autoeq-qa/tests/wolfram_re02_preference_shelves.rs": "0f1db070f36cd54af1526c4e91f2b74fbb11e035b4585c75c30dab6d2baa815f",
+    "crates/autoeq-qa/tests/wolfram_re03_candidate_loss.rs": "60bd48c0d32e92416e02eb9086e1792c507f184122c88759088e93b366986433",
+    "crates/autoeq-qa/tests/wolfram_re04_pruning_cumulative.rs": "f7f08ba7e572bb0631ec86e17f29ce83c10a2de5f89c5939c2bf7846e27c5095",
+    "crates/autoeq-qa/tests/wolfram_re05_fir_residual.rs": "0d5bc07449e89e5d6638d8ae7c7d3aa4bdd58f2e15b12f71aac84b4bbd131af6",
+    "crates/autoeq-qa/tests/wolfram_re06_fir_integer_delay.rs": "2675531c4b42afe26e181993b9b2a2f61cef1d369341ec6b88a9a1945e25c740",
+    "crates/autoeq-qa/tests/wolfram_re07_null_mask.rs": "c3e9cd0c78c59aeabec3d94bd6f2aaf1d4a0df65c882028418be1f5ec64ec7bd",
+    "crates/autoeq-qa/tests/wolfram_re08_split_band_sum.rs": "f9b79e3bbb497d6820fa34c115d14e56f6558f40f0cf33df278891eeb87bdab0",
+    "crates/autoeq-qa/tests/wolfram_re09_kautz_bank.rs": "c54974911660d4db8380be28d06b1d1661f5fe1f605094cdfbedc3d5f729aabc",
+    "crates/autoeq-qa/tests/wolfram_re10_branch_sum_levels.rs": "c4337a2982a5fd1e080f2005f3018109c5db4e64b1e86a2df8f5c487e484d667",
+    "crates/autoeq-qa/tests/wolfram_re11_summation_lattice.rs": "c0da6044bc3a2256987ad99879f10c7c8c497b3b7f5bead1596fe0dd5af3b4dd",
+    "crates/autoeq-qa/tests/wolfram_re12_gd_coherence.rs": "45bde11b37bafc31c097240f8952573f6c9d789dc80f329d32bc9122ff203824",
+    "crates/autoeq-qa/tests/wolfram_re13_mso_seat_response.rs": "349e1dae79aa8d1dc237c9e3ec1fd701418e1ed9cdd5d56f2c79c1a05a899214",
+    "crates/autoeq-qa/tests/wolfram_re14_combined_curves.rs": "51e2963410f5a3092bc9a820bc07ed7cb288f276cabf00f6285d8e108136c190",
+    "crates/autoeq-qa/tests/wolfram_re15_modal_svd.rs": "ca0147c2d79aeecf537af39ab37767f88ec5b1f1a2c5083b973304892b0e66db",
+    "crates/autoeq-qa/tests/wolfram_re16_spatial_quadrature.rs": "7144f90b3c07a0759bbb45763c87a58de17efd7cda07c63f13dd9ac251ea04f7",
+    "crates/autoeq-qa/tests/wolfram_re17_interchannel_deviation.rs": "f7fba1fff53a007e9d01cb4f079aa662aa2e2802459f4078415317427280187e",
+    "crates/autoeq-qa/tests/wolfram_re18_dba_sum.rs": "dc9642acb5ad571d5c99999aa91e0668c3ca8ef04f651c3c8a4f004266bf5381",
+    "crates/autoeq-qa/tests/wolfram_re19_bass_power.rs": "4d7a7055e4b43b2d00578e822283593ae4dab763c43e4af3d44c4b5f7337ff73",
+    "crates/autoeq-qa/tests/wolfram_re20_drr_velvet.rs": "5296b424298150b022065df4fe8c70ec7ffa20e1042e0b52b4cd52ffe80f5185",
+    "crates/autoeq-qa/tests/wolfram_re21_eq_response_correction.rs": "f4ae97218f6f5fb4c60b06ce174cebd641bdf95f060d811f378d7b05b310272c",
+    "crates/autoeq-qa/tests/wolfram_re22_limiter_gain_envelope.rs": "85aafb87d2a7b95a450897bec1a5f8e0e8786fe7b39d37c382a99800acb9de72",
+    "crates/autoeq-qa/tests/wolfram_re23_ctc_regularized.rs": "3cd9dc17979f2a21f24b15f2d3ff4f762789278aac21f4481cfd4fc13a0d11ff",
+    "crates/autoeq-qa/tests/wolfram_re24_cardioid.rs": "f95eb6e511cd0464e3c7e5dc301f7e3eb36cf565ae0f51ebc11dfe9c808f7ce3",
+    "crates/autoeq-qa/tests/wolfram_rm01_schroeder_spl.rs": "ffdd06f3a20e68ec941469e8253d1a37c338ba22669da2bf407cafec6f65117f",
+    "crates/autoeq-qa/tests/wolfram_rm01_spl_level.rs": "502495076858b8d797e05b84deed02320ba1a63786e9058f123693b46c63b659",
+    "crates/autoeq-qa/tests/wolfram_rm02_target_shape.rs": "bee012919b051d8b07b3303baf2094bca068fcde6c73ed72f769e23bc9974b0c",
+    "crates/autoeq-qa/tests/wolfram_rm03_auto_tune.rs": "3324e6ce58078dd59d578ae1216214f6dffc845f122d4de914492de465088221",
+    "crates/autoeq-qa/tests/wolfram_rm03_band_gauss.rs": "0acfac5554f5588ae5b83dcfbf60f92d3e836c866d3e52f43de0ab62c62cee67",
+    "crates/autoeq-qa/tests/wolfram_rm04_phase_thresholds.rs": "2f7c3c17d44752047ca702ab6f6a5726e19fde9e8ce9f93214e54008bd159254",
+    "crates/autoeq-qa/tests/wolfram_root01_facade_passthrough.rs": "6e6032bbcbe2578bf67657486a8296b9cd14ceade3faeee406c7a94d57c4438c",
+    "crates/autoeq-qa/tests/wolfram_rq01_seat_bin_cvar.rs": "7fa8d2b27573f83a67af84e13049225111f0d39e191f6bc70c92554580edfb39",
+    "crates/autoeq-qa/tests/wolfram_rq02_step_schroeder_t60.rs": "c3bb0d1eec30e08106bf625b1424a0f43dc11fb11a2354e63b4f281d220d7ebc",
+    "crates/autoeq-qa/tests/wolfram_rq03_welch_noise_spl.rs": "5edfe52755c79edef2dc53879405e3a801e2e21cd79d02d5a7dd9ce55d306438",
+    "crates/autoeq-qa/tests/wolfram_rq04_headroom_drive_verdicts.rs": "af660803b1f6f183b03c523b2b1352743e73f64df70c52bf1310687166592392",
+    "crates/autoeq-qa/tests/wolfram_rq05_capture_alignment.rs": "7c8fa2646e286a068b892dc1813a79a242646b1db05034eeeaf39640077bd8b8",
+    "crates/autoeq-qa/tests/wolfram_rq06_tone_render.rs": "5a3f050b21657a14887e2f71f92d2d5f059522bf24fb1e705aaee2e5c0179894",
+    "crates/autoeq-qa/tests/wolfram_rq07_abx_binomial.rs": "7727a4823728488a3cfa284319475ed4a906991aa34ea1218057f1418348590d",
+    "crates/autoeq-qa/tests/wolfram_rq08_delay_oracle.rs": "13bb3b3bfa7a25d95a545090632bf7c3b4c999458504a23b7dd32176674c397d",
+    "crates/autoeq-qa/tests/wolfram_rs01_flat_tilt.rs": "6b4e2251233f469f5abd0500f3a34e4a21bf56dbeef90a1a434d3c2f36dc1472",
+    "crates/autoeq-qa/tests/wolfram_rs02_coherent_sum.rs": "a7802718f4c0ef1ddf5ca92e7be1ed4d1813bf7db97b4fa62f5ef1ee378f8bb2",
+    "crates/autoeq-qa/tests/wolfram_rs03_tone_bank.rs": "6ed1ecc3bc5ace64bdff141010f1a46deb25de8ed6fc888b4d4bb77668933d2f",
+    "crates/autoeq-qa/tests/wolfram_rw01_intake_overlap.rs": "e94e3de8a4bcb167bf6c33bd6cab3120fecaf7aaf15412b13fae1e8548115d38",
+    "crates/autoeq-qa/tests/wolfram_rw02_windowed_matrix_dft.rs": "af2f5ab796ebff219b3b7a1b4558eb9a23632c7625f31ce6306686c64e55a40a",
+    "crates/autoeq-qa/tests/wolfram_rw03_dsp_fir_convolution.rs": "fbd10ae1083c745c55068e24c94f8ecb70d6166b3af61ef19262d6ce526530f2",
+    "crates/autoeq-qa/tests/wolfram_rw04_crossover_bounded_sum.rs": "0d0c2c90cedb3c26fe996e88178fcc9c216749922f800f08e4eba7566c8b6868",
+    "crates/autoeq-qa/tests/wolfram_rw05_electrical_headroom.rs": "79e194c5b977a0bccac3ad6798311bb3a8cf15d6744446e39fedb8141d37bfec",
+    "crates/autoeq-qa/tests/wolfram_rw06_velvet_support.rs": "6c66a5d96e2af935113828e6f2dc6691b0ac7aeeb5ab3db97338cb38185d51cd",
+    "crates/autoeq-qa/tests/wolfram_rw07_scorecard_pruning.rs": "df6633e51cd8f0a08e353d52f403a4ec6ae3ae5c1f96b7eb0871da28bb7d90b1",
+    "crates/autoeq-qa/tests/wolfram_rw08_stimulus_binding.rs": "4a8fc7729078538d3f2fe77bd1ce3a3bfbcd472c5b2b971336e7962b4e7795ea",
+    "crates/autoeq-qa/tests/wolfram_rw09_scaled_replay.rs": "065694c559bfe6e2a99d8dcf487bbdc6606f4c262682920a80e013170da78e67",
+    "crates/autoeq-qa/tests/wolfram_rw10_from_measurement_slope.rs": "f4d5ce7d4660f2ce2ccab8d7c5763a95f66bd4ac205b4a3f1a0bc20808c6e19d",
+    "crates/autoeq-qa/tests/wolfram_rw11_hybrid_grid_delay.rs": "2fbd13129ca34c48674b07205d715ae15dbd83f9d51c7abc4458a3d5b782cc06",
+    "crates/autoeq-qa/validation-manifest.toml": "f784c5f55b6ed5e670b769e9fbfb2fa2b7911dae7c0d74f8cf27aec6c5260f93",
+    "crates/autoeq-qa/wolfram/ac01_cli_spacing_score.wls": "9401aab8106f569a132cf6f05bbe852675fbf46ef839dcb1c5f45089c6a46fdd",
+    "crates/autoeq-qa/wolfram/ac02_apo_roundtrip_gap.wls": "8ad0a4a0008ce55d28691c24cec018a24add95b2363316012f23611e2843e5eb",
+    "crates/autoeq-qa/wolfram/ac03_benchmark_stats.wls": "b3d810033cdbd43be54c2d42ffc709431b11181ced90436af930e79b35bcf0ce",
+    "crates/autoeq-qa/wolfram/ar01_impulse_store.wls": "c1b80dca6fcfb7af381cf2e08c13906093735f6b50a6f7a79f79c847294034a9",
+    "crates/autoeq-qa/wolfram/aw01_workflow_correction.wls": "67ebd4ff5560b671fbeb4dd420be64e2c20b8e54b47fa9edff54361caee42d57",
+    "crates/autoeq-qa/wolfram/c02_free_types.wls": "4d6b84f5e82eecb844b2092e7637a95c5930ce26c4d77f464f4c0fda3d8a15f6",
+    "crates/autoeq-qa/wolfram/c02_peq_layouts.wls": "af10a50cc7faa926f8fa3155606a8722595fab6ea00d093a9c7e035e8919a7c9",
+    "crates/autoeq-qa/wolfram/c03_logmean_slope.wls": "f777d6dec43ac7b961474f5d33108320fd0a2276c616e3daaa04657d4ae35c23",
+    "crates/autoeq-qa/wolfram/c04_gaussian_smooth.wls": "1cb0219827fec27ed77199ade670e924912faacab25409a93433e435bd7be564",
+    "crates/autoeq-qa/wolfram/c04_octave_smooth.wls": "592d02a6382f9c45836cde11463b7a96ef17cdac5fe6c0ebcca38b4929446d76",
+    "crates/autoeq-qa/wolfram/c05_minphase_flat.wls": "1ce46ad4faaa2ccb906c77eea0aa896fa4281fc649f1a83b91971fb9d060f299",
+    "crates/autoeq-qa/wolfram/c05_unwrap_delay.wls": "30c15de01c123333124c050a36330c40ffd197e68ce2f530c0cca7babdf32165",
+    "crates/autoeq-qa/wolfram/c07_quality_geometry.wls": "351530154a4fe61bb571aada510b5c0a627d6af90c98b212ca145b0a5b56480e",
+    "crates/autoeq-qa/wolfram/c08_local_q.wls": "bb627ca34836d8b49402e316eff0cc7c22ccbcd428a281e5b6174fbe7a2725dc",
+    "crates/autoeq-qa/wolfram/erb_quadrature.wls": "ae59c7c51f72a4382fbdbafee160b48c471d8e04367972febd108607a219c77f",
+    "crates/autoeq-qa/wolfram/ex01_apo_biquad_gain_delay.wls": "62a16d98fb06eda4eb3419360a0684902602a8bd98ee37131faeff6d0268e742",
+    "crates/autoeq-qa/wolfram/ex02_delay_padding_matrix.wls": "850dadcd685a9dee109f262feecfabb5d34033bf66b72e35f5e142b6eb035865",
+    "crates/autoeq-qa/wolfram/ex03_rendered_convolution_taps.wls": "05a6575af9a51a5e93001877a8ac121bf814583d283d6fcefaa0dc3f533172a5",
+    "crates/autoeq-qa/wolfram/f01_fir_flat_designs.wls": "c6f714830462b43b77712313adf07dafb8ac0c9c729ab214ab019ad2004b6dcc",
+    "crates/autoeq-qa/wolfram/f02_target_grid_wav.wls": "e78480876b9a4061f6f1b35d98c1cae9cc343108f944aaafe93893856592fb4f",
+    "crates/autoeq-qa/wolfram/fir_response.wls": "018bd4dd6adba9b3022c1de7c08c5957c25982ada0c9c2f231bf596834fd481e",
+    "crates/autoeq-qa/wolfram/goldens/ac01_cli_spacing_score.json": "6ac8a7161b03e15acf823d0ac8ff20fff23e411ba01ad03d5affc8e519b0cf0d",
+    "crates/autoeq-qa/wolfram/goldens/ac02_apo_roundtrip_gap.json": "a30fe8f2879597a2ccc1a7a65305458159c687f58f9cc6cf3bc361cdc2fca2c6",
+    "crates/autoeq-qa/wolfram/goldens/ac03_benchmark_stats.json": "9bbf47b07e8d5b80d4df97cb450f8960e763a3e61783ab93f1204b6960237abf",
+    "crates/autoeq-qa/wolfram/goldens/ar01_impulse_store.json": "a64f96d0bb0d0c6546cbfa4b609922c9ced50544e0cb6f592fd2583b61faee66",
+    "crates/autoeq-qa/wolfram/goldens/aw01_workflow_correction.json": "bd2932dd3bee9a2ec5c60c55176b9814cef1cd3e73e1a1ab5dc07aa819431ecc",
+    "crates/autoeq-qa/wolfram/goldens/c02_free_types.json": "31d2e24f17d732b63f356a72dfc8da75ccbb500a1d17e0589edf8a4e4d15b066",
+    "crates/autoeq-qa/wolfram/goldens/c02_peq_layouts.json": "b5080e54d63c85ffb499bd9526372032b9ed4240d370c5086880a6edd8b8cf3c",
+    "crates/autoeq-qa/wolfram/goldens/c03_logmean_slope.json": "5c943d2e56f8d8632ea2581e12041162a189ead27ec14ce82b463f47aa328353",
+    "crates/autoeq-qa/wolfram/goldens/c04_gaussian_smooth.json": "b867fbc90217d35665dee30b7708f2d32adc168cdcce280d5ed0a012cfcb2048",
+    "crates/autoeq-qa/wolfram/goldens/c04_octave_smooth.json": "2b53a414712d087c77bd6d03eea7947f4c0aaecf9e1bee9c8fb49502fe17ae76",
+    "crates/autoeq-qa/wolfram/goldens/c05_minphase_flat.json": "9353e60ebc99bcb34a2c6512e60da501aa0c71a44f0f53b594348cb6206a944c",
+    "crates/autoeq-qa/wolfram/goldens/c05_unwrap_delay.json": "7e9dc85535252b720d086d5c74e9f066a35c880b7e3a1cc296f1a62d51b6e7ca",
+    "crates/autoeq-qa/wolfram/goldens/c07_quality_geometry.json": "11d2801d200b090775b9fa6ec18eafc45599411de5d4fa72eb970ac496654cd5",
+    "crates/autoeq-qa/wolfram/goldens/c08_local_q.json": "c7f4ae231a40b5f1437a142197d415eed3578e62bb31b9dd3f1e1f20f71e86db",
+    "crates/autoeq-qa/wolfram/goldens/erb_quadrature.json": "a0b87cf64017a3c84d1255cda732d569b336b78259efeff89cf8b1bd9af1fc69",
+    "crates/autoeq-qa/wolfram/goldens/ex01_apo_biquad_gain_delay.json": "bc6d597810fd68147ce6caa6e3cbf59573cef094e8cb2a2ed699585e66c9f10e",
+    "crates/autoeq-qa/wolfram/goldens/ex02_delay_padding_matrix.json": "f00c1c4e068e71bd42f2c962eab9d62db11811058cc71a97af769902cdb97fb8",
+    "crates/autoeq-qa/wolfram/goldens/ex03_rendered_convolution_taps.json": "d6af9ec7e86da5e8f6421cd4781ff8f7912b09071e02270873ec4528409bd948",
+    "crates/autoeq-qa/wolfram/goldens/f01_fir_flat_designs.json": "a133d9f5c88d42e21ff0cb33891899483a4755439a6e14cb4acf799a2788a71e",
+    "crates/autoeq-qa/wolfram/goldens/f02_target_grid_wav.json": "39fe73627c26a815a92d3e7eae0666e431ec999fd6a46250b9a551c0d4e544c6",
+    "crates/autoeq-qa/wolfram/goldens/fir_response.json": "6a9f90a69d82976e8574532f632216c2ca6fbb148bb75aa8cf1db0a325bc18e1",
+    "crates/autoeq-qa/wolfram/goldens/h01_fir_bin_rounding.json": "deb61b364bad3707119fcc9b7c3f388fe40719335e5764ff03876bc0270107a8",
+    "crates/autoeq-qa/wolfram/goldens/h02_scorer_sign.json": "aeccc202ce6aacea0dfd80515a4eed3ed2b37126c97d0fe612838b9fe2a258bf",
+    "crates/autoeq-qa/wolfram/goldens/log_interp.json": "c6a92bdfe063d7663fa938bce931b6e0af894a8322363e6a3da585eb594d6f0c",
+    "crates/autoeq-qa/wolfram/goldens/m01_pir_prefscore.json": "e09b3f68725ab21231322f0a5a18bdbe9f6fb2f5d77c331022aa8732165d801a",
+    "crates/autoeq-qa/wolfram/goldens/m02_avg_coherent.json": "7c62c444719f3260a2123965880c58777814fe6197c486e74a04067824b8c1bc",
+    "crates/autoeq-qa/wolfram/goldens/m03_mic_clock.json": "9f084f98d109e48f1b104d86040105a46a8b74cd50903712d44e5cf26a551b27",
+    "crates/autoeq-qa/wolfram/goldens/m04_ingest_adapters.json": "6a43b9c81048af09b566888b40f99c2e4b852233f3b768d70c8c808bc5e60fd0",
+    "crates/autoeq-qa/wolfram/goldens/o01_asymmetric_weights.json": "e94e2e984325a32195eeb5af1cabd13a00fa839ac9c3f53ca1a0b2d39b591790",
+    "crates/autoeq-qa/wolfram/goldens/o01_scalar_weights.json": "21f6a3b025a24e6d87be32381b31b54cf3bf29e80e350fa6f35e8cfe25faf3b8",
+    "crates/autoeq-qa/wolfram/goldens/o02_scalarization.json": "87e96125dfef61737d311b1a7e76c82adc6cedf06a889fab71b14ab9d06473c8",
+    "crates/autoeq-qa/wolfram/goldens/o03_tv2_stencil.json": "77bef59f44cd2e3072ea709335b8768ca56a97c6d2776cb810b6fa43565bf057",
+    "crates/autoeq-qa/wolfram/goldens/o04_bass_boost.json": "bf0867a4347a0fe42436102c5619f7b6ccd42900297609d876f5f2ae1ba24769",
+    "crates/autoeq-qa/wolfram/goldens/o04_deadband.json": "eeee8211cc52c4ea86c6d315a8491696586c8ec6b2a4b3710567eaef1af4b229",
+    "crates/autoeq-qa/wolfram/goldens/o05_constraint_penalties.json": "ae39924c151d54012afa80f49181c8551fe231a015f52b7be4df9da64369d49e",
+    "crates/autoeq-qa/wolfram/goldens/o06_initial_guess_bounds.json": "b22dfc3ca181986d2341af4e325716a395dfd72e6342b44859bf290d83ad6d0e",
+    "crates/autoeq-qa/wolfram/goldens/o07_crossover_sum.json": "80748f3247365c2ea0915ea13ae092f98bb7a0f3da9b2569efda0ed8d68b514b",
+    "crates/autoeq-qa/wolfram/goldens/o08_joint_multisub.json": "ad6890dfd67230e3ce2d2fc7b08b61fff5596ff564f563ae96b5292660401890",
+    "crates/autoeq-qa/wolfram/goldens/o09_group_delay.json": "7f1f875659f8ff691f5c7c84d53795ac3dbee9062d439efe47b0839adce42ef9",
+    "crates/autoeq-qa/wolfram/goldens/o10_bark_sharpness.json": "edfe7c62ff4a2e8eb1e33dae507def52d7342fba29b3d4bcc394ea9ee80c6d59",
+    "crates/autoeq-qa/wolfram/goldens/o11_temporal_ir.json": "b20bce0fac42cde4d30eaaba52eac56e87d60501e304c849808b4c28bab27568",
+    "crates/autoeq-qa/wolfram/goldens/o12_pareto_mixed.json": "8b076f3ba6e811cd4826fc2b2c7cb18bff9718b769e033144187be5df9021978",
+    "crates/autoeq-qa/wolfram/goldens/o13_backend_objectives.json": "d4786ac6bc09b9316c1a6abb6ca6c2e5df72ab8fdd4c0aabfaa8e5f8605ca9fc",
+    "crates/autoeq-qa/wolfram/goldens/o14_rerank_ordering.json": "46f411b8c1de33b9da9c67ffb2d1ec307d8e354596afc803522e59b5e96da0b7",
+    "crates/autoeq-qa/wolfram/goldens/peq_response.json": "feeabbaeb4a8e3f1e5b2ce07b22cd421eeca7289fa26b2ad201346d9717ed1d1",
+    "crates/autoeq-qa/wolfram/goldens/pl01_tonal_regression.json": "c09a5c16b098db779905fe1058da852338f0996bab88f7eee0dd66e0e8afd087",
+    "crates/autoeq-qa/wolfram/goldens/pl02_plot_response_trace.json": "fa29d30f3f859531dadacde2624ecbfe2e3d5864b7e91ae99623a0085185f79f",
+    "crates/autoeq-qa/wolfram/goldens/py01_dsp_smoothing.json": "0d53718b22f40aef113dbbd1fcaa654c98331174d1636f0219c94d588aaa1d53",
+    "crates/autoeq-qa/wolfram/goldens/py02_band_statistics.json": "50518ae60ecc166e7e1777ae43903f9f5efd072a2bc3bb2bf9896482712671e2",
+    "crates/autoeq-qa/wolfram/goldens/py03_roon_correlation.json": "b5cfb58a899e50ad823d13a47d6dca2df5c7a3ea0534b5951e5b8f4cac9e2eff",
+    "crates/autoeq-qa/wolfram/goldens/py04_converter_decode.json": "056661120d140402179bbe15fd01739a72f447f04cb68b6519bf6cc8e1180f4d",
+    "crates/autoeq-qa/wolfram/goldens/py05_heldout_contract.json": "d9ee7a183f47e47cef5d2e85773a6a8aa9bbeeb1dde09f9bd6877b9a3f3cdf08",
+    "crates/autoeq-qa/wolfram/goldens/qa01_clock_phase.json": "23832ccfd4a55f9bef20dde2322f5f5cbf575b31d5e98e28ed637267967b948a",
+    "crates/autoeq-qa/wolfram/goldens/qa02_heldout_perturb.json": "7680eb8d1331dada4ead76d561dea7733f90d29fb810bba87abfb4553ee49ab8",
+    "crates/autoeq-qa/wolfram/goldens/qa03_seed_matrix.json": "bfa843cf5537e6bc2a068bb2e2b752b48838335a01e1f4a3a3fe836856f1d4d6",
+    "crates/autoeq-qa/wolfram/goldens/ra01_hybrid_grid.json": "b804d68bf106ae0ee20289c9df78508de541afd616a228cb4db1e1e30f20bfcb",
+    "crates/autoeq-qa/wolfram/goldens/ra01_log_slope.json": "f6f2822ea40e8af8c8b2f41bc65f007d82d1814cd7e4f56fb8a3e66c32b35f42",
+    "crates/autoeq-qa/wolfram/goldens/ra01_lr24_crossover.json": "9bc7e461ab65261cfdcd5f70e7973ce6738cdaeac190cd3c0b106fafbc8f9ea1",
+    "crates/autoeq-qa/wolfram/goldens/ra02_arrival_alignment.json": "ebb07c4fe2080d077930ba1472921f4a824e2f251a3934e0013fd7e7700659a3",
+    "crates/autoeq-qa/wolfram/goldens/ra02_phase_slope_delay.json": "d3881b75aeb34ca3b01b4fff57440ca54eb52a467a6b605e7c96f3467bcbc962",
+    "crates/autoeq-qa/wolfram/goldens/ra02_probe_delay.json": "29cbcf3bc55a9b1d6577a536f96e23f5b13d81d8837185b4f6c3689ff5cd6fa2",
+    "crates/autoeq-qa/wolfram/goldens/ra03_mode_null_masks.json": "c31355e28c99885a1784ee2c2f8facecee80edca9ae37d31d0e3d13c290dc26c",
+    "crates/autoeq-qa/wolfram/goldens/ra04_decay_severity.json": "ff4952d4d804eb8768312e868f1dc920aa8d22f424f2a251498b446b772e19af",
+    "crates/autoeq-qa/wolfram/goldens/ra05_delay_excess_phase.json": "f061d18289452b8069f74b15bf00739c2285f0a2d0412ae6509afd3d5a87140a",
+    "crates/autoeq-qa/wolfram/goldens/ra06_reflection_cancel.json": "8ac016d2e4d3f0ec5124326eb733d394b46a2f7a5e86e834fc66e40eef4090c9",
+    "crates/autoeq-qa/wolfram/goldens/ra07_spatial_stats.json": "2a38a9a151780c46f43a1ea46d37c61035eb35b9e4093e61340efb71bbc64015",
+    "crates/autoeq-qa/wolfram/goldens/ra08_area_interp.json": "f6233484815966a11307b7672a97a0f04cca25b3d8977c15dae7a59c69e40b0b",
+    "crates/autoeq-qa/wolfram/goldens/ra09_rir_weights.json": "8c5f365ffb5719dbbe45f35825bf567e4769810878a1abfe61f98d967a94739b",
+    "crates/autoeq-qa/wolfram/goldens/ra10_evidence_stats.json": "2e2ea104e27e8cd8e48d0f8612c212509f8702ec538846d64ae293eb6a9faab9",
+    "crates/autoeq-qa/wolfram/goldens/rc01_wav_decode_dtft_calibration.json": "9372548c86de5866b1b1dfb08e140237044a9eff1bacf4d31b0fcfd38c947358",
+    "crates/autoeq-qa/wolfram/goldens/rc02_route_matrix_prediction.json": "7f56e22853eae7328aac73e8522b1db5debb88bd129d02926eb035eccfdecb9c",
+    "crates/autoeq-qa/wolfram/goldens/re01_dsp_gain_delay.json": "2be8e7b63c1eb804886c54b2d5f8ffdd2dbedddd45d51902bcd08d4181ec3ecb",
+    "crates/autoeq-qa/wolfram/goldens/re02_preference_shelves.json": "988e41786da3266152abfac5b5053967aec8d24e814f321cb0f716a49cc4e397",
+    "crates/autoeq-qa/wolfram/goldens/re03_candidate_loss.json": "356be7667a036f0449be54bc7c80c8e2cd5161ca4388733f788887e9d6935f75",
+    "crates/autoeq-qa/wolfram/goldens/re04_pruning_cumulative.json": "5460cda5bdae0e6d00210faffc4f2d4d8a1d6ecc7c01d1a2acd606802ce4fbf1",
+    "crates/autoeq-qa/wolfram/goldens/re05_fir_residual.json": "3011f6f71938f8a3a3f40729f7e4341cdfa9ef4fb0c5399ce99fe7e8bee03e17",
+    "crates/autoeq-qa/wolfram/goldens/re06_fir_integer_delay.json": "f62bd08b348cf4d462e3da2ce45bd1dcd254bee443505efc9e56ad66648f993a",
+    "crates/autoeq-qa/wolfram/goldens/re07_null_mask.json": "7cffb3a3f6d519f8c7f336708028091ca6eb148fb41df547110dc7069e6a27b9",
+    "crates/autoeq-qa/wolfram/goldens/re08_split_band_sum.json": "f61dbf0df8b61d9946409ebfa323500c376df3140b2a35c4600b05cb14356d6b",
+    "crates/autoeq-qa/wolfram/goldens/re09_kautz_bank.json": "5a0328c514c63234f5f8d30bf8a84ba83a598b1e1b20bf7f58781b55e5aca42b",
+    "crates/autoeq-qa/wolfram/goldens/re10_branch_sum_levels.json": "4ffb5521bf581f7d25e3be489c31b2ce79ebc3e6f9dce0e496ce6a28182e92a2",
+    "crates/autoeq-qa/wolfram/goldens/re11_summation_lattice.json": "297eda21240d5e296ba99831bff2364e59bab5b9ed2d0016c64242638dece3c6",
+    "crates/autoeq-qa/wolfram/goldens/re12_gd_coherence.json": "aa227d2ac9e489d27110ed1f42d3ad1df67c5b9578af8d922c5768a2d55b1752",
+    "crates/autoeq-qa/wolfram/goldens/re13_mso_seat_response.json": "4b94b31f76bfc44f01b35610f5fd2e9608f868b307909c30a45d43834256cbe1",
+    "crates/autoeq-qa/wolfram/goldens/re14_combined_curves.json": "7d8eda5f37e58f2dfe8e2973d1c1452d69d4d997da510f230e5bc7199adf50af",
+    "crates/autoeq-qa/wolfram/goldens/re15_modal_svd.json": "c0c985601d7209cfe6ab379127fea4cd99a84aa4541987adbaa79b2ea87a3a8e",
+    "crates/autoeq-qa/wolfram/goldens/re16_spatial_quadrature.json": "8f591b7b3d7b7d1226a03c2f203e9c9fe16742d796a7d358dd71004b1315fb07",
+    "crates/autoeq-qa/wolfram/goldens/re17_interchannel_deviation.json": "4b9b2ded0cc9e31edb057e3c0a6a16377f945568cf7dc6bfc1b921cbace46cde",
+    "crates/autoeq-qa/wolfram/goldens/re18_dba_sum.json": "f9963d86499faf9b94a3a54acbdcf7f0aaf24d8f20369fd773bce851f321bf34",
+    "crates/autoeq-qa/wolfram/goldens/re19_bass_power.json": "b7237caa39132675631cf6526ea0352d60c65ff5808993b36591f70d2d72b434",
+    "crates/autoeq-qa/wolfram/goldens/re20_drr_velvet.json": "37bfb2bf0e8de622f26f2e8f1c571ad751089bb2b8986e7a1393e12e3ab5f7ac",
+    "crates/autoeq-qa/wolfram/goldens/re21_eq_response_correction.json": "f506c6c4697697c5e9011a3217a002a5cbaaf632c43bd97827b298301becb212",
+    "crates/autoeq-qa/wolfram/goldens/re22_limiter_gain_envelope.json": "c12bc0c8dcd93b8a8127a950a1db7d5fa82c68e8fae6a1d5d3849d8906a6e02f",
+    "crates/autoeq-qa/wolfram/goldens/re23_ctc_regularized.json": "1a0e0cd21c0f03007b2770b66cd6e279db3e4a99e026a79f4e0e2714598b2fc9",
+    "crates/autoeq-qa/wolfram/goldens/re24_cardioid.json": "2afed76bc0a9666c47e98bd636c854adb15088460b08df70386a10bdf996df4a",
+    "crates/autoeq-qa/wolfram/goldens/rm01_schroeder_spl.json": "cc3ddcb9b98a0c9e37aff0d9f643932e62c4a999a23cbb37a1b3f01f96b7b96f",
+    "crates/autoeq-qa/wolfram/goldens/rm01_spl_level.json": "e7ee3f621dd32bebd2748741884c34cb5dcadeccdb852029e903d03272fc32d6",
+    "crates/autoeq-qa/wolfram/goldens/rm02_target_shape.json": "fb65df0a7c8eb98d329d14ffe513c36087366dcb223d566ea2d6e629bb78335d",
+    "crates/autoeq-qa/wolfram/goldens/rm03_auto_tune.json": "d1fb960fe14daeaea481c501975a6847408d249bd18c347f68ef7f9c8e13d7a8",
+    "crates/autoeq-qa/wolfram/goldens/rm03_band_gauss.json": "4d4d2e1096ab44b6b08b9f62cce7ad1ea8cda003a6e22b7506876bad6695594e",
+    "crates/autoeq-qa/wolfram/goldens/rm04_phase_thresholds.json": "94be12ed2b0bd46d7a2b976fb2546033a5cf6030d7aa9f8a2e4c2e53c9906130",
+    "crates/autoeq-qa/wolfram/goldens/root01_facade_passthrough.json": "33c04e881e7d36c021152a636bf1d874769d20dbb24823eb07cf67bf5c7b416d",
+    "crates/autoeq-qa/wolfram/goldens/rq01_seat_bin_cvar.json": "9158817d3eefe1662b9e11c6fec623a26742a43b70f0cc54103b431a13df6572",
+    "crates/autoeq-qa/wolfram/goldens/rq02_step_schroeder_t60.json": "86e5a984baaa708e1f6a865f9c4ef8fb68f43825da7106c7bec6980866630652",
+    "crates/autoeq-qa/wolfram/goldens/rq03_welch_noise_spl.json": "7fdcc22667f9a668ed7db2e9668c5477adca67afd61264c3759d1a66242414ef",
+    "crates/autoeq-qa/wolfram/goldens/rq04_headroom_drive_verdicts.json": "52dbef1284a76b5a30ae9a41cc55b69f70a38c21d72c18f1b26ea7dbad7b63cf",
+    "crates/autoeq-qa/wolfram/goldens/rq05_capture_alignment.json": "b72e5c46e539a3910422a42c014e9c56df872b2e16c4b9363ceefdb5a2f298f5",
+    "crates/autoeq-qa/wolfram/goldens/rq06_tone_render.json": "2c476b9ed804850d9637a2fc0e9de9633658305362660d076f792e1c1547a3fe",
+    "crates/autoeq-qa/wolfram/goldens/rq07_abx_binomial.json": "ac9afa6be6cb4c25d4554313a41eb947d1623df7ac75062ce1506d5606d0b3af",
+    "crates/autoeq-qa/wolfram/goldens/rq08_delay_oracle.json": "60a041859bb7a91b333e9f1c19cf399f8fa84ec607bc51c15d0d3a9579372221",
+    "crates/autoeq-qa/wolfram/goldens/rs01_flat_tilt.json": "fb5c9ca746b55554884bc5a43df2a079af687094abc4dacaf03de14f7038192c",
+    "crates/autoeq-qa/wolfram/goldens/rs02_coherent_sum.json": "df0fb831f8809a5ff6fee4f9cfb7d9e72528ae71c2d65a2257bae4907c420617",
+    "crates/autoeq-qa/wolfram/goldens/rs03_tone_bank.json": "a209393684ab7c08a9e83657ef0a806b9c478a528d50481717809094d69fa6ab",
+    "crates/autoeq-qa/wolfram/goldens/rw01_intake_overlap.json": "69c6882a9d6c861780c20a3398fb4cd3a237bc550a1686c4a963813440aeeabc",
+    "crates/autoeq-qa/wolfram/goldens/rw02_windowed_matrix_dft.json": "c118c42edf5bc008e1bb7497bdcc0dbebe32913b4b37c254e6751761367133e0",
+    "crates/autoeq-qa/wolfram/goldens/rw03_dsp_fir_convolution.json": "b8506765cce691e6344fc6edcee222ca3bdc3e3069253ffa7a0e8b77d068f476",
+    "crates/autoeq-qa/wolfram/goldens/rw04_crossover_bounded_sum.json": "9005f23c2d7990d2cf72e010b953ba1c73dbd18b62cbc2a4c329e11de698f129",
+    "crates/autoeq-qa/wolfram/goldens/rw05_electrical_headroom.json": "ef124634f0478456ab432741fdeafce66623d86fcfb209c8455621465d2a7b26",
+    "crates/autoeq-qa/wolfram/goldens/rw06_velvet_support.json": "e8a3142c6662c4fed1adcce9ba71c1107dd793f72609e9e5582d2896d2faba5d",
+    "crates/autoeq-qa/wolfram/goldens/rw07_scorecard_pruning.json": "e10b1917d3f1a67a9e544bac6a0a642bdfe64dfb230cb7feada2e60672633740",
+    "crates/autoeq-qa/wolfram/goldens/rw08_stimulus_binding.json": "7ffc1c36a2b3c37be9644d5e91efe9cb3ef66e776487c1da71a7208362087941",
+    "crates/autoeq-qa/wolfram/goldens/rw09_scaled_replay.json": "db1b8cac4963a44b4f03f3edd4333f7a5c799c34a1ccbe72a2f96309ae996bd6",
+    "crates/autoeq-qa/wolfram/goldens/rw10_from_measurement_slope.json": "99e106475b9a14d03840020ca59aedbdb076b14cec91fc7148ddfeeaf7475c23",
+    "crates/autoeq-qa/wolfram/goldens/rw11_hybrid_grid_delay.json": "26df0b7f72bf6b308a5a4b3299aaf36cb19e562d55f16c3228e39baa0f389011",
+    "crates/autoeq-qa/wolfram/h01_fir_bin_rounding.wls": "0f5894ac9b50f065ec7fbf40df21ec5b6d505e904c63bb6f5f407d2e767d979e",
+    "crates/autoeq-qa/wolfram/h02_scorer_sign.wls": "04b7fceda78b909686f825690c41a9ca95294b86e9acfbf206940bc6fbd9aa1e",
+    "crates/autoeq-qa/wolfram/log_interp.wls": "cd6400563ccbc01bc1f35d0a5f3f87182e0ea30a469a98bdc66776c0db31f77d",
+    "crates/autoeq-qa/wolfram/m01_pir_prefscore.wls": "63ff8cf0182d527f6d04194059c585fdf402bd70a372ff36c809313fc26d1692",
+    "crates/autoeq-qa/wolfram/m02_avg_coherent.wls": "4f9dbf9ab8b3215701f5fbf92244a43e4d1d4a16f5ce009f2b300d161305bdef",
+    "crates/autoeq-qa/wolfram/m03_mic_clock.wls": "3622ba33d8a9c66220518f80261e51d26cde40689f453fe200f27898d4566afc",
+    "crates/autoeq-qa/wolfram/m04_ingest_adapters.wls": "f629ec3e0b62d4af0df2f789301ad3a1052b6b5909e7af1c4d8346e3fdc7bcae",
+    "crates/autoeq-qa/wolfram/o01_asymmetric_weights.wls": "e85c85d3a353841d0ee824ca1bb72d250a4502fee2fcc42699325d39e8b2f3e2",
+    "crates/autoeq-qa/wolfram/o01_scalar_weights.wls": "36d5b3bf0376f14ce895b2a51c68fe3244105b7f06ffcbf2c2cbb5632c9eb066",
+    "crates/autoeq-qa/wolfram/o02_scalarization.wls": "ea384b6a9387ffd8a18801dc11da9af9af9dcf8c8e52d970b264a30c69cd00ba",
+    "crates/autoeq-qa/wolfram/o03_tv2_stencil.wls": "4628ef9350b3a4b6a89684865d351789a5b73a1e754dacb0ee694bff10d56358",
+    "crates/autoeq-qa/wolfram/o04_bass_boost.wls": "f17c83e93209f2fdda0d9b97013e6fed12655951b7d2a4b967b2c827c9704015",
+    "crates/autoeq-qa/wolfram/o04_deadband.wls": "37ab2a9d816d7d0c4ae5e123ad26ad82205d0918722c440a3df7286c66e8665d",
+    "crates/autoeq-qa/wolfram/o05_constraint_penalties.wls": "1159e77de9e415e8fa4fad2fd50a7a2ab6fd4b3ea12cba453deae48051ecf16f",
+    "crates/autoeq-qa/wolfram/o06_initial_guess_bounds.wls": "856f23f08ce0e4d0194341304d9ff9a54f7841d1834697cc20ffd20e77086e24",
+    "crates/autoeq-qa/wolfram/o07_crossover_sum.wls": "b4db32179790dd6f51f18bb5d4576af2ab77f71fdfdd00584e14c8181a571a78",
+    "crates/autoeq-qa/wolfram/o08_joint_multisub.wls": "b9e5f92b24e94be83d6b479a39ac560b75a5fb70ad50b671d2da837d1bc6ec15",
+    "crates/autoeq-qa/wolfram/o09_group_delay.wls": "ba459f3e80a2e12eb444e227a4d6659d9321e2c2abd38e642042d20549fd3d51",
+    "crates/autoeq-qa/wolfram/o10_bark_sharpness.wls": "391f014f931c83bbeffeea46ca8658eb7f6b1051a9992bc9b32d43108a92da46",
+    "crates/autoeq-qa/wolfram/o11_temporal_ir.wls": "37672742f12371220601fa1d2023d9a1f78aa60de6a9b1a3ac43460e4acc1116",
+    "crates/autoeq-qa/wolfram/o12_pareto_mixed.wls": "a789e20c13772b59377a9600448c61dc7848ad3b6bda57911657c3195eaa9738",
+    "crates/autoeq-qa/wolfram/o13_backend_objectives.wls": "18c9e2d98a916e8b32d28b2203e0a0431c792c92a5218d89fe0d257c99810434",
+    "crates/autoeq-qa/wolfram/o14_rerank_ordering.wls": "6ee98be45df5d612015b74ad16dd251116b5c35f96936f1ab27f636d60ed1325",
+    "crates/autoeq-qa/wolfram/peq_response.wls": "6c0544b01945bd8dd24313451611b677c1e1f0819bee22b92318e7c85b5c3cb0",
+    "crates/autoeq-qa/wolfram/pl01_tonal_regression.wls": "546d295a04d8ca82a092724ec4f117b98743e18c43fe3ea086a81127615f9017",
+    "crates/autoeq-qa/wolfram/pl02_plot_response_trace.wls": "f1aac60c4b92f463f48519a1a674c70c490acf7079403bff73ce816cf95136c3",
+    "crates/autoeq-qa/wolfram/py01_dsp_smoothing.wls": "e88277b04bbc5a401dfcfae510631a9d8bb613945e230c26b103fa4d72f417ca",
+    "crates/autoeq-qa/wolfram/py02_band_statistics.wls": "7ad46f6011f4e695f8d23261539bccee6a115bc69aaf7c57c0b46a9e7f2d55a3",
+    "crates/autoeq-qa/wolfram/py03_roon_correlation.wls": "3b4035f7bf90bd4e06c9b0cd8aed533dc8328a39d1049ebe37f7b38c904b0fba",
+    "crates/autoeq-qa/wolfram/py04_converter_decode.wls": "e59ad1a117fcbb7876913ecbc3f2a98dd685ee1ae971a682a0a9e88708a269f0",
+    "crates/autoeq-qa/wolfram/py05_heldout_contract.wls": "0dacca76058845a95dd30ff0b5207193f3918213cfaf7073c0fc319843701ef4",
+    "crates/autoeq-qa/wolfram/qa01_clock_phase.wls": "d2ce4ba74dbec9c468067f2f28ddf3927b23e7a8b93dba8d726f260eef9ade5c",
+    "crates/autoeq-qa/wolfram/qa02_heldout_perturb.wls": "2bf7f94017c49adbab40df5c1911ba9a392db9430a4813dfaec061646bd68f7f",
+    "crates/autoeq-qa/wolfram/qa03_seed_matrix.wls": "1cb8b46bd2c403b58da4a6b9bf6b40af4ad0cd113ce9ca2cb2748eb5c1633f4e",
+    "crates/autoeq-qa/wolfram/ra01_hybrid_grid.wls": "ed6a7ca360fd2d54e78303897789497509c4d3db87f11e4a8e64e0651d41235c",
+    "crates/autoeq-qa/wolfram/ra01_log_slope.wls": "1e02436dcbb7b58056c6ec9c70d396d40593cfe08fc55e6ebcd5b95a397f9cb1",
+    "crates/autoeq-qa/wolfram/ra01_lr24_crossover.wls": "106c31ff72c87e0d2079d268551056b117edacc4ac67b6a95bf6cf34eee5e41a",
+    "crates/autoeq-qa/wolfram/ra02_arrival_alignment.wls": "dc8bfc83bf4e72329adff1f3e8a6742ad31feeadea1559986ca7b6df2bbc1a9d",
+    "crates/autoeq-qa/wolfram/ra02_phase_slope_delay.wls": "fdd1e7848610444165cf3bc50b718638b5fcc4441f351bf2c42b273f23031aa5",
+    "crates/autoeq-qa/wolfram/ra02_probe_delay.wls": "cd163805f03be8f14e874bbef763c0e27c33ff20b3ea38a5249abc52d06259ac",
+    "crates/autoeq-qa/wolfram/ra03_mode_null_masks.wls": "96ddb316967e4d3b04a7d9410bdc1674e6fc45fff0fd87cfee84c8f50c862b4e",
+    "crates/autoeq-qa/wolfram/ra04_decay_severity.wls": "174a4d5c760626846b0ccf23b0ff311f091dd0859666862fdfbc3a2a3242a961",
+    "crates/autoeq-qa/wolfram/ra05_delay_excess_phase.wls": "0d76cf8b9db0a63948b4017f4373444757e9581416d02fc5ab316d2023813836",
+    "crates/autoeq-qa/wolfram/ra06_reflection_cancel.wls": "605b49e9e58715f1ca7150bc4548db1a9c62291fded6764aeda2c349c83afb97",
+    "crates/autoeq-qa/wolfram/ra07_spatial_stats.wls": "cacd1283254ce44a773dc313ef8456ff1e8cd7486260633b1d746ee1780ccdc9",
+    "crates/autoeq-qa/wolfram/ra08_area_interp.wls": "3b71e3b1efa04fbc3e5b66a2fb1b9fb88c7956b7a5945b8eda946eb2aee81ddc",
+    "crates/autoeq-qa/wolfram/ra09_rir_weights.wls": "71ff9d2e0195dc6baf490030c6a122656c0e81f9f37fac079fbdb08f1ff39766",
+    "crates/autoeq-qa/wolfram/ra10_evidence_stats.wls": "3a818f701bd23475cb8cd97c99b0801703c36b4dbe8d1a50b689e2f4ba20e225",
+    "crates/autoeq-qa/wolfram/rc01_wav_decode_dtft_calibration.wls": "efe798894a76d9d1aef859e92e35cbd436f15545e6bfc93652bf1f87e275e377",
+    "crates/autoeq-qa/wolfram/rc02_route_matrix_prediction.wls": "4279b1857877dff63a3ddbfbe81bfba5583526f720f9c9369cc0f3b712a2fec9",
+    "crates/autoeq-qa/wolfram/re01_dsp_gain_delay.wls": "a385086dfd6418f0f2d5b32c30059062e12700f62188f289d829f1f1730f4750",
+    "crates/autoeq-qa/wolfram/re02_preference_shelves.wls": "2b1e668a9d08c007435fe477d1f249aa7f338e0e662f1e9734dec9d03e82ef6a",
+    "crates/autoeq-qa/wolfram/re03_candidate_loss.wls": "162c4be9e8bb5bb763d39446e895977359f4d3da2524b40c7f92a08354a6cf10",
+    "crates/autoeq-qa/wolfram/re04_pruning_cumulative.wls": "35015974ce110ebba7e006b6b85ddcd463e7c68db8bc37d4043a416d197805e8",
+    "crates/autoeq-qa/wolfram/re05_fir_residual.wls": "cd19140e3f56bc76c1ce9eb6ce843ea514edd4e91f005ecd92f58d4095fb591f",
+    "crates/autoeq-qa/wolfram/re06_fir_integer_delay.wls": "8b1b233a74108c732d168007a1e8897421779c1bd21930009dd522b7d56f74ce",
+    "crates/autoeq-qa/wolfram/re07_null_mask.wls": "40b1cf66c1b32ed88ab77ecf71f1caaba87cbed774e20e7b67068e2bfaddd572",
+    "crates/autoeq-qa/wolfram/re08_split_band_sum.wls": "87c84204257255188a94e4e09c465a35368618e39b7b3f0c5ddb5ce5892f32a5",
+    "crates/autoeq-qa/wolfram/re09_kautz_bank.wls": "7c299a7e82dfcb11712323b8513b1cabd9efcb59d022bfe2bcb2a3a6fd342993",
+    "crates/autoeq-qa/wolfram/re10_branch_sum_levels.wls": "90f86223dd9c45e3ce490776cdbc45f57766dfe21823cab1f37197e14a965e62",
+    "crates/autoeq-qa/wolfram/re11_summation_lattice.wls": "4de20e8ad966d3d2e92e3f72d3310d4e8f45dece8d1b6690c6997169be8055a2",
+    "crates/autoeq-qa/wolfram/re12_gd_coherence.wls": "942ea15234c32a59bc6b40edb047752c6ab8db9bda9300b485d8822af006f66d",
+    "crates/autoeq-qa/wolfram/re13_mso_seat_response.wls": "ff2591293a1fc46cac2073a8242a251585ec8b36b938aa11d24adb817a8c10d7",
+    "crates/autoeq-qa/wolfram/re14_combined_curves.wls": "835e0e8320d6c7fb2bb5da346763a33c529e70d4fe5bc209da6d50dcb6546da4",
+    "crates/autoeq-qa/wolfram/re15_modal_svd.wls": "518720bc41f3b677daa933a21b2e66af7df96aa3d4a64755968acf1f92357b0d",
+    "crates/autoeq-qa/wolfram/re16_spatial_quadrature.wls": "76c9b06bf308864d6e46dae1d373dd52cf60e525632a922806744b43cd1e1d9f",
+    "crates/autoeq-qa/wolfram/re17_interchannel_deviation.wls": "f2f40307177ab1688f55b80b783a3dcdb0dcb20ef3fe4b1d5cff21a4a3ccb184",
+    "crates/autoeq-qa/wolfram/re18_dba_sum.wls": "ebbeaef30810af304513fad740773018adfb3632e88934910a4c39973091fc7a",
+    "crates/autoeq-qa/wolfram/re19_bass_power.wls": "9ab1a921557c2f1c9f9f6510ad30dddedeb2fe0e5860bb070073a73a1593086a",
+    "crates/autoeq-qa/wolfram/re20_drr_velvet.wls": "dd89ba033c22932a3f84229765b5ce4201b54a9d7503940d311f5f0f25bed4ac",
+    "crates/autoeq-qa/wolfram/re21_eq_response_correction.wls": "939bd1c0e0f2969ee08e03ad27d70250c7c1ba9df8131c9623daf979c47c92e6",
+    "crates/autoeq-qa/wolfram/re22_limiter_gain_envelope.wls": "7eed69c78a563ec3bbd3dbbd6e5480f6593ac451770b65597e3ec672278b8341",
+    "crates/autoeq-qa/wolfram/re23_ctc_regularized.wls": "3f75bf841bba962d565dac119437ee74d5daf927843584d13c9bcd21049b615e",
+    "crates/autoeq-qa/wolfram/re24_cardioid.wls": "da9b79209074b72beb2f8e4d4c7fb2d89a11cbd8a104c21ffa6216e50658c805",
+    "crates/autoeq-qa/wolfram/rm01_schroeder_spl.wls": "f16f4be6527b08dc07022c5a5fbc9314f0b45e190f16939ba4efe475620c8692",
+    "crates/autoeq-qa/wolfram/rm01_spl_level.wls": "f6000eaca5b95e0de273e253ba55cbcb62f3571b8b81cb77616133d05db24f0b",
+    "crates/autoeq-qa/wolfram/rm02_target_shape.wls": "1e8a62cabeff17cd79b55925902fd90ea07fd5ec3b24036dd372009e100e0d11",
+    "crates/autoeq-qa/wolfram/rm03_auto_tune.wls": "0ecf34f72a103511acce4804df2d39af81b29187c1ead6909e8a23ddf4d5ad16",
+    "crates/autoeq-qa/wolfram/rm03_band_gauss.wls": "8d143a99257d64dd7d2e7e287d54473c1493d445e00974ed4f096ee2058f78e8",
+    "crates/autoeq-qa/wolfram/rm04_phase_thresholds.wls": "36aca79882b6cdc5a30da5c95d54f7076bcf5078fcbc8979fab9c7b5ba8a1bd9",
+    "crates/autoeq-qa/wolfram/root01_facade_passthrough.wls": "3657be87779ae43ab11eb5d4b3dcdf8ef8709c08f8c762cbc90ed9b727f46ed0",
+    "crates/autoeq-qa/wolfram/rq01_seat_bin_cvar.wls": "ed3d9da1d97db4c66a3f2d05ecf21c4be5cebb0000cc700c7b0929a9f400cf34",
+    "crates/autoeq-qa/wolfram/rq02_step_schroeder_t60.wls": "7574b63b8e6eb18cc1d8a56861f9c9ce9c63393faf0224dd58a1458c3125856c",
+    "crates/autoeq-qa/wolfram/rq03_welch_noise_spl.wls": "a1a37acbc84ee31c99c336a61e3182ecb7791384df6f19435b40b04bfd0765e9",
+    "crates/autoeq-qa/wolfram/rq04_headroom_drive_verdicts.wls": "53e95b3c7854e92672c590cac7adc4eac502df943514fb55103e0e8fe2c57551",
+    "crates/autoeq-qa/wolfram/rq05_capture_alignment.wls": "58558d49c3471af5a1ffea2987c5570029a262579632682060ee3bff4bbd9b94",
+    "crates/autoeq-qa/wolfram/rq06_tone_render.wls": "226bf042fb84324d4b2b1b2c32ba6ea3964fcf7aeba20caf2fd6434df88575d4",
+    "crates/autoeq-qa/wolfram/rq07_abx_binomial.wls": "0bd265283b8baedd4de44985914b087c5ba41dadac694d1dc270ca5c3f8a8842",
+    "crates/autoeq-qa/wolfram/rq08_delay_oracle.wls": "b73e72445c2acb86fcd1da385901745721ca6774faba02338212899edf98d6c1",
+    "crates/autoeq-qa/wolfram/rs01_flat_tilt.wls": "80209bdfc3a3605c41045838b4614180b2514fd69f1f80cf4d1fe216f5d3ac06",
+    "crates/autoeq-qa/wolfram/rs02_coherent_sum.wls": "8700155dc85b79069eb2c9bea3a8ef34cdfc60bed261a2d6c4da50454f257069",
+    "crates/autoeq-qa/wolfram/rs03_tone_bank.wls": "301a1a382a4490f59675a37aece6b9199ffe214fd7e53de4492d7b9f212bde59",
+    "crates/autoeq-qa/wolfram/rw01_intake_overlap.wls": "5cdbf02ee26e004a38635503007769b19e2d76c3ed4d372f7ec27900e00c4736",
+    "crates/autoeq-qa/wolfram/rw02_windowed_matrix_dft.wls": "a29708366d0bd32526ed4f2b2dd831dbba549c42c3ae640f877dce1c2d2a635e",
+    "crates/autoeq-qa/wolfram/rw03_dsp_fir_convolution.wls": "145d904feb1bc144425ef02d38b35230ea39611de2aec9cfdf1f94193708ad8d",
+    "crates/autoeq-qa/wolfram/rw04_crossover_bounded_sum.wls": "edbccd4803285dccc334b468c74b4bdd7e19fa72082615010f0398a826f59fe1",
+    "crates/autoeq-qa/wolfram/rw05_electrical_headroom.wls": "d035fd6e57976d61d9af546745535ee782111df9febef823f24ec3782b711ba7",
+    "crates/autoeq-qa/wolfram/rw06_velvet_support.wls": "045f8c9624e6ca5c3e723899d598a23116249310acc9eef882887516ad8a2c74",
+    "crates/autoeq-qa/wolfram/rw07_scorecard_pruning.wls": "9b4a9ee55e7ef5670547a64bc2a173c9c5703abbedeb6d2f2b549e1d8318682c",
+    "crates/autoeq-qa/wolfram/rw08_stimulus_binding.wls": "ef4c572e55277b50ed411c9042d40944323e27e1c264adef32dc29b879c7bdd4",
+    "crates/autoeq-qa/wolfram/rw09_scaled_replay.wls": "84aabddb75d5e4bdf1ecd39ff903d70acf121fe63f728ad2bb83cfdcb054e9bc",
+    "crates/autoeq-qa/wolfram/rw10_from_measurement_slope.wls": "cf562f731760362e630611da138efead85c85742020bf8ec05a1f8ca77cef3c0",
+    "crates/autoeq-qa/wolfram/rw11_hybrid_grid_delay.wls": "be25f8de50b27f4e511f2b939f4d942f8bd3379c23a3c15e89b63bd69ddeee33"
+  },
+  "source_identities": "/Volumes/home_tmp/tmp/autoeq-oracle-layout-trial-20261026/source-identities.json",
+  "source_identities_sha256": "ecc8a0f3983300ed314b36674820567fa4fd456fa53592a5151ec8952e68400d",
+  "patch": "oracle-layout-one-vs-six.patch",
+  "next_required": "After baseline budgets are frozen: compile/list both layouts; exact normalized identity/ignored-state comparison, full oracle and supplemental correctness, then at least three controlled alternating full-build and one-case-file-edit repetitions with wall time, memory and actual link observations. No layout decision or performance claim yet.",
+  "cargo_target_discovery": {
+    "six": {
+      "metadata": "/Volumes/home_tmp/tmp/autoeq-oracle-layout-trial-20261026/six/cargo-metadata.json",
+      "metadata_sha256": "80fe2d6d77104aa1d29f93b9adc244112ccc0008a7c2e515c53e1df128357566",
+      "integration_targets": [
+        "negative_controls",
+        "optimizer_benchmark",
+        "oracle_analysis_quality",
+        "oracle_core",
+        "oracle_engine",
+        "oracle_export",
+        "oracle_optim",
+        "oracle_workflow",
+        "qa_contract"
+      ],
+      "autotests": false,
+      "cargo_metadata_exit_code": 0
+    },
+    "one": {
+      "metadata": "/Volumes/home_tmp/tmp/autoeq-oracle-layout-trial-20261026/one/cargo-metadata.json",
+      "metadata_sha256": "c601dde7fafaaa334260839d7e2edf08f34696430f5e3e771da76db243188b0f",
+      "integration_targets": [
+        "negative_controls",
+        "optimizer_benchmark",
+        "oracle_all",
+        "qa_contract"
+      ],
+      "autotests": false,
+      "cargo_metadata_exit_code": 0
+    }
+  },
+  "measurement_selection_warning": "The ordinary bench_build.py --crate ... test-build/test-edit lane selects --lib only and cannot measure this integration-layout experiment. Use explicit autoeq-qa --lib --tests --all-features selections or a dedicated integration-layout driver, with actual executable/identity verification. Do not use library-only timings as layout evidence."
+}

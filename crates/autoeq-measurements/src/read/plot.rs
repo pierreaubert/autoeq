@@ -1,6 +1,8 @@
 use crate::read::plot;
+use crate::read::speaker_suggestions::ApiError;
+#[cfg(feature = "api")]
 use crate::read::speaker_suggestions::{
-    ApiError, fetch_available_speakers, find_similar_speakers, format_speaker_not_found_error,
+    fetch_available_speakers, find_similar_speakers, format_speaker_not_found_error,
 };
 use serde_json::Value;
 use std::error::Error;
@@ -41,7 +43,18 @@ pub async fn normalize_plotly_value_with_suggestions(v: &Value) -> Result<Value,
     // If it's not an array, check if it's a speaker error
     if let Some(api_error) = ApiError::from_json(v) {
         if let Some(invalid_speaker) = api_error.speaker_name {
+            // Without the `api` feature there is no speaker list to
+            // suggest from; keep the plain not-found error.
+            #[cfg(not(feature = "api"))]
+            {
+                return Err(format!(
+                    "Speaker '{}' not found in the database. Please check the speaker name and try again.",
+                    invalid_speaker
+                )
+                .into());
+            }
             // Try to fetch available speakers and provide suggestions
+            #[cfg(feature = "api")]
             match fetch_available_speakers().await {
                 Ok(available_speakers) => {
                     let suggestions =

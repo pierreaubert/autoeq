@@ -11,15 +11,20 @@ homepage = "https://github.com/pierreaubert/autoeq"
 workspace = true
 
 [features]
+# Compatibility re-exports for explicit network-enabled measurement access.
+api = ["autoeq-measurements/api"]
+# Preserve the shipping registry while allowing built-in-only library builds.
+default = ["backend-metaheuristics"]
+backend-metaheuristics = ["dep:metaheuristics-nature"]
 # Retained as a compatibility marker. RoomEQ configuration adapts to
-# `OptimParams` in `roomeq-model`, preserving the lower-layer dependency
-# direction (`roomeq-model -> autoeq-optim`).
+# the optimizer's `OptimParams` at the workflow boundary; shared
+# serialized evidence lives in `autoeq-optim-types` so this crate
+# does not depend on `roomeq-model`.
 roomeq-adapter = []
 
 [dependencies]
 autoeq-core = { workspace = true }
 autoeq-measurements = { workspace = true }
-clap = { workspace = true }
 log = { workspace = true }
 math-iir-fir = { workspace = true }
 math-dsp = { workspace = true }
@@ -29,12 +34,13 @@ num-complex = { workspace = true }
 num_cpus = { workspace = true }
 rand = { workspace = true }
 rand_chacha = { workspace = true }
-roomeq-model = { workspace = true }
+autoeq-objective = { workspace = true }
+autoeq-optim-types = { workspace = true }
 schemars = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-metaheuristics-nature = { workspace = true }
+metaheuristics-nature = { workspace = true, optional = true }
 
 [dev-dependencies]
 criterion = "0.8.2"
@@ -42,5 +48,5 @@ rayon = "1.11"
 stats_alloc = "0.1.10"
 
 [[bench]]
-name = "objective_hot_path"
+name = "solver_generation"
 harness = false

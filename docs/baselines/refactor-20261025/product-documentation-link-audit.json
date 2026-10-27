@@ -1,0 +1,472 @@
+{
+  "checked_utc": "2026-10-26T05:13:17.040158+00:00",
+  "status": "passed",
+  "scope": "Inline relative file links outside fenced code in current product, crate, and architecture guides. External URLs, reference-style links, and general anchor validation are outside this check.",
+  "documents": [
+    "README.md",
+    "docs/ROOMEQ_MANUAL.md",
+    "docs/ROOMEQ_INPUT_FORMAT.md",
+    "docs/ROOMEQ_OUTPUT_FORMAT.md",
+    "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+    "ui/roomeq-gui/README.md",
+    "crates/autoeq-artifacts/README.md",
+    "crates/autoeq-cli/README.md",
+    "crates/autoeq-core/README.md",
+    "crates/autoeq-fir/README.md",
+    "crates/autoeq-gpui-examples/README.md",
+    "crates/autoeq-measurements/README.md",
+    "crates/autoeq-objective/README.md",
+    "crates/autoeq-optim/README.md",
+    "crates/autoeq-optim-types/README.md",
+    "crates/autoeq-plot/README.md",
+    "crates/autoeq-qa/README.md",
+    "crates/autoeq-report-gpui/README.md",
+    "crates/autoeq-report-wasm/README.md",
+    "crates/autoeq-report-wasm-shell/README.md",
+    "crates/autoeq-workflow/README.md",
+    "crates/roomeq-analysis/README.md",
+    "crates/roomeq-cli/README.md",
+    "crates/roomeq-dsp/README.md",
+    "crates/roomeq-engine/README.md",
+    "crates/roomeq-export/README.md",
+    "crates/roomeq-model/README.md",
+    "crates/roomeq-qa/README.md",
+    "crates/roomeq-quality/README.md",
+    "crates/roomeq-synthetic/README.md",
+    "crates/roomeq-workflow/README.md",
+    "docs/ARCHITECTURE.md",
+    "crates/autoeq-artifacts/ARCHITECTURE.md",
+    "crates/autoeq-cli/ARCHITECTURE.md",
+    "crates/autoeq-core/ARCHITECTURE.md",
+    "crates/autoeq-fir/ARCHITECTURE.md",
+    "crates/autoeq-gpui-examples/ARCHITECTURE.md",
+    "crates/autoeq-measurements/ARCHITECTURE.md",
+    "crates/autoeq-objective/ARCHITECTURE.md",
+    "crates/autoeq-optim/ARCHITECTURE.md",
+    "crates/autoeq-optim-types/ARCHITECTURE.md",
+    "crates/autoeq-plot/ARCHITECTURE.md",
+    "crates/autoeq-qa/ARCHITECTURE.md",
+    "crates/autoeq-report-gpui/ARCHITECTURE.md",
+    "crates/autoeq-report-wasm/ARCHITECTURE.md",
+    "crates/autoeq-report-wasm-shell/ARCHITECTURE.md",
+    "crates/autoeq-workflow/ARCHITECTURE.md",
+    "crates/roomeq-analysis/ARCHITECTURE.md",
+    "crates/roomeq-cli/ARCHITECTURE.md",
+    "crates/roomeq-dsp/ARCHITECTURE.md",
+    "crates/roomeq-engine/ARCHITECTURE.md",
+    "crates/roomeq-export/ARCHITECTURE.md",
+    "crates/roomeq-model/ARCHITECTURE.md",
+    "crates/roomeq-qa/ARCHITECTURE.md",
+    "crates/roomeq-quality/ARCHITECTURE.md",
+    "crates/roomeq-synthetic/ARCHITECTURE.md",
+    "crates/roomeq-workflow/ARCHITECTURE.md"
+  ],
+  "local_links": [
+    {
+      "document": "README.md",
+      "href": "docs/AUTOEQ_MANUAL.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/ROOMEQ_101.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/ROOMEQ_MANUAL.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/ROOMEQ_INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/ROOMEQ_OUTPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/input_schema.json",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/output_schema.json",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/INPUT_FORMAT.md#multi-measurement-rir-prototype",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/REFERENCES.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/asr-202604.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "docs/AUTOEQ_MANUAL.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/input_schema.json",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "crates/roomeq-cli/schemas/output_schema.json",
+      "exists": true
+    },
+    {
+      "document": "README.md",
+      "href": "ui/roomeq-gui/README.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "MEASURED_IR_IMPORT.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "../crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "../crates/roomeq-cli/schemas/INPUT_FORMAT.md#speech-transmission-index",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "ROOMEQ_INPUT_FORMAT.md#recording-configuration-recording_config",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "ROOMEQ_INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "ROOMEQ_OUTPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "../crates/roomeq-cli/schemas/input_schema.json",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "../crates/roomeq-cli/schemas/output_schema.json",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "baselines/refactor-20261025/completion-audit.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_MANUAL.md",
+      "href": "../crates/roomeq-cli/schemas/INPUT_FORMAT.md#configuration-schema-version",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_INPUT_FORMAT.md",
+      "href": "../crates/roomeq-cli/schemas/input_schema.json",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_INPUT_FORMAT.md",
+      "href": "../crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_INPUT_FORMAT.md",
+      "href": "../crates/roomeq-cli/schemas/input_schema.json",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_INPUT_FORMAT.md",
+      "href": "./ROOMEQ_OUTPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_OUTPUT_FORMAT.md",
+      "href": "../crates/roomeq-cli/schemas/output_schema.json",
+      "exists": true
+    },
+    {
+      "document": "docs/ROOMEQ_OUTPUT_FORMAT.md",
+      "href": "./ROOMEQ_INPUT_FORMAT.md#epa-configuration",
+      "exists": true
+    },
+    {
+      "document": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "href": "../../../docs/ROOMEQ_INPUT_FORMAT.md#recording-configuration-recording_config",
+      "exists": true
+    },
+    {
+      "document": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "href": "../../../docs/ROOMEQ_MANUAL.md#fir-mixed-and-mixed-phase-which-mode-should-i-use",
+      "exists": true
+    },
+    {
+      "document": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "href": "../../../docs/ROOMEQ_MANUAL.md#kautz-replay-and-gain-limits",
+      "exists": true
+    },
+    {
+      "document": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "href": "../../../docs/ROOMEQ_MANUAL.md#declared-physical-drive-limits",
+      "exists": true
+    },
+    {
+      "document": "crates/roomeq-cli/schemas/INPUT_FORMAT.md",
+      "href": "../../../docs/ROOMEQ_MANUAL.md#audibility-acceptance-contract-2026-09-20",
+      "exists": true
+    },
+    {
+      "document": "ui/roomeq-gui/README.md",
+      "href": "../../docs/ROOMEQ_MANUAL.md",
+      "exists": true
+    },
+    {
+      "document": "ui/roomeq-gui/README.md",
+      "href": "../../docs/ROOMEQ_INPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "ui/roomeq-gui/README.md",
+      "href": "../../docs/ROOMEQ_OUTPUT_FORMAT.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-qa/README.md",
+      "href": "validation-manifest.toml",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-qa/README.md",
+      "href": "../../scripts/autoeq-qa-requirements.txt",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-wasm/README.md",
+      "href": "SCHEMA.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-core/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-measurements/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-objective/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-optim-types/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-optim/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-workflow/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-cli/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-fir/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-plot/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-artifacts/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-model/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-analysis/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-dsp/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-engine/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-workflow/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-export/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-quality/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-qa/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-synthetic/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/roomeq-cli/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-qa/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-report-wasm/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-report-wasm-shell/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-report-gpui/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "docs/ARCHITECTURE.md",
+      "href": "../crates/autoeq-gpui-examples/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-gpui-examples/ARCHITECTURE.md",
+      "href": "README.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-gpui-examples/ARCHITECTURE.md",
+      "href": "../../docs/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-qa/ARCHITECTURE.md",
+      "href": "validation-manifest.toml",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-qa/ARCHITECTURE.md",
+      "href": "README.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-qa/ARCHITECTURE.md",
+      "href": "../../docs/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-gpui/ARCHITECTURE.md",
+      "href": "README.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-gpui/ARCHITECTURE.md",
+      "href": "../autoeq-report-wasm/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-gpui/ARCHITECTURE.md",
+      "href": "../../docs/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-wasm/ARCHITECTURE.md",
+      "href": "SCHEMA.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-wasm/ARCHITECTURE.md",
+      "href": "README.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-wasm/ARCHITECTURE.md",
+      "href": "../../docs/ARCHITECTURE.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-wasm-shell/ARCHITECTURE.md",
+      "href": "README.md",
+      "exists": true
+    },
+    {
+      "document": "crates/autoeq-report-wasm-shell/ARCHITECTURE.md",
+      "href": "../../docs/ARCHITECTURE.md",
+      "exists": true
+    }
+  ],
+  "broken": []
+}

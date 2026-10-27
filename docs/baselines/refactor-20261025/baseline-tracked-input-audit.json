@@ -1,0 +1,12 @@
+{
+  "status": "all legitimate tracked inputs present",
+  "restored_original_runtime_targets": 23,
+  "remaining_deleted_tracked_artifacts": 317,
+  "remaining_categories": {
+    "cargo_target_artifacts": 316,
+    "python_cache": 1
+  },
+  "unclassified_missing_tracked_files": [],
+  "restoration_proof": "snapshot-restored-tracked-inputs.json",
+  "complete_manifest": "controlled-inputs-resource-fixed.json"
+}

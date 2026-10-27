@@ -19,6 +19,46 @@ use math_audio_optimisation::{
 use ndarray::Array1;
 use std::sync::Arc;
 
+/// Keep scored CMA-ES candidates and returned controls inside exact rails.
+///
+/// Normalized box interpolation can round a boundary point a few ULPs outside
+/// its physical interval. Project before scoring and on return so the reported
+/// loss describes the exact emitted parameters, without loosening final checks.
+///
+/// # Errors
+/// Returns the underlying solver's configuration or execution error.
+pub(super) fn run_bounded_cma_es<F>(
+    objective: &F,
+    config: CmaEsConfig,
+) -> math_audio_optimisation::Result<CmaEsReport>
+where
+    F: Fn(&Array1<f64>) -> f64 + Sync,
+{
+    let bounds = config.bounds.clone();
+    let bounded_objective = |point: &Array1<f64>| {
+        if point
+            .iter()
+            .zip(&bounds)
+            .all(|(value, (low, high))| value >= low && value <= high)
+        {
+            objective(point)
+        } else {
+            let bounded = Array1::from_iter(
+                point
+                    .iter()
+                    .zip(&bounds)
+                    .map(|(value, (low, high))| value.clamp(*low, *high)),
+            );
+            objective(&bounded)
+        }
+    };
+    let mut report = cma_es(&bounded_objective, config)?;
+    for (value, (low, high)) in report.x.iter_mut().zip(&bounds) {
+        *value = value.clamp(*low, *high);
+    }
+    Ok(report)
+}
+
 /// Pure-Rust CMA-ES `FilterOptimizer`.
 pub struct AutoeqCmaEsBackend {
     name: &'static str,
@@ -101,7 +141,7 @@ impl AutoeqCmaEsBackend {
             }));
         }
 
-        match cma_es(&f, cfg) {
+        match run_bounded_cma_es(&f, cfg) {
             Ok(report) => {
                 if report.x.len() == x.len() {
                     x.copy_from_slice(report.x.as_slice().unwrap());

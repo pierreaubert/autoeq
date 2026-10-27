@@ -1,0 +1,62 @@
+{
+  "root": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq",
+  "requested_profile": "release",
+  "target_dir": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/workspace/full-native/1",
+  "build_command": [
+    "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+    "build",
+    "--offline",
+    "--locked",
+    "-p",
+    "autoeq-report-wasm",
+    "--bin",
+    "report-producer",
+    "--profile",
+    "release",
+    "--target-dir",
+    "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/workspace/full-native/1",
+    "--timings",
+    "--message-format=json-render-diagnostics"
+  ],
+  "build_stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-independent-copy-baseline-j8-20261026T155829-0eef9eee/workspace/full-native/1/report-producer.build.stdout",
+  "build_stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-independent-copy-baseline-j8-20261026T155829-0eef9eee/workspace/full-native/1/report-producer.build.stderr",
+  "artifact": {
+    "package_id": "path+file:///Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-wasm#0.5.1",
+    "target": {
+      "kind": [
+        "bin"
+      ],
+      "crate_types": [
+        "bin"
+      ],
+      "name": "report-producer",
+      "src_path": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-wasm/src/bin/report_producer.rs",
+      "edition": "2024",
+      "doc": true,
+      "doctest": false,
+      "test": true
+    },
+    "profile": {
+      "opt_level": "3",
+      "debuginfo": 0,
+      "debug_assertions": false,
+      "overflow_checks": false,
+      "test": false
+    },
+    "features": [],
+    "filenames": [
+      "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/workspace/full-native/1/release/report-producer"
+    ],
+    "executable": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/workspace/full-native/1/release/report-producer",
+    "fresh": false
+  },
+  "executable": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/workspace/full-native/1/native-report-producer-5uixyv7m/report-producer",
+  "executable_sha256": "dd5431c3352de19bb86f7c959b37af5aa5ff99413bd43fdd38f1797ecbeb3bdb",
+  "cargo_executable": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/workspace/full-native/1/release/report-producer",
+  "cargo_executable_sha256_at_prepare": "dd5431c3352de19bb86f7c959b37af5aa5ff99413bd43fdd38f1797ecbeb3bdb",
+  "independent_copy_verified": true,
+  "producer_build_included_in_measurement": true,
+  "exit_code": 0,
+  "after_lane_sha256": "dd5431c3352de19bb86f7c959b37af5aa5ff99413bd43fdd38f1797ecbeb3bdb",
+  "cargo_executable_after_lane_sha256": "79bcaf0b6d754d152b30541f0bc6d5d0aa39e49ef32060920ea57779402eac99"
+}

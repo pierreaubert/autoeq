@@ -1,0 +1,85 @@
+{
+  "status": "passed",
+  "mappings": [
+    {
+      "logical": "optim::constraint_envelope::constraint_envelope_tests::every_seat_scores_one_common_bandwidth_in_scalar_and_pareto_paths",
+      "original": "optim::resolution_guard::tests::every_seat_scores_one_common_bandwidth_in_scalar_and_pareto_paths",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/resolution_guard.rs",
+      "current_file": "crates/autoeq-optim/src/optim/constraint_envelope.rs",
+      "original_body_sha256": "94e9483037d68bf10e40fa453604f7adc4865345e44d619455e1a64a00b24a0d",
+      "current_body_sha256": "ecda07d7adf7d5b01b51de309b5f9dbbaf2d959e3242c1e5bb5f77b79f39db97",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "optim::constraint_envelope::constraint_envelope_tests::incompatible_minimum_q_and_extrapolated_centers_are_refused",
+      "original": "optim::resolution_guard::tests::incompatible_minimum_q_and_extrapolated_centers_are_refused",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/resolution_guard.rs",
+      "current_file": "crates/autoeq-optim/src/optim/constraint_envelope.rs",
+      "original_body_sha256": "c818871856d873174c231a32c347ad7cb2b9df8dbfad93b8e05e01655a71708f",
+      "current_body_sha256": "57b0b62449cda895d7702e8684590bc47805cfa5cd3c0112020694e4a8a605a6",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "optim::constraint_envelope::constraint_envelope_tests::matched_peaks_use_actual_extremum_width_in_scoring_and_emission",
+      "original": "optim::resolution_guard::tests::matched_peaks_use_actual_extremum_width_in_scoring_and_emission",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/resolution_guard.rs",
+      "current_file": "crates/autoeq-optim/src/optim/constraint_envelope.rs",
+      "original_body_sha256": "6a6b6b238feb3b81173ba2dcceb382851876535bcc7d13e068d2581115f38105",
+      "current_body_sha256": "0ffba548feefe886fde80d1551c7081b53f32606161419dea496820a19a68de6",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "optim::constraint_envelope::constraint_envelope_tests::search_and_emission_use_the_same_resolution_broadened_response",
+      "original": "optim::resolution_guard::tests::search_and_emission_use_the_same_resolution_broadened_response",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/resolution_guard.rs",
+      "current_file": "crates/autoeq-optim/src/optim/constraint_envelope.rs",
+      "original_body_sha256": "2930b76024e012facf2210b0ef021bb0a430952ec6b98d50620561b0e29512e6",
+      "current_body_sha256": "21b2cfe2a050e0b3acb5d6659dfff1d0263dfbda9ea5ab64af284655d341fda8",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "optim::constraint_envelope::constraint_envelope_tests::zero_gain_pass_notch_and_allpass_topologies_obey_the_same_bandwidth_floor",
+      "original": "optim::resolution_guard::tests::zero_gain_pass_notch_and_allpass_topologies_obey_the_same_bandwidth_floor",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/resolution_guard.rs",
+      "current_file": "crates/autoeq-optim/src/optim/constraint_envelope.rs",
+      "original_body_sha256": "7aca098ff71770442811c32ff7550d6dd5188835aaca2e7085cb0bce3df03363",
+      "current_body_sha256": "62ce261df32ffa34ae7dc7ba6176ee4a96fa9285b40dc6032a862a92312b5003",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "optim::de::tests::epa_progress_skips_when_only_weighted_deviation_is_available",
+      "original": "optim::objective_data::progress_tests::epa_progress_skips_when_only_weighted_deviation_is_available",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/objective_data.rs",
+      "current_file": "crates/autoeq-optim/src/optim/de/tests.rs",
+      "original_body_sha256": "d1a2dcbdce50c4381fa4e604c5476d01a6f75ee49536629f8d8e69bf71ea920f",
+      "current_body_sha256": "47460d71b248925b2427d5a59c5b737e16a565c3635acbe4631b2d7b3050afed",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "optim::de::tests::epa_progress_uses_unmasked_input_curve",
+      "original": "optim::objective_data::progress_tests::epa_progress_uses_unmasked_input_curve",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/autoeq-optim/src/optim/objective_data.rs",
+      "current_file": "crates/autoeq-optim/src/optim/de/tests.rs",
+      "original_body_sha256": "ae41df752f103d37a977ae98b79173ab7c6d43205758eee0b4101e1a003a0b34",
+      "current_body_sha256": "bea3413a74c479f44dd4f27b8d7ba5639e0c50da40746e5e0b2425285348650c",
+      "normalized_body_identical": true
+    },
+    {
+      "logical": "physical_routing_integration_tests::physical_routing_preserves_correction_owned_output_delay_once",
+      "original": "physical_routing::tests::physical_routing_preserves_correction_owned_output_delay_once",
+      "original_file": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261025/baseline/autoeq/crates/roomeq-engine/src/physical_routing.rs",
+      "current_file": "crates/roomeq-engine/src/physical_routing_integration_tests.rs",
+      "original_body_sha256": "d9cf18078365bb17cb5804e1ddbc1cdc062aec41019b8fe09e51d581e6ac4be5",
+      "current_body_sha256": "19f9cb296510c65e256e5fbb70fa18321d89daa6424c8ad814cde6d02883afb7",
+      "normalized_body_identical": true
+    }
+  ],
+  "fixture_helper_normalized_body_identical": true,
+  "normalizations": [
+    "fixture helper rename objective() -> resolution_guard_objective()",
+    "same matched_resolution::feature helper qualified through autoeq_objective",
+    "formatting and trailing call commas; string literals retained verbatim"
+  ],
+  "original_all_feature_case_count": 467,
+  "matched_logical_optimizer_cases": 203
+}

@@ -1,0 +1,66 @@
+{
+  "status": "Exact source-epoch native inventory mapping verified; one documented root-package retirement and two declared additions",
+  "checked_utc": "2026-10-26T10:29:39.340332+00:00",
+  "baseline_execution_row": {
+    "report": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-advisory-baseline-j8-20261026T093302-3bbeb2dc/report.json",
+    "case": "workspace",
+    "scenario": "execution",
+    "repetition": 0,
+    "profile": "release",
+    "exit_code": 0,
+    "test_count": 5411,
+    "executable_count": 211,
+    "rebuild_verified_absent": true,
+    "summary": "     Summary [ 127.853s] 5369 tests run: 5369 passed (4 slow), 42 skipped"
+  },
+  "baseline_listing_sha256": "95198c552f998411aaf39e7426764ac7cbdf89d35b585c91ce5ed133747ab0c0",
+  "candidate_listing_sha256": "6d4786b997e7a643baa84e3007e3ac94b2eead4c617b8a6b771fc7cafc585af1",
+  "mapping_inputs_sha256": {
+    "root-test-identity-map.tsv": "22c691502e0609afd02a941c37a9e24ef04333454733d6fb5ee6cb596c4175d2",
+    "autoeq-qa-test-identity-map.tsv": "880456eae50a94b8b2989adabb5de42e033324105169adac46ddac55e1c4f044",
+    "original-optimizer-identity-preservation.json": "a23b643b0f3e39302e4b1fd95020395a423a3d6caee631985b0313dd5a5dded8",
+    "cli-test-relocations.json": "0ab916d02b1b2e4b11b38e5b4765c1ca3d32353832070694a90201f7212e9bd9",
+    "benchmark-test-namespace-mapping-proof.json": "700f76cf267c5643c4581b52f6c66e8e2725a8700402685f2d32933acec51ddd",
+    "native-advisory-fixed-execution-proof.json": "11496edeb9329dd46e9a5d3afdf35c9dd96e9217e0d5f825f4214c5d3e22166f"
+  },
+  "mapping_file": "advisory-fixed-full-native-identity-map.tsv",
+  "mapping_sha256": "6dbceb7bfeac60f9529ccd5e199f8af0fd6bddd3e48235ed6e68a297cbd9f531",
+  "baseline_cases": 5411,
+  "candidate_cases": 5412,
+  "preserved_exactly_once": 5410,
+  "kind_or_ignored_changes": 0,
+  "ignored_cases_preserved": 42,
+  "retired": [
+    {
+      "suite": "autoeq::packaging_excludes",
+      "name": "published_package_excludes_qa_scripts_backups_and_mdat",
+      "reason": "The original published root package is removed; no root Cargo package exists. Final per-package archive contents still require explicit inspection."
+    }
+  ],
+  "declared_additions": [
+    {
+      "suite": "autoeq-cli",
+      "name": "cli::args::tests::parsed_defaults_match_parser_independent_configuration"
+    },
+    {
+      "suite": "roomeq-cli",
+      "name": "export_args::tests::export_spellings_and_coefficient_alias_keep_domain_values"
+    }
+  ],
+  "mapping_bases": {
+    "root integration owner": 203,
+    "unchanged": 4541,
+    "original optimizer identity map": 271,
+    "objective versus solver Criterion owner": 29,
+    "explicit QA grouping map": 331,
+    "shared physical routing DSP owner": 8,
+    "source-proven physical routing namespace move": 1,
+    "realized transfer integration owner": 15,
+    "shared optimizer reference registry owner": 11
+  },
+  "missing": [],
+  "unmapped": [],
+  "duplicates": [],
+  "profile_guarded_case_present_in_both": "room_optimization::room_optimization_result::tests::sanity_check_result_detects_non_finite_spl",
+  "qualification": "This is a complete inventory/correctness-scope audit for the frozen advisory-fixed source epoch, not a candidate timing sample or a performance acceptance. Count difference is the retired root packaging contract plus two declared CLI boundary tests; no profile-name inference or numerical/domain gate waiver is used. Source-backed operation/case-body equivalence remains separate. Final archive-content inspection remains pending."
+}

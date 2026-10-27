@@ -1,0 +1,510 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling libc v0.2.191
+   Compiling cfg-if v1.0.5
+   Compiling serde_core v1.0.229
+   Compiling autocfg v1.5.1
+   Compiling typeid v1.0.3
+   Compiling erased-serde v0.4.10
+   Compiling libm v0.2.16
+   Compiling memchr v2.8.3
+   Compiling bitflags v2.13.2
+   Compiling equivalent v1.0.3
+   Compiling crossbeam-utils v0.8.23
+   Compiling hashbrown v0.17.1
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling itoa v1.0.18
+   Compiling pin-project-lite v0.2.17
+   Compiling serde v1.0.229
+   Compiling foldhash v0.2.0
+   Compiling zmij v1.0.23
+   Compiling crossbeam-epoch v0.9.21
+   Compiling serde_fmt v1.1.0
+   Compiling indexmap v2.14.2
+   Compiling crossbeam-deque v0.8.8
+   Compiling futures-core v0.3.34
+   Compiling once_cell v1.21.4
+   Compiling value-bag-serde1 v1.14.1
+   Compiling either v1.19.0
+   Compiling value-bag v1.14.1
+   Compiling rayon-core v1.13.0
+   Compiling jobserver v0.1.35
+   Compiling shlex v2.0.1
+   Compiling serde_json v1.0.154
+   Compiling futures-io v0.3.34
+   Compiling log v0.4.34
+   Compiling find-msvc-tools v0.1.14
+   Compiling num-integer v0.1.47
+   Compiling cc v1.8.0
+   Compiling heck v0.5.0
+   Compiling rayon v1.12.0
+   Compiling errno v0.3.14
+   Compiling smallvec v1.16.3
+   Compiling core-foundation-sys v0.8.7
+   Compiling anstyle v1.0.14
+   Compiling base64 v0.23.1
+   Compiling matrixmultiply v0.3.11
+   Compiling slab v0.4.12
+   Compiling utf8parse v0.2.2
+   Compiling thiserror v2.0.21
+   Compiling anstyle-parse v1.0.0
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling byteorder v1.5.0
+   Compiling anstyle-query v1.1.5
+   Compiling colorchoice v1.0.5
+   Compiling rawpointer v0.2.1
+   Compiling anstream v1.0.0
+   Compiling synstructure v0.14.0
+   Compiling typenum v1.20.1
+   Compiling rand_core v0.10.1
+   Compiling strsim v0.11.1
+   Compiling stable_deref_trait v1.2.1
+   Compiling clap_lex v1.1.1
+   Compiling ref-cast v1.0.27
+   Compiling clap_builder v4.6.7
+   Compiling hybrid-array v0.4.15
+   Compiling serde_derive_internals v0.30.0
+   Compiling strength_reduce v0.2.4
+   Compiling getrandom v0.4.3
+   Compiling futures-sink v0.3.34
+   Compiling transpose v0.2.3
+   Compiling primal-check v0.3.4
+   Compiling dyn-clone v1.0.20
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling const-oid v0.10.2
+   Compiling fastrand v2.5.0
+   Compiling digest v0.11.3
+   Compiling futures-channel v0.3.34
+   Compiling cpufeatures v0.3.1
+   Compiling zerocopy v0.8.63
+   Compiling bytes v1.12.1
+   Compiling hound v3.5.1
+   Compiling sha2 v0.11.1
+   Compiling core-foundation v0.10.1
+   Compiling futures-task v0.3.34
+   Compiling signal-hook-registry v1.4.8
+   Compiling writeable v0.6.4
+   Compiling litemap v0.8.3
+   Compiling http v1.5.0
+   Compiling utf8_iter v1.0.4
+   Compiling icu_normalizer_data v2.3.0
+   Compiling icu_properties_data v2.3.0
+   Compiling pkg-config v0.3.34
+   Compiling atomic-waker v1.1.2
+   Compiling percent-encoding v2.3.2
+   Compiling http-body v1.1.0
+   Compiling tracing-core v0.1.36
+   Compiling scopeguard v1.2.0
+   Compiling rustix v1.1.5
+   Compiling form_urlencoded v1.2.2
+   Compiling cmake v0.1.58
+   Compiling num_cpus v1.17.0
+   Compiling fs_extra v1.3.0
+   Compiling dunce v1.0.5
+   Compiling rustversion v1.0.23
+   Compiling simd-adler32 v0.3.10
+   Compiling regex-syntax v0.8.11
+   Compiling adler2 v2.0.1
+   Compiling crc32fast v1.5.2
+   Compiling aws-lc-sys v0.46.0
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.4
+   Compiling aho-corasick v1.1.5
+   Compiling regex-automata v0.4.18
+   Compiling anyhow v1.0.104
+   Compiling aws-lc-rs v1.18.2
+   Compiling zeroize v1.9.1
+   Compiling miniz_oxide v0.9.1
+   Compiling flate2 v1.1.10
+   Compiling rustls-pki-types v1.15.1
+   Compiling chacha20 v0.10.2
+   Compiling httparse v1.10.1
+   Compiling rustls v0.23.46
+   Compiling untrusted v0.9.0
+   Compiling system-configuration-sys v0.6.0
+   Compiling rand v0.10.3
+   Compiling try-lock v0.2.5
+   Compiling fnv v1.0.7
+   Compiling tower-service v0.3.3
+   Compiling subtle v2.6.1
+   Compiling want v0.3.2
+   Compiling regex v1.13.1
+   Compiling core-foundation v0.9.4
+   Compiling approx v0.5.1
+   Compiling option-ext v0.2.0
+   Compiling dirs-sys v0.5.0
+   Compiling system-configuration v0.7.0
+   Compiling encoding_rs v0.8.42
+   Compiling security-framework-sys v2.17.0
+   Compiling num-rational v0.4.2
+   Compiling sync_wrapper v1.0.2
+   Compiling ipnet v2.12.2
+   Compiling tower-layer v0.3.3
+   Compiling security-framework v3.7.0
+   Compiling directories v6.0.0
+   Compiling simdutf8 v0.1.5
+   Compiling multiversion_no_op v1.0.0
+   Compiling http-body-util v0.1.5
+   Compiling iana-time-zone v0.1.65
+   Compiling mime v0.3.17
+   Compiling parking v2.2.1
+   Compiling math-optimisation v0.5.15 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/math-audio/crates/math-optimisation)
+   Compiling urlencoding v2.1.3
+   Compiling rand_distr v0.6.0
+   Compiling zerocopy-derive v0.8.63
+   Compiling tracing-attributes v0.1.31
+   Compiling autoeq-optim v0.5.64 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-optim)
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling thiserror-impl v2.0.21
+   Compiling ref-cast-impl v1.0.27
+   Compiling clap_derive v4.6.7
+   Compiling zerofrom-derive v0.1.8
+   Compiling bytemuck v1.25.2
+   Compiling num-complex v0.4.6
+   Compiling yoke-derive v0.8.4
+   Compiling schemars_derive v1.2.3
+   Compiling rustfft v6.4.1
+   Compiling zerovec-derive v0.11.6
+   Compiling displaydoc v0.2.7
+   Compiling ndarray v0.17.2
+   Compiling clap v4.6.7
+   Compiling futures-macro v0.3.34
+   Compiling math-iir-fir v0.5.27 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/math-audio/crates/math-iir-fir)
+   Compiling tracing v0.1.44
+   Compiling tokio-macros v2.7.2
+   Compiling zerofrom v0.1.8
+   Compiling oxiblas-core v0.2.2
+   Compiling oxiblas-matrix v0.2.2
+   Compiling ppv-lite86 v0.2.21
+   Compiling wide v1.7.1
+   Compiling oxiblas-blas v0.2.2
+   Compiling yoke v0.8.3
+   Compiling zerovec v0.11.8
+   Compiling tinystr v0.8.4
+   Compiling icu_locale_core v2.3.0
+   Compiling futures-util v0.3.34
+   Compiling schemars v1.2.3
+   Compiling potential_utf v0.1.6
+   Compiling zerotrie v0.2.5
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-core)
+   Compiling icu_provider v2.3.1
+   Compiling icu_collections v2.3.0
+   Compiling tokio v1.53.3
+   Compiling simba v0.10.2
+   Compiling icu_properties v2.3.0
+   Compiling icu_normalizer v2.3.0
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling oxiblas-lapack v0.2.2
+   Compiling url v2.5.8
+   Compiling tokio-util v0.7.20
+   Compiling h2 v0.4.20
+   Compiling oxiblas-ndarray v0.2.2
+   Compiling tower v0.5.3
+   Compiling sotf-nalgebra v0.35.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling hyper v1.12.0
+   Compiling roomeq-model v0.5.15 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-model)
+   Compiling tower-http v0.6.11
+   Compiling hyper-util v0.1.21
+   Compiling rand_chacha v0.10.0
+   Compiling realfft v3.5.0
+   Compiling chrono v0.4.45
+   Compiling async-trait v0.1.92
+   Compiling math-test-functions v0.5.4 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/math-audio/crates/math-test-functions)
+   Compiling arrayvec v0.7.8
+   Compiling sotf-metaheuristics-nature v10.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling half v2.7.1
+   Compiling math-dsp v0.5.35 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/math-audio/crates/math-dsp)
+   Compiling tempfile v3.27.0
+   Compiling futures-lite v2.6.1
+   Compiling concurrent-queue v2.5.0
+   Compiling event-listener v5.4.2
+   Compiling rustc-hash v2.1.3
+   Compiling object v0.39.1
+   Compiling glob v0.3.4
+   Compiling event-listener-strategy v0.5.4
+   Compiling foreign-types-macros v0.2.4
+   Compiling clang-sys v1.9.1
+   Compiling core-graphics-types v0.2.0
+   Compiling parking_lot_core v0.9.12
+   Compiling version_check v0.9.5
+   Compiling foreign-types-shared v0.3.1
+   Compiling prettyplease v0.2.37
+   Compiling slotmap v1.1.1
+   Compiling miniz_oxide v0.8.9
+   Compiling foreign-types v0.5.0
+   Compiling euclid v0.22.14
+   Compiling malloc_buf v0.0.6
+   Compiling minimal-lexical v0.2.1
+   Compiling async-task v4.7.1
+   Compiling same-file v1.0.6
+   Compiling getrandom v0.3.4
+   Compiling block v0.1.6
+   Compiling nom v7.1.3
+   Compiling ar_archive_writer v0.5.3
+   Compiling rustls-webpki v0.103.15
+   Compiling objc v0.2.7
+   Compiling toml_datetime v0.6.11
+   Compiling serde_spanned v0.6.9
+   Compiling futures-executor v0.3.34
+   Compiling font-types v0.12.7
+   Compiling lock_api v0.4.14
+   Compiling libloading v0.8.9
+   Compiling paste v1.0.15
+   Compiling bindgen v0.72.1
+   Compiling float-cmp v0.9.0
+   Compiling semver v1.0.28
+   Compiling winnow v0.7.15
+   Compiling toml_write v0.1.2
+   Compiling tokio-rustls v0.26.6
+   Compiling rustls-platform-verifier v0.7.1
+   Compiling hyper-rustls v0.27.10
+   Compiling itertools v0.13.0
+   Compiling reqwest v0.13.5
+   Compiling rustc_version v0.4.1
+   Compiling toml_edit v0.22.27
+   Compiling strict-num v0.1.1
+   Compiling parking_lot v0.12.5
+   Compiling read-fonts v0.41.0
+   Compiling psm v0.1.32
+   Compiling autoeq-measurements v0.5.4 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-measurements)
+   Compiling cexpr v0.6.0
+   Compiling lyon_geom v1.0.19
+   Compiling async-channel v2.5.0
+   Compiling polycool v0.4.0
+   Compiling fdeflate v0.3.7
+   Compiling async-io v2.6.0
+   Compiling cbindgen v0.28.0
+   Compiling shlex v1.3.0
+   Compiling zune-core v0.5.3
+   Compiling leak v0.1.2
+   Compiling quick-error v2.0.1
+   Compiling arrayref v0.3.9
+   Compiling object v0.37.3
+   Compiling weezl v0.1.12
+   Compiling unicode-segmentation v1.13.3
+   Compiling libbz2-rs-sys v0.2.5
+   Compiling convert_case v0.11.0
+   Compiling bzip2 v0.6.1
+   Compiling tiny-skia-path v0.12.0
+   Compiling leaky-cow v0.1.1
+   Compiling zune-jpeg v0.5.15
+   Compiling png v0.18.1
+   Compiling kurbo v0.13.1
+   Compiling lyon_path v1.0.19
+   Compiling rand_core v0.9.5
+   Compiling toml v0.8.23
+   Compiling pathfinder_simd v0.5.6
+   Compiling sotf-gpui_util v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling math-rir v0.5.13 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/math-audio/crates/math-rir)
+   Compiling polling v3.11.0
+   Compiling stacker v0.1.25
+   Compiling cgl v0.3.2
+   Compiling memmap2 v0.9.11
+   Compiling byteorder-lite v0.1.0
+   Compiling unicode-xid v0.2.6
+   Compiling color_quant v1.1.0
+   Compiling jiff-core v0.1.1
+   Compiling ryu v1.0.23
+   Compiling tinyvec v1.13.3
+   Compiling gimli v0.32.3
+   Compiling heck v0.4.1
+   Compiling compression-core v0.4.34
+   Compiling vcpkg v0.2.15
+   Compiling siphasher v1.0.4
+   Compiling heapless v0.9.3
+   Compiling svgtypes v0.16.1
+   Compiling compression-codecs v0.4.46
+   Compiling addr2line v0.25.1
+   Compiling jiff v0.2.38
+   Compiling fontdb v0.24.0
+   Compiling gif v0.14.2
+   Compiling libsqlite3-sys v0.36.0
+   Compiling sotf-derive_more-impl v2.1.2 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling image-webp v0.2.4
+   Compiling metal v0.33.0
+   Compiling io-surface v0.16.1
+   Compiling sotf-collections v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling rand_chacha v0.9.0
+   Compiling skrifa v0.44.0
+   Compiling harfrust v0.12.0
+   Compiling futures v0.3.34
+   Compiling core-graphics2 v0.5.2
+   Compiling core-graphics v0.24.0
+   Compiling pin-project-internal v1.1.13
+   Compiling env_filter v2.0.0
+   Compiling piper v0.2.5
+   Compiling hash32 v0.3.1
+   Compiling simplecss v0.2.2
+   Compiling core_maths v0.1.1
+   Compiling roxmltree v0.21.1
+   Compiling float_next_after v1.0.0
+   Compiling unicode-script v0.5.8
+   Compiling sha1_smol v1.0.1
+   Compiling imagesize v0.15.0
+   Compiling linktime-proc-macro v0.2.3
+   Compiling pico-args v0.5.0
+   Compiling unicode-vo v0.1.0
+   Compiling data-url v0.3.2
+   Compiling fax v0.2.7
+   Compiling link-section v0.19.3
+   Compiling pxfm v0.1.30
+   Compiling unicode-bidi v0.3.18
+   Compiling rustc-demangle v0.1.28
+   Compiling xmlwriter v0.1.0
+   Compiling pin-project v1.1.13
+   Compiling usvg v0.48.1
+   Compiling sotf-derive_more v2.1.2 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling backtrace v0.3.76
+   Compiling moxcms v0.8.1
+   Compiling sotf-media v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling ctor v1.0.13
+   Compiling tiff v0.11.3
+   Compiling uuid v1.28.0
+   Compiling lyon_tessellation v1.0.22
+   Compiling ttf-parser v0.25.1
+   Compiling blocking v1.7.0
+   Compiling env_logger v0.11.11
+   Compiling core-video v0.5.2
+   Compiling rand v0.9.5
+   Compiling sotf-gpui-toolkit-perf v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling async-compression v0.4.51
+   Compiling serde_urlencoded v0.7.1
+   Compiling roomeq-analysis v0.5.10 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-analysis)
+   Compiling lyon_algorithms v1.0.21
+   Compiling sotf-gpui-toolkit-gpui v0.2.3 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling tiny-skia v0.12.0
+   Compiling cocoa-foundation v0.2.0
+   Compiling roomeq-quality v0.5.62 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-quality)
+   Compiling async-lock v3.4.2
+   Compiling autoeq-fir v0.5.3 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-fir)
+   Compiling rgb v0.8.53
+   Compiling stacksafe-macro v1.0.3
+   Compiling sotf-derive_refineable v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling profiling-procmacros v1.0.18
+   Compiling strum_macros v0.28.0
+   Compiling hashbrown v0.16.1
+   Compiling virtue v0.0.18
+   Compiling svg_fmt v0.4.5
+   Compiling web-time v1.1.0
+   Compiling smol_str v0.3.6
+   Compiling fixedbitset v0.5.7
+   Compiling sotf-gpui_shared_string v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling futures-concurrency v7.7.1
+   Compiling sotf-gpui-toolkit-scheduler v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling bincode_derive v2.0.1
+   Compiling sotf-refineable v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling etagere v0.2.15
+   Compiling stacksafe v1.0.3
+   Compiling hashlink v0.11.1
+   Compiling profiling v1.0.18
+   Compiling resvg v0.48.1
+   Compiling cocoa v0.26.0
+   Compiling sotf-gpui-toolkit-util-macros v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling lyon v1.0.19
+   Compiling sotf-gpui-toolkit-http-client v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling pathfinder_geometry v0.5.1
+   Compiling sotf-gpui-toolkit-sum-tree v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling accesskit v0.24.1
+   Compiling image v0.25.10
+   Compiling core-text v21.0.0
+   Compiling async-signal v0.2.14
+   Compiling taffy v0.14.0
+   Compiling sotf-gpui-toolkit-gpui-macros v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling itertools v0.15.0
+   Compiling mach2 v0.5.0
+   Compiling unty v0.0.4
+   Compiling typed-path v0.12.3
+   Compiling robust v1.2.0
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling foldhash v0.1.5
+   Compiling waker-fn v1.2.0
+   Compiling pollster v1.0.1
+   Compiling raw-window-handle v0.6.2
+   Compiling inventory v0.3.25
+   Compiling fallible-iterator v0.3.0
+   Compiling allocator-api2 v0.2.21
+   Compiling seahash v4.1.0
+   Compiling rusqlite v0.38.0
+   Compiling delaunator v1.1.0
+   Compiling hashbrown v0.15.5
+   Compiling zip v8.6.0
+   Compiling bincode v2.0.1
+   Compiling async-process v2.5.0
+   Compiling roomeq-engine v0.5.84 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-engine)
+   Compiling async-fs v2.2.0
+   Compiling async-net v2.0.0
+   Compiling async-executor v1.14.0
+   Compiling smol v2.0.2
+   Compiling sofa-reader v0.2.1 (https://github.com/pierreaubert/sofa-reader#c2ba490d)
+   Compiling fontdue v0.9.5
+   Compiling math-delaunay v0.5.4
+   Compiling strum v0.28.0
+   Compiling autoeq-artifacts v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-artifacts)
+   Compiling serde_ignored v0.1.14
+   Compiling csv-core v0.1.13
+   Compiling gpui-profiler v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling csv v1.4.0
+   Compiling autoeq-workflow v0.5.6 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-workflow)
+   Compiling roomeq-synthetic v0.5.25 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-synthetic)
+   Compiling walkdir v2.5.0
+   Compiling bstr v1.13.1
+   Compiling predicates-core v1.0.10
+   Compiling globset v0.4.20
+   Compiling serial_test_derive v4.0.1
+   Compiling difflib v0.4.0
+   Compiling ignore v0.4.33
+   Compiling roomeq-export v0.5.9 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-export)
+   Compiling termtree v0.5.1
+   Compiling predicates-tree v1.0.13
+   Compiling roomeq-workflow v0.5.36 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-workflow)
+   Compiling globwalk v0.9.1
+   Compiling predicates v3.1.4
+   Compiling rand_xorshift v0.5.0
+   Compiling core_detect v1.0.0
+   Compiling unarray v0.1.4
+   Compiling proptest v1.12.0
+   Compiling serial_test v4.0.1
+   Compiling assert_fs v1.1.4
+   Compiling alloca v0.4.0
+   Compiling wasm-bindgen-shared v0.2.129
+   Compiling plotters-backend v0.3.7
+   Compiling ciborium-io v0.2.2
+   Compiling ciborium-ll v0.2.2
+   Compiling plotters-svg v0.3.7
+   Compiling cast v0.3.0
+   Compiling ciborium v0.2.2
+   Compiling plotters v0.3.7
+   Compiling tinytemplate v1.2.1
+   Compiling criterion-plot v0.8.2
+   Compiling page_size v0.6.0
+   Compiling oorandom v11.1.5
+   Compiling anes v0.1.6
+   Compiling criterion v0.8.2
+   Compiling stats_alloc v0.1.10
+   Compiling bumpalo v3.20.3
+   Compiling wasm-bindgen v0.2.129
+   Compiling wasm-bindgen-macro-support v0.2.129
+   Compiling roomeq-qa v0.5.68 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-qa)
+   Compiling roomeq-cli v0.5.9 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/roomeq-cli)
+   Compiling gpui-design v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling gpui-d3rs v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-report-wasm)
+   Compiling autoeq-plot v0.5.5 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-plot)
+   Compiling autoeq-cli v0.5.3 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-cli)
+   Compiling autoeq-qa v0.5.2 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-qa)
+   Compiling autoeq v0.5.78 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq)
+   Compiling wasm-bindgen-macro v0.2.129
+   Compiling js-sys v0.3.106
+   Compiling web-sys v0.3.106
+   Compiling autoeq-report-wasm-shell v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-report-wasm-shell)
+   Compiling autoeq-report-gpui v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/source/autoeq/crates/autoeq-report-gpui)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-clwcf_n7/targets/primed/0/test/affected/cargo-timings/cargo-timing-20261026T083354284Z-fd616119913dbe19.html
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 52s
+warning: the following packages contain code that will be rejected by a future version of Rust: block v0.1.6
+note: to see what the problems were, use the option `--future-incompat-report`, or run `cargo report future-incompatibilities --id 1`

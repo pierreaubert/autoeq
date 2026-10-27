@@ -1,0 +1,13 @@
+
+running 8 tests
+test physical_routing::tests::physical_routing_allows_shared_parent_named_after_driver ... ok
+test physical_routing::tests::physical_routing_is_permutation_invariant_and_roundtrips ... ok
+test physical_routing::tests::physical_routing_migrates_only_proven_legacy_crossover_ownership ... ok
+test physical_routing::tests::physical_routing_preserves_correction_owned_output_attenuation_once ... ok
+test physical_routing::tests::physical_routing_preserves_sub_delays_eq_and_single_control_ownership ... ok
+test physical_routing::tests::physical_routing_rejects_ambiguous_ownership_and_invalid_controls ... ok
+test physical_routing::tests::physical_routing_rejects_separate_channel_named_after_driver ... ok
+test physical_routing::tests::physical_routing_retains_driver_eq_and_tiny_route_delay ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 969 filtered out; finished in 0.01s
+

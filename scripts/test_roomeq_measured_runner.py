@@ -49,6 +49,9 @@ class MeasuredRunnerTests(unittest.TestCase):
                               "{'outcome': 'rejected' if failed else 'unchanged', 'metrics': {}}}}))\n"
                               "sys.exit(3 if failed else 0)\n")
             binary.chmod(0o755)
+            producer = binary.with_name("report-producer")
+            producer.write_text("#!/bin/sh\nexit 0\n")
+            producer.chmod(0o755)
             expected_binary_hash = hashlib.sha256(binary.read_bytes()).hexdigest()
             (root / "ui").mkdir()
             (root / "ui/display-roomeq").write_text(
@@ -58,12 +61,15 @@ class MeasuredRunnerTests(unittest.TestCase):
                 "import pathlib, sys\nassert pathlib.Path(sys.argv[1]).is_file()\n"
                 "print('{\"audit_attempted\": true}')\n")
             environment = {**os.environ, "CARGO": "true", "PYTHON": "python3",
+                           "CARGO_TARGET_DIR": str(root / "target"),
+                           "AUTOEQ_REPORT_PRODUCER": str(producer),
                            "SCENARIOS": scenario, "MODES": "iir", "IN": "input",
                            "OUT": "output", "FIXTURE_NATIVE_REFUSAL": str(int(native_failure))}
             run = subprocess.run(["bash", str(scripts / "test_roomeq_measured.sh")],
                                  env=environment, capture_output=True, text=True, timeout=30)
             self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
             folder = root / "output" / scenario / "iir"
+            self.assertTrue((folder / "audit.jsonl").is_file(), run.stdout + run.stderr)
             self.assertEqual(json.loads((folder / "audit.jsonl").read_text()),
                              {"audit_attempted": True})
             if report_only:

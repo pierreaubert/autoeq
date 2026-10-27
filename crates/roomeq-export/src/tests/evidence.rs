@@ -449,7 +449,7 @@ fn limiter_graph() -> roomeq_model::DspGraph {
         channels: HashMap::from([(
             "Sub1".into(),
             serde_json::from_value(json!({"channel": "Sub1", "plugins": [
-                roomeq_engine::runtime_limiter::plugin(0.0)
+                autoeq_core::runtime_limiter::plugin(0.0)
             ]}))
             .unwrap(),
         )]),

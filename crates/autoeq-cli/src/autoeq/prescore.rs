@@ -11,7 +11,7 @@ pub(super) struct PreOptMetrics {
 
 /// Compute pre-optimization metrics
 pub(super) async fn compute_pre_optimization_metrics(
-    _args: &autoeq::cli::Args,
+    _args: &crate::cli::Args,
     objective_data: &autoeq::optim::ObjectiveData,
     use_cea: bool,
     deviation_curve: &Curve,

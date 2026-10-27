@@ -1,0 +1,349 @@
+--- /dev/null
++++ b/crates/roomeq-workflow-contracts/src/lib.rs
+@@ -0,0 +1,90 @@
++//! Shared application context and exact-recovery ports for RoomEQ coordination.
++
++#![forbid(unsafe_code)]
++
++use std::collections::HashMap;
++use std::io;
++use std::path::Path;
++
++use autoeq_artifacts::ArtifactStore;
++use autoeq_core::MeasurementSource;
++use roomeq_engine::eq::exact_recovery::ExactDERecoveryOptions;
++use roomeq_model::{Curve, RoomConfig};
++
++/// Receives immutable JSON events from an explicitly enabled finalization trace.
++pub trait FinalizationDiagnosticSink {
++    /// Persist one named event without changing optimization behavior.
++    ///
++    /// Implementations should reject duplicate event names and use atomic,
++    /// no-overwrite file publication when writing to disk.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error when the event cannot be serialized or durably stored.
++    fn write_event(&self, name: &str, json: &[u8]) -> io::Result<()>;
++}
++
++/// Exact finalization trial selected for opt-in diagnostic capture.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub enum FinalizationDiagnosticTrial {
++    /// Capture the unmodified-strength, output-safety candidate before fallback selection.
++    ZeroStrengthOutput,
++    /// Capture the full-strength output-safety candidate before fallback selection.
++    FullStrengthOutput,
++}
++
++/// Application-owned data accompanying an in-memory engine request.
++pub struct WorkflowContext<'a> {
++    /// Optional destination for generated artifacts.
++    pub output_dir: Option<&'a Path>,
++    /// Artifact persistence selected by the application.
++    pub artifact_store: &'a dyn ArtifactStore,
++    /// Measurements excluded from optimization and reserved for validation.
++    pub validation_measurements: &'a HashMap<String, Vec<Curve>>,
++}
++
++impl std::fmt::Debug for WorkflowContext<'_> {
++    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
++        formatter.debug_struct("WorkflowContext").finish_non_exhaustive()
++    }
++}
++
++/// Supplies exact single-channel recovery without owning application persistence.
++///
++/// Implementations retain their existing configuration/input/build identity
++/// gates. Returned options must acknowledge checkpoint durability through the
++/// existing engine callback; no journal, lock, counter or publication state is
++/// transferred to the numerical coordinator.
++pub trait ExactRoomRecovery: Send + Sync {
++    /// Verify the configured run before preparing or scoring measurements.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error if configuration, input bytes, output identity, rate,
++    /// sample count, or supported recovery lane differs from the bound run.
++    fn verify_configuration(
++        &self,
++        room_config: &RoomConfig,
++        sample_rate_hz: f64,
++        frequency_samples: usize,
++    ) -> Result<(), String>;
++
++    /// Freeze the exact numerical measurement bound to this recovery session.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error if loading fails or the frozen curve identity differs
++    /// from the one bound at session creation.
++    fn freeze_and_verify_measurement_source(
++        &self,
++        source: &MeasurementSource,
++    ) -> Result<MeasurementSource, String>;
++
++    /// Obtain validated exact-DE state and its durable save callback.
++    ///
++    /// # Errors
++    ///
++    /// Returns an error for a terminal session, invalid checkpoint identity,
++    /// terminal observer cancellation, or poisoned recovery state.
++    fn exact_de_options(&self) -> Result<ExactDERecoveryOptions, String>;
++}
+--- /dev/null
++++ b/crates/roomeq-workflow-contracts/Cargo.toml
+@@ -0,0 +1,20 @@
++[package]
++name = "roomeq-workflow-contracts"
++version = "0.1.0"
++edition = "2024"
++description = "Shared RoomEQ workflow context and recovery ports"
++license = "GPL-3.0-or-later"
++
++[lib]
++# This new type/port-only owner contains no unit tests; consuming production
++# workflows retain all existing behavioral tests and compile this library.
++test = false
++
++[lints]
++workspace = true
++
++[dependencies]
++autoeq-artifacts = { workspace = true }
++autoeq-core = { workspace = true }
++roomeq-engine = { workspace = true }
++roomeq-model = { workspace = true }
+--- /dev/null
++++ b/crates/roomeq-workflow-contracts/ARCHITECTURE.md
+@@ -0,0 +1,25 @@
++# Shared workflow contracts pilot
++
++This source-only preparatory owner contains the existing immutable-diagnostic
++sink/trial and application context, plus a three-operation exact-recovery port.
++It owns no numerical algorithm, loader, network client, journal, file lock,
++checkpoint counter, cancellation policy, or publication implementation.
++
++`RoomOptimizationResult` already belongs to the engine and stays there.
++`PipelineObserver` also stays in the engine; no second observer is introduced.
++The application keeps its concrete `RoomRecoverySession` and forwards the port
++operations to its unchanged methods. Snapshot identity checks and the existing
++checkpoint durability callback stay in that concrete implementation. Stage and
++output publication transitions remain application-owned.
++
++The workflow's old public diagnostic/context paths reexport these same items.
++Only internal recovery borrows change to the port. The application pipeline
++still owns the concrete session and passes it to numerical dispatch. Prepared
++capture fields remain private and are not moved or exposed by this step.
++
++This new type/port-only library has no unit tests and declares `test=false` to
++avoid a new empty native harness. All existing consuming workflow and recovery
++behavior tests remain reachable. The overlay must be materialized and checked
++by the compiler, existing recovery/diagnostic/cancellation contracts, namespace
++and artifact inventories, and numerical callers after calibration. It is not
++an accepted routed or finalization extraction and is not ported to the refactor.
+--- a/crates/roomeq-workflow/src/pipeline.rs
++++ b/crates/roomeq-workflow/src/pipeline.rs
+@@ -1,7 +1,6 @@
+ //! RoomEQ application pipeline composition.
+ 
+ use std::collections::HashMap;
+-use std::io;
+ use std::path::Path;
+ 
+ use autoeq_artifacts::{ArtifactStore, FsArtifactStore};
+@@ -12,37 +11,9 @@
+ 
+ use crate::DEFAULT_FREQUENCY_SAMPLES;
+ 
+-/// Receives immutable JSON events from an explicitly enabled finalization trace.
+-pub trait FinalizationDiagnosticSink {
+-    /// Persist one named event without changing optimization behavior.
+-    ///
+-    /// Implementations should reject duplicate event names and use atomic,
+-    /// no-overwrite file publication when writing to disk.
+-    ///
+-    /// # Errors
+-    ///
+-    /// Returns an error when the event cannot be serialized or durably stored.
+-    fn write_event(&self, name: &str, json: &[u8]) -> io::Result<()>;
+-}
+-
+-/// Exact finalization trial selected for opt-in diagnostic capture.
+-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+-pub enum FinalizationDiagnosticTrial {
+-    /// Capture the unmodified-strength, output-safety candidate before fallback selection.
+-    ZeroStrengthOutput,
+-    /// Capture the full-strength output-safety candidate before fallback selection.
+-    FullStrengthOutput,
+-}
+-
+-/// Application-owned data accompanying an in-memory engine request.
+-pub struct WorkflowContext<'a> {
+-    /// Optional destination for generated artifacts.
+-    pub output_dir: Option<&'a Path>,
+-    /// Artifact persistence selected by the application.
+-    pub artifact_store: &'a dyn ArtifactStore,
+-    /// Measurements excluded from optimization and reserved for validation.
+-    pub validation_measurements: &'a HashMap<String, Vec<Curve>>,
+-}
++pub use roomeq_workflow_contracts::{
++    FinalizationDiagnosticSink, FinalizationDiagnosticTrial, WorkflowContext,
++};
+ 
+ /// Request data for a RoomEQ workflow run.
+ #[derive(Clone, Copy)]
+--- a/crates/roomeq-workflow/src/channel.rs
++++ b/crates/roomeq-workflow/src/channel.rs
+@@ -101,7 +101,7 @@
+     probe_arrival_ms: Option<f64>,
+     shared_mean_spl: Option<f64>,
+     frequency_samples: usize,
+-    recovery: &crate::room_recovery::RoomRecoverySession,
++    recovery: &dyn roomeq_workflow_contracts::ExactRoomRecovery,
+ ) -> Result<ChannelWorkflowResult> {
+     process_single_channel_with_optional_recovery(
+         channel_name,
+@@ -128,7 +128,7 @@
+     probe_arrival_ms: Option<f64>,
+     shared_mean_spl: Option<f64>,
+     frequency_samples: usize,
+-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+ ) -> Result<ChannelWorkflowResult> {
+     let recovery_source = if let Some(recovery) = recovery {
+         recovery
+--- a/crates/roomeq-workflow/src/room_optimization.rs
++++ b/crates/roomeq-workflow/src/room_optimization.rs
+@@ -254,7 +254,7 @@
+     context: &crate::WorkflowContext<'_>,
+     observer: Option<Box<dyn PipelineObserver>>,
+     frequency_samples: usize,
+-    recovery: &crate::room_recovery::RoomRecoverySession,
++    recovery: &dyn roomeq_workflow_contracts::ExactRoomRecovery,
+     finalization_diagnostic: Option<(
+         crate::pipeline::FinalizationDiagnosticTrial,
+         &dyn crate::pipeline::FinalizationDiagnosticSink,
+@@ -275,7 +275,7 @@
+     context: &crate::WorkflowContext<'_>,
+     observer: Option<Box<dyn PipelineObserver>>,
+     frequency_samples: usize,
+-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+     finalization_diagnostic: Option<(
+         crate::pipeline::FinalizationDiagnosticTrial,
+         &dyn crate::pipeline::FinalizationDiagnosticSink,
+@@ -432,7 +432,7 @@
+     context: &crate::WorkflowContext<'_>,
+     observer: Option<Box<dyn PipelineObserver>>,
+     frequency_samples: usize,
+-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+     finalization_diagnostic: Option<(
+         crate::pipeline::FinalizationDiagnosticTrial,
+         &dyn crate::pipeline::FinalizationDiagnosticSink,
+@@ -1029,7 +1029,7 @@
+     probe_arrival_overrides: Option<&HashMap<String, f64>>,
+     observer_shared: &SharedPipelineObserver,
+     frequency_samples: usize,
+-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+ ) -> Result<(GenericChannelCollection, usize)> {
+     let channels_to_process = channels_for_generic_optimization(config);
+     let total_speakers = channels_to_process.len();
+@@ -1090,7 +1090,7 @@
+ 
+ struct RoomOptimizationRecovery<'a> {
+     frequency_samples: usize,
+-    recovery: Option<&'a crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&'a dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+ }
+ 
+ fn optimize_room_impl_with_recovery_and_frequency_samples(
+--- a/crates/roomeq-workflow/src/room_optimization/process.rs
++++ b/crates/roomeq-workflow/src/room_optimization/process.rs
+@@ -67,7 +67,7 @@
+     probe_arrival_overrides: Option<&HashMap<String, f64>>,
+     observer_shared: &SharedPipelineObserver,
+     frequency_samples: usize,
+-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+ ) -> Result<Vec<SpeakerProcessResult>> {
+     let total_speakers = channels_to_process.len();
+ 
+@@ -276,7 +276,7 @@
+     shared_mean_spl: Option<f64>,
+     probe_arrival_overrides: Option<&HashMap<String, f64>>,
+     frequency_samples: usize,
+-    recovery: Option<&crate::room_recovery::RoomRecoverySession>,
++    recovery: Option<&dyn roomeq_workflow_contracts::ExactRoomRecovery>,
+ ) -> Result<MixedModeResult> {
+     let output_dir = output_dir.unwrap_or(Path::new("."));
+ 
+--- a/crates/roomeq-workflow/src/room_recovery.rs
++++ b/crates/roomeq-workflow/src/room_recovery.rs
+@@ -1487,6 +1487,28 @@
+         .map_err(|error| format!("cannot identify RoomEQ output bundle: {error}"))
+ }
+ 
++impl roomeq_workflow_contracts::ExactRoomRecovery for RoomRecoverySession {
++    fn verify_configuration(
++        &self,
++        room_config: &RoomConfig,
++        sample_rate_hz: f64,
++        frequency_samples: usize,
++    ) -> Result<(), String> {
++        RoomRecoverySession::verify_configuration(self, room_config, sample_rate_hz, frequency_samples)
++    }
++
++    fn freeze_and_verify_measurement_source(
++        &self,
++        source: &MeasurementSource,
++    ) -> Result<MeasurementSource, String> {
++        RoomRecoverySession::freeze_and_verify_measurement_source(self, source)
++    }
++
++    fn exact_de_options(&self) -> Result<ExactDERecoveryOptions, String> {
++        RoomRecoverySession::exact_de_options(self)
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -16,6 +16,7 @@
+     "crates/roomeq-engine",
+     "crates/roomeq-engine-channel",
+     "crates/roomeq-engine-system",
++    "crates/roomeq-workflow-contracts",
+     "crates/roomeq-export",
+     "crates/roomeq-quality",
+     "crates/roomeq-qa",
+@@ -52,6 +53,7 @@
+     "crates/roomeq-engine",
+     "crates/roomeq-engine-channel",
+     "crates/roomeq-engine-system",
++    "crates/roomeq-workflow-contracts",
+     "crates/roomeq-export",
+     "crates/roomeq-synthetic",
+     "crates/roomeq-workflow",
+@@ -86,6 +88,7 @@
+ roomeq-engine = { path = "crates/roomeq-engine", version = "0.5.84" }
+ roomeq-engine-channel = { path = "crates/roomeq-engine-channel", version = "0.1" }
+ roomeq-engine-system = { path = "crates/roomeq-engine-system", version = "0.1" }
++roomeq-workflow-contracts = { path = "crates/roomeq-workflow-contracts", version = "0.1" }
+ roomeq-export = { path = "crates/roomeq-export", version = "0.5.9" }
+ roomeq-quality = { path = "crates/roomeq-quality", version = "0.5" }
+ roomeq-qa = { path = "crates/roomeq-qa", version = "0.5" }
+--- a/crates/roomeq-workflow/Cargo.toml
++++ b/crates/roomeq-workflow/Cargo.toml
+@@ -27,6 +27,7 @@
+ roomeq-engine = { workspace = true }
+ roomeq-engine-channel = { workspace = true }
+ roomeq-engine-system = { workspace = true }
++roomeq-workflow-contracts = { workspace = true }
+ roomeq-export = { workspace = true }
+ roomeq-model = { workspace = true }
+ roomeq-quality = { workspace = true }

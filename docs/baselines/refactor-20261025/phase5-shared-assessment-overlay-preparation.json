@@ -1,0 +1,2080 @@
+{
+  "status": "source-only shared prerequisite prepared; compiler/runtime/performance not verified",
+  "prepared_utc": "2026-10-26T12:44:11.193739+00:00",
+  "base": "/Volumes/home_tmp/tmp/autoeq-shared-level-alignment-trial-20261026/autoeq",
+  "overlay": "/Volumes/home_tmp/tmp/autoeq-shared-assessment-overlay-20261026",
+  "files": {
+    "crates/roomeq-playback/src/assessment/seat_replay.rs": "6db92ac939422abc9cdc3c657472a8548f8e063c1838daeab27ca483e104c9f9",
+    "crates/roomeq-playback/src/assessment/seat_replay/correlated_bass.rs": "9f2e85da8b6fc6fdbf5369b0c4f31106ebb692154a428d7880e53d337387e350",
+    "crates/roomeq-playback/src/assessment/seat_replay/intake.rs": "e8f94162262232914a354dbbecd04137f6d85fe53aa0fdee4beb5bda41d7c470",
+    "crates/roomeq-playback/src/assessment/seat_replay/asymmetric.rs": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+    "crates/roomeq-playback/src/assessment/seat_replay/configured_reference.rs": "b0865bc9f19d8ef3b85f199c6ac1caa71131a5aebc43fb6bbfb3fe26a12ea14c",
+    "crates/roomeq-playback/src/assessment/seat_replay/bounded_sum.rs": "ed3c2d00e8fbe50c2a59ef0b6075997232c7feb05617c79135b2c8affbf24690",
+    "crates/roomeq-playback/src/assessment/seat_replay/configured_reference/lfe_target.rs": "b5498481657cf9026a0e2d048c5b4eecd723412efa86b680ac4b7327c27aedcb",
+    "crates/roomeq-playback/src/assessment/room_optimization_result.rs": "11ee5db23435ebd6dd106d4c46600f5205469c98aec7808e75759197d231dc67",
+    "crates/roomeq-playback/src/assessment/reports.rs": "63c8f5080bc44715514eb6cd325ecc384faa40495e91cc9f4b2f7cde24b960ed",
+    "crates/roomeq-playback/src/assessment/reports/role.rs": "51532418b2a4390d316c533af1240aa37b3d18711e6cb050db73f8814e869eb3",
+    "crates/roomeq-playback/src/assessment/reports/types.rs": "7aa5dd9bbc9650ca507af47fcf95e934959dcb499ad320c015a11849cb91bd11",
+    "crates/roomeq-playback/src/assessment/reports/channel.rs": "022c906cbef1919b52c4c446cd4e4351c78389175985805d6846457e9fcc2fc0",
+    "crates/roomeq-playback/src/assessment/reports/build.rs": "2d8e3a88eaf7507dcda7ac1980ff5b85818389f0a3fcb516d07abf0d5bfa4aed",
+    "crates/roomeq-playback/src/assessment/reports/waveform_status.rs": "8d75519b38d39ea8901eae82cb46d7b76fea15ce15b089d1be4d8b2f85e5f255",
+    "crates/roomeq-playback/src/assessment/reports/misc.rs": "ae0e53c8e3a42f6997414209719df324b099a0d9f04eb5d308fade7a1097656c",
+    "crates/roomeq-playback/src/assessment/reports/refresh.rs": "df05a8e3b10f2a0d5eed94de99fe1145813df22cb29560c28b39f47ca0cad526",
+    "crates/roomeq-playback/src/assessment/validation_scorecard.rs": "f63f978e653ea7364aa4477b83cd5e81ccec392ae7127195cff6181e8a6cb45b",
+    "crates/roomeq-workflow/src/room_optimization/finalization.rs": "6f77b284f8e597ae1fa3dbd3cdf730f44f16dcb949ac8ab55b677f2cdc4475c3",
+    "crates/roomeq-playback/src/assessment/configured_acceptance.rs": "1a83adf514e629a7397143a64ae29a0876e49a8efe60e30509b688e7a2da4e24",
+    "crates/roomeq-workflow/src/home_cinema/all.rs": "2d1dccb60022a5eec577688b4519c50b1ced730a4666fa35aa6eb5dfa4670068",
+    "crates/roomeq-playback/src/multiseat_report.rs": "e3cbabb30450004835db772832a863fe96a780f25dd4915775ab0a44ab68e24a",
+    "crates/roomeq-playback/src/assessment.rs": "42dad3d1105ddf17f0eeeffe592eee65f4085f6cd3a344cdff2f74f0e8c2b8bb",
+    "crates/roomeq-playback/src/assessment/types.rs": "8addf990378df93ce46128199fbe855bc47463e21e70f4e285bd5417f5bed263",
+    "crates/roomeq-playback/src/assessment/misc.rs": "bae562af4a84b4c8a6b3fc2d3d9e62d778056c35e5e8a9a3fcdc88de7823bcba",
+    "crates/roomeq-workflow/src/room_optimization/misc.rs": "5502a94ccca1f8656b6f097fbfbe1987fbcffd640a27da0084c2d9966907ef10",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay.rs": "1ce595ee4cb648cf7eaf4ee001fbd0443d87f3824ce96eac5c2392a72fab33b8",
+    "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs": "ab2cbe400b523b203d78d9869246a340c0b574addfac774bddf50e9869198f58",
+    "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs": "7c2111b8838f82da600827e451ff1c980cdcbeef972f515afb8846042c5234ca",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs": "2fdb22ee8bc52120eb349dc5047c4003367c290b4311e19714a4ce4e026ae657",
+    "crates/roomeq-workflow/src/room_optimization/reports.rs": "e8e18e745624d97c11b96b0fc2b37ad739fa355456725290c21dddb96b1bc75f",
+    "crates/roomeq-workflow/src/home_cinema/multi.rs": "248aa7d3f67c8bcd7f14426cd6bdbd46c9d356f02539a24bfe2fa533ec4718e3",
+    "crates/roomeq-playback/Cargo.toml": "ed0af50de696ce8109e692eaa0a408890afd060d9d1fb75491350476665006da",
+    "crates/roomeq-workflow/Cargo.toml": "1bd3abfb443b5e349dddd91303a226754f16f55ca133cfc22d9c0d57abc90c43",
+    "crates/roomeq-playback/src/lib.rs": "3b493dfe17315208747d6f6c932dcd181b8684c2af358188af7b2a0afbbaf84b"
+  },
+  "whole_module_moves": [
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay.rs",
+      "original_sha256": "2a536e32f65d98c6eab42a087445746eac5f7ef753f7807e431b1f1aae1670a9",
+      "moved_sha256": "6db92ac939422abc9cdc3c657472a8548f8e063c1838daeab27ca483e104c9f9",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay/correlated_bass.rs",
+      "original_sha256": "470d798b6b6e7e7b1dfce46cc6bbb1ce34eeac923239cc5b81f370f4b118fd80",
+      "moved_sha256": "9f2e85da8b6fc6fdbf5369b0c4f31106ebb692154a428d7880e53d337387e350",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay/intake.rs",
+      "original_sha256": "d60d8115cee2b6f7af3f3fa2209ed06621e7ed320b80b32e4e49f3dd90f1de85",
+      "moved_sha256": "e8f94162262232914a354dbbecd04137f6d85fe53aa0fdee4beb5bda41d7c470",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay/asymmetric.rs",
+      "original_sha256": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+      "moved_sha256": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay/configured_reference.rs",
+      "original_sha256": "b0bc19afa3bf59183428fcd6810debc467c6e4ab41634ff85c28f62f01fe86f2",
+      "moved_sha256": "b0865bc9f19d8ef3b85f199c6ac1caa71131a5aebc43fb6bbfb3fe26a12ea14c",
+      "removed_items": [
+        "configured_reference_does_not_inherit_candidate_output_safety"
+      ],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay/bounded_sum.rs",
+      "original_sha256": "a981973e93cfc799682a946f16d01bda377a86a5151d86c45b59a6b24e6e427e",
+      "moved_sha256": "ed3c2d00e8fbe50c2a59ef0b6075997232c7feb05617c79135b2c8affbf24690",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs",
+      "target": "crates/roomeq-playback/src/assessment/seat_replay/configured_reference/lfe_target.rs",
+      "original_sha256": "3b6581e4e937518de1a8163f109cc3ecb1fb44e8e45fe4fb689a841e516054fe",
+      "moved_sha256": "b5498481657cf9026a0e2d048c5b4eecd723412efa86b680ac4b7327c27aedcb",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+      "target": "crates/roomeq-playback/src/assessment/room_optimization_result.rs",
+      "original_sha256": "d8ebc74a7059e52c7f7a2482f3edcd05eb791299cf73356d3bc3033a9aa6d164",
+      "moved_sha256": "11ee5db23435ebd6dd106d4c46600f5205469c98aec7808e75759197d231dc67",
+      "removed_items": [
+        "apply_ctc_if_enabled_disabled_leaves_none",
+        "apply_ctc_if_enabled_disabled_explicitly_leaves_none",
+        "apply_ctc_if_enabled_without_system_errors",
+        "apply_ctc_if_enabled_with_system_runs",
+        "apply_ctc_if_enabled"
+      ],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports.rs",
+      "original_sha256": "ce8da46b15f48b423b949e609f901ee93a50e6dce2f2204317c0c5fead57bd4b",
+      "moved_sha256": "63c8f5080bc44715514eb6cd325ecc384faa40495e91cc9f4b2f7cde24b960ed",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/role.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/role.rs",
+      "original_sha256": "d884db8598c05513fbebf7318f5cdcc8ff91b7046f8f5d209eb75e8c47a724b9",
+      "moved_sha256": "51532418b2a4390d316c533af1240aa37b3d18711e6cb050db73f8814e869eb3",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/types.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/types.rs",
+      "original_sha256": "d09af306c384405e314defd56a2a91863570dddbe794373cba35c8100fef3a8d",
+      "moved_sha256": "7aa5dd9bbc9650ca507af47fcf95e934959dcb499ad320c015a11849cb91bd11",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/channel.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/channel.rs",
+      "original_sha256": "b8b8bb677e6a660567f61290624c9fd899a4254c96ebe6912e58cbcb0e8caa0e",
+      "moved_sha256": "022c906cbef1919b52c4c446cd4e4351c78389175985805d6846457e9fcc2fc0",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/build.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/build.rs",
+      "original_sha256": "603c058e4fc549774369f609db0eec12365492ca0a0ff64dda211958f21651bc",
+      "moved_sha256": "2d8e3a88eaf7507dcda7ac1980ff5b85818389f0a3fcb516d07abf0d5bfa4aed",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/waveform_status.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/waveform_status.rs",
+      "original_sha256": "8d75519b38d39ea8901eae82cb46d7b76fea15ce15b089d1be4d8b2f85e5f255",
+      "moved_sha256": "8d75519b38d39ea8901eae82cb46d7b76fea15ce15b089d1be4d8b2f85e5f255",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/misc.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/misc.rs",
+      "original_sha256": "f9fd3860d1d43d3787a242dd818006681ea86b5138f3d5fb941ec7fbf3ca98ef",
+      "moved_sha256": "ae0e53c8e3a42f6997414209719df324b099a0d9f04eb5d308fade7a1097656c",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/reports/refresh.rs",
+      "target": "crates/roomeq-playback/src/assessment/reports/refresh.rs",
+      "original_sha256": "0d5f85cf19065d26a5a6894ce51228e7c668fc0e35dd0e06943d55d61542aede",
+      "moved_sha256": "df05a8e3b10f2a0d5eed94de99fe1145813df22cb29560c28b39f47ca0cad526",
+      "removed_items": [],
+      "visibility_adjustment": "report exports adjusted separately"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+      "target": "crates/roomeq-playback/src/assessment/validation_scorecard.rs",
+      "original_sha256": "c8f2d1ad8fce80bf9bb0c3ea508414d2cb2f3df8e8069aee6086a0bb620dafbc",
+      "moved_sha256": "f63f978e653ea7364aa4477b83cd5e81ccec392ae7127195cff6181e8a6cb45b",
+      "removed_items": [],
+      "visibility_adjustment": "restricted visibility becomes public only for cross-crate assessment modules; Capture fields and baseline cache remain private"
+    },
+    {
+      "source": "crates/roomeq-workflow/src/home_cinema/multi.rs",
+      "target": "crates/roomeq-playback/src/multiseat_report.rs",
+      "original_sha256": "36d3411c010e08c404dd2274fcc2abf6f476cbf71a8a2dc4fbfc6c580e84e64b",
+      "moved_sha256": "e3cbabb30450004835db772832a863fe96a780f25dd4915775ab0a44ab68e24a",
+      "removed_items": [],
+      "visibility_adjustment": "public report paths retained by explicit workflow reexports; model imports are private"
+    }
+  ],
+  "specific_moves": [
+    {
+      "name": "configured_acceptance_graph",
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "original_lines": [
+        3829,
+        3839
+      ],
+      "original_sha256": "0f66c40285ae3dd320ec64d5af518a40e722c6e4fa59e0eb8b72e25450aa9432",
+      "moved_sha256": "45c55174f7e844c2afe0d96210f6fcb21df283ca30ce7cdc62469d26f49f706a",
+      "copied_error_factory_only": false
+    },
+    {
+      "name": "refresh_configured_native_acceptance",
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "original_lines": [
+        3841,
+        3918
+      ],
+      "original_sha256": "31b8d35a01972d8f1949a720e4b989a24c22d864beae5e5346073f403173d60a",
+      "moved_sha256": "5077f5fffc73a85cab1e95dcd6cacc0e7235e23cac0627148f9783f614cf091a",
+      "copied_error_factory_only": false
+    },
+    {
+      "name": "failed",
+      "source": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "original_lines": [
+        388,
+        392
+      ],
+      "original_sha256": "0ed2e376c10becc6c781e6b0cc4386630b55c6d6ce806fc2e4b8b384fbe713fb",
+      "moved_sha256": "0ed2e376c10becc6c781e6b0cc4386630b55c6d6ce806fc2e4b8b384fbe713fb",
+      "copied_error_factory_only": true
+    },
+    {
+      "name": "all_channel_multiseat_enabled",
+      "source": "crates/roomeq-workflow/src/home_cinema/all.rs",
+      "original_lines": [
+        221,
+        227
+      ],
+      "original_sha256": "39be9cd47f306c62502d4be678d9f56d737b1d5727418ac308545ad02443c491",
+      "moved_sha256": "7dafba87c02a1b207290c4577bbc5a931abfed11ea0daec34ce7e6d5c4d6dd3d"
+    },
+    {
+      "name": "all_channel_multiseat_policy",
+      "source": "crates/roomeq-workflow/src/home_cinema/all.rs",
+      "original_lines": [
+        229,
+        231
+      ],
+      "original_sha256": "07dcf1d50865b4cd28f38f8258a4289f11ac0ebeba865375e41009aef1b204b4",
+      "moved_sha256": "17ac9d4194e3217eeaa8be87f4945374952911736895d3f4d70eedde565c35cb"
+    },
+    {
+      "name": "ARRIVAL_TIME_WARNING_THRESHOLD_MS",
+      "source": "crates/roomeq-workflow/src/room_optimization/misc.rs",
+      "original_lines": [
+        30,
+        31
+      ],
+      "original_sha256": "eae7f052666a23220c30736438e85a114ab5c62371571774ac7c7bd9b838bcdf",
+      "moved_sha256": "b7190d4a21ab8380debddc509560d8757c62d1e8489b22378fb50f0d809e2960"
+    }
+  ],
+  "path_rebindings": {
+    "crate::ctc::apply_channel_dsp_chain_to_curve": "crate::chain::apply_channel_dsp_chain_to_curve",
+    "crate::ctc::channel_electrical_response_with_embedded_irs": "crate::chain::channel_electrical_response_with_embedded_irs",
+    "crate::ctc::read_wav_channels_f64": "crate::resource::read_wav_channels_f64",
+    "crate::ctc::checked_sample_rate": "crate::resource::checked_sample_rate",
+    "crate::export::validate_final_routed_stage_ownership": "crate::final_resources::validate_final_routed_stage_ownership",
+    "crate::group_measurements::seat_labels": "crate::resource::seat_labels",
+    "crate::prepare_eq_resources": "crate::eq_resources::prepare_eq_resources",
+    "crate::topology::": "crate::routed::",
+    "crate::DEFAULT_FREQUENCY_SAMPLES": "crate::measurement::DEFAULT_FREQUENCY_SAMPLES",
+    "crate::home_cinema::multi_seat_correction_report": "crate::multiseat_report::multi_seat_correction_report",
+    "crate::home_cinema::multi_seat_coverage": "crate::multiseat_report::multi_seat_coverage",
+    "crate::room_optimization::": "crate::assessment::",
+    "::finalization::refresh_configured_native_acceptance": "::configured_acceptance::refresh_configured_native_acceptance",
+    "roomeq_playback::": "crate::"
+  },
+  "workflow_adapters": {
+    "crates/roomeq-workflow/src/room_optimization/seat_replay.rs": {
+      "public": [
+        "Capture",
+        "FinalPhysicalSeatPlayback",
+        "capture_training",
+        "replay_final_physical_seat",
+        "training_physical_captures",
+        "training_seat_label"
+      ],
+      "restricted": [
+        "ConfiguredComparison",
+        "attach_configured_comparison",
+        "capture_with_receipt",
+        "configured_selection_metrics",
+        "correlated_bass_stage",
+        "crossover_phase_advisories",
+        "has_unmeasured_multi_branch_phase",
+        "restore_configured_bass_routes",
+        "restore_structural_baseline",
+        "validate_candidate_final_seats",
+        "validate_candidate_final_seats_with_diagnostic_trace",
+        "validate_final_correlated_bass",
+        "validate_final_seats"
+      ]
+    },
+    "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs": {
+      "public": [],
+      "restricted": [
+        "apply_final_correction_safety_gate",
+        "apply_logical_channel_chain",
+        "correction_stages",
+        "evaluate_preserved_target_passband",
+        "hybrid_fir_design_input",
+        "is_baseline_correction",
+        "is_plugin_free_identity",
+        "policy_for_delivered_graph",
+        "record_peq_candidates",
+        "refresh_optimizer_evidence",
+        "remove_routing_transfer",
+        "sanity_check_result"
+      ]
+    },
+    "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs": {
+      "public": [],
+      "restricted": [
+        "align_report_metrics_to_scorecard",
+        "attach_validation_scorecard",
+        "defer_native_routed_acceptance",
+        "needs_native_routed_acceptance"
+      ]
+    }
+  },
+  "report_exports_by_child": {
+    "build": {
+      "public": [
+        "build_timing_diagnostics"
+      ],
+      "internal": []
+    },
+    "channel": {
+      "public": [
+        "compute_and_correct_icd"
+      ],
+      "internal": [
+        "channel_matching_band_rms_db",
+        "channel_matching_profile_for_role_key",
+        "channel_matching_worsens_reported_scores"
+      ]
+    },
+    "misc": {
+      "public": [
+        "final_score_band_for_channel",
+        "generate_validation_bundle_report",
+        "mean",
+        "recompute_curve_flatness_score",
+        "should_apply_spectral_shelves",
+        "spread"
+      ],
+      "internal": [
+        "applied_bass_crossover_hz",
+        "apply_channel_matching_correction",
+        "bass_consistency_rms_db",
+        "curve_roughness_rms_db",
+        "dialog_band_roughness_rms_db",
+        "excursion_hpf_hz_from_chain",
+        "group_mean_deviation_rms_db",
+        "headroom_peak_boost_db",
+        "lcr_timing_advisory",
+        "rms",
+        "surround_or_height_precedence_risk"
+      ]
+    },
+    "refresh": {
+      "public": [
+        "refresh_direct_early_late_reports",
+        "refresh_final_reports",
+        "refresh_perceptual_policy_reports",
+        "refresh_temporal_ir_evidence"
+      ],
+      "internal": []
+    },
+    "role": {
+      "public": [
+        "update_perceptual_metrics"
+      ],
+      "internal": [
+        "role_aware_channel_matching_groups",
+        "role_aware_channel_matching_groups_with_keys",
+        "role_channel_matching_rms_db"
+      ]
+    }
+  },
+  "multiseat_public_exports": [
+    "multi_seat_correction_report",
+    "multi_seat_correction_report_with_frequency_samples",
+    "multi_seat_coverage"
+  ],
+  "case_map": [
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_applied_pass",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_applied_pass",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_disabled",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_disabled",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_failed_constraints_and_null_advisory",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_failed_constraints_and_null_advisory",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_frequency_grid_mismatch",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_frequency_grid_mismatch",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_invalid_policy_weights_advisory",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_invalid_policy_weights_advisory",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_measurement_load_failed",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_measurement_load_failed",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_not_optimized",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_not_optimized",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_primary_seat_out_of_range",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_primary_seat_out_of_range",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_rejected_guardrails",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_rejected_guardrails",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_single_seat_skipped",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_single_seat_skipped",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_spatial_robustness_invalid",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_spatial_robustness_invalid",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::correction_report_unsupported_topology",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::correction_report_unsupported_topology",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::multi_seat_coverage_advisories_branches",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::multi_seat_coverage_advisories_branches",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::multi_seat_coverage_all_channels_ready",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::multi_seat_coverage_all_channels_ready",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::multi_seat_coverage_partial_and_sub_only",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::multi_seat_coverage_partial_and_sub_only",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::recommended_scope_branches",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::recommended_scope_branches",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "home_cinema::multi::multi_seat_branch_tests::role_group_reports_pass_and_fail",
+      "new_owner": "roomeq-playback",
+      "new_name": "multiseat_report::multi_seat_branch_tests::role_group_reports_pass_and_fail",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::bootstrap_uncertainty_report_marks_spatial_robustness_depth_mask",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::bootstrap_uncertainty_report_marks_spatial_robustness_depth_mask",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::bootstrap_uncertainty_report_none_by_default",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::bootstrap_uncertainty_report_none_by_default",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::bootstrap_uncertainty_report_unmasks_non_spatial_robustness",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::bootstrap_uncertainty_report_unmasks_non_spatial_robustness",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::direct_house_curve_is_reported_as_preference_without_a_policy_preset",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::direct_house_curve_is_reported_as_preference_without_a_policy_preset",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::perceptual_policy_report_none_by_default",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::perceptual_policy_report_none_by_default",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::perceptual_policy_report_reflects_configured_policy",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::perceptual_policy_report_reflects_configured_policy",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::timing_diagnostics_excludes_intentional_stage_delays_from_after_spread",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::timing_diagnostics_excludes_intentional_stage_delays_from_after_spread",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::timing_diagnostics_reports_reference_spread_and_offsets",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::timing_diagnostics_reports_reference_spread_and_offsets",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::build::tests::timing_diagnostics_returns_none_without_arrivals",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::build::tests::timing_diagnostics_returns_none_without_arrivals",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_band_rms_db_computes_band",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_band_rms_db_computes_band",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_band_rms_db_empty_band_fallback",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_band_rms_db_empty_band_fallback",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_group_stops_at_narrowest_measured_passband",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_group_stops_at_narrowest_measured_passband",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_profile_front_lr_scaled",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_profile_front_lr_scaled",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_profile_threshold_clamped_positive",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_profile_threshold_clamped_positive",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_profile_unknown_uses_default_band",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_profile_unknown_uses_default_band",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_respects_bass_only_optimizer_bounds",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_respects_bass_only_optimizer_bounds",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_skips_when_active_band_has_no_role_overlap",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_skips_when_active_band_has_no_role_overlap",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_worsens_reported_scores_detects_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_worsens_reported_scores_detects_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::channel_matching_worsens_reported_scores_no_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::channel_matching_worsens_reported_scores_no_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::compute_and_correct_icd_disabled_sets_metadata",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::compute_and_correct_icd_disabled_sets_metadata",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::compute_and_correct_icd_prefers_authoritative_deployed_curves",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::compute_and_correct_icd_prefers_authoritative_deployed_curves",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::compute_and_correct_icd_single_channel_clears_metadata",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::compute_and_correct_icd_single_channel_clears_metadata",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::matching_band_from_profile_uses_f3_floor",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::matching_band_from_profile_uses_f3_floor",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::channel::tests::role_aware_groups_front_lr_pair",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::channel::tests::role_aware_groups_front_lr_pair",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::applied_bass_crossover_hz_none_without_optimization",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::applied_bass_crossover_hz_none_without_optimization",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::applied_bass_crossover_hz_reads_optimized_value",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::applied_bass_crossover_hz_reads_optimized_value",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::apply_channel_matching_correction_adds_plugin_and_updates_curve",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::apply_channel_matching_correction_adds_plugin_and_updates_curve",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::bass_consistency_rms_db_with_two_subs",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::bass_consistency_rms_db_with_two_subs",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::curve_roughness_rms_db_nonzero",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::curve_roughness_rms_db_nonzero",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::dialog_band_roughness_center_channel",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::dialog_band_roughness_center_channel",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::direct_early_late_metrics_basic",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::direct_early_late_metrics_basic",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::direct_early_late_metrics_mismatched_lengths_none",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::direct_early_late_metrics_mismatched_lengths_none",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::energy_ratio_to_db_extreme_low_ratio",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::energy_ratio_to_db_extreme_low_ratio",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::energy_ratio_to_db_unity",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::energy_ratio_to_db_unity",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::excursion_hpf_hz_from_chain_none_without_labeled_plugin",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::excursion_hpf_hz_from_chain_none_without_labeled_plugin",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::excursion_hpf_hz_from_chain_reads_labeled_plugin",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::excursion_hpf_hz_from_chain_reads_labeled_plugin",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::final_score_band_mains_prefers_applied_crossover_over_range_fallback",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::final_score_band_mains_prefers_applied_crossover_over_range_fallback",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::final_score_band_no_system_uses_optimizer_range",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::final_score_band_no_system_uses_optimizer_range",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::final_score_band_range_only_crossover_falls_back_to_80",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::final_score_band_range_only_crossover_falls_back_to_80",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::final_score_band_sub_caps_at_applied_crossover",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::final_score_band_sub_caps_at_applied_crossover",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::generate_validation_bundle_report_creates_json",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::generate_validation_bundle_report_creates_json",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::generate_validation_bundle_report_disabled_clears_metadata",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::generate_validation_bundle_report_disabled_clears_metadata",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::group_mean_deviation_rms_db_identical_curves_zero",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::group_mean_deviation_rms_db_identical_curves_zero",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::group_mean_deviation_rms_db_mismatched_grids_none",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::group_mean_deviation_rms_db_mismatched_grids_none",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::headroom_peak_boost_db_no_plugins_none",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::headroom_peak_boost_db_no_plugins_none",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::headroom_peak_boost_db_reads_gain_and_eq",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::headroom_peak_boost_db_reads_gain_and_eq",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::lcr_timing_advisory_single_channel_none",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::lcr_timing_advisory_single_channel_none",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::lcr_timing_advisory_spread_above_threshold",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::lcr_timing_advisory_spread_above_threshold",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::max_optional_skips_non_finite",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::max_optional_skips_non_finite",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::mean_and_rms_helpers",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::mean_and_rms_helpers",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::recompute_curve_flatness_score_flat_is_low",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::recompute_curve_flatness_score_flat_is_low",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::recompute_curve_flatness_score_matches_topology_metric",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::recompute_curve_flatness_score_matches_topology_metric",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::should_apply_spectral_shelves_empty_filters_false",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::should_apply_spectral_shelves_empty_filters_false",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::should_apply_spectral_shelves_missing_channel_false",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::should_apply_spectral_shelves_missing_channel_false",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::spread_basic",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::spread_basic",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::misc::tests::surround_precedence_risk_detects_early_surround",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::misc::tests::surround_precedence_risk_detects_early_surround",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::routing_basis_tests::refreshed_post_score_excludes_routing_transfer",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::routing_basis_tests::refreshed_post_score_excludes_routing_transfer",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::serialized_waveform_tests::serial_fir_composition_matches_direct_oracle_and_checks_resources",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::serialized_waveform_tests::serial_fir_composition_matches_direct_oracle_and_checks_resources",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::serialized_waveform_tests::serial_fir_temporal_evidence_composes_all_resources_and_rejects_partial_sets",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::serialized_waveform_tests::serial_fir_temporal_evidence_composes_all_resources_and_rejects_partial_sets",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::serialized_waveform_tests::serialized_kautz_waveform_matches_streamed_bank_gain_and_delay",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::serialized_waveform_tests::serialized_kautz_waveform_matches_streamed_bank_gain_and_delay",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::serialized_waveform_tests::serialized_waveform_failure_clears_stale_views_without_peq_fallback",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::serialized_waveform_tests::serialized_waveform_failure_clears_stale_views_without_peq_fallback",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::direct_early_late_reports_absent_without_irs",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::direct_early_late_reports_absent_without_irs",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::direct_early_late_reports_populated_when_enabled_with_irs",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::direct_early_late_reports_populated_when_enabled_with_irs",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::direct_early_late_reports_untouched_when_disabled",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::direct_early_late_reports_untouched_when_disabled",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::report_refresh_scores_routed_bass_correction_not_composite_programme_energy",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::report_refresh_scores_routed_bass_correction_not_composite_programme_energy",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::temporal_ir_evidence_absent_without_fir",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::temporal_ir_evidence_absent_without_fir",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::temporal_ir_evidence_loads_deployed_convolution_sidecar",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::temporal_ir_evidence_loads_deployed_convolution_sidecar",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::temporal_ir_evidence_populated_for_fir_chain_before_gate",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::temporal_ir_evidence_populated_for_fir_chain_before_gate",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::temporal_ir_refresh_clears_waveforms_when_phase_evidence_is_unavailable",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::temporal_ir_refresh_clears_waveforms_when_phase_evidence_is_unavailable",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::temporal_ir_resolves_waveform_basis_through_system_speaker_mapping",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::temporal_ir_resolves_waveform_basis_through_system_speaker_mapping",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::refresh::tests::temporal_ir_uses_primary_seat_phase_when_spatial_average_has_none",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::refresh::tests::temporal_ir_uses_primary_seat_phase_when_spatial_average_has_none",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::waveform_status::tests::repeated_replay_failures_are_reported_without_repeating_warnings",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::waveform_status::tests::repeated_replay_failures_are_reported_without_repeating_warnings",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::waveform_status::tests::waveform_reasons_distinguish_initial_phase_from_branch_replay",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::waveform_status::tests::waveform_reasons_distinguish_initial_phase_from_branch_replay",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::reports::waveform_status::tests::waveform_refresh_removes_stale_views_without_channel_measurements",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::reports::waveform_status::tests::waveform_refresh_removes_stale_views_without_channel_measurements",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::combined_boost_limit_deselects_superseded_optimizer_candidate",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::combined_boost_limit_deselects_superseded_optimizer_candidate",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::combined_boost_limit_refreshes_biquad_coefficients_and_ir_report",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::combined_boost_limit_refreshes_biquad_coefficients_and_ir_report",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::combined_boost_replay_failure_does_not_mutate_the_chain",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::combined_boost_replay_failure_does_not_mutate_the_chain",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::per_driver_latency_tests::per_driver_fir_safety_reversion_keeps_common_causal_support",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::per_driver_latency_tests::per_driver_fir_safety_reversion_keeps_common_causal_support",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::baseline_restoration_keeps_deployed_safety_but_strips_correction",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::baseline_restoration_keeps_deployed_safety_but_strips_correction",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::baseline_restoration_strips_marked_padding_but_keeps_structural_delays",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::baseline_restoration_strips_marked_padding_but_keeps_structural_delays",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::branch_bulk_maxes_parallel_bands_and_sums_serial_stages",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::branch_bulk_maxes_parallel_bands_and_sums_serial_stages",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_chain_boost_limiter_scales_only_positive_eq_gains",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_chain_boost_limiter_scales_only_positive_eq_gains",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_does_not_reject_stage_less_routing_residual",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_does_not_reject_stage_less_routing_residual",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_does_not_score_route_lowpass_as_correction_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_does_not_score_route_lowpass_as_correction_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_enforces_canonical_realization_error",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_enforces_canonical_realization_error",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_ignores_legacy_score_regression_when_canonical_curve_is_safe",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_ignores_legacy_score_regression_when_canonical_curve_is_safe",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_keeps_group_delay_stage_within_configured_budget",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_keeps_group_delay_stage_within_configured_budget",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_keeps_group_target_level_correction",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_keeps_group_target_level_correction",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_preserves_routed_array_controls_when_lowpass_changes_flatness",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_preserves_routed_array_controls_when_lowpass_changes_flatness",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reconciles_bounded_tradeoff_report",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reconciles_bounded_tradeoff_report",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_rejects_selected_stopped_candidate",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_rejects_selected_stopped_candidate",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_rejects_selected_unusable_optimizer_evidence",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_rejects_selected_unusable_optimizer_evidence",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reports_selected_best_effort_optimizer_evidence",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reports_selected_best_effort_optimizer_evidence",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_retains_improving_correction_with_routed_score_mismatch",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_retains_improving_correction_with_routed_score_mismatch",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reverts_changed_curve_when_topology_score_regresses",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reverts_changed_curve_when_topology_score_regresses",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reverts_graph_routed_bass_topology_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reverts_graph_routed_bass_topology_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reverts_mso_driver_alignment_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reverts_mso_driver_alignment_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reverts_only_corrective_plugins",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reverts_only_corrective_plugins",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_reverts_peq_stage_without_removing_gain",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_reverts_peq_stage_without_removing_gain",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_serializes_native_cobyla_budget_exhaustion",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_serializes_native_cobyla_budget_exhaustion",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::final_safety_gate_skips_supporting_source_outputs",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::final_safety_gate_skips_supporting_source_outputs",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::fir_reversion_preserves_only_explicit_design_delay",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::fir_reversion_preserves_only_explicit_design_delay",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::group_delay_summary_reads_phase_linear_fir_metadata",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::group_delay_summary_reads_phase_linear_fir_metadata",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::group_delay_summary_tracks_the_final_exported_graph",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::group_delay_summary_tracks_the_final_exported_graph",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::hybrid_alignment_delay_is_removed_with_fir_stage",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::hybrid_alignment_delay_is_removed_with_fir_stage",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::hybrid_crossover_processors_are_one_atomic_correction_stage",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::hybrid_crossover_processors_are_one_atomic_correction_stage",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::hybrid_revert_releases_fir_coefficients_and_temporal_masking",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::hybrid_revert_releases_fir_coefficients_and_temporal_masking",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::masking_survives_only_with_fir_bulk",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::masking_survives_only_with_fir_bulk",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::passband_acceptance_aligns_an_explicit_target_grid",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::passband_acceptance_aligns_an_explicit_target_grid",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::passband_acceptance_preserves_an_explicit_design_target_level",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::passband_acceptance_preserves_an_explicit_design_target_level",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::realignment_leaves_no_mutual_ghost_lock",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::realignment_leaves_no_mutual_ghost_lock",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::realignment_reconciles_stale_install_when_partner_bulk_drops",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::realignment_reconciles_stale_install_when_partner_bulk_drops",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::realignment_rejoins_reverted_branch_to_surviving_bulk",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::realignment_rejoins_reverted_branch_to_surviving_bulk",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::realignment_targets_crossover_partner_bulk",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::realignment_targets_crossover_partner_bulk",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::realignment_updates_install_when_gap_changes",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::realignment_updates_install_when_gap_changes",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::refresh_optimizer_evidence_preserves_veto_reports_by_channel",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::refresh_optimizer_evidence_preserves_veto_reports_by_channel",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::rejected_optimizer_attempts_are_not_deployed_correction_dependencies",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::rejected_optimizer_attempts_are_not_deployed_correction_dependencies",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::routed_post_eq_main_gate_protects_response_above_the_splice_window",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::routed_post_eq_main_gate_protects_response_above_the_splice_window",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::routing_removal_preserves_all_original_support_before_residual_fir",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::routing_removal_preserves_all_original_support_before_residual_fir",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::runtime_acceptance_dealiases_each_channels_fir_latency",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::runtime_acceptance_dealiases_each_channels_fir_latency",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::runtime_acceptance_retains_acoustic_evidence_without_dsp_chain",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::runtime_acceptance_retains_acoustic_evidence_without_dsp_chain",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::runtime_acceptance_skips_supporting_source_outputs",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::runtime_acceptance_skips_supporting_source_outputs",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sanity_check_result_accepts_complete_hybrid_crossover_block",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sanity_check_result_accepts_complete_hybrid_crossover_block",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sanity_check_result_detects_non_finite_spl",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sanity_check_result_detects_non_finite_spl",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sanity_check_result_empty_errors",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sanity_check_result_empty_errors",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sanity_check_result_non_empty_ok",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sanity_check_result_non_empty_ok",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sanity_check_result_rejects_partial_hybrid_crossover_block",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sanity_check_result_rejects_partial_hybrid_crossover_block",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sole_physical_target_keeps_absolute_plane_through_final_safety_gate",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sole_physical_target_keeps_absolute_plane_through_final_safety_gate",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::sync_chain_reported_curve_replaces_stale_eq_response",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::sync_chain_reported_curve_replaces_stale_eq_response",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::target_level_alignment_ignores_a_band_limited_stopband",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::target_level_alignment_ignores_a_band_limited_stopband",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::temporal_evidence_does_not_treat_unresolved_convolution_as_iir",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::temporal_evidence_does_not_treat_unresolved_convolution_as_iir",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::temporal_evidence_preserves_measured_precursor_across_modes",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::temporal_evidence_preserves_measured_precursor_across_modes",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::to_dsp_chain_output_includes_channels_and_metadata",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::to_dsp_chain_output_includes_channels_and_metadata",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::room_optimization_result::tests::veto_metadata_round_trips_through_dsp_chain_output",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::room_optimization_result::tests::veto_metadata_round_trips_through_dsp_chain_output",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::asymmetric::asymmetric_driver_replay_matches_independent_complex_crossover_sum",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::asymmetric::asymmetric_driver_replay_matches_independent_complex_crossover_sum",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::asymmetric::driver_fir_is_not_mistaken_for_parent_retained_fir",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::asymmetric::driver_fir_is_not_mistaken_for_parent_retained_fir",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::asymmetric::explicit_requested_lower_bound_can_use_common_driver_support",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::asymmetric::explicit_requested_lower_bound_can_use_common_driver_support",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::asymmetric::missing_low_driver_support_cannot_silently_remove_measured_bass",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::asymmetric::missing_low_driver_support_cannot_silently_remove_measured_bass",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::declining_bound_is_checked_at_frequency",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::declining_bound_is_checked_at_frequency",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::explicit_rising_rolloff_is_rejected",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::explicit_rising_rolloff_is_rejected",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::genuine_lower_gap_still_fails_closed",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::genuine_lower_gap_still_fails_closed",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::genuine_upper_gap_still_needs_declaration",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::genuine_upper_gap_still_needs_declaration",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::inferred_subwoofer_bound_follows_measured_rolloff",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::inferred_subwoofer_bound_follows_measured_rolloff",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::low_pass_alone_cannot_establish_short_subwoofer_acoustic_support",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::low_pass_alone_cannot_establish_short_subwoofer_acoustic_support",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::negligible_standalone_subwoofer_tail_has_no_relative_denominator",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::negligible_standalone_subwoofer_tail_has_no_relative_denominator",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::one_lower_edge_bin_is_held_without_extrapolation",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::one_lower_edge_bin_is_held_without_extrapolation",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::rising_tail_keeps_flat_peak_hold",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::rising_tail_keeps_flat_peak_hold",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::short_support_without_bound_is_not_scored",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::short_support_without_bound_is_not_scored",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::sub_bin_past_assessment_edge_is_covered",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::sub_bin_past_assessment_edge_is_covered",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::bounded_sum::tests::subwoofer_tail_assumption_requires_crossover_coverage_and_negligible_output",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::bounded_sum::tests::subwoofer_tail_assumption_requires_crossover_coverage_and_negligible_output",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::lfe_target::tests::configured_lfe_target_is_frozen_against_candidate_crossover_changes",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::lfe_target::tests::configured_lfe_target_is_frozen_against_candidate_crossover_changes",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::lfe_target::tests::legacy_one_element_crossover_keeps_only_the_programme_lfe_lowpass",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::lfe_target::tests::legacy_one_element_crossover_keeps_only_the_programme_lfe_lowpass",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::lfe_target::tests::lfe_forward_target_retains_the_configured_relative_tilt",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::lfe_target::tests::lfe_forward_target_retains_the_configured_relative_tilt",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::lfe_target::tests::lfe_target_contains_both_declared_lowpasses_without_narrowing_the_band",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::lfe_target::tests::lfe_target_contains_both_declared_lowpasses_without_narrowing_the_band",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::lfe_target::tests::narrowing_lfe_observation_does_not_recalibrate_its_array_target",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::lfe_target::tests::narrowing_lfe_observation_does_not_recalibrate_its_array_target",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::tests::configured_excursion_reference_is_frozen_and_conditions_its_target",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::tests::configured_excursion_reference_is_frozen_and_conditions_its_target",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::tests::configured_reference_accepts_cardioid_and_dba_topologies",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::tests::configured_reference_accepts_cardioid_and_dba_topologies",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::tests::configured_routed_reference_is_independent_of_candidate_controls",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::tests::configured_routed_reference_is_independent_of_candidate_controls",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::configured_reference::tests::explicit_topology_reference_rebuilds_declared_bands_without_optimized_alignment",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::configured_reference::tests::explicit_topology_reference_rebuilds_declared_bands_without_optimized_alignment",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::correlated_bass::tests::common_gain_and_phase_changes_preserve_efficiency",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::correlated_bass::tests::common_gain_and_phase_changes_preserve_efficiency",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::correlated_bass::tests::final_serialized_routes_reject_opposed_correlated_bass_at_every_seat",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::correlated_bass::tests::final_serialized_routes_reject_opposed_correlated_bass_at_every_seat",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::correlated_bass::tests::opposed_correlated_polarity_cannot_hide_behind_peak_buildup",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::correlated_bass::tests::opposed_correlated_polarity_cannot_hide_behind_peak_buildup",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::correlated_bass::tests::phase_absence_is_not_a_coherent_acceptance",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::correlated_bass::tests::phase_absence_is_not_a_coherent_acceptance",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::intake::tests::receipt_preserves_declarations_without_inventing_acquisition_or_gain_reference",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::intake::tests::receipt_preserves_declarations_without_inventing_acquisition_or_gain_reference",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::intake::tests::receipt_retains_disjoint_support_gap",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::intake::tests::receipt_retains_disjoint_support_gap",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::band_concealment_flags_only_passing_broadband_with_regressed_band",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::band_concealment_flags_only_passing_broadband_with_regressed_band",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::bass_only_optimization_detects_out_of_band_damage_in_routed_playback",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::bass_only_optimization_detects_out_of_band_damage_in_routed_playback",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::branch_sum_keeps_a_narrow_native_bass_cancellation",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::branch_sum_keeps_a_narrow_native_bass_cancellation",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::branch_sum_preserves_each_native_grid_and_rejects_unknown_phase",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::branch_sum_preserves_each_native_grid_and_rejects_unknown_phase",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::channel_matching_is_applied_to_the_complete_routed_source",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::channel_matching_is_applied_to_the_complete_routed_source",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::completed_routed_rejection_retains_native_gate_evidence",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::completed_routed_rejection_retains_native_gate_evidence",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::diagnostic_trace_does_not_turn_missing_routed_capture_into_acceptance",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::diagnostic_trace_does_not_turn_missing_routed_capture_into_acceptance",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::diagnostic_trace_records_every_physical_contributor_to_a_logical_sum",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::diagnostic_trace_records_every_physical_contributor_to_a_logical_sum",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::diagnostic_trace_uses_lfe_sub1_physical_capture_without_changing_validation",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::diagnostic_trace_uses_lfe_sub1_physical_capture_without_changing_validation",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::final_seat_output_loss_requires_an_explicit_gain_allowance",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::final_seat_output_loss_requires_an_explicit_gain_allowance",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::final_seat_overlap_preserves_per_input_support_and_reports_disjoint_inputs",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::final_seat_overlap_preserves_per_input_support_and_reports_disjoint_inputs",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::final_seat_rejection_retains_both_shape_and_output_failures",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::final_seat_rejection_retains_both_shape_and_output_failures",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::final_seat_replay_rejects_sidecar_conflicting_with_retained_fir",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::final_seat_replay_rejects_sidecar_conflicting_with_retained_fir",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::final_training_seat_replay_rejects_hidden_regression_after_post_pass",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::final_training_seat_replay_rejects_hidden_regression_after_post_pass",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::grouped_physical_output_captures_keep_declared_branch_order",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::grouped_physical_output_captures_keep_declared_branch_order",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::held_out_replay_uses_final_chain_and_preserves_partition_identity",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::held_out_replay_uses_final_chain_and_preserves_partition_identity",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::independent_bass_only_correction_still_checks_the_speaker_passband",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::independent_bass_only_correction_still_checks_the_speaker_passband",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::independent_group_replays_declared_physical_outputs_under_their_owner",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::independent_group_replays_declared_physical_outputs_under_their_owner",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::mono_bass_sums_report_coherent_buildup_and_refuse_without_phase",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::mono_bass_sums_report_coherent_buildup_and_refuse_without_phase",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::named_seat_permutation_is_not_silently_coherently_summed",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::named_seat_permutation_is_not_silently_coherently_summed",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::native_capture_is_not_reduced_and_missing_seats_are_not_broadcast",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::native_capture_is_not_reduced_and_missing_seats_are_not_broadcast",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::native_capture_preserves_distinct_grids_and_auxiliary_evidence",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::native_capture_preserves_distinct_grids_and_auxiliary_evidence",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::native_lfe_detects_correction_changes_on_its_physical_owner",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::native_lfe_detects_correction_changes_on_its_physical_owner",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::native_main_target_isolated_from_shared_sub_and_preserves_calibration",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::native_main_target_isolated_from_shared_sub_and_preserves_calibration",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::native_routed_acceptance_recomputes_identity_and_refuses_in_band_damage",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::native_routed_acceptance_recomputes_identity_and_refuses_in_band_damage",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::physical_and_native_target_consumers_preserve_nonzero_calibration_planes",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::physical_and_native_target_consumers_preserve_nonzero_calibration_planes",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::qualified_sub_bound_keeps_full_main_band_and_rejects_upper_midrange_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::qualified_sub_bound_keeps_full_main_band_and_rejects_upper_midrange_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::redirected_physical_lowpass_does_not_add_the_compatibility_lfe_filter",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::redirected_physical_lowpass_does_not_add_the_compatibility_lfe_filter",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::replay_scorecard_temporal_carries_branch_fir_latency_prior",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::replay_scorecard_temporal_carries_branch_fir_latency_prior",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_finalization_and_replay_reject_unowned_channel_stages",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_finalization_and_replay_reject_unowned_channel_stages",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_observation_respects_limited_main_and_lfe_passbands",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_observation_respects_limited_main_and_lfe_passbands",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_replay_realizes_driver_gain_delay_polarity_once_via_route",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_replay_realizes_driver_gain_delay_polarity_once_via_route",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_replay_uses_each_seat_and_applies_route_delay_gain_and_post_eq_once",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_replay_uses_each_seat_and_applies_route_delay_gain_and_post_eq_once",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_single_position_captures_do_not_compare_measurement_names",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_single_position_captures_do_not_compare_measurement_names",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_spl_budget_measures_main_output_not_redirected_sub_loss",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_spl_budget_measures_main_output_not_redirected_sub_loss",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::routed_subwoofer_stopband_replays_full_main_band_without_declaration",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::routed_subwoofer_stopband_replays_full_main_band_without_declaration",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::significant_or_unqualified_unmeasured_sub_is_insufficient_evidence",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::significant_or_unqualified_unmeasured_sub_is_insufficient_evidence",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::standalone_subwoofer_replay_uses_measured_band_not_full_range_limit",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::standalone_subwoofer_replay_uses_measured_band_not_full_range_limit",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::subwoofer_useful_output_exemption_does_not_waive_residual_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::subwoofer_useful_output_exemption_does_not_waive_residual_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::training_labels_follow_source_and_original_index_without_inference",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::training_labels_follow_source_and_original_index_without_inference",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::transplant_matches_driver_safety_by_driver_name",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::transplant_matches_driver_safety_by_driver_name",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::transplant_matches_post_route_safety_but_not_common_input_safety",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::transplant_matches_post_route_safety_but_not_common_input_safety",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::seat_replay::tests::useful_output_budget_does_not_waive_residual_regression",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::seat_replay::tests::useful_output_budget_does_not_waive_residual_regression",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::validation_scorecard::tests::held_out_seat_regression_is_exposed_in_final_decision",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::validation_scorecard::tests::held_out_seat_regression_is_exposed_in_final_decision",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::validation_scorecard::tests::partial_channel_rollback_is_not_whole_graph_identity",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::validation_scorecard::tests::partial_channel_rollback_is_not_whole_graph_identity",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::validation_scorecard::tests::routed_zero_correction_validation_preserves_configured_identity",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::validation_scorecard::tests::routed_zero_correction_validation_preserves_configured_identity",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::validation_scorecard::tests::runtime_policy_follows_processing_mode",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::validation_scorecard::tests::runtime_policy_follows_processing_mode",
+      "ignored": false
+    },
+    {
+      "old_owner": "roomeq-workflow",
+      "old_name": "room_optimization::validation_scorecard::tests::runtime_validation_populates_held_out_scorecard",
+      "new_owner": "roomeq-playback",
+      "new_name": "assessment::validation_scorecard::tests::runtime_validation_populates_held_out_scorecard",
+      "ignored": false
+    }
+  ],
+  "moved_existing_cases": 230,
+  "retained_workflow_cross_boundary_cases": [
+    "room_optimization::room_optimization_result::tests::apply_ctc_if_enabled_disabled_explicitly_leaves_none",
+    "room_optimization::room_optimization_result::tests::apply_ctc_if_enabled_disabled_leaves_none",
+    "room_optimization::room_optimization_result::tests::apply_ctc_if_enabled_with_system_runs",
+    "room_optimization::room_optimization_result::tests::apply_ctc_if_enabled_without_system_errors",
+    "room_optimization::seat_replay::configured_reference::tests::configured_reference_does_not_inherit_candidate_output_safety"
+  ],
+  "retained_application_ctc_body_sha256": "16905d22f44a348c2fb55ff0688ebfd05f5ddeab73c0212c9da95a5bb4bf000c",
+  "retained_application_ctc_test_body_sha256": {
+    "apply_ctc_if_enabled_disabled_leaves_none": "9f69953b575b1d4696d2861a7fcd46a5b64be0c72267f5d601a1e46c92a8320a",
+    "apply_ctc_if_enabled_disabled_explicitly_leaves_none": "676c8286e10942184d7175baab5f7e051ccf92d7f718142617f9b0d8b64e5457",
+    "apply_ctc_if_enabled_without_system_errors": "01a6b6969ca4b6ad8cefe73af97b6835b0e3b6db5e4cd9858c55cf749bef29df",
+    "apply_ctc_if_enabled_with_system_runs": "b20abce340beb87e2a28cf780664965c8437aef6874f17378091583f406f45ad"
+  },
+  "cross_boundary_case": {
+    "name": "configured_reference_does_not_inherit_candidate_output_safety",
+    "old_sha256": "765784bbbefd2abf3a7dc7c28748e9be9c438fd0738abe44fc8b9ae242e45164",
+    "new_sha256": "085ee577e3dcd4a958506623503cc3fc82b649b1e00e3127736d05f07d005c02",
+    "only_expression_change": {
+      "old": "shared.baselines.lock().unwrap().len()",
+      "new": "shared.cached_baseline_count_for_test_support()"
+    },
+    "same_comparison_and_expected_count": 1
+  },
+  "test_support_accessor": {
+    "owner": "roomeq-playback",
+    "feature": "test-support",
+    "method": "ConfiguredComparison::cached_baseline_count_for_test_support",
+    "body": "self.baselines.lock().unwrap().len()",
+    "enabled_by": "roomeq-workflow dev-dependency only",
+    "private_cache_field_exposed": false,
+    "production_default_api_added": false
+  },
+  "capture_private_fields_unchanged": true,
+  "no_dsp_implementation_copied": true,
+  "only_copied_production_item": "Existing small AutoeqError constructor, unchanged; no DSP implementation is duplicated.",
+  "existing_test_cases_removed": 0,
+  "existing_numerical_assertions_weakened": 0,
+  "new_crates": 0,
+  "normal_dependencies_added": [
+    "math-iir-fir (moved from dev)",
+    "roomeq-analysis",
+    "rustfft"
+  ],
+  "external_versions_change_allowed": false,
+  "application_receipt_audit": "phase5-assessment-identity-and-asset-audit.json",
+  "patch": "phase5-shared-assessment-overlay.patch",
+  "patch_sha256": "18eca0ac92b4cbc4178c7c569354d9c1ed8d409c9bb5310c016d4482a4851499",
+  "performance_acceptance": false,
+  "ported": false,
+  "next_required": [
+    "Source preservation and exact 230-case relocation audit, including standalone/profile-gated tests",
+    "Private Capture/cache and test-support-only visibility proof",
+    "Offline locked graph, minimal feature build and all-target compiler after current baseline terminal",
+    "Exact 1204-case inventory, all affected behavior, receipt regression and full cross-subsystem case",
+    "Complete independent routed and finalization production candidates; this prerequisite is not their completed evaluation"
+  ],
+  "deleted_files": {
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/correlated_bass.rs": "470d798b6b6e7e7b1dfce46cc6bbb1ce34eeac923239cc5b81f370f4b118fd80",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs": "d60d8115cee2b6f7af3f3fa2209ed06621e7ed320b80b32e4e49f3dd90f1de85",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/asymmetric.rs": "46113b7e4a4969aac7f77160d3b4334ed0d77c8d705176b7d35ac6865250b215",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/bounded_sum.rs": "a981973e93cfc799682a946f16d01bda377a86a5151d86c45b59a6b24e6e427e",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference/lfe_target.rs": "3b6581e4e937518de1a8163f109cc3ecb1fb44e8e45fe4fb689a841e516054fe",
+    "crates/roomeq-workflow/src/room_optimization/reports/role.rs": "d884db8598c05513fbebf7318f5cdcc8ff91b7046f8f5d209eb75e8c47a724b9",
+    "crates/roomeq-workflow/src/room_optimization/reports/types.rs": "d09af306c384405e314defd56a2a91863570dddbe794373cba35c8100fef3a8d",
+    "crates/roomeq-workflow/src/room_optimization/reports/channel.rs": "b8b8bb677e6a660567f61290624c9fd899a4254c96ebe6912e58cbcb0e8caa0e",
+    "crates/roomeq-workflow/src/room_optimization/reports/build.rs": "603c058e4fc549774369f609db0eec12365492ca0a0ff64dda211958f21651bc",
+    "crates/roomeq-workflow/src/room_optimization/reports/waveform_status.rs": "8d75519b38d39ea8901eae82cb46d7b76fea15ce15b089d1be4d8b2f85e5f255",
+    "crates/roomeq-workflow/src/room_optimization/reports/misc.rs": "f9fd3860d1d43d3787a242dd818006681ea86b5138f3d5fb941ec7fbf3ca98ef",
+    "crates/roomeq-workflow/src/room_optimization/reports/refresh.rs": "0d5f85cf19065d26a5a6894ce51228e7c668fc0e35dd0e06943d55d61542aede"
+  },
+  "orphan_cleanup": "Twelve old child source files are explicitly deleted. Four workflow module roots become adapters and one child retains its exact cross-subsystem case."
+}

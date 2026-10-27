@@ -1318,7 +1318,7 @@ mod checkpoint_progress_tests {
     fn progress_checkpoint_records_reusable_optimizer_version() {
         let directory = tempfile::tempdir().unwrap();
         let checkpoint_path = directory.path().join("optimizer-state.json");
-        let args = crate::cli::Args::speaker_defaults();
+        let args = crate::OptimizationConfig::speaker_defaults();
         let mut params = crate::OptimParams::from(&args);
         params.num_filters = 1;
         params.maxeval = 8;

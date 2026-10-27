@@ -1,0 +1,3391 @@
+{
+  "status": "exploratory boundary evidence; not a measured extraction decision",
+  "depth": 2,
+  "limits": [
+    "Call graph paths are not complete normal/dev/feature dependency closure.",
+    "Truncation is recorded; direct-depth data is included separately.",
+    "Source and compiler measurements are required before accepting or rejecting a split."
+  ],
+  "candidates": [
+    {
+      "key": "channel",
+      "node_id": "graph:1ee350518c1d5fda5d7b91ea0d13522b:function:e8d097922ce83fc6bef30066bd21b6aa",
+      "callers": {
+        "edges": [
+          {
+            "name": "execute_prepared_channel_with_exact_checkpoint",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 198,
+            "def_line": 187,
+            "end_line": 209,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "dc9d99f72821786c5f5500d5e7ff77f01405f3ea97fd98a83a45a675338bfe18"
+          },
+          {
+            "name": "execute_prepared_channel",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 172,
+            "def_line": 162,
+            "end_line": 183,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "dc9d99f72821786c5f5500d5e7ff77f01405f3ea97fd98a83a45a675338bfe18"
+          },
+          {
+            "name": "process_single_channel_with_optional_recovery",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/channel.rs",
+            "line": 214,
+            "def_line": 121,
+            "end_line": 292,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "7c95bcb55da08e4396f7ea6185389a480f2387a33cbe2406136e4750faa80ff3"
+          },
+          {
+            "name": "hybrid_mixed_crossover_serializes_and_realizes_excursion_protection",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 976,
+            "def_line": 927,
+            "end_line": 1088,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "dc9d99f72821786c5f5500d5e7ff77f01405f3ea97fd98a83a45a675338bfe18"
+          },
+          {
+            "name": "disjoint_support_optimizes_union_and_authorizes_segments",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/arrival.rs",
+            "line": 476,
+            "def_line": 431,
+            "end_line": 517,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "9b186f424ffb6af20d385f81860c7f713add23b39c380a5363e396028d9a63bc"
+          },
+          {
+            "name": "hybrid_narrow_band_preserves_fixed_target_in_direct_dtft",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_fir/tests.rs",
+            "line": 376,
+            "def_line": 356,
+            "end_line": 471,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "b6f976dc64c69a4943079a279c09485a9113cd18b82b3e7586656b498a4ed2b7"
+          },
+          {
+            "name": "roadmap_correction_declared_band_reaches_channel_execution",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/arrival.rs",
+            "line": 379,
+            "def_line": 336,
+            "end_line": 428,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "9b186f424ffb6af20d385f81860c7f713add23b39c380a5363e396028d9a63bc"
+          },
+          {
+            "name": "declared_band_keeps_delivered_correction_independent_of_unusable_samples",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 781,
+            "def_line": 706,
+            "end_line": 817,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "dc9d99f72821786c5f5500d5e7ff77f01405f3ea97fd98a83a45a675338bfe18"
+          },
+          {
+            "name": "declared_ir_populates_measured_room_acoustics",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 621,
+            "def_line": 593,
+            "end_line": 664,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "dc9d99f72821786c5f5500d5e7ff77f01405f3ea97fd98a83a45a675338bfe18"
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "callees": {
+        "edges": [
+          {
+            "name": "measured_early_reflections",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 47,
+            "end_line": 95,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "build_preference_filters",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_preference.rs",
+            "line": 5,
+            "end_line": 116,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "measured_wavelet",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 270,
+            "end_line": 305,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_fir_channel",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_fir.rs",
+            "line": 229,
+            "end_line": 235,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "measured_octave_t60",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 102,
+            "end_line": 141,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "assess_segment_support",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/segment_support.rs",
+            "line": 75,
+            "end_line": 112,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_mixed_crossover",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/mixed_crossover.rs",
+            "line": 43,
+            "end_line": 348,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "measured_waterfall",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 215,
+            "end_line": 263,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "required_sidecar",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 404,
+            "end_line": 411,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_iir",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 373,
+            "end_line": 402,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "eq_resources",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_input.rs",
+            "line": 208,
+            "end_line": 210,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "arrival_time_ms",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_input.rs",
+            "line": 200,
+            "end_line": 202,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "push_high_frequency_slope",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_preference.rs",
+            "line": 138,
+            "end_line": 169,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "generate_preference_filters",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/cea2034.rs",
+            "line": 267,
+            "end_line": 296,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "role_for_channel",
+            "kind": "function",
+            "file": "crates/roomeq-model/src/home_cinema.rs",
+            "line": 29,
+            "end_line": 79,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "push_tilt",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_preference.rs",
+            "line": 118,
+            "end_line": 136,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "push_shelf",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_preference.rs",
+            "line": 171,
+            "end_line": 187,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "is_sub_or_lfe",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/home_cinema.rs",
+            "line": 307,
+            "end_line": 309,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "time_frequency_direct",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 163,
+            "end_line": 184,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_hybrid",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_fir.rs",
+            "line": 270,
+            "end_line": 387,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_phase_linear",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_fir.rs",
+            "line": 237,
+            "end_line": 268,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_mixed_phase",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_fir.rs",
+            "line": 389,
+            "end_line": 495,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "gap_leakage",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/segment_support.rs",
+            "line": 184,
+            "end_line": 246,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "segment_score",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/segment_support.rs",
+            "line": 145,
+            "end_line": 181,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "refuse_gap_centered_filters",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/segment_support.rs",
+            "line": 115,
+            "end_line": 142,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "valid_bands_hz",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_input.rs",
+            "line": 147,
+            "end_line": 149,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "split_curve_at_frequency",
+            "kind": "function",
+            "file": "crates/roomeq-analysis/src/crossover_utils.rs",
+            "line": 12,
+            "end_line": 58,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "subtract_target_tilt",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_result.rs",
+            "line": 11,
+            "end_line": 22,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_eq_response",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/compute.rs",
+            "line": 339,
+            "end_line": 353,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_maybe_multi",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_optimizer.rs",
+            "line": 21,
+            "end_line": 42,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_channel_eq_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 953,
+            "end_line": 969,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "flat_loss",
+            "kind": "function",
+            "file": "crates/autoeq-objective/src/loss/flat.rs",
+            "line": 100,
+            "end_line": 113,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "extend_curve_to_full_range",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/misc.rs",
+            "line": 24,
+            "end_line": 126,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "create_labeled_eq_plugin",
+            "kind": "function",
+            "file": "crates/roomeq-dsp/src/output/create.rs",
+            "line": 90,
+            "end_line": 100,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "prepared_fir_target_curve",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/fir/generate.rs",
+            "line": 78,
+            "end_line": 133,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "fir_bulk_delay_ms",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/mixed_crossover.rs",
+            "line": 410,
+            "end_line": 459,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_channel_eq_with_callback_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 1025,
+            "end_line": 1042,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "detect_passband_and_mean",
+            "kind": "function",
+            "file": "crates/roomeq-analysis/src/response_metrics.rs",
+            "line": 23,
+            "end_line": 25,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "generate_fir_correction_prepared",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/fir/generate.rs",
+            "line": 257,
+            "end_line": 312,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "build_mixed_mode_crossover_chain_with_post_merge_eq",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/build.rs",
+            "line": 838,
+            "end_line": 947,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "apply_crossover_response",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/mixed_crossover.rs",
+            "line": 351,
+            "end_line": 408,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "filename",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_result.rs",
+            "line": 50,
+            "end_line": 52,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "default",
+            "kind": "method",
+            "file": "crates/autoeq-core/src/curve.rs",
+            "line": 65,
+            "end_line": 77,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "usable_curve",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_input.rs",
+            "line": 186,
+            "end_line": 198,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "waterfall_grid",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 186,
+            "end_line": 208,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_iir_channel",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_iir.rs",
+            "line": 74,
+            "end_line": 76,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_iir_channel_with_exact_checkpoint",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_iir.rs",
+            "line": 79,
+            "end_line": 84,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "direct_callees": {
+        "edges": [
+          {
+            "name": "measured_early_reflections",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 47,
+            "end_line": 95,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "build_preference_filters",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_preference.rs",
+            "line": 5,
+            "end_line": 116,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "measured_wavelet",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 270,
+            "end_line": 305,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_fir_channel",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_fir.rs",
+            "line": 229,
+            "end_line": 235,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "measured_octave_t60",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 102,
+            "end_line": 141,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "assess_segment_support",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/segment_support.rs",
+            "line": 75,
+            "end_line": 112,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_mixed_crossover",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/mixed_crossover.rs",
+            "line": 43,
+            "end_line": 348,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "measured_waterfall",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/ir_acoustics.rs",
+            "line": 215,
+            "end_line": 263,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "required_sidecar",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 404,
+            "end_line": 411,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_iir",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_execution.rs",
+            "line": 373,
+            "end_line": 402,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "eq_resources",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_input.rs",
+            "line": 208,
+            "end_line": 210,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "arrival_time_ms",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_input.rs",
+            "line": 200,
+            "end_line": 202,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "caller_role_counts": {
+        "test_only": 6,
+        "ordinary_or_unresolved": 3,
+        "unresolved": 0
+      },
+      "seed_file": "crates/roomeq-engine/src/channel_execution.rs",
+      "seed_file_line_classes": {
+        "ordinary": 554,
+        "embedded_test": 543
+      }
+    },
+    {
+      "key": "system",
+      "node_id": "graph:1ee350518c1d5fda5d7b91ea0d13522b:function:561bc5151ba2fc320f3fa191494399a6",
+      "callers": {
+        "edges": [
+          {
+            "name": "joint_budget_and_array_cancellation_are_enforced_before_shared_eq",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 1535,
+            "def_line": 1525,
+            "end_line": 1553,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "831db9bbf352d25afc43a856116626eb4314055fa966a65840a0b2dabf647b3a"
+          },
+          {
+            "name": "process_multisub_group",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 964,
+            "def_line": 955,
+            "end_line": 974,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "47813aa8056d54125e2c0bb68598bb84c55e0b025cc5877d790f154377684874"
+          },
+          {
+            "name": "roadmap_correction_joint_outer_dispatch_preserves_admission_refusal",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 1875,
+            "def_line": 1868,
+            "end_line": 1895,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "831db9bbf352d25afc43a856116626eb4314055fa966a65840a0b2dabf647b3a"
+          },
+          {
+            "name": "roadmap_correction_joint_report_replays_serialized_controls_and_detects_mutation",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 2090,
+            "def_line": 2064,
+            "end_line": 2157,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "831db9bbf352d25afc43a856116626eb4314055fa966a65840a0b2dabf647b3a"
+          },
+          {
+            "name": "allpass_outer_dispatch_requires_matching_timing_scope",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 1910,
+            "def_line": 1898,
+            "end_line": 1925,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "831db9bbf352d25afc43a856116626eb4314055fa966a65840a0b2dabf647b3a"
+          },
+          {
+            "name": "roadmap_correction_joint_selection_precedes_legacy_multiseat",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 2011,
+            "def_line": 2001,
+            "end_line": 2061,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "831db9bbf352d25afc43a856116626eb4314055fa966a65840a0b2dabf647b3a"
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "callees": {
+        "edges": [
+          {
+            "name": "protect_shared_eq_seats",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 763,
+            "end_line": 825,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_eq_response",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/compute.rs",
+            "line": 339,
+            "end_line": 353,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_multisub_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 114,
+            "end_line": 204,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "flat_loss_score",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group.rs",
+            "line": 118,
+            "end_line": 122,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_multisub_with_allpass",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 226,
+            "end_line": 462,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "bounded_sub_eq_max",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 238,
+            "end_line": 265,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_joint_sub_group_detailed_with_callback",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 827,
+            "end_line": 1047,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "sub_optimizer_config",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 269,
+            "end_line": 281,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "timing_scopes_are_shared",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/types.rs",
+            "line": 6,
+            "end_line": 23,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "build_multisub_dsp_chain_with_allpass",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/build.rs",
+            "line": 498,
+            "end_line": 533,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "apply_complex_response",
+            "kind": "function",
+            "file": "crates/autoeq-core/src/response.rs",
+            "line": 110,
+            "end_line": 112,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "joint_sub_diagnostics",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 1054,
+            "end_line": 1131,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_channel_eq_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 953,
+            "end_line": 969,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_peq_complex_response",
+            "kind": "function",
+            "file": "crates/autoeq-core/src/response.rs",
+            "line": 38,
+            "end_line": 69,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "extend_curve_to_full_range",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/misc.rs",
+            "line": 24,
+            "end_line": 126,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_channel_eq_with_callback_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 1025,
+            "end_line": 1042,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "detect_passband_and_mean",
+            "kind": "function",
+            "file": "crates/roomeq-analysis/src/response_metrics.rs",
+            "line": 23,
+            "end_line": 25,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "resolve_multi_measurement_auto_optimizer_config",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/multi_eq_auto_optimizer_context.rs",
+            "line": 24,
+            "end_line": 74,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_multisub_group_multiseat",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 1322,
+            "end_line": 1573,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "active_correction_band",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/config/optimizer_config.rs",
+            "line": 441,
+            "end_line": 450,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "sub_channel",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/eq/multi_eq_auto_optimizer_context.rs",
+            "line": 15,
+            "end_line": 21,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "callback",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_fir/progress.rs",
+            "line": 19,
+            "end_line": 26,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "recompiled_loss",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 1976,
+            "end_line": 1980,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "prepare_single_channel_eq_with_normalization",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/prepared_single_channel_eq/misc.rs",
+            "line": 188,
+            "end_line": 213,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "evaluate_multi_seat_acceptance",
+            "kind": "function",
+            "file": "crates/roomeq-quality/src/acceptance.rs",
+            "line": 242,
+            "end_line": 269,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "clear",
+            "kind": "method",
+            "file": "crates/autoeq-qa/src/optimizer_benchmark.rs",
+            "line": 109,
+            "end_line": 115,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "ordered_drivers_data",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 17,
+            "end_line": 19,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_drivers_combined_response_complex",
+            "kind": "function",
+            "file": "crates/autoeq-objective/src/loss/drivers/compute.rs",
+            "line": 118,
+            "end_line": 161,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_multisub_gains_only",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 36,
+            "end_line": 99,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_multisub",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 207,
+            "end_line": 215,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "curve_from_complex_sum",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 21,
+            "end_line": 34,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "flat_loss",
+            "kind": "function",
+            "file": "crates/autoeq-objective/src/loss/flat.rs",
+            "line": 100,
+            "end_line": 113,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "mean_response_in_range",
+            "kind": "function",
+            "file": "crates/roomeq-analysis/src/response_metrics.rs",
+            "line": 8,
+            "end_line": 20,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_combined_with_allpass_complex",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/allpass.rs",
+            "line": 66,
+            "end_line": 129,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "multisub_allpass_converged",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub.rs",
+            "line": 33,
+            "end_line": 35,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_bounded_scalar",
+            "kind": "function",
+            "file": "crates/autoeq-optim/src/optim/scalar.rs",
+            "line": 74,
+            "end_line": 84,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "allpass_q_bounds",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/allpass.rs",
+            "line": 27,
+            "end_line": 51,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "verify_joint_budgets",
+            "kind": "function",
+            "file": "crates/autoeq-optim/src/optim/constraint_envelope.rs",
+            "line": 1229,
+            "end_line": 1278,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "multisub_allpass_loss",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub.rs",
+            "line": 40,
+            "end_line": 77,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "allpass_frequency_bounds",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/allpass.rs",
+            "line": 10,
+            "end_line": 23,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "build_target_tilt_curve",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_target.rs",
+            "line": 36,
+            "end_line": 117,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "invalid",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/channel_iir/kautz_fit.rs",
+            "line": 15,
+            "end_line": 19,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "render_mso_seat_responses",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/seat_response.rs",
+            "line": 9,
+            "end_line": 80,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_joint_sub_array_with_control",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 344,
+            "end_line": 699,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "mean_band_level",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 270,
+            "end_line": 284,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "combine",
+            "kind": "method",
+            "file": "crates/autoeq-core/src/resolution.rs",
+            "line": 49,
+            "end_line": 69,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "new",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 59,
+            "end_line": 61,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "default",
+            "kind": "method",
+            "file": "crates/autoeq-objective/src/loss/joint_multisub.rs",
+            "line": 78,
+            "end_line": 84,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": true,
+        "omitted": 25
+      },
+      "direct_callees": {
+        "edges": [
+          {
+            "name": "protect_shared_eq_seats",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 763,
+            "end_line": 825,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_eq_response",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/compute.rs",
+            "line": 339,
+            "end_line": 353,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_multisub_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 114,
+            "end_line": 204,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "flat_loss_score",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group.rs",
+            "line": 118,
+            "end_line": 122,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_multisub_with_allpass",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/optimize.rs",
+            "line": 226,
+            "end_line": 462,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "bounded_sub_eq_max",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 238,
+            "end_line": 265,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_joint_sub_group_detailed_with_callback",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 827,
+            "end_line": 1047,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "sub_optimizer_config",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 269,
+            "end_line": 281,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "timing_scopes_are_shared",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/types.rs",
+            "line": 6,
+            "end_line": 23,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "build_multisub_dsp_chain_with_allpass",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/build.rs",
+            "line": 498,
+            "end_line": 533,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "apply_complex_response",
+            "kind": "function",
+            "file": "crates/autoeq-core/src/response.rs",
+            "line": 110,
+            "end_line": 112,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "joint_sub_diagnostics",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/multisub/joint_objective.rs",
+            "line": 1054,
+            "end_line": 1131,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_channel_eq_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 953,
+            "end_line": 969,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compute_peq_complex_response",
+            "kind": "function",
+            "file": "crates/autoeq-core/src/response.rs",
+            "line": 38,
+            "end_line": 69,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "extend_curve_to_full_range",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/output/misc.rs",
+            "line": 24,
+            "end_line": 126,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_channel_eq_with_callback_detailed",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/optimize.rs",
+            "line": 1025,
+            "end_line": 1042,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "detect_passband_and_mean",
+            "kind": "function",
+            "file": "crates/roomeq-analysis/src/response_metrics.rs",
+            "line": 23,
+            "end_line": 25,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "resolve_multi_measurement_auto_optimizer_config",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/eq/multi_eq_auto_optimizer_context.rs",
+            "line": 24,
+            "end_line": 74,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "process_multisub_group_multiseat",
+            "kind": "function",
+            "file": "crates/roomeq-engine/src/group_processing.rs",
+            "line": 1322,
+            "end_line": 1573,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "active_correction_band",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/config/optimizer_config.rs",
+            "line": 441,
+            "end_line": 450,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "sub_channel",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/eq/multi_eq_auto_optimizer_context.rs",
+            "line": 15,
+            "end_line": 21,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "callback",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/channel_fir/progress.rs",
+            "line": 19,
+            "end_line": 26,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "caller_role_counts": {
+        "test_only": 5,
+        "ordinary_or_unresolved": 1,
+        "unresolved": 0
+      },
+      "seed_file": "crates/roomeq-engine/src/group_processing.rs",
+      "seed_file_line_classes": {
+        "ordinary": 1842,
+        "embedded_test": 132
+      }
+    },
+    {
+      "key": "routed",
+      "node_id": "graph:1ee350518c1d5fda5d7b91ea0d13522b:function:29d7e8963dca883960d07bf0691537ed",
+      "callers": {
+        "edges": [
+          {
+            "name": "optimize_room_pipeline_impl_with_recovery",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 263,
+            "def_line": 252,
+            "end_line": 271,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "018a06807389f612fd6b2c977029441efcfcc4a9faabe9285028cb9a5889efcb"
+          },
+          {
+            "name": "optimize_room_pipeline_impl_with_frequency_samples",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 242,
+            "def_line": 232,
+            "end_line": 250,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "018a06807389f612fd6b2c977029441efcfcc4a9faabe9285028cb9a5889efcb"
+          },
+          {
+            "name": "run_with_store",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/pipeline.rs",
+            "line": 168,
+            "def_line": 141,
+            "end_line": 188,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "eef678917ec066453cf269aa06abd94aa518ee06aabd59a2fb45383bcde37a6b"
+          },
+          {
+            "name": "rejected_final_seat_validation_does_not_publish_validation_bundle",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/tests/observers.rs",
+            "line": 510,
+            "def_line": 496,
+            "end_line": 534,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "0f8fc2c662de5d12e4a1bf0dd731e346abbd812618b1756eafbce962140c7df6"
+          },
+          {
+            "name": "optimize_room_pipeline_impl_direct_call",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/tests/observers.rs",
+            "line": 620,
+            "def_line": 606,
+            "end_line": 632,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "0f8fc2c662de5d12e4a1bf0dd731e346abbd812618b1756eafbce962140c7df6"
+          },
+          {
+            "name": "validation_bundle_matches_final_pipeline_playback_evidence",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/tests/observers.rs",
+            "line": 444,
+            "def_line": 433,
+            "end_line": 493,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "0f8fc2c662de5d12e4a1bf0dd731e346abbd812618b1756eafbce962140c7df6"
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "callees": {
+        "edges": [
+          {
+            "name": "relocate_resources",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 57,
+            "end_line": 148,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "normalize_seat_identity",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/input_snapshot.rs",
+            "line": 39,
+            "end_line": 154,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "select_with_reference",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 195,
+            "end_line": 207,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "generate_validation_bundle_report",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/reports/misc.rs",
+            "line": 142,
+            "end_line": 230,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "capture_with_receipt",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 117,
+            "end_line": 139,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_room_candidate",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 430,
+            "end_line": 606,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "finalize_result_ledger",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/final_ledger.rs",
+            "line": 156,
+            "end_line": 292,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "processing_snapshot",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/final_ledger.rs",
+            "line": 45,
+            "end_line": 62,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "publish_baseline",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 2870,
+            "end_line": 3008,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "stopped",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 19,
+            "end_line": 21,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "observer",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 23,
+            "end_line": 50,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "checked_convolution_resource_references",
+            "kind": "function",
+            "file": "crates/roomeq-export/src/package.rs",
+            "line": 171,
+            "end_line": 202,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "bind_final_convolution_artifacts",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/export.rs",
+            "line": 25,
+            "end_line": 121,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "pass",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/output.rs",
+            "line": 902,
+            "end_line": 911,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "as_str",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+            "line": 1767,
+            "end_line": 1775,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "to_dsp_chain_output",
+            "kind": "method",
+            "file": "crates/roomeq-engine/src/room_result.rs",
+            "line": 147,
+            "end_line": 242,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "new",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 12,
+            "end_line": 17,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "seat_permutation",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/group_measurements.rs",
+            "line": 214,
+            "end_line": 239,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "seat_labels",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/group_measurements.rs",
+            "line": 14,
+            "end_line": 26,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "validate_source_seat_bindings",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/group_measurements.rs",
+            "line": 261,
+            "end_line": 292,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "reordered_for_measurements",
+            "kind": "method",
+            "file": "crates/autoeq-core/src/capture_provenance.rs",
+            "line": 88,
+            "end_line": 122,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "err",
+            "kind": "method",
+            "file": "crates/autoeq-optim/src/optim/optimizer_backend.rs",
+            "line": 476,
+            "end_line": 481,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "ok",
+            "kind": "method",
+            "file": "crates/autoeq-optim/src/optim/optimizer_backend.rs",
+            "line": 467,
+            "end_line": 472,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "select_using_scores",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 209,
+            "end_line": 338,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "score",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 150,
+            "end_line": 185,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "attach",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+            "line": 813,
+            "end_line": 1061,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "create_dir_all",
+            "kind": "method",
+            "file": "crates/autoeq-artifacts/src/lib.rs",
+            "line": 18,
+            "end_line": 18,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "validation_bundle_config",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/config/optimizer_config.rs",
+            "line": 495,
+            "end_line": 497,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "write",
+            "kind": "method",
+            "file": "crates/autoeq-artifacts/src/lib.rs",
+            "line": 21,
+            "end_line": 21,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "capture_training_impl",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 141,
+            "end_line": 266,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "into_stage",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+            "line": 106,
+            "end_line": 117,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "record",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay/intake.rs",
+            "line": 18,
+            "end_line": 104,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "record_peq_candidates",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+            "line": 2267,
+            "end_line": 2363,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "verify_declared_physical_drive",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 835,
+            "end_line": 899,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_room_impl_with_recovery_and_frequency_samples",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 1096,
+            "end_line": 1216,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "requested",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/routed_pruning.rs",
+            "line": 260,
+            "end_line": 279,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "attach_validation_scorecard",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+            "line": 44,
+            "end_line": 222,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "attach_measurement_conditioning",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/evidence_intake/conditioning_report.rs",
+            "line": 137,
+            "end_line": 246,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "attach_optimizer_conditioning",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/evidence_intake/conditioning_report.rs",
+            "line": 248,
+            "end_line": 317,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "select_with_diagnostic_sink",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 757,
+            "end_line": 833,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "distribute_routed_firs",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/per_driver_fir.rs",
+            "line": 12,
+            "end_line": 113,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "compile_graph_delays_causal",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/delay_compile.rs",
+            "line": 78,
+            "end_line": 197,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "attach_configured_comparison",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay/configured_reference.rs",
+            "line": 1064,
+            "end_line": 1073,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "resolved_schroeder_hz",
+            "kind": "function",
+            "file": "crates/roomeq-model/src/auto_tune.rs",
+            "line": 131,
+            "end_line": 150,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "refuse_negative_delays",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/final_ledger.rs",
+            "line": 73,
+            "end_line": 153,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "graph_acceptance_evidence",
+            "kind": "function",
+            "file": "crates/roomeq-quality/src/acceptance_bundle/production.rs",
+            "line": 63,
+            "end_line": 155,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "finalize_output_ledger",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/final_ledger.rs",
+            "line": 320,
+            "end_line": 393,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": true,
+        "omitted": 13
+      },
+      "direct_callees": {
+        "edges": [
+          {
+            "name": "relocate_resources",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 57,
+            "end_line": 148,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "normalize_seat_identity",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/input_snapshot.rs",
+            "line": 39,
+            "end_line": 154,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "select_with_reference",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 195,
+            "end_line": 207,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "generate_validation_bundle_report",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/reports/misc.rs",
+            "line": 142,
+            "end_line": 230,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "capture_with_receipt",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 117,
+            "end_line": 139,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "optimize_room_candidate",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 430,
+            "end_line": 606,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "finalize_result_ledger",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/final_ledger.rs",
+            "line": 156,
+            "end_line": 292,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "processing_snapshot",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/final_ledger.rs",
+            "line": 45,
+            "end_line": 62,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "publish_baseline",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 2870,
+            "end_line": 3008,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "stopped",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 19,
+            "end_line": 21,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "observer",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/hybrid_parts.rs",
+            "line": 23,
+            "end_line": 50,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "caller_role_counts": {
+        "test_only": 3,
+        "ordinary_or_unresolved": 3,
+        "unresolved": 0
+      },
+      "seed_file": "crates/roomeq-workflow/src/room_optimization.rs",
+      "seed_file_line_classes": {
+        "ordinary": 4900,
+        "embedded_test": 152
+      }
+    },
+    {
+      "key": "finalization",
+      "node_id": "graph:1ee350518c1d5fda5d7b91ea0d13522b:function:9624ad5af6cf31504770a0b5a5eb7773",
+      "callers": {
+        "edges": [
+          {
+            "name": "diagnostic_sink_failure_rolls_back_finalization_result",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 5432,
+            "def_line": 5418,
+            "end_line": 5449,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "opt_in_zero_strength_capture_replays_exact_useful_output_inputs_without_changing_result",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 5136,
+            "def_line": 5077,
+            "end_line": 5325,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "select",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 750,
+            "def_line": 741,
+            "end_line": 751,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "optimize_room_candidate",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 540,
+            "def_line": 430,
+            "end_line": 606,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "018a06807389f612fd6b2c977029441efcfcc4a9faabe9285028cb9a5889efcb"
+          },
+          {
+            "name": "diagnostic_capture_refuses_when_selection_stops_before_target_trial",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 5350,
+            "def_line": 5328,
+            "end_line": 5377,
+            "depth": 1,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "unknown_output_safety_budget_id_fails_before_selection_search",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 4691,
+            "def_line": 4681,
+            "end_line": 4703,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "declared_gain_allowance_delivers_electrically_bounded_final_graph",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 7201,
+            "def_line": 7181,
+            "end_line": 7230,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "ctc_with_room_seat_captures_goes_through_final_seat_selection",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 5043,
+            "def_line": 5011,
+            "end_line": 5074,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "tiny_realized_improvement_returns_unchanged_baseline",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 5860,
+            "def_line": 5834,
+            "end_line": 5930,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "selection_defers_without_acceptance_evidence",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 4656,
+            "def_line": 4648,
+            "end_line": 4678,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "electrical_attenuation_cannot_hide_in_single_seat_baseline",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 7132,
+            "def_line": 7114,
+            "end_line": 7178,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "explicit_over_budget_without_acceptance_evidence_fails_closed",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 4754,
+            "def_line": 4740,
+            "end_line": 4768,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "successful_final_replay_supersedes_historical_stage_reversion",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 5964,
+            "def_line": 5933,
+            "end_line": 5989,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "cumulative_eq_refinement_preserves_useful_sub_correction",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 7297,
+            "def_line": 7233,
+            "end_line": 7335,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "selection_reconciles_metrics_after_final_seat_replay",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 4972,
+            "def_line": 4966,
+            "end_line": 5008,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "selection_identity_is_unchanged_not_an_accepted_improvement",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 6858,
+            "def_line": 6851,
+            "end_line": 6872,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "test_only",
+            "source_sha256": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab"
+          },
+          {
+            "name": "optimize_room_pipeline_impl_with_optional_recovery",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 300,
+            "def_line": 273,
+            "end_line": 416,
+            "depth": 2,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false,
+            "source_role": "ordinary_or_unresolved",
+            "source_sha256": "018a06807389f612fd6b2c977029441efcfcc4a9faabe9285028cb9a5889efcb"
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "callees": {
+        "edges": [
+          {
+            "name": "verify_delivered_channel_alignment",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 906,
+            "end_line": 1037,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "select_inner",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 1078,
+            "end_line": 1647,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "align_report_metrics_to_scorecard",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+            "line": 256,
+            "end_line": 269,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "correlated_bass_stage",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 985,
+            "end_line": 1059,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "validate_final_correlated_bass",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 15,
+            "end_line": 24,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "publish_baseline",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 2870,
+            "end_line": 3008,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "complete",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 311,
+            "end_line": 385,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "new",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 280,
+            "end_line": 293,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "refresh_outcome",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/report_contracts.rs",
+            "line": 1431,
+            "end_line": 1433,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "fail",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/output.rs",
+            "line": 913,
+            "end_line": 926,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "baseline_has_safety_evidence",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 2781,
+            "end_line": 2822,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "final_role_level_alignment_gains",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization.rs",
+            "line": 1568,
+            "end_line": 1712,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "failed",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 388,
+            "end_line": 392,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "refresh_responses",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 3695,
+            "end_line": 3766,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "pass",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/output.rs",
+            "line": 902,
+            "end_line": 911,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "ok",
+            "kind": "method",
+            "file": "crates/autoeq-optim/src/optim/optimizer_backend.rs",
+            "line": 467,
+            "end_line": 472,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "correction_stages",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/room_optimization_result.rs",
+            "line": 2246,
+            "end_line": 2264,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "rebuild",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 3768,
+            "end_line": 3827,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "finish_ctc_without_room_seat_evidence",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 698,
+            "end_line": 737,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "canonicalize_common_driver_delays",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 1657,
+            "end_line": 1716,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "has_unmeasured_multi_branch_phase",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 46,
+            "end_line": 50,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "has_repeated_eq_sections",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 3659,
+            "end_line": 3693,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "validate_candidate_final_seats",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 1599,
+            "end_line": 1620,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "is_identity_correction",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 1045,
+            "end_line": 1047,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "proposals",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization/joint_drive.rs",
+            "line": 358,
+            "end_line": 455,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "attach_validation_scorecard",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+            "line": 44,
+            "end_line": 222,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "defer_native_routed_acceptance",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+            "line": 27,
+            "end_line": 42,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "shift_main_route_delays",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 3505,
+            "end_line": 3570,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "crossover_timing_refused",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/topology/home_cinema.rs",
+            "line": 793,
+            "end_line": 802,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "record_output_safety_attenuation_budget",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 669,
+            "end_line": 696,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "evaluate_prepared_trial",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 1932,
+            "end_line": 2627,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "applied_lfe_playback_gain_db",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/delay_compile.rs",
+            "line": 250,
+            "end_line": 257,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "without_common_post_eq",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 2667,
+            "end_line": 2706,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "configured_baseline_below_improvement_floors",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 46,
+            "end_line": 81,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "output_safety_attenuation_budget_checks",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 608,
+            "end_line": 651,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "output_safety_attenuation_failure",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 653,
+            "end_line": 667,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "diagnostic_config_value",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 251,
+            "end_line": 259,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "refresh_configured_native_acceptance",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 3841,
+            "end_line": 3918,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "resolved_schroeder_hz",
+            "kind": "function",
+            "file": "crates/roomeq-model/src/auto_tune.rs",
+            "line": 131,
+            "end_line": 150,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "diagnostic_result_value",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 161,
+            "end_line": 196,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "is_subwoofer_channel",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/misc.rs",
+            "line": 33,
+            "end_line": 54,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "prepare_candidate",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 3576,
+            "end_line": 3614,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "evaluate_trial_schedule",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 1812,
+            "end_line": 1929,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "correction_strength_for_electrical_ceiling",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/delay_compile.rs",
+            "line": 259,
+            "end_line": 307,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "needs_native_routed_acceptance",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+            "line": 9,
+            "end_line": 25,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "write",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 295,
+            "end_line": 309,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": true,
+        "omitted": 19
+      },
+      "direct_callees": {
+        "edges": [
+          {
+            "name": "verify_delivered_channel_alignment",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 906,
+            "end_line": 1037,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "select_inner",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 1078,
+            "end_line": 1647,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "align_report_metrics_to_scorecard",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/validation_scorecard.rs",
+            "line": 256,
+            "end_line": 269,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "correlated_bass_stage",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 985,
+            "end_line": 1059,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "validate_final_correlated_bass",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/seat_replay.rs",
+            "line": 15,
+            "end_line": 24,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "publish_baseline",
+            "kind": "function",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 2870,
+            "end_line": 3008,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "complete",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 311,
+            "end_line": 385,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "new",
+            "kind": "method",
+            "file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+            "line": 280,
+            "end_line": 293,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "refresh_outcome",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/report_contracts.rs",
+            "line": 1431,
+            "end_line": 1433,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          },
+          {
+            "name": "fail",
+            "kind": "method",
+            "file": "crates/roomeq-model/src/output.rs",
+            "line": 913,
+            "end_line": 926,
+            "edge_kind": "calls",
+            "dispatch_via_trait": false
+          }
+        ],
+        "truncated": false,
+        "omitted": 0
+      },
+      "caller_role_counts": {
+        "test_only": 14,
+        "ordinary_or_unresolved": 3,
+        "unresolved": 0
+      },
+      "seed_file": "crates/roomeq-workflow/src/room_optimization/finalization.rs",
+      "seed_file_line_classes": {
+        "ordinary": 4353,
+        "embedded_test": 3150
+      }
+    }
+  ],
+  "owner_declared_dependencies": {
+    "roomeq-engine": [
+      {
+        "name": "autoeq-core",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "autoeq-fir",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "autoeq-measurements",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "autoeq-optim",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "log",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-dsp",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-iir-fir",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-optimisation",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-rir",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "sotf-nalgebra",
+        "rename": "nalgebra",
+        "kind": null,
+        "optional": false,
+        "features": [
+          "std"
+        ],
+        "uses_default_features": false,
+        "target": null
+      },
+      {
+        "name": "ndarray",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "rayon",
+          "serde"
+        ],
+        "uses_default_features": false,
+        "target": null
+      },
+      {
+        "name": "num-complex",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "num_cpus",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "oxiblas-ndarray",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "rand",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "rand_chacha",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-analysis",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-dsp",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-model",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-quality",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "rustfft",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "schemars",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "serde",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "derive",
+          "rc"
+        ],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "serde_json",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "sha2",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "hound",
+        "rename": null,
+        "kind": "dev",
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "tempfile",
+        "rename": null,
+        "kind": "dev",
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      }
+    ],
+    "roomeq-workflow": [
+      {
+        "name": "anyhow",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "autoeq-artifacts",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "autoeq-core",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "autoeq-measurements",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "api"
+        ],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "chrono",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "serde"
+        ],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "hound",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "log",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-dsp",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-iir-fir",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "math-rir",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "ndarray",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "rayon",
+          "serde"
+        ],
+        "uses_default_features": false,
+        "target": null
+      },
+      {
+        "name": "num-complex",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "rayon",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-analysis",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-engine",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-export",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-model",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-quality",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "rustfft",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "same-file",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "schemars",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "serde",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "derive",
+          "rc"
+        ],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "serde_ignored",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "serde_json",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "float_roundtrip"
+        ],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "sha2",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "sofa-reader",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "tempfile",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "tokio",
+        "rename": null,
+        "kind": null,
+        "optional": false,
+        "features": [
+          "rt-multi-thread",
+          "fs",
+          "macros",
+          "io-util",
+          "process",
+          "signal"
+        ],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "criterion",
+        "rename": null,
+        "kind": "dev",
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "roomeq-synthetic",
+        "rename": null,
+        "kind": "dev",
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      },
+      {
+        "name": "stats_alloc",
+        "rename": null,
+        "kind": "dev",
+        "optional": false,
+        "features": [],
+        "uses_default_features": true,
+        "target": null
+      }
+    ]
+  },
+  "caller_classification_note": "Explicit local cfg/test ranges plus inherited target roles from source-size inventory; other call sites remain ordinary_or_unresolved. This is not compiler-expanded reachability.",
+  "source_confirmed_extra_edges": [
+    {
+      "candidate": "system",
+      "caller": "process_multisub_group_with_callback_and_frequency_samples",
+      "file": "crates/roomeq-workflow/src/group_processing.rs",
+      "def_line": 209,
+      "end_line": 263,
+      "call_line": 253,
+      "callee": "roomeq_engine::group_processing::process_multisub_group_with_callback",
+      "source_role": "ordinary",
+      "source_sha256": "85ee9f9a065b3951a52c47492c8ba686c184219acf0f3c2486c2d5dd16497bbc",
+      "reason": "Module import uses self as engine; graph caller query omits this cross-crate module-alias edge."
+    }
+  ],
+  "tool_gap_suggestion": "A sanitized module-alias caller-resolution issue can be filed at https://github.com/aovestdipaperino/tokensave. Minimal pattern: use dep::module::{self as alias, Type}; fn caller(){ alias::callee(); }. No proprietary source is needed."
+}

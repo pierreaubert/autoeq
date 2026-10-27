@@ -1,0 +1,34 @@
+{
+  "recorded_utc": "2026-10-26T10:43:07.124133+00:00",
+  "status": "rejected failed calibration; all 65 partial rows ineligible for budgets or acceptance",
+  "session_id": 15210,
+  "terminal_exit_code": 1,
+  "report": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-advisory-baseline-j8-20261026T093302-3bbeb2dc/report.json",
+  "retained_rows": 65,
+  "budgets_frozen": false,
+  "performance_acceptance": false,
+  "failure_scenario": "workspace/full-native repetition 0",
+  "failed_tests": [
+    "roadmap_correction_admission_joint_shared_eq_protects_flat_seat",
+    "roadmap_correction_admission_joint_sub_reverts_damaged_seat",
+    "roadmap_correction_admission_report_binds_production_payload",
+    "roadmap_correction_capture_matched_decay_reaches_report"
+  ],
+  "summary": "5369 tests run: 5365 passed, 4 failed, 42 skipped",
+  "diagnosis": "The full-native just ntest lane did not supply AUTOEQ_REPORT_PRODUCER. Four Python report consumers fell back to nested cold cargo run --bin report-producer and hit the unchanged 120-second subprocess timeout. The separately prepared execution-only lane had already passed all 5369 active cases.",
+  "raw_stderr_sha256": "ec53f7a49ae104a75a2b117be2ab3dde94abf058dbd6d54d9007c2015db0b304",
+  "failed_nested_command": [
+    "cargo",
+    "run",
+    "--quiet",
+    "--manifest-path",
+    "<owned snapshot>/Cargo.toml",
+    "-p",
+    "autoeq-report-wasm",
+    "--bin",
+    "report-producer",
+    "--"
+  ],
+  "required_fix": "Prepare and bind the report helper at the native lane actual profile/features, including its build in full-native elapsed/build work; ensure no nested Cargo fallback and retain all original test identities, timeouts and budgets. Add a focused orchestration regression before a new controlled run.",
+  "source_epoch_policy": "Keep original frozen sources and failed raw artifacts immutable. Review the controller/harness binding before choosing whether the corrected harness requires a new source epoch."
+}

@@ -51,7 +51,7 @@ pub(super) const WAVELET_BANDS: [f64; 11] = [
 ];
 
 /// Parse filter type string to BiquadFilterType enum
-pub(super) fn parse_biquad_filter_type(ft: &str) -> anyhow::Result<BiquadFilterType> {
+pub fn parse_biquad_filter_type(ft: &str) -> anyhow::Result<BiquadFilterType> {
     let filter_type = match ft {
         "peak" => BiquadFilterType::Peak,
         "lowshelf" => BiquadFilterType::Lowshelf,

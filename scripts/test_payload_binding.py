@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import re
+import struct
 from pathlib import Path
 import tempfile
 import unittest
@@ -162,8 +163,15 @@ class PayloadBindingTests(unittest.TestCase):
             temp_root = Path(tempfile.gettempdir())
         with tempfile.TemporaryDirectory(dir=temp_root) as directory:
             root = Path(directory)
-            resource = root / "impulse.bin"
-            resource.write_bytes(b"fixture impulse bytes")
+            resource = root / "impulse.wav"
+            # A real mono float WAV exercises resource loading as well as the
+            # byte binding; arbitrary bytes are correctly refused by the loader.
+            samples = struct.pack("<f", 1.0)
+            resource.write_bytes(
+                b"RIFF" + struct.pack("<I", 36 + len(samples)) + b"WAVEfmt "
+                + struct.pack("<IHHIIHH", 16, 3, 1, 48_000, 192_000, 4, 32)
+                + b"data" + struct.pack("<I", len(samples)) + samples
+            )
             data = bound_fixture()
             data["channels"]["L"]["plugins"] = [{"plugin_type": "convolution", "parameters": {"ir_file": resource.name}}]
             data["metadata"] = {"final_convolution_sha256": {

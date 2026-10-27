@@ -98,3 +98,9 @@ CTAGS
 crates/autoeq-report-wasm/dist/
 crates/autoeq-report-wasm/pkg2d/
 crates/autoeq-report-gpui/pkg/
+
+# Large compiler traces stay available beside benchmark reports as local artifacts.
+/docs/baselines/refactor-20261025/bench-*/diagnostics/llvm-traces/
+
+# Local browser validation; selected evidence lives under docs/baselines.
+/output/playwright/

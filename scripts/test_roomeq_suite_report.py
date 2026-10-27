@@ -326,11 +326,13 @@ class MeasuredModeComparisonTests(unittest.TestCase):
         args = Namespace(out_dir=self.root, scenarios="chosen", modes="fir")
         self.assertEqual(suite.expected_matrix(args), (["chosen"], ["fir"]))
 
-    def test_default_matrix_includes_all_22_scenarios(self):
+    def test_default_matrix_includes_all_23_scenarios(self):
         args = Namespace(out_dir=self.root, scenarios="", modes="")
         with patch.dict(os.environ, {}, clear=True):
             scenarios, modes = suite.expected_matrix(args)
-        self.assertEqual(len(scenarios), 22)
+        self.assertEqual(len(scenarios), 23)
+        self.assertEqual(len(set(scenarios)), 23)
+        self.assertTrue({"2.0_t7v_2024", "2.0_t7v_2026"}.issubset(scenarios))
         self.assertEqual(len([s for s in scenarios if "badroom" in s]), 6)
         self.assertEqual(len(modes), 4)
 

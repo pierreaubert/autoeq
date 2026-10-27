@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 autoeq-core = { workspace = true }
-clap = { workspace = true }
+autoeq-optim-types = { workspace = true }
 log = { workspace = true }
 ndarray = { workspace = true }
 num_cpus = { workspace = true }

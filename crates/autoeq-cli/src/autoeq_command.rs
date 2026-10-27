@@ -72,7 +72,7 @@ pub async fn run_command() -> Result<()> {
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let mut args = autoeq::cli::Args::parse();
+    let mut args = crate::cli::Args::parse();
 
     if args.product_renderer_capabilities {
         let raw_args = std::env::args_os().skip(1).collect::<Vec<_>>();
@@ -86,21 +86,21 @@ pub async fn run_command() -> Result<()> {
 
     // Check if user wants to see algorithm list
     if args.algo_list {
-        autoeq::cli::display_algorithm_list();
+        crate::cli::display_algorithm_list();
     }
 
     // Check if user wants to see strategy list
     if args.strategy_list {
-        autoeq::cli::display_strategy_list();
+        crate::cli::display_strategy_list();
     }
 
     // Check if user wants to see PEQ model list
     if args.peq_model_list {
-        autoeq::cli::display_peq_model_list();
+        crate::cli::display_peq_model_list();
     }
 
     // Validate CLI arguments
-    autoeq::cli::validate_args_or_exit(&args);
+    crate::cli::validate_args_or_exit(&args);
 
     // Run the main logic
     if let Err(e) = run(args).await {
@@ -180,7 +180,7 @@ fn cli_product_identity(
     ]))
 }
 
-fn validate_product_config_dispatch(args: &autoeq::cli::Args) -> Result<()> {
+fn validate_product_config_dispatch(args: &crate::cli::Args) -> Result<()> {
     if args.product_config.is_some()
         && matches!(
             args.loss,
@@ -304,7 +304,7 @@ impl CliCheckpointIdentity {
     }
 }
 
-fn validate_checkpoint_mode(args: &autoeq::cli::Args) -> Result<()> {
+fn validate_checkpoint_mode(args: &crate::cli::Args) -> Result<()> {
     let uses_exact_state = args.resume_exact.is_some() || args.checkpoint_exact.is_some();
     if !uses_exact_state {
         return Ok(());
@@ -420,7 +420,7 @@ fn cli_checkpoint_callback(
     })
 }
 
-async fn run(args: autoeq::cli::Args) -> Result<()> {
+async fn run(args: crate::cli::Args) -> Result<()> {
     validate_product_config_dispatch(&args)?;
     validate_checkpoint_mode(&args)?;
     // Check if this is multi-driver mode
@@ -1061,7 +1061,7 @@ async fn run(args: autoeq::cli::Args) -> Result<()> {
 }
 
 /// Run multi-driver crossover optimization
-async fn run_multi_driver_optimization(args: &autoeq::cli::Args) -> Result<()> {
+async fn run_multi_driver_optimization(args: &crate::cli::Args) -> Result<()> {
     info!("🎵 Multi-driver crossover optimization mode");
 
     // Collect driver file paths
@@ -1216,7 +1216,7 @@ mod tests {
         product_renderer_capabilities_json, validate_checkpoint_mode,
         validate_product_config_dispatch,
     };
-    use autoeq::cli::Args;
+    use crate::cli::Args;
     use clap::Parser;
     use ndarray::Array1;
     use std::ffi::OsString;

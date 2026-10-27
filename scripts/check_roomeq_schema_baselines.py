@@ -14,8 +14,8 @@ import sys
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SCHEMAS = {
-    "input": REPO_ROOT / "src" / "bin" / "roomeq" / "input_schema.json",
-    "output": REPO_ROOT / "src" / "bin" / "roomeq" / "output_schema.json",
+    "input": REPO_ROOT / "crates" / "roomeq-cli" / "schemas" / "input_schema.json",
+    "output": REPO_ROOT / "crates" / "roomeq-cli" / "schemas" / "output_schema.json",
 }
 
 
@@ -33,9 +33,7 @@ def generate_schema(kind: str) -> object:
             "--quiet",
             "--locked",
             "-p",
-            "autoeq",
-            "--features",
-            "cli",
+            "roomeq-cli",
             "--bin",
             "roomeq",
             "--",

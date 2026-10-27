@@ -21,7 +21,7 @@ mod limiter_tests {
             channels: std::collections::HashMap::from([(
                 "Sub1".into(),
                 serde_json::from_value(serde_json::json!({"channel": "Sub1", "plugins": [
-                    roomeq_engine::runtime_limiter::plugin(0.0)
+                    autoeq_core::runtime_limiter::plugin(0.0)
                 ]}))
                 .unwrap(),
             )]),
@@ -103,7 +103,7 @@ mod limiter_tests {
             channels: std::collections::HashMap::from([(
                 "Sub1".into(),
                 serde_json::from_value(serde_json::json!({"channel": "Sub1", "plugins": [
-                    roomeq_engine::runtime_limiter::plugin(0.0)
+                    autoeq_core::runtime_limiter::plugin(0.0)
                 ]}))
                 .unwrap(),
             )]),
@@ -130,38 +130,30 @@ mod limiter_tests {
 }
 
 /// Supported export formats for DSP chain output
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, clap::ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ExportFormat {
     /// CamillaDSP YAML configuration
-    #[value(name = "camilladsp")]
     #[serde(rename = "camilladsp")]
     CamillaDsp,
     /// Equalizer APO / Peace GUI text format (also works with PipeWire parametric-equalizer module)
-    #[value(name = "apo")]
     #[serde(rename = "apo")]
     EqualizerApo,
     /// EasyEffects JSON preset
-    #[value(name = "easyeffects")]
     #[serde(rename = "easyeffects")]
     EasyEffects,
     /// Wavelet GraphicEQ text format
-    #[value(name = "wavelet")]
     #[serde(rename = "wavelet")]
     Wavelet,
     /// PipeWire filter-chain SPA-JSON configuration
-    #[value(name = "pipewire")]
     #[serde(rename = "pipewire")]
     PipeWire,
     /// Roon DSP Engine preset (JSON)
-    #[value(name = "roon")]
     #[serde(rename = "roon")]
     RoonDsp,
     /// REW Generic EQ reference text for manual entry; REW cannot reload this text.
-    #[value(name = "rew")]
     #[serde(rename = "rew")]
     Rew,
     /// Raw normalized biquad coefficients with channel/order metadata
-    #[value(name = "coefficients", alias = "biquad-coefficients")]
     #[serde(rename = "coefficients")]
     BiquadCoefficients,
 }

@@ -12,7 +12,8 @@
 # WOLFRAMSCRIPT points at a live engine).
 [group('qa-wolfram')]
 qa-wolfram-smoke:
-	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract --test wolfram_peq_response --test wolfram_fir_response --test wolfram_log_interp --test wolfram_erb_quadrature
+	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract
+	{{cargo}} test -p autoeq-qa --locked --release --test oracle_core -- wolfram_peq_response:: wolfram_fir_response:: wolfram_log_interp:: wolfram_erb_quadrature::
 
 # Full AutoEQ numerical QA. The runner checks manifest/target membership,
 # executes all 118 Rust cases plus the library tests, and records per-case evidence.

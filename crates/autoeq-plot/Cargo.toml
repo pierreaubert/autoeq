@@ -11,9 +11,12 @@ homepage = "https://github.com/pierreaubert/autoeq"
 workspace = true
 
 [features]
+# Compatibility re-exports for explicit network-enabled measurement access.
+api = ["autoeq-measurements/api"]
 default = []
 
 [dependencies]
+autoeq-optim-types = { workspace = true }
 anyhow = { workspace = true }
 autoeq-core = { workspace = true }
 autoeq-measurements = { workspace = true }

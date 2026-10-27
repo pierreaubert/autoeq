@@ -617,7 +617,13 @@ pub fn attach_measured_acoustics(
         }
         chain.pre_ir = Some(measured.waveform);
         chain.speech_transmission = speech_transmission;
-        apply_chain_acoustics(chain, &samples, measured.sample_rate_hz, channel, &mut warnings);
+        apply_chain_acoustics(
+            chain,
+            &samples,
+            measured.sample_rate_hz,
+            channel,
+            &mut warnings,
+        );
     }
     Ok(warnings)
 }
@@ -738,14 +744,11 @@ fn capture_impulse_response(
         full_spectrum[fft_size - index] = spectrum[index].conj();
     }
     let mut planner = FftPlanner::<f32>::new();
-    planner.plan_fft_inverse(fft_size).process(&mut full_spectrum);
+    planner
+        .plan_fft_inverse(fft_size)
+        .process(&mut full_spectrum);
     let scale = 1.0 / fft_size as f32;
-    Some(
-        full_spectrum
-            .iter()
-            .map(|value| value.re * scale)
-            .collect(),
-    )
+    Some(full_spectrum.iter().map(|value| value.re * scale).collect())
 }
 
 /// Attach measured acoustics derived from a capture handoff's sweep takes.
@@ -791,21 +794,19 @@ pub fn attach_capture_measured_acoustics(
         warnings.push("capture measured acoustics unavailable: handoff unreadable".into());
         return warnings;
     };
-    let Some(stimulus) = crate::capture_handoff::stimulus_artifact(&handoff)
-        .and_then(|artifact| {
-            crate::capture_handoff::verified_audio_samples(config_dir, &handoff, &artifact.file)
-        })
-    else {
+    let Some(stimulus) = crate::capture_handoff::stimulus_artifact(&handoff).and_then(|artifact| {
+        crate::capture_handoff::verified_audio_samples(config_dir, &handoff, &artifact.file)
+    }) else {
         warnings.push("capture measured acoustics unavailable: no usable stimulus".into());
         return warnings;
     };
     let Some(_sweep_range_hz) = config
         .recording_config
         .as_ref()
-        .and_then(|recording| {
-            Some((recording.sweep_start_freq?, recording.sweep_end_freq?))
+        .and_then(|recording| Some((recording.sweep_start_freq?, recording.sweep_end_freq?)))
+        .filter(|(start, end)| {
+            start.is_finite() && end.is_finite() && *start > 0.0 && *end > *start
         })
-        .filter(|(start, end)| start.is_finite() && end.is_finite() && *start > 0.0 && *end > *start)
     else {
         warnings.push("capture measured acoustics unavailable: no sweep range".into());
         return warnings;
@@ -1121,20 +1122,13 @@ mod tests {
             let size = 131072_usize;
             let mut planner = FftPlanner::<f32>::new();
             let fft = planner.plan_fft_forward(size);
-            let mut a: Vec<Complex<f32>> = stimulus
-                .iter()
-                .map(|&s| Complex::new(s, 0.0))
-                .collect();
+            let mut a: Vec<Complex<f32>> = stimulus.iter().map(|&s| Complex::new(s, 0.0)).collect();
             a.resize(size, Complex::default());
-            let mut b: Vec<Complex<f32>> = room
-                .iter()
-                .map(|&s| Complex::new(s, 0.0))
-                .collect();
+            let mut b: Vec<Complex<f32>> = room.iter().map(|&s| Complex::new(s, 0.0)).collect();
             b.resize(size, Complex::default());
             fft.process(&mut a);
             fft.process(&mut b);
-            let mut spectrum: Vec<Complex<f32>> =
-                a.iter().zip(&b).map(|(x, y)| x * y).collect();
+            let mut spectrum: Vec<Complex<f32>> = a.iter().zip(&b).map(|(x, y)| x * y).collect();
             planner.plan_fft_inverse(size).process(&mut spectrum);
             spectrum[..48000]
                 .iter()
@@ -1196,16 +1190,32 @@ mod tests {
         let stimulus_bytes = capture_wav_bytes(&stimulus);
         let recording_bytes = capture_wav_bytes(&recording);
         let payloads: Vec<(&str, CaptureArtifactRole, &[u8])> = vec![
-            ("recordings.json", CaptureArtifactRole::Configuration, &config_bytes),
+            (
+                "recordings.json",
+                CaptureArtifactRole::Configuration,
+                &config_bytes,
+            ),
             (
                 "response.csv",
                 CaptureArtifactRole::MagnitudeResponse,
                 b"frequency_hz,spl_db\n100,80\n1000,80\n",
             ),
-            ("calibration.txt", CaptureArtifactRole::Calibration, calibration),
+            (
+                "calibration.txt",
+                CaptureArtifactRole::Calibration,
+                calibration,
+            ),
             ("raw.wav", CaptureArtifactRole::RawAudio, &recording_bytes),
-            ("processed.wav", CaptureArtifactRole::ProcessedAudio, &recording_bytes),
-            ("stimulus.wav", CaptureArtifactRole::SupportingEvidence, &stimulus_bytes),
+            (
+                "processed.wav",
+                CaptureArtifactRole::ProcessedAudio,
+                &recording_bytes,
+            ),
+            (
+                "stimulus.wav",
+                CaptureArtifactRole::SupportingEvidence,
+                &stimulus_bytes,
+            ),
         ];
         let artifacts = payloads
             .iter()
@@ -1245,7 +1255,8 @@ mod tests {
             }],
         };
         std::fs::write(
-            dir.path().join(autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME),
+            dir.path()
+                .join(autoeq_core::capture_handoff::CAPTURE_HANDOFF_FILENAME),
             serde_json::to_vec_pretty(&handoff).unwrap(),
         )
         .unwrap();
@@ -1254,7 +1265,9 @@ mod tests {
         output.add_channel("L", Vec::new());
         let warnings = attach_capture_measured_acoustics(&mut output, &config, dir.path());
         assert!(
-            !warnings.iter().any(|warning| warning.contains("unavailable")),
+            !warnings
+                .iter()
+                .any(|warning| warning.contains("unavailable")),
             "{warnings:?}"
         );
         let chain = &output.channels["L"];

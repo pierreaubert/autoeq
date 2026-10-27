@@ -195,7 +195,7 @@ pub(crate) fn acceptance_views_member(
     );
     let mut bindings = std::collections::BTreeMap::new();
     for (name, channel) in channels {
-        let bundle: roomeq_engine::quality::AcceptanceBundle =
+        let bundle: roomeq_quality::AcceptanceBundle =
             serde_json::from_value(channel["bundle"].clone())?;
         let settings_hash = bundle.settings.settings_hash();
         let mut views = Vec::new();
@@ -277,7 +277,7 @@ mod tests {
         use roomeq_model::decision_ledger::{CorrectionDecisionLedger, DECISION_LEDGER_VERSION};
         let mut graph = roomeq_model::DspGraph::new("1");
         graph.add_channel("L", Vec::new());
-        let evidence = roomeq_engine::quality::graph_acceptance_evidence(&graph, 48_000.0).unwrap();
+        let evidence = roomeq_quality::graph_acceptance_evidence(&graph, 48_000.0).unwrap();
         let value = serde_json::to_value(&graph).unwrap();
         let binding = PayloadBinding::new(&value, &evidence.binding.graph_identity);
         graph.correction_decisions = Some(CorrectionDecisionLedger {

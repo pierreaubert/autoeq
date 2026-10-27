@@ -1,43 +1,18 @@
-[package]
-name = "autoeq"
-version.workspace = true
-description = "Automatic equalization for speakers, headphones and rooms!"
-edition = "2024"
-keywords = ["audio", "dsp", "eq"]
-categories = ["multimedia::audio"]
-repository = "https://github.com/pierreaubert/autoeq"
-authors = ["Pierre F. Aubert pierre@spinorama.org"]
-license = "GPL-3.0-or-later"
-# Keep the published crate under crates.io's size cap. The excluded paths are
-# QA recordings, generated test fixtures, helper shell scripts, and editor
-# backups — none are needed to compile the library or the user-facing
-# binaries. The QA-only `roomeq-qa-features` binary and the
-# `roomeq_generated_data_test` integration test will fail at runtime against
-# a published copy because their fixtures are absent; they are meant to run
-# from a workspace checkout.
-exclude = [
-    "data_tests/**",
-    "data_generated/**",
-    "scripts/**",
-    "*.mdat",
-    "**/*.mdat",
-    "*~",
-    "**/*~",
-]
-
 [workspace]
 resolver = "3"
 members = [
-    ".",
     "crates/autoeq-core",
     "crates/autoeq-artifacts",
     "crates/autoeq-fir",
     "crates/autoeq-plot",
     "crates/autoeq-measurements",
+    "crates/autoeq-objective",
     "crates/autoeq-optim",
+    "crates/autoeq-optim-types",
     "crates/autoeq-workflow",
     "crates/autoeq-cli",
     "crates/roomeq-model",
+    "crates/roomeq-dsp",
     "crates/roomeq-engine",
     "crates/roomeq-export",
     "crates/roomeq-quality",
@@ -54,6 +29,29 @@ members = [
 # Local GPUI demos have a separate workspace so backend installs do not
 # resolve their sibling checkout dependencies.
 exclude = ["crates/autoeq-gpui-examples"]
+# Ordinary library development set (refactor-20261025 Phase 1): bare
+# `cargo build/test/check` selects these libraries. CLI, QA, renderer, and
+# shell packages are built explicitly (`-p`, `--workspace`, or a Justfile
+# lane); `default-members` does not restrict explicit `--workspace`.
+default-members = [
+    "crates/autoeq-core",
+    "crates/autoeq-artifacts",
+    "crates/autoeq-fir",
+    "crates/autoeq-plot",
+    "crates/autoeq-measurements",
+    "crates/autoeq-objective",
+    "crates/autoeq-optim",
+    "crates/autoeq-optim-types",
+    "crates/autoeq-workflow",
+    "crates/roomeq-model",
+    "crates/roomeq-analysis",
+    "crates/roomeq-quality",
+    "crates/roomeq-dsp",
+    "crates/roomeq-engine",
+    "crates/roomeq-export",
+    "crates/roomeq-synthetic",
+    "crates/roomeq-workflow",
+]
 
 [workspace.package]
 version = "0.5.78"
@@ -71,13 +69,16 @@ autoeq-artifacts = { path = "crates/autoeq-artifacts", version = "0.5" }
 autoeq-fir = { path = "crates/autoeq-fir", version = "0.5" }
 autoeq-plot = { path = "crates/autoeq-plot", version = "0.5" }
 autoeq-measurements = { path = "crates/autoeq-measurements", version = "0.5" }
+autoeq-objective = { path = "crates/autoeq-objective", version = "0.5" }
 autoeq-optim = { path = "crates/autoeq-optim", version = "0.5" }
+autoeq-optim-types = { path = "crates/autoeq-optim-types", version = "0.5" }
 autoeq-workflow = { path = "crates/autoeq-workflow", version = "0.5" }
 autoeq-cli = { path = "crates/autoeq-cli", version = "0.5" }
 autoeq-report-wasm = { path = "crates/autoeq-report-wasm", version = "0.5" }
 autoeq-report-wasm-shell = { path = "crates/autoeq-report-wasm-shell", version = "0.5" }
 autoeq-report-gpui = { path = "crates/autoeq-report-gpui", version = "0.5" }
 roomeq-model = { path = "crates/roomeq-model", version = "0.5.15" }
+roomeq-dsp = { path = "crates/roomeq-dsp", version = "0.5" }
 roomeq-engine = { path = "crates/roomeq-engine", version = "0.5.84" }
 roomeq-export = { path = "crates/roomeq-export", version = "0.5.9" }
 roomeq-quality = { path = "crates/roomeq-quality", version = "0.5" }
@@ -137,128 +138,6 @@ oxiblas-ndarray = "0.2.2"
 
 rayon = "1.11"
 
-[dependencies]
-autoeq-core = { workspace = true }
-autoeq-artifacts = { workspace = true }
-autoeq-fir = { workspace = true }
-autoeq-plot = { workspace = true }
-autoeq-report-wasm = { workspace = true }
-autoeq-measurements = { workspace = true }
-autoeq-optim = { workspace = true }
-autoeq-workflow = { workspace = true }
-autoeq-cli = { workspace = true, optional = true }
-roomeq-model = { workspace = true }
-roomeq-engine = { workspace = true }
-roomeq-export = { workspace = true }
-roomeq-quality = { workspace = true }
-roomeq-qa = { workspace = true, optional = true }
-roomeq-cli = { workspace = true, optional = true }
-tokio = { workspace = true, optional = true }
-roomeq-analysis = { workspace = true }
-roomeq-synthetic = { workspace = true }
-roomeq-workflow = { workspace = true }
-anyhow = { workspace = true }
-serde_json = { workspace = true }
-math-iir-fir = { workspace = true }
-math-optimisation = { workspace = true }
-
-[features]
-default = []
-cli = ["dep:autoeq-cli", "dep:roomeq-cli", "dep:tokio"]
-qa = ["cli", "dep:roomeq-qa"]
-
-[target.'cfg(target_os = "macos")'.dependencies]
-
-[target.'cfg(all(any(target_os = "ios", target_os="ios_sim"), target_arch = "aarch64"))'.dependencies]
-
-[target.'cfg(all(target_os = "linux", target_arch="x86_64"))'.dependencies]
-
-[target.'cfg(all(target_os = "linux", target_arch="aarch64"))'.dependencies]
-
-[target.'cfg(all(target_os = "windows", target_arch="x86_64"))'.dependencies]
-
-[target.'cfg(all(target_os = "windows", target_arch="aarch64"))'.dependencies]
-
-[[bin]]
-name = "autoeq"
-path = "src/bin/autoeq/main.rs"
-required-features = ["cli"]
-
-[[bin]]
-name = "benchmark-autoeq-speaker"
-path = "src/bin/autoeq_benchmark_speaker.rs"
-required-features = ["cli"]
-
-[[bin]]
-name = "autoeq-download-speakers"
-path = "src/bin/autoeq_download_speaker.rs"
-required-features = ["cli"]
-
-[[bin]]
-name = "roomeq"
-path = "src/bin/roomeq/main.rs"
-required-features = ["cli"]
-
-[[bin]]
-name = "roomeq-fuzzer"
-path = "src/bin/roomeq_fuzzer.rs"
-required-features = ["qa"]
-
-[[bin]]
-name = "roomeq-qa-quality"
-path = "src/bin/roomeq_qa_quality.rs"
-required-features = ["qa"]
-
-[[bin]]
-name = "roomeq-qa-coverage"
-path = "src/bin/roomeq_qa_coverage.rs"
-required-features = ["qa"]
-
-[[bin]]
-name = "roomeq-qa-features"
-path = "src/bin/roomeq_qa_features.rs"
-required-features = ["qa"]
-
-[[bin]]
-name = "roomeq-qa-synthetic"
-path = "src/bin/roomeq_qa_synthetic.rs"
-required-features = ["qa"]
-
-[[bin]]
-name = "roomeq-qa-acoustic"
-path = "src/bin/roomeq_qa_acoustic.rs"
-required-features = ["qa"]
-
-[[bin]]
-name = "convert-recording"
-path = "src/bin/convert_recording.rs"
-required-features = ["cli"]
-
-[lib]
-name = "autoeq"
-path = "src/lib.rs"
-
-[[example]]
-name = "headphone_loss_demo"
-
-[[example]]
-name = "headphone_loss_validation"
-
-[dev-dependencies]
-tempfile = { workspace = true }
-assert_fs = { workspace = true }
-clap = { workspace = true }
-hound = { workspace = true }
-ndarray = { workspace = true }
-num-complex = { workspace = true }
-proptest = { workspace = true }
-rustfft = { workspace = true }
-serial_test = { workspace = true }
-tokio = { workspace = true }
-
-[lints]
-workspace = true
-
 [profile.dev]
 opt-level = 0
 # Line tables only: gives file:line stack traces, but skips 10GB+ of variable/type DWARF info that chokes the linker.
@@ -290,6 +169,35 @@ codegen-units = 14
 panic = "abort"           # Removes unwind tables, saving ~15% binary size and link work
 debug = false             # Omit debug symbols in release binaries
 strip = "debuginfo"       # Strip debug symbols, keep symbol table
+
+# Development test profile (refactor-20261025 Phase 1): the `just test`
+# and `just test-crate` lanes compile with `--cargo-profile test` so a
+# library edit gets fast codegen (many codegen units, no LTO) while
+# keeping line tables for stack traces. Candidate values from the plan;
+# compare against opt-level 2 with scripts/bench_build.py before tuning.
+[profile.test]
+opt-level = 1
+lto = "off"
+codegen-units = 256
+incremental = true
+debug = "line-tables-only"
+strip = "none"
+
+# QA profile (refactor-20261025 Phase 1): one consistent optimized
+# artifact set for the complete `just ntest` lane and executable tests,
+# replacing the old release-binary prebuild plus separate test build.
+# Inherits `release` numerics but unwinds (tests need it) and uses more
+# codegen units for parallel codegen; shipped `release`/`dist` are
+# unchanged.
+[profile.qa]
+inherits = "release"
+opt-level = 3
+lto = "off"
+codegen-units = 64
+incremental = true
+panic = "unwind"
+debug = "line-tables-only"
+strip = "none"
 
 # `dist` is the "cut a release" profile. Inherits everything from `release`
 # and tightens for maximum runtime performance at the cost of much longer

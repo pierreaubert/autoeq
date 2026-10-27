@@ -1,0 +1,17 @@
+{
+  "status": "current required-cut packaging-policy replacement passed",
+  "checked_utc": "2026-10-26T12:10:56.974655+00:00",
+  "retired_original_case": "autoeq::packaging_excludes / published_package_excludes_qa_scripts_backups_and_mdat",
+  "retirement_mapping": "advisory-fixed-full-native-identity-proof.json",
+  "retirement_mapping_sha256": "1650bcebe0653bba548d4a8210630a93786e36f783b0958f09130e83bdb2c0f0",
+  "replacement_evidence": "publishable-package-content-audit.json",
+  "replacement_evidence_sha256": "f1dda230a108499ca394c0b16f814758389501017e48ec7f84c8aa608c4d8a04",
+  "publishable_owners_checked": 18,
+  "nonpublished_owners_checked": 6,
+  "listed_archive_files": 1308,
+  "same_excluded_path_policy": true,
+  "actual_cargo_lists_not_only_manifest_flags": true,
+  "numerical_test_cases_removed": 0,
+  "compiler_test_or_publish_command_run": false,
+  "final_source_rerun_required_after_owner_or_manifest_changes": true
+}

@@ -19,7 +19,7 @@ OUTPUT_DIR="data_generated/roomeq_comparison/${SCENARIO}"
 echo "=== Running multi-mode comparison for: ${SCENARIO} ==="
 
 # Run the comparison test (generates JSON outputs for all modes)
-$CARGO test -p autoeq "test_multimode_comparison_${SCENARIO}" --release -- --nocapture
+$CARGO test -p roomeq-qa --test roomeq_generated_data_test "test_multimode_comparison_${SCENARIO}" --release -- --nocapture
 
 # Find the generated JSONs
 JSONS=()

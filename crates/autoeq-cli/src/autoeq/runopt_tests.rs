@@ -4,9 +4,9 @@ mod tests {
         perform_optimization_with_backend, perform_optimization_with_backend_and_candidate,
         perform_optimization_with_candidate, perform_optimization_with_exact_checkpoint,
     };
+    use crate::cli::Args;
     use autoeq::OptimParams;
     use autoeq::PeqModel;
-    use autoeq::cli::Args;
     use autoeq::loss::LossType;
     use autoeq::optim::OptimizerBackendCompletion;
     use autoeq::optim::backend::{BackendSearchEvidence, BackendSearchStopCause};

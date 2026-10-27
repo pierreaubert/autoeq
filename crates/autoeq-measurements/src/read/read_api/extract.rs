@@ -1,11 +1,15 @@
 use super::misc::collect_trace_names;
 use super::misc::decode_typed_array;
 use super::misc::is_target_trace_name;
+#[cfg(feature = "api")]
 use super::parse::parse_angle_from_trace_name;
+#[cfg(feature = "api")]
 use super::types::ContourPlotData;
+use crate::Curve;
+#[cfg(feature = "api")]
+use crate::DirectivityCurve;
 use crate::cea2034::SpinoramaBundleBuilder;
 use crate::read::interpolate::interpolate;
-use crate::{Curve, DirectivityCurve};
 use ndarray::Array1;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -262,6 +266,7 @@ pub fn extract_cea2034_curves(
 ///
 /// # Returns
 /// * Vector of DirectivityCurve structs, sorted by angle
+#[cfg(feature = "api")]
 pub(super) fn extract_directivity_curves(
     plot_data: &Value,
 ) -> Result<Vec<DirectivityCurve>, Box<dyn Error>> {
@@ -327,6 +332,7 @@ pub(super) fn extract_directivity_curves(
 }
 
 /// Extract contour data from Plotly JSON (heatmap format)
+#[cfg(feature = "api")]
 pub(super) fn extract_contour_data(plot_data: &Value) -> Result<ContourPlotData, Box<dyn Error>> {
     // Look for the first trace with a 'z' array (heatmap data)
     if let Some(data) = plot_data.get("data").and_then(|d| d.as_array()) {
@@ -536,6 +542,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "api")]
     fn extract_directivity_curves_parses_typed_arrays() {
         let plot = json!({
             "data": [
@@ -549,6 +556,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "api")]
     fn extract_contour_data_from_nested_arrays() {
         let plot = json!({
             "data": [{

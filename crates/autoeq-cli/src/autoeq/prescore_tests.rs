@@ -1,9 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::autoeq_command::prescore::compute_pre_optimization_metrics;
+    use crate::cli::Args;
     use autoeq::Curve;
     use autoeq::PeqModel;
-    use autoeq::cli::Args;
     use autoeq::loss::LossType;
     use autoeq::optim::{ObjectiveData, ObjectiveDataBuilder};
     use clap::Parser;

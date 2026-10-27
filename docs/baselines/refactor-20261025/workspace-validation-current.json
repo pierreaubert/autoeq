@@ -1,0 +1,66 @@
+[
+  {
+    "name": "workspace-check",
+    "command": [
+      "just",
+      "check"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 38.34292020788416,
+    "log": "workspace-check-current.log"
+  },
+  {
+    "name": "workspace-clippy",
+    "command": [
+      "cargo",
+      "clippy",
+      "--workspace",
+      "--all-targets",
+      "--all-features",
+      "--no-deps",
+      "--",
+      "-D",
+      "warnings"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 55.926508208038285,
+    "log": "workspace-clippy-current.log"
+  },
+  {
+    "name": "doctests",
+    "command": [
+      "just",
+      "test-docs"
+    ],
+    "exit_code": 101,
+    "wall_seconds": 67.25065270904452,
+    "log": "doctests-current.log",
+    "superseded_by": {
+      "exit_code": 0,
+      "log": "doctests-after-owner-fix.log",
+      "passed": 59,
+      "ignored": 2,
+      "cause_repaired": "Three examples now import the evaluator from autoeq-objective."
+    }
+  },
+  {
+    "name": "examples",
+    "command": [
+      "just",
+      "check-examples"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 0.7298994581215084,
+    "log": "examples-current.log"
+  },
+  {
+    "name": "schemas",
+    "command": [
+      "just",
+      "check-roomeq-schema-baselines"
+    ],
+    "exit_code": 0,
+    "wall_seconds": 121.1035064579919,
+    "log": "schemas-current.log"
+  }
+]

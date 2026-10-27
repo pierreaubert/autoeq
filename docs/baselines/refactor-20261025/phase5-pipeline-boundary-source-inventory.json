@@ -1,0 +1,52 @@
+{
+  "status": "fresh source-backed boundary inventory; preparatory interface overlay only",
+  "checked_utc": "2026-10-26T09:15:13.783513+00:00",
+  "source_hashes": {
+    "crates/roomeq-engine/src/room_result.rs": "3d37679236157fc1327a3ccf8126a33787b4ac4711216b1909786eb34553308f",
+    "crates/roomeq-engine/src/pipeline.rs": "58ee5151e6c42ab9a797624da7ece159a437dd0f9f283d5f7e37cb090f15bb19",
+    "crates/roomeq-workflow/src/pipeline.rs": "eef678917ec066453cf269aa06abd94aa518ee06aabd59a2fb45383bcde37a6b",
+    "crates/roomeq-workflow/src/channel.rs": "7c95bcb55da08e4396f7ea6185389a480f2387a33cbe2406136e4750faa80ff3",
+    "crates/roomeq-workflow/src/room_recovery.rs": "fbbb9230f20f7d4e6f4f299d34e8d6db4d839b906055f711d16a697a6c88a490",
+    "crates/roomeq-workflow/src/room_optimization.rs": "018a06807389f612fd6b2c977029441efcfcc4a9faabe9285028cb9a5889efcb",
+    "crates/roomeq-workflow/src/room_optimization/finalization.rs": "c2385b08aecb376d9f8ed8aac686ae294579c4d77bb73cd6a18f31b2d220d8ab",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay.rs": "2a536e32f65d98c6eab42a087445746eac5f7ef753f7807e431b1f1aae1670a9"
+  },
+  "existing_result_owner": {
+    "path": "crates/roomeq-engine/src/room_result.rs",
+    "struct_lines": "129-143",
+    "implementation_lines": "145-243",
+    "action": "retain the existing computational owner; no new result-type relocation or data dump"
+  },
+  "existing_observer_owner": "roomeq-engine pipeline; retained without adding another observer trait",
+  "context_diagnostic_contracts": [
+    "WorkflowContext",
+    "FinalizationDiagnosticTrial",
+    "FinalizationDiagnosticSink"
+  ],
+  "recovery_dispatch_operations": [
+    "verify_configuration",
+    "freeze_and_verify_measurement_source",
+    "exact_de_options"
+  ],
+  "concrete_application_state_retained": [
+    "run/config/input/output/build identity verification",
+    "measurement snapshot verification",
+    "journal and directory lock",
+    "logical and per-process evaluation counters",
+    "typed interruption/cancellation checkpoints",
+    "stage completion and publication-only recovery",
+    "atomic checkpoint durability acknowledgement",
+    "no-overwrite publication/commit transitions"
+  ],
+  "preparatory_overlay": "phase5-pipeline-contract-overlay-preparation.json",
+  "source_preservation_proof": "phase5-pipeline-contract-source-proof.json",
+  "unresolved_full_extraction_work": [
+    "Keep Capture private and invariant-preserving; define or move its production replay/loader interface before a finalization crate cut",
+    "Classify room-optimization/topology shared target/crossover computations and place shared kernels below both consumers",
+    "Move actual routed/finalization implementation and callers with full logical test/asset/coverage mapping",
+    "Compiler-check concrete port bounds, coercions and existing recovery/diagnostic behavior after calibration",
+    "Produce controlled before/after timings and memory plus explicit maintenance and accept/reject decisions"
+  ],
+  "performance_acceptance": false,
+  "qualification": "The result type is already below workflow and requires no invented relocation. The ten-file interface overlay is a prerequisite, not a completed routed/finalization extraction or an accepted design."
+}

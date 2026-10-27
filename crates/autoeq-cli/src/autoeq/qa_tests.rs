@@ -138,7 +138,7 @@ mod tests {
     #[test]
     fn autoeq_command_bare_qa_uses_strict_zero_threshold() {
         use clap::Parser;
-        let args = autoeq::cli::Args::parse_from(["autoeq", "--qa"]);
+        let args = crate::cli::Args::parse_from(["autoeq", "--qa"]);
         let threshold = args.qa.expect("bare QA enabled");
         assert_eq!(threshold, 0.0);
         assert!(

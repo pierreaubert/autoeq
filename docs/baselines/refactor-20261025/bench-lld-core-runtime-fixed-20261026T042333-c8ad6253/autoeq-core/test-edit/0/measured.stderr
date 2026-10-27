@@ -1,0 +1,9 @@
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-build-bench-k34a4q7x/source/autoeq/crates/autoeq-core)
+warning: linker stderr: ld64.lld: directory not found for option -L /Applications/Xcode.app/Contents/Frameworks
+         ld64.lld: directory not found for option -L /opt/homebrew/Cellar/llvm/23.1.1_1/lib
+  |
+  = note: `#[warn(linker_messages)]` on by default
+
+warning: `autoeq-core` (lib test) generated 1 warning
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-build-bench-k34a4q7x/targets/primed/0/test/autoeq-core/test/cargo-timings/cargo-timing-20261026T032426384Z-86b95a535cc20310.html
+    Finished `test` profile [optimized + debuginfo] target(s) in 0.77s

@@ -1,0 +1,406 @@
+{
+  "recorded_utc": "2026-10-27T07:07:01.726495+00:00",
+  "goal_complete": false,
+  "live_sessions": [
+    {
+      "session_id": 37737,
+      "purpose": "complete controlled three-repetition candidate comparison, 210 normal rows plus diagnostics",
+      "status_file": "target/qa/final-live-logs/independent-copy-candidate-status.json"
+    }
+  ],
+  "terminal_this_turn": [
+    {
+      "session_id": 71827,
+      "exit_code": 101,
+      "purpose": "initial pilot found private usable_curve API boundary"
+    },
+    {
+      "session_id": 75169,
+      "exit_code": 0,
+      "purpose": "11-case pilot pass"
+    },
+    {
+      "session_id": 82129,
+      "exit_code": 0,
+      "purpose": "31 selected workflow tests pass"
+    },
+    {
+      "session_id": 83476,
+      "exit_code": 0,
+      "purpose": "972-case compiler inventory matches exactly"
+    },
+    {
+      "session_id": 69494,
+      "exit_code": 101,
+      "purpose": "Debug-enabled expect_err lint cleanups required"
+    },
+    {
+      "session_id": 31952,
+      "exit_code": 0,
+      "purpose": "final 42-case combined pilot pass"
+    },
+    {
+      "session_id": 72503,
+      "exit_code": 0,
+      "purpose": "final strict all-targets/all-features Clippy pass"
+    },
+    {
+      "session_id": 78134,
+      "exit_code": 0,
+      "purpose": "all 118 Rust oracle cases pass exactly once in combined target; unchanged source identity",
+      "proof": "oracle-one-correctness-proof.json"
+    },
+    {
+      "session_id": 90890,
+      "exit_code": 0,
+      "purpose": "fresh paired 20-case PR and four-case quick qualification complete"
+    },
+    {
+      "session_id": 84492,
+      "exit_code": 0,
+      "purpose": "228 combined-layout supplemental controls pass"
+    },
+    {
+      "session_id": 41191,
+      "exit_code": 0,
+      "purpose": "23 remaining QA-library cases pass; full Rust package 369 identities preserved"
+    },
+    {
+      "session_id": 77923,
+      "exit_code": 0,
+      "purpose": "refactor code graph refreshed before calibration; no index sync during measurement"
+    },
+    {
+      "session_id": 62052,
+      "exit_code": 0,
+      "purpose": "combined 2139 enabled cases, nine unchanged ignores and strict Clippy pass",
+      "proof": "phase5-system-coordinator-behavior-proof.json"
+    },
+    {
+      "session_id": 25397,
+      "exit_code": 0,
+      "purpose": "all 1169 enabled workflow cases plus seven unchanged ignores and strict Clippy pass",
+      "proof": "phase5-pipeline-contract-behavior-proof.json"
+    },
+    {
+      "session_id": 78791,
+      "exit_code": 0,
+      "purpose": "shared playback final strict Clippy after all 1197 enabled cases and receipt red/green passed",
+      "proof": "phase5-playback-shared-behavior-proof.json"
+    },
+    {
+      "session_id": 93994,
+      "exit_code": 0,
+      "purpose": "all four unchanged quick contracts pass; one accepted and three safe reversions",
+      "proof": "phase5-playback-quick-proof.json"
+    },
+    {
+      "session_id": 68023,
+      "exit_code": 0,
+      "purpose": "shared alignment 1197 enabled cases, seven unchanged ignores, exact 1204-case scope and strict Clippy pass",
+      "proof": "phase5-shared-level-alignment-behavior-proof.json"
+    },
+    {
+      "session_id": 69960,
+      "exit_code": 1,
+      "purpose": "native recipe passed5369 cases/42skip but changed mutable Cargo report-producer output; all65 calibration rows rejected",
+      "proof": "native-prepared-calibration-artifact-rejection.json"
+    },
+    {
+      "session_id": 72701,
+      "exit_code": 0,
+      "purpose": "copied ordinary release helper passed exact4 original report regressions; copied QA helper passed exact5370 enabled candidate native cases/42ignores",
+      "proof": "native-producer-independent-copy-real-proof.json"
+    },
+    {
+      "session_id": 42432,
+      "exit_code": 0,
+      "purpose": "all four remaining CLI/native report/stable WASM/nightly GPUI product commands passed for each frozen epoch;one repetition does not satisfy acceptance",
+      "proof": "independent-copy-product-preflight-proof.json"
+    },
+    {
+      "session_id": 12266,
+      "exit_code": 0,
+      "purpose": "actual fresh-controller prerequisite prefix passed; no benchmark launched by static check",
+      "proof": "independent-copy-controller-static-preflight.json"
+    },
+    {
+      "session_id": 45662,
+      "exit_code": 0,
+      "purpose": "four unchanged quick QA contracts and accepted/reverted outcomes pass",
+      "proof": "phase5-routed-finalization-quick-proof.json"
+    },
+    {
+      "session_id": 73976,
+      "exit_code": 0,
+      "purpose": "coverage owner move and import cleanup pass normal/all-feature strict Clippy",
+      "proof": "phase5-coverage-boundaries-proof.json"
+    },
+    {
+      "session_id": 96917,
+      "exit_code": 0,
+      "purpose": "external public API and three private/test-only rejection checks pass",
+      "proof": "phase5-routed-finalization-feature-privacy-proof.json"
+    }
+  ],
+  "next_actions": [
+    "Monitor candidate benchmark session37737 to terminal without competing builds/tests/indexing. Preserve all rows and frozen budgets.",
+    "Prepare conditional extraction measurement scopes and source-only documentation while the controlled comparison runs.",
+    "Measure marginal and combined conditional extractions plus profile, scheduling, linker and oracle-layout alternatives; record explicit acceptance/rejection before adoption.",
+    "Finish final coverage, native/Python/domain QA, sibling/platform checks, docs, archive/CI policy adoption and coordinated commit/publication work. Preserve existing behavior and thresholds."
+  ],
+  "calibration_running": true,
+  "budgets_frozen": true,
+  "current_source_epoch": "/Volumes/home_tmp/tmp/autoeq-controlled-inputs-20261026-advisory-fixed",
+  "main_unchanged": true,
+  "authoritative_math_unchanged": true,
+  "new_system_pilot": "phase5-system-coordinator-prototype-preparation.json",
+  "pipeline_contract_overlay": {
+    "preparation": "phase5-pipeline-contract-overlay-preparation.json",
+    "source_proof": "phase5-pipeline-contract-source-proof.json",
+    "inventory": "phase5-pipeline-boundary-source-inventory.json",
+    "direct_graph": "phase5-pipeline-direct-graph-current.json",
+    "status": "Qualified prototype: all-target compiler, all1169 enabled workflow cases plus seven unchanged ignores and strict Clippy passed; not measured/accepted/ported.",
+    "base": "/Volumes/home_tmp/tmp/autoeq-system-coordinator-trial-20261026/autoeq",
+    "overlay": "/Volumes/home_tmp/tmp/autoeq-pipeline-contract-overlay-20261026",
+    "behavior_proof": "phase5-pipeline-contract-behavior-proof.json"
+  },
+  "finalization_boundary_worklist": {
+    "inventory": "phase5-finalization-replay-reference-inventory.json",
+    "test_classification": "phase5-finalization-reference-test-classification.json",
+    "worklist": "phase5-finalization-boundary-worklist.json",
+    "status": "source-bound classification only; real implementation and compiler/feature closure pending"
+  },
+  "playback_shared_overlay": {
+    "preparation": "phase5-playback-shared-overlay-preparation.json",
+    "source_proof": "phase5-playback-shared-source-proof.json",
+    "format_precheck": "phase5-playback-shared-format-precheck.json",
+    "patch": "phase5-playback-shared-overlay.patch",
+    "source_verifier": "target/qa/final-live-logs/verify-playback-shared-source.py",
+    "status": "Qualified43-file prototype plus one deletion: exact1204 affected native cases,1197 enabled passed,seven unchanged ignores,receipt red/green,strict Clippy and all four RoomEQ quick contracts passed; not measured/accepted/ported.",
+    "patch_roundtrip": "phase5-playback-shared-patch-roundtrip.json",
+    "asset_metadata_audit": "phase5-playback-shared-asset-metadata-audit.json",
+    "declared_new_workflow_regression": "measurement::tests::conditioning_receipt_keeps_workflow_application_identity",
+    "behavior_proof": "phase5-playback-shared-behavior-proof.json"
+  },
+  "complete_native_epoch_mapping": {
+    "proof": "advisory-fixed-full-native-identity-proof.json",
+    "mapping": "advisory-fixed-full-native-identity-map.tsv",
+    "preserved": 5410,
+    "retired_root_contract": 1,
+    "declared_cli_additions": 2,
+    "ignored_state_changes": 0
+  },
+  "calibration_rejection": "advisory-fixed-calibration-rejection.json",
+  "native_prerequisite_repair": "benchmark-native-prerequisite-repair.json",
+  "native_prerequisite_status": {
+    "original": "4/4 real failed cases passed with unchanged timeouts and prepared release producer",
+    "candidate": "5370 enabled cases exactly once, 42 ignored, source hashes unchanged; qa producer unchanged",
+    "proofs": [
+      "native-prerequisite-original-regression-proof.json",
+      "native-prerequisite-candidate-regression-proof.json"
+    ]
+  },
+  "refreshed_calibration_matrix": "controlled-full-matrix-contract-independent-copy.json",
+  "remaining_static_work": "Combined trial passes affected runtime inventory, strict Clippy in both feature configurations, unchanged quick QA, external feature privacy and 13 applied coverage mapping controls. Candidate performance measurement now running on frozen base refactor epoch; no conditional split adopted.",
+  "source_only_progress": {
+    "record": "phase5-shared-level-alignment-overlay-preparation.json",
+    "files": 8,
+    "shared_functions": 12,
+    "existing_role_type": 1,
+    "unchanged_budgets": 4,
+    "parse_proof": "phase5-shared-level-alignment-format-precheck.json",
+    "compiler_or_runtime_verified": true,
+    "not_a_completed_routed_or_finalization_extraction": true,
+    "source_proof": "phase5-shared-level-alignment-source-proof.json",
+    "materialization": "phase5-shared-level-alignment-materialization.json",
+    "locked_metadata_verified": true,
+    "application_receipt_and_assets": "phase5-assessment-identity-and-asset-audit.json",
+    "new_public_functions": 10,
+    "new_public_constants": 2,
+    "internal_operations_not_exposed": 2,
+    "behavior_proof": "phase5-shared-level-alignment-behavior-proof.json"
+  },
+  "performance_qualification": "Complete baseline reviewed and budgets frozen before candidate evaluation. Five high-spread groups retain observed noise. No candidate performance accepted.",
+  "prepared_during_calibration": {
+    "shared_assessment": {
+      "preparation": "phase5-shared-assessment-overlay-preparation.json",
+      "proof": "phase5-shared-assessment-source-proof.json",
+      "result_files": 34,
+      "explicit_old_child_deletions": 12,
+      "existing_cases_relocated": 230,
+      "retained_workflow_ctc_cases": 4,
+      "retained_finalizer_cache_case": 1,
+      "capture_and_cache_fields_private": true,
+      "compiler_runtime_verified": true,
+      "behavior_proof": "phase5-shared-assessment-behavior-proof.json",
+      "enabled_passed": 1197,
+      "ignored": 7,
+      "strict_clippy_passed": true,
+      "compiler_corrections": "phase5-shared-assessment-compiler-corrections.json"
+    },
+    "full_finalization": {
+      "preparation": "phase5-finalization-candidate-overlay-preparation.json",
+      "proof": "phase5-finalization-candidate-source-proof.json",
+      "moved_active_cases": 64,
+      "canonical_cases_retained_in_workflow": 3,
+      "canonical_ignore_seed_maxiter_and_assertions_unchanged": true,
+      "full_production_module_moved": true,
+      "compiler_runtime_verified": false
+    },
+    "permanent_package_governance": {
+      "preparation": "permanent-package-governance-overlay-preparation.json",
+      "proof": "package-governance-functional-and-candidate-proof.json",
+      "files": 5,
+      "new_functional_tests_prepared": 3,
+      "tests_real_cargo_and_ci_parity_execution": false,
+      "functional_tests_passed": 3,
+      "actual_final_archives_checked": false,
+      "intentional_mutation_rejected_by_six_subcases": true,
+      "actual_candidate_publishable_archives_checked": 24,
+      "unpublished_owners": 6
+    },
+    "routed_boundary_audit": "phase5-routed-application-boundary-audit.json",
+    "routed": {
+      "preparation": "phase5-routed-candidate-overlay-preparation.json",
+      "proof": "phase5-routed-candidate-source-proof.json",
+      "source_files": 36,
+      "application_operation_ports": 5,
+      "existing_workflow_case_items_preserved": 166,
+      "rust_syntax_positive_control": true,
+      "whole_production_transform_reversal_verified": true,
+      "compiler_runtime_verified": false,
+      "performance_acceptance": false,
+      "ported": false,
+      "explicit_public_owner_imports_corrected": [
+        "assessment::room_optimization_result::remove_routing_transfer",
+        "assessment::room_optimization_result::evaluate_preserved_target_passband"
+      ],
+      "source_reversal_rechecked": true
+    },
+    "routed_shared_inputs": {
+      "preparation": "phase5-routed-shared-inputs-overlay-preparation.json",
+      "proof": "phase5-routed-candidate-source-proof.json",
+      "files": 8,
+      "moved_crossover_cases": 16,
+      "new_crates": 0,
+      "compiler_runtime_verified": false,
+      "performance_acceptance": false,
+      "ported": false
+    },
+    "routed_finalization_union": {
+      "preparation": "phase5-routed-finalization-combined-overlay-preparation.json",
+      "files": 87,
+      "explicit_old_child_deletions": 18,
+      "workspace_packages_expected": 30,
+      "independent_git_apply_verified": true,
+      "compiler_runtime_verified": true,
+      "performance_acceptance": false,
+      "ported": false,
+      "declared_boundary_proof": "phase5-routed-finalization-declared-boundary-proof.json",
+      "syntax_proof": "phase5-routed-finalization-combined-syntax-proof.json",
+      "expected_membership": "phase5-routed-finalization-expected-native-scope-proof.json",
+      "actual_compiler_inventory_verified": true,
+      "guarded_next_materializer": "target/qa/final-live-logs/materialize-shared-assessment-after-baseline.py (prepared,not executed; first confirm session69960 actually terminal)",
+      "direct_public_path_preflight": "phase5-routed-finalization-direct-public-path-preflight.json (29 explicit paths; actual Rust resolution remains pending)",
+      "actual_compiler_check_passed": true,
+      "resolved_graph_proof": "phase5-routed-finalization-resolved-graph-proof.json",
+      "compiler_correction_source_audit": "phase5-routed-finalization-compiler-correction-source-audit.json",
+      "strict_clippy_passed": true,
+      "enabled_passed_exactly_once": 1197,
+      "ignored": 7,
+      "behavior_proof": "phase5-routed-finalization-behavior-proof.json",
+      "corrected_patch": "phase5-routed-finalization-compiler-qualified.patch",
+      "corrected_source": "phase5-routed-finalization-compiler-qualified-source.json"
+    }
+  },
+  "native_producer_independent_copy": {
+    "unit_proof": "native-producer-independent-copy-unit-proof.json",
+    "real_preflight_status": "passed",
+    "real_preflight_session": 72701,
+    "old_calibration_rejection": "native-prepared-calibration-artifact-rejection.json",
+    "fresh_full_calibration_required": true,
+    "budgets_frozen": false,
+    "real_preflight_session_terminal": 72701,
+    "real_proof": "native-producer-independent-copy-real-proof.json",
+    "harness_proof": "native-independent-copy-harness-validation.json",
+    "harness_tests_passed": 33,
+    "preparing_failed_and_short_runs_never_claim_repetitions": true,
+    "product_preflight_status": "passed",
+    "product_preflight_session": 42432,
+    "product_preflight_proof": "independent-copy-product-preflight-proof.json"
+  },
+  "new_declared_python_cases": [
+    "scripts/test_bench_native_lane.py::NativeLanePrerequisiteTests::test_native_cargo_rebuild_cannot_replace_bound_helper",
+    "scripts/test_bench_native_lane.py::NativeLanePrerequisiteTests::test_mutating_bound_helper_still_rejects_native_lane",
+    "scripts/test_bench_build.py::MeasurementTests::test_failed_requested_three_repetitions_cannot_claim_acceptance"
+  ],
+  "python_inventory_note": "Three declared new harness regressions; final actual pytest collection/mapping remains required. No inferred replacement global count.",
+  "fresh_calibration": {
+    "label": "controlled-independent-copy-baseline-j8",
+    "session": 34184,
+    "controller": "target/qa/final-live-logs/run-independent-copy-calibration.py",
+    "matrix": "controlled-full-matrix-contract-independent-copy.json",
+    "controller_preparation": "independent-copy-controller-preparation.json",
+    "admission_controls": "independent-copy-controller-admission-controls.json",
+    "static_preflight": "independent-copy-controller-static-preflight.json",
+    "product_preflights": "independent-copy-product-preflight-proof.json",
+    "normal_rows_expected": 210,
+    "diagnostics_counted_separately": true,
+    "all_old_rows_rejected": true,
+    "budgets_frozen": true,
+    "observed_normal_rows": 210,
+    "last_observed_failures": 0,
+    "completed_full_native_helper_checks": [
+      {
+        "repetition": 0,
+        "ordinary_release_helper_bound": true,
+        "copied_helper_digest_unchanged": true,
+        "cargo_output_replaced_without_changing_bound_copy": true
+      },
+      {
+        "repetition": 1,
+        "ordinary_release_helper_bound": true,
+        "copied_helper_digest_unchanged": true,
+        "cargo_output_replaced_without_changing_bound_copy": true
+      },
+      {
+        "repetition": 2,
+        "ordinary_release_helper_bound": true,
+        "copied_helper_digest_unchanged": true,
+        "cargo_output_replaced_without_changing_bound_copy": true
+      }
+    ],
+    "library_scenario_repetitions_completed": 3,
+    "remaining_normal_workspace_rows": 0,
+    "status": "baseline_reviewed_budgets_frozen",
+    "normal_rows": 210,
+    "diagnostic_rows": 1,
+    "review": "independent-copy-baseline-review.json",
+    "budgets": "controlled-independent-copy-budgets.json"
+  },
+  "remaining_pr_failure_closure_decision": {
+    "state": "explicit async clarification pending; do not re-ask while pending",
+    "question_asked_utc": "2026-10-26T15:02:25.025720+00:00",
+    "scope": "14 remaining RoomEQ PR failures,identical original/candidate and distinct from repaired report/quick-QA issues",
+    "options": [
+      "Fix separately before closure",
+      "Accept documented exact parity"
+    ],
+    "reason": "Plan excludes algorithm changes but requires QA gates passing; no waiver or expanded algorithm scope is inferred from silence.",
+    "independent_work": "Continue the live frozen-source build calibration; do not change protected source/harness inputs."
+  },
+  "candidate_controller": "target/qa/final-live-logs/run-independent-copy-candidate.py (prepared,not launched; wait for terminal correctness jobs and quiet load)",
+  "candidate_static_preflight": "independent-copy-candidate-static-preflight.json",
+  "prepared_profile_linker_experiments": {
+    "commands": "remaining-profile-linker-experiment-commands.json",
+    "runner": "target/qa/final-live-logs/run-profile-linker-comparisons.py",
+    "experiments": 7,
+    "launched": false
+  },
+  "latest_combined_trial_patch": "phase5-routed-finalization-current.patch",
+  "latest_combined_trial_proof": "phase5-routed-finalization-current-source.json",
+  "coverage_mapping_controls_after_application": 13,
+  "package_ci_parity_proof": "package-governance-ci-parity-proof.json",
+  "local_main_commits_last_12_hours": 0
+}

@@ -1,0 +1,59 @@
+{
+  "status": "prepared_and_functionally_verified_not_adopted",
+  "recorded_utc": "2026-10-27T06:44:43.878931+00:00",
+  "overlay": "/Volumes/home_tmp/tmp/autoeq-refactor-coverage-overlay-20261027",
+  "base": "/Volumes/home_tmp/tmp/autoeq-routed-finalization-trial-20261027/autoeq",
+  "files": {
+    "scripts/roomeq_coverage_ownership.py": "5f42b496d03f193b7c8061f8d741f20f0cfbae886480b34827805083b5a8dd20",
+    "scripts/run_roomeq_coverage.py": "65ecfcbf08315be4862daf9deb4a6dcea3c05c075ac4580b6079d9d796299558",
+    "scripts/test_run_roomeq_coverage.py": "820fa147796fc15232ca4e1bbc2a21f636abe757fc8d724300a570c50830daf0",
+    "scripts/test_roomeq_coverage_ownership.py": "a225a24467c77a26d4511e408f6cc65355c39a3292c1b63565db6ce2d4844c3f",
+    "scripts/check_roomeq_subsystem_coverage.py": "4d096037e1ea17e02ee311a22453063f5f04ad5aeded33992c798690219b9164",
+    "crates/roomeq-playback/src/final_ledger.rs": "83c9041fb545ef2218b05aa303a511c29d08e073abfa594cc115ec578f961c2e",
+    "crates/roomeq-playback/src/routed.rs": "61c1b25a65a0e91be621260bccab87f0509a5e733600c96bd6cdf050b1811dc5",
+    "crates/roomeq-playback/src/final_ledger/snapshot.rs": "ac1b50ec537006082f5b01e481703468f9067ddb736318f98de6185e2fde6672"
+  },
+  "base_files_sha256": {
+    "scripts/roomeq_coverage_ownership.py": null,
+    "scripts/run_roomeq_coverage.py": "37d75f9bcdd30675d69261090e1f3962d624cd02866c378dd37edfa47a842184",
+    "scripts/test_run_roomeq_coverage.py": "820fa147796fc15232ca4e1bbc2a21f636abe757fc8d724300a570c50830daf0",
+    "scripts/test_roomeq_coverage_ownership.py": null,
+    "scripts/check_roomeq_subsystem_coverage.py": "24a38e9f849a312913e4bd885e68fb1aafc3f7014c008b08b3c39a50dc9353be",
+    "crates/roomeq-playback/src/final_ledger.rs": "37a0cf9158043d936c929d43d4cab40aef2f956717ae4d02c1df40819b33642f",
+    "crates/roomeq-playback/src/routed.rs": "fba77cf7340c123874507ce5b499ce8f812c36c48214cb217532f5638aff228a",
+    "crates/roomeq-playback/src/final_ledger/snapshot.rs": null
+  },
+  "green_tests": 13,
+  "omitted_move_mapping_mutation_rejected": true,
+  "log": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/coverage-ownership-controls.log",
+  "log_sha256": "d81c0533831c6921cd633bacd1a11ee7aa0938b500107b106c20339836fc41ac",
+  "actual_selected_packages": [
+    "roomeq-model",
+    "roomeq-analysis",
+    "roomeq-quality",
+    "roomeq-engine",
+    "roomeq-export",
+    "roomeq-workflow",
+    "roomeq-dsp",
+    "autoeq-optim-types",
+    "roomeq-engine-channel",
+    "roomeq-engine-system",
+    "roomeq-workflow-contracts",
+    "roomeq-playback",
+    "roomeq-routed",
+    "roomeq-finalization"
+  ],
+  "verified_duplicate_test_fixture_paths": [
+    "crates/roomeq-playback/src/test_fixtures.rs",
+    "crates/roomeq-finalization/src/test_fixtures.rs"
+  ],
+  "snapshot_helper_body_unchanged": true,
+  "thresholds_unchanged": [
+    90,
+    85,
+    80,
+    75
+  ],
+  "instrumented_coverage_run": false,
+  "adopted": false
+}

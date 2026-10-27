@@ -293,7 +293,7 @@ mod tests {
 #[cfg(test)]
 mod production_split_resume_tests {
     use super::{ExactOptimizerState, load_exact_optimizer_state, save_exact_optimizer_state};
-    use autoeq_optim::cli::Args;
+    use autoeq_optim::OptimizationConfig as Args;
     use autoeq_optim::de::DECheckpoint;
     use autoeq_optim::loss::LossType;
     use autoeq_optim::optim::de::DECheckpointSaveCallback;

@@ -1,0 +1,3 @@
+   Compiling autoeq-optim v0.5.64 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-tte4_m3q/source/autoeq/crates/autoeq-optim)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-tte4_m3q/targets/primed/0/test/optimizer/test/cargo-timings/cargo-timing-20261025T194007763Z-c532a9cbe74c6f45.html
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.23s

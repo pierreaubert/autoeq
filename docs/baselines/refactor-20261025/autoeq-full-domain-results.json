@@ -1,0 +1,14 @@
+{
+  "status": "passed",
+  "exit_code": 0,
+  "finished_utc": "2026-10-25T21:25:49.162442+00:00",
+  "command": [
+    "just",
+    "qa-autoeq-all"
+  ],
+  "log": "autoeq-full-domain.log",
+  "recipe_source_sha256": "238b2f67ac1d1022505e6b7d1a3c635009b66357a156a0aa5f90da87c97dbe94",
+  "cli_sha256": "1c10a7e3053c598b26b09fb3d67368e5d3be11edb5a084698323745dac02fd8f",
+  "qa_pass_records": 9,
+  "original_budgets_seeds_thresholds_preserved": true
+}

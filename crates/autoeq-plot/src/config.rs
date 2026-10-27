@@ -11,8 +11,8 @@ pub struct PlotConfig {
     pub max_freq: f64,
 }
 
-impl From<&crate::cli::Args> for PlotConfig {
-    fn from(args: &crate::cli::Args) -> Self {
+impl From<&crate::OptimizationConfig> for PlotConfig {
+    fn from(args: &crate::OptimizationConfig) -> Self {
         Self {
             speaker_name: args.speaker.clone(),
             num_filters: args.num_filters,

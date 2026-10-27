@@ -1,0 +1,16 @@
+[package]
+name = "roomeq-dsp"
+version = "0.5.0"
+edition = "2024"
+description = "Shared RoomEQ DSP realization helpers used by engine tiers and exporters"
+license = "GPL-3.0-or-later"
+documentation = "https://docs.rs/roomeq-dsp"
+homepage = "https://github.com/pierreaubert/autoeq"
+
+[lints]
+workspace = true
+
+[dependencies]
+math-iir-fir = { workspace = true }
+roomeq-model = { workspace = true }
+serde_json = { workspace = true }

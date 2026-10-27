@@ -1,28 +1,43 @@
 {
   "root_package": "autoeq",
-  "terminal_consumers": [
-    "autoeq"
-  ],
+  "terminal_consumers": [],
   "allowed_direct_dependencies": {
-    "autoeq-core": [],
     "autoeq-artifacts": [
       "autoeq-core"
     ],
+    "autoeq-cli": [
+      "autoeq-core",
+      "autoeq-optim",
+      "autoeq-optim-types",
+      "autoeq-plot",
+      "autoeq-workflow"
+    ],
+    "autoeq-core": [],
     "autoeq-fir": [
       "autoeq-core"
     ],
     "autoeq-measurements": [
       "autoeq-core"
     ],
+    "autoeq-objective": [
+      "autoeq-core",
+      "autoeq-measurements",
+      "autoeq-optim-types"
+    ],
     "autoeq-optim": [
       "autoeq-core",
       "autoeq-measurements",
-      "roomeq-model"
+      "autoeq-objective",
+      "autoeq-optim-types"
+    ],
+    "autoeq-optim-types": [
+      "autoeq-core"
     ],
     "autoeq-plot": [
       "autoeq-core",
       "autoeq-measurements",
       "autoeq-optim",
+      "autoeq-optim-types",
       "autoeq-report-wasm"
     ],
     "autoeq-qa": [
@@ -47,29 +62,19 @@
     "autoeq-report-gpui": [
       "autoeq-report-wasm"
     ],
-    "autoeq-workflow": [
-      "autoeq-core",
-      "autoeq-measurements",
-      "autoeq-optim"
-    ],
-    "autoeq-cli": [
-      "autoeq-plot",
-      "autoeq-workflow"
-    ],
     "autoeq-report-wasm": [
       "autoeq-core"
     ],
     "autoeq-report-wasm-shell": [
       "autoeq-report-wasm"
     ],
-    "roomeq-model": [
-      "autoeq-core"
+    "autoeq-workflow": [
+      "autoeq-core",
+      "autoeq-measurements",
+      "autoeq-optim",
+      "autoeq-optim-types"
     ],
     "roomeq-analysis": [
-      "autoeq-core",
-      "roomeq-model"
-    ],
-    "roomeq-quality": [
       "autoeq-core",
       "roomeq-model"
     ],
@@ -80,18 +85,28 @@
       "roomeq-model",
       "roomeq-workflow"
     ],
+    "roomeq-dsp": [
+      "roomeq-model"
+    ],
     "roomeq-engine": [
       "autoeq-core",
       "autoeq-fir",
       "autoeq-measurements",
       "autoeq-optim",
       "roomeq-analysis",
+      "roomeq-dsp",
       "roomeq-model",
       "roomeq-quality"
     ],
     "roomeq-export": [
-      "roomeq-engine",
-      "roomeq-model"
+      "autoeq-core",
+      "roomeq-dsp",
+      "roomeq-model",
+      "roomeq-quality"
+    ],
+    "roomeq-model": [
+      "autoeq-core",
+      "autoeq-optim-types"
     ],
     "roomeq-qa": [
       "autoeq-core",
@@ -100,7 +115,12 @@
       "roomeq-model",
       "roomeq-quality",
       "roomeq-synthetic",
-      "roomeq-workflow"
+      "roomeq-workflow",
+      "autoeq-plot"
+    ],
+    "roomeq-quality": [
+      "autoeq-core",
+      "roomeq-model"
     ],
     "roomeq-synthetic": [
       "autoeq-core",
@@ -118,12 +138,28 @@
     ]
   },
   "allowed_dev_dependencies": {
-    "roomeq-export": [
-      "roomeq-workflow"
-    ],
     "roomeq-qa": [
       "autoeq-measurements",
       "roomeq-analysis"
+    ],
+    "autoeq-cli": [
+      "roomeq-model",
+      "autoeq-objective",
+      "autoeq-measurements"
+    ],
+    "roomeq-cli": [
+      "autoeq-core",
+      "autoeq-measurements",
+      "autoeq-objective"
+    ],
+    "autoeq-fir": [
+      "autoeq-measurements"
+    ],
+    "roomeq-workflow": [
+      "roomeq-synthetic"
+    ],
+    "autoeq-objective": [
+      "autoeq-report-wasm"
     ]
   },
   "allowed_build_dependencies": {},
@@ -136,28 +172,66 @@
     }
   },
   "temporary_exceptions": [],
-  "metric_budgets": {
-    "root_rust_loc": 581,
-    "root_roomeq_rust_loc": 292,
-    "root_binary_rust_loc": 184,
-    "root_unit_tests": 2
+  "build_lanes": {
+    "test": {
+      "selection": "default-members",
+      "packages": [
+        "autoeq-artifacts",
+        "autoeq-core",
+        "autoeq-fir",
+        "autoeq-measurements",
+        "autoeq-objective",
+        "autoeq-optim",
+        "autoeq-optim-types",
+        "autoeq-plot",
+        "autoeq-workflow",
+        "roomeq-analysis",
+        "roomeq-dsp",
+        "roomeq-engine",
+        "roomeq-export",
+        "roomeq-model",
+        "roomeq-quality",
+        "roomeq-synthetic",
+        "roomeq-workflow"
+      ],
+      "cargo_profile": "test",
+      "nextest_profile": "fast"
+    },
+    "test-cli": {
+      "selection": "packages",
+      "packages": [
+        "autoeq-cli",
+        "roomeq-cli"
+      ],
+      "cargo_profile": "qa",
+      "nextest_profile": "qa"
+    },
+    "ntest": {
+      "selection": "workspace",
+      "packages": [],
+      "cargo_profile": "qa",
+      "nextest_profile": "full"
+    }
   },
-  "public_api": {
-    "source": "src/lib.rs",
-    "baseline": "docs/baselines/root_public_api.txt"
+  "metric_budgets": {
+    "root_rust_loc": 0,
+    "root_roomeq_rust_loc": 0,
+    "root_binary_rust_loc": 0,
+    "root_unit_tests": 0
   },
   "schema_baselines": {
-    "input": "src/bin/roomeq/input_schema.json",
-    "output": "src/bin/roomeq/output_schema.json"
+    "input": "crates/roomeq-cli/schemas/input_schema.json",
+    "output": "crates/roomeq-cli/schemas/output_schema.json"
   },
   "focused_tests": {
-    "autoeq": "cargo test -p autoeq --locked --lib --all-features",
     "autoeq-artifacts": "cargo test -p autoeq-artifacts --locked --lib --all-features",
     "autoeq-cli": "cargo test -p autoeq-cli --locked --lib --all-features",
     "autoeq-core": "cargo test -p autoeq-core --locked --lib --all-features",
     "autoeq-fir": "cargo test -p autoeq-fir --locked --lib --all-features",
     "autoeq-measurements": "cargo test -p autoeq-measurements --locked --lib --all-features",
+    "autoeq-objective": "cargo test -p autoeq-objective --locked --lib --all-features",
     "autoeq-optim": "cargo test -p autoeq-optim --locked --lib --all-features",
+    "autoeq-optim-types": "cargo test -p autoeq-optim-types --locked --lib --all-features",
     "autoeq-plot": "cargo test -p autoeq-plot --locked --lib --all-features",
     "autoeq-qa": "cargo test -p autoeq-qa --locked --lib --all-features",
     "autoeq-report-gpui": "cargo test -p autoeq-report-gpui --locked --lib --all-features",
@@ -166,6 +240,7 @@
     "autoeq-workflow": "cargo test -p autoeq-workflow --locked --lib --all-features",
     "roomeq-analysis": "cargo test -p roomeq-analysis --locked --lib --all-features",
     "roomeq-cli": "cargo test -p roomeq-cli --locked --lib --all-features",
+    "roomeq-dsp": "cargo test -p roomeq-dsp --locked --lib --all-features",
     "roomeq-engine": "cargo test -p roomeq-engine --locked --lib --all-features",
     "roomeq-export": "cargo test -p roomeq-export --locked --lib --all-features",
     "roomeq-model": "cargo test -p roomeq-model --locked --lib --all-features",
@@ -174,7 +249,7 @@
     "roomeq-synthetic": "cargo test -p roomeq-synthetic --locked --lib --all-features",
     "roomeq-workflow": "cargo test -p roomeq-workflow --locked --lib --all-features"
   },
-  "workspace_package_count": 22,
+  "workspace_package_count": 24,
   "numerical_qa": {
     "package": "autoeq-qa",
     "manifest": "crates/autoeq-qa/validation-manifest.toml",
@@ -183,34 +258,309 @@
       "rust": 118,
       "python": 6
     },
-    "expected_rust_test_target_count": 140,
+    "expected_rust_test_target_count": 9,
     "auxiliary_python_files": [
       "negative_controls_tailpy.py"
     ],
     "evidence_directory": "target/qa",
     "additional_rust_test_targets": [
       "negative_controls",
-      "negative_controls_app",
-      "negative_controls_core1",
-      "negative_controls_core2",
-      "negative_controls_enga",
-      "negative_controls_engb",
-      "negative_controls_engc",
-      "negative_controls_engd",
-      "negative_controls_expquala",
-      "negative_controls_meas",
-      "negative_controls_model",
-      "negative_controls_optima",
-      "negative_controls_optimb",
-      "negative_controls_optimc",
       "optimizer_benchmark",
-      "negative_controls_qqsa",
-      "negative_controls_raa",
-      "negative_controls_rab",
-      "negative_controls_rac",
-      "negative_controls_rw1",
-      "negative_controls_rw2",
       "qa_contract"
     ]
+  },
+  "virtual_workspace": true,
+  "terminal_packages": [
+    "autoeq-cli",
+    "roomeq-cli",
+    "roomeq-qa",
+    "autoeq-qa",
+    "autoeq-report-wasm-shell",
+    "autoeq-report-gpui"
+  ],
+  "forbidden_dependency_closures": {
+    "autoeq-objective": [
+      "autoeq-optim",
+      "math-optimisation",
+      "sotf-metaheuristics-nature",
+      "roomeq-model",
+      "roomeq-engine",
+      "roomeq-workflow",
+      "autoeq-cli",
+      "roomeq-cli",
+      "roomeq-qa"
+    ],
+    "roomeq-export": [
+      "roomeq-engine",
+      "roomeq-workflow",
+      "autoeq-optim",
+      "roomeq-cli",
+      "roomeq-qa"
+    ],
+    "roomeq-dsp": [
+      "autoeq-optim",
+      "autoeq-objective",
+      "roomeq-engine",
+      "roomeq-workflow",
+      "roomeq-export",
+      "roomeq-cli",
+      "roomeq-qa"
+    ],
+    "autoeq-optim-types": [
+      "clap",
+      "autoeq-optim",
+      "autoeq-objective",
+      "math-optimisation",
+      "metaheuristics-nature",
+      "roomeq-model",
+      "roomeq-engine",
+      "roomeq-workflow",
+      "autoeq-cli",
+      "roomeq-cli",
+      "roomeq-qa",
+      "autoeq-qa",
+      "autoeq-report-wasm-shell",
+      "autoeq-report-gpui"
+    ],
+    "autoeq-core": [
+      "clap",
+      "autoeq-optim",
+      "autoeq-objective",
+      "math-optimisation",
+      "metaheuristics-nature",
+      "autoeq-cli",
+      "roomeq-cli",
+      "roomeq-qa",
+      "autoeq-qa",
+      "autoeq-report-wasm-shell",
+      "autoeq-report-gpui"
+    ]
+  },
+  "explicit_library_exports": true,
+  "forbidden_direct_external_dependencies": {
+    "autoeq-artifacts": [
+      "clap"
+    ],
+    "autoeq-core": [
+      "clap"
+    ],
+    "autoeq-fir": [
+      "clap"
+    ],
+    "autoeq-measurements": [
+      "clap"
+    ],
+    "autoeq-objective": [
+      "clap"
+    ],
+    "autoeq-optim": [
+      "clap"
+    ],
+    "autoeq-optim-types": [
+      "clap"
+    ],
+    "autoeq-plot": [
+      "clap"
+    ],
+    "autoeq-report-wasm": [
+      "clap"
+    ],
+    "autoeq-workflow": [
+      "clap"
+    ],
+    "roomeq-analysis": [
+      "clap"
+    ],
+    "roomeq-dsp": [
+      "clap"
+    ],
+    "roomeq-engine": [
+      "clap"
+    ],
+    "roomeq-export": [
+      "clap"
+    ],
+    "roomeq-model": [
+      "clap"
+    ],
+    "roomeq-quality": [
+      "clap"
+    ],
+    "roomeq-synthetic": [
+      "clap"
+    ],
+    "roomeq-workflow": [
+      "clap"
+    ]
+  },
+  "owner_size_budgets": {
+    "autoeq-artifacts": {
+      "source_tree_lines": 973,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 574,
+      "source_files": 4,
+      "external_test_files": 2
+    },
+    "autoeq-cli": {
+      "source_tree_lines": 12173,
+      "external_test_tree_lines": 2551,
+      "largest_source_file_lines": 1586,
+      "source_files": 39,
+      "external_test_files": 14
+    },
+    "autoeq-core": {
+      "source_tree_lines": 11569,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 1080,
+      "source_files": 34,
+      "external_test_files": 2
+    },
+    "autoeq-fir": {
+      "source_tree_lines": 1327,
+      "external_test_tree_lines": 684,
+      "largest_source_file_lines": 1312,
+      "source_files": 3,
+      "external_test_files": 7
+    },
+    "autoeq-measurements": {
+      "source_tree_lines": 13154,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 2141,
+      "source_files": 43,
+      "external_test_files": 2
+    },
+    "autoeq-objective": {
+      "source_tree_lines": 13053,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 1779,
+      "source_files": 67,
+      "external_test_files": 2
+    },
+    "autoeq-optim": {
+      "source_tree_lines": 20515,
+      "external_test_tree_lines": 553,
+      "largest_source_file_lines": 2598,
+      "source_files": 45,
+      "external_test_files": 4
+    },
+    "autoeq-optim-types": {
+      "source_tree_lines": 1290,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 528,
+      "source_files": 7,
+      "external_test_files": 2
+    },
+    "autoeq-plot": {
+      "source_tree_lines": 1598,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 312,
+      "source_files": 16,
+      "external_test_files": 2
+    },
+    "autoeq-qa": {
+      "source_tree_lines": 4634,
+      "external_test_tree_lines": 23907,
+      "largest_source_file_lines": 2099,
+      "source_files": 7,
+      "external_test_files": 149
+    },
+    "autoeq-report-gpui": {
+      "source_tree_lines": 542,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 527,
+      "source_files": 3,
+      "external_test_files": 2
+    },
+    "autoeq-report-wasm": {
+      "source_tree_lines": 26140,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 3958,
+      "source_files": 50,
+      "external_test_files": 2
+    },
+    "autoeq-report-wasm-shell": {
+      "source_tree_lines": 550,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 535,
+      "source_files": 3,
+      "external_test_files": 2
+    },
+    "autoeq-workflow": {
+      "source_tree_lines": 7150,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 2503,
+      "source_files": 15,
+      "external_test_files": 2
+    },
+    "roomeq-analysis": {
+      "source_tree_lines": 12869,
+      "external_test_tree_lines": 141,
+      "largest_source_file_lines": 1125,
+      "source_files": 53,
+      "external_test_files": 3
+    },
+    "roomeq-cli": {
+      "source_tree_lines": 8883,
+      "external_test_tree_lines": 3424,
+      "largest_source_file_lines": 4260,
+      "source_files": 16,
+      "external_test_files": 6
+    },
+    "roomeq-dsp": {
+      "source_tree_lines": 1238,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 716,
+      "source_files": 8,
+      "external_test_files": 2
+    },
+    "roomeq-engine": {
+      "source_tree_lines": 78042,
+      "external_test_tree_lines": 208,
+      "largest_source_file_lines": 7274,
+      "source_files": 187,
+      "external_test_files": 3
+    },
+    "roomeq-export": {
+      "source_tree_lines": 12262,
+      "external_test_tree_lines": 302,
+      "largest_source_file_lines": 1596,
+      "source_files": 29,
+      "external_test_files": 3
+    },
+    "roomeq-model": {
+      "source_tree_lines": 27136,
+      "external_test_tree_lines": 621,
+      "largest_source_file_lines": 3332,
+      "source_files": 99,
+      "external_test_files": 5
+    },
+    "roomeq-qa": {
+      "source_tree_lines": 30466,
+      "external_test_tree_lines": 1016,
+      "largest_source_file_lines": 2940,
+      "source_files": 76,
+      "external_test_files": 7
+    },
+    "roomeq-quality": {
+      "source_tree_lines": 23479,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 2631,
+      "source_files": 36,
+      "external_test_files": 2
+    },
+    "roomeq-synthetic": {
+      "source_tree_lines": 4493,
+      "external_test_tree_lines": 25,
+      "largest_source_file_lines": 818,
+      "source_files": 12,
+      "external_test_files": 2
+    },
+    "roomeq-workflow": {
+      "source_tree_lines": 112077,
+      "external_test_tree_lines": 7961,
+      "largest_source_file_lines": 11682,
+      "source_files": 125,
+      "external_test_files": 11
+    }
   }
 }

@@ -38,13 +38,23 @@ mod tests;
 mod types;
 mod write;
 
+pub use conformance::validate_camilladsp_input;
 pub use delay::CamillaDspDelayRealization;
-pub use export_format::*;
+pub use export_format::{
+    ExportCapability, ExportCapabilityCode, ExportCapabilityReason, ExportFormat,
+    external_export_supported, query_export_capabilities, query_export_capabilities_at_sample_rate,
+    query_export_capability, query_export_capability_at_sample_rate,
+};
 pub use identity::{
     BoundConvolution, DspIdentity, ExportReadiness, canonical_dsp_identity, export_readiness,
     package_fingerprint,
 };
-pub use package::*;
+pub use misc::parse_biquad_filter_type;
+pub use package::{
+    ConvolutionResource, ExportPackage, ExportPackageMember,
+    checked_convolution_resource_references, convolution_resource_references,
+    package_convolution_sidecars,
+};
 
 /// Backend-specific added latency and validity, derived from the same stage
 /// plan used to render the artifact. Canonical acoustic timing is not mutated.
@@ -73,7 +83,6 @@ use conformance::ExportArtifactManifest;
 use conformance::ExportNodeKind;
 use conformance::camilladsp_physical_routing;
 use conformance::normalize_export_identifier;
-use conformance::validate_camilladsp_input;
 use conformance::{routed_channel_names, validate_pipewire_input, validate_serial_external_input};
 use export_format::ensure_external_export_supported;
 use extract::extract_convolution_paths;
@@ -83,7 +92,6 @@ use extract::extract_gain_db;
 use misc::WAVELET_BANDS;
 use misc::apo_filter_type;
 use misc::easyeffects_filter_type;
-use misc::parse_biquad_filter_type;
 use misc::roon_filter_type;
 use pipewire::pipewire_channel_position;
 use pipewire::pipewire_filter_label;

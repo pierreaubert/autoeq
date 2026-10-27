@@ -1,0 +1,3 @@
+   Compiling roomeq-workflow v0.5.36 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-bl8yk5vd/source/autoeq/crates/roomeq-workflow)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-bl8yk5vd/targets/primed/0/test/workflow/test/cargo-timings/cargo-timing-20261026T132101906Z-6bac3a28c2087a21.html
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.42s

@@ -7,6 +7,9 @@ on:
       - "crates/autoeq-core/**"
       - "crates/autoeq-measurements/**"
       - "crates/autoeq-optim/**"
+      - "crates/autoeq-objective/**"
+      - "crates/autoeq-optim-types/**"
+      - "crates/roomeq-dsp/**"
       - "src/roomeq/**"
       - "data_tests/roomeq/**"
       - "utils/mdat2csv.py"
@@ -59,7 +62,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           mkdir -p target/qa
-          cargo run --release --features qa --bin roomeq-qa-acoustic -- \
+          cargo run -p roomeq-qa --release --bin roomeq-qa-acoustic -- \
             --tier nightly \
             --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json \
             --output target/qa/roomeq-acoustic.json \

@@ -52,14 +52,14 @@ single aggregate score.
   field-by-field reference and complete system examples
 - [RoomEQ output DSP-chain guide](docs/ROOMEQ_OUTPUT_FORMAT.md) — filters,
   per-driver chains, routing, curves, metadata, and export examples
-- [Focused configuration examples](src/bin/roomeq/INPUT_FORMAT.md) — timbre
+- [Focused configuration examples](crates/roomeq-cli/schemas/INPUT_FORMAT.md) — timbre
   matching, height alignment, and RIR prototypes
-- [RoomEQ input schema](src/bin/roomeq/input_schema.json) — complete
+- [RoomEQ input schema](crates/roomeq-cli/schemas/input_schema.json) — complete
   machine-readable configuration contract
-- [RoomEQ output schema](src/bin/roomeq/output_schema.json) — generated filters,
+- [RoomEQ output schema](crates/roomeq-cli/schemas/output_schema.json) — generated filters,
   routing, reports, and metadata contract
-- [RIR prototype design](docs/superpowers/specs/2026-07-10-roomeq-rir-prototype-design.md)
-  — distance/directivity weighting model and validation rules
+- [RIR prototype configuration](crates/roomeq-cli/schemas/INPUT_FORMAT.md#multi-measurement-rir-prototype)
+  — distance/directivity weighting fields and validation rules
 
 ## Research and references
 
@@ -70,32 +70,31 @@ single aggregate score.
 
 ## Workspace crates
 
-`autoeq` is now a compatibility facade and thin-launcher package; canonical
-implementation lives in focused crates. Note that this thin-layer will go away
-before the first stable release.
+The repository is a virtual Cargo workspace. The root `autoeq` package and
+its Rust facade have been removed; consumers import their owning crates.
+Executable names, flags, algorithms, JSON schemas, and export formats retain
+their contracts.
 
-The current library layers are:
+- `autoeq-core`: curves, filters, response math, and parameter layouts.
+- `autoeq-measurements`: loading/preprocessing; `api` enables HTTP adapters.
+- `autoeq-objective`: losses, prepared evaluation, and objective data.
+- `autoeq-optim-types`: parser-independent configuration, loss selection, and evidence.
+- `autoeq-optim`: backend registry, run control, and execution.
+- `autoeq-workflow`: speaker/headphone application workflows.
+- `autoeq-artifacts`, `autoeq-fir`, `autoeq-plot`: artifact storage, FIR math,
+  and native HTML/WASM reporting.
+- `roomeq-model`, `roomeq-analysis`, `roomeq-quality`: domain contracts,
+  acoustic analysis, and production acceptance.
+- `roomeq-dsp`: shared path-free routing and DSP realization.
+- `roomeq-engine`, `roomeq-workflow`: execution kernels, IO, composition,
+  finalization, and publishing.
+- `roomeq-export`: conformance and artifact rendering using model/DSP/quality,
+  with no optimization-engine dependency.
+- `autoeq-cli`, `roomeq-cli`, `roomeq-qa`, `autoeq-qa`: terminal adapters and QA.
 
-- `autoeq-core` — curves, PEQ models, response math, and parameter layouts
-- `autoeq-measurements` — loading and preprocessing measurement data
-- `autoeq-optim` — objectives, constraints, and optimizer backends
-- `autoeq-workflow` — speaker and headphone application workflows
-- `autoeq-artifacts` — report/export artifact storage
-- `autoeq-fir` — FIR design and WAV serialization
-- `roomeq-model`, `roomeq-engine`, `roomeq-workflow`, and `roomeq-export` —
-  RoomEQ contracts, deterministic processing, application orchestration, and
-  external-DSP rendering
-- `roomeq-quality` — acoustic-quality metrics, acceptance policies, and QA
-  fixtures
-- `roomeq-analysis` — measurement analysis, beginning with phase/probe time
-  alignment and channel-delay calculation
-- `roomeq-synthetic` and `roomeq-qa` — deterministic scenarios, regression
-  matrices, reports, and fuzzing
-- `autoeq-cli` and `roomeq-cli` — command parsing and user-facing adapters
-
-Existing `autoeq::*` public paths remain available as compatibility re-exports.
-Production RoomEQ now runs through `roomeq-cli -> roomeq-workflow ->
-roomeq-engine`; no workspace crate depends on the root facade.
+For example, replace `autoeq::Curve` with `autoeq_core::Curve`, measurement
+loading with `autoeq_measurements::read`, and RoomEQ configuration/execution
+with `roomeq_model::RoomConfig` and `roomeq_workflow::optimize_room`.
 
 ## Capabilities
 
@@ -156,7 +155,7 @@ configuration and writes a structured result suitable for reporting, export,
 or direct application by SotF:
 
 ```bash
-cargo run --release --features cli --bin roomeq -- \
+cargo run -p roomeq-cli --release --bin roomeq -- \
   --config path/to/room.json \
   --output path/to/result.json
 ```
@@ -166,9 +165,9 @@ file or `--export-format coefficients` for canonical normalized biquad
 coefficients. Both exports fail closed if the source DSP graph contains stages
 or routing that the target artifact cannot represent.
 
-Start with the [input-format examples](src/bin/roomeq/INPUT_FORMAT.md), then use
-the [input schema](src/bin/roomeq/input_schema.json) and
-[output schema](src/bin/roomeq/output_schema.json) as the complete contracts.
+Start with the [input-format examples](crates/roomeq-cli/schemas/INPUT_FORMAT.md), then use
+the [input schema](crates/roomeq-cli/schemas/input_schema.json) and
+[output schema](crates/roomeq-cli/schemas/output_schema.json) as the complete contracts.
 
 For a native configuration and result-review client, install the local
 [`autoeq-roomeq-gui`](ui/roomeq-gui/README.md) package. It deliberately
@@ -182,21 +181,15 @@ If you do not have cargo already, install it with [rustup](https://rustup.rs/). 
 From a source checkout, install the shipping commands with the locked dependencies:
 
 ```bash
-cargo install --path . --locked \
-   --features cli \
-   --bin autoeq \
-   --bin roomeq \
-   --bin autoeq-download-speakers \
-   --bin convert-recording
+just report-dist
+just report-dist-gpui
+cargo install --path crates/autoeq-cli --locked --bin autoeq --bin autoeq-download-speakers
+cargo install --path crates/roomeq-cli --locked --bin roomeq --bin convert-recording
 ```
 
-The current workspace requires its owning crates to be published before registry
-installation is available. Registry package preparation currently fails because
-`autoeq-cli` is absent from the refreshed crates.io index.
-
-The root package keeps terminal adapters opt-in: use `--features cli` for the
-shipping commands and `--features qa` for QA/fuzzer binaries. Default library
-builds retain the compatibility API without compiling terminal-only crates.
+Terminal and report-shell packages use `publish = false`; install the commands
+from their source paths. Ordinary Cargo commands select the library
+`default-members`. Select CLI, QA, and report packages explicitly.
 
 ## Development
 
@@ -227,24 +220,25 @@ just prod-roomeq      # Build roomeq, conversion and RoomEQ QA commands
 just dev              # Build debug binaries
 ```
 
-Reports embed the checked-in HTML/WASM assets from
-`crates/autoeq-report-wasm/dist/`. Ordinary CLI builds use those assets;
+Reports embed the generated HTML/WASM assets from
+`crates/autoeq-report-wasm/dist/`. Build these assets before generating reports from a fresh checkout;
 `just report-dist` rebuilds the 2D bundle with the WASM target and
 `wasm-bindgen` version specified in the Justfile. The GPUI report bundle has
 its own `just report-dist-gpui` recipe and nightly toolchain requirement. Both
 recipes use Cargo’s resolved target directory, including `CARGO_TARGET_DIR`
 and `.cargo/config.toml`, and require Python 3 to read Cargo metadata.
 
-### Cargo features and binaries
+### Executable ownership
 
-| Feature | Binaries |
+| Package | Executables |
 | --- | --- |
-| `cli` | `autoeq`, `benchmark-autoeq-speaker`, `autoeq-download-speakers`, `roomeq`, `convert-recording` |
-| `qa` (includes `cli`) | All CLI binaries, `roomeq-fuzzer`, `roomeq-qa-quality`, `roomeq-qa-coverage`, `roomeq-qa-features`, `roomeq-qa-synthetic`, `roomeq-qa-acoustic` |
-| Default | Library compatibility API |
+| `autoeq-cli` | `autoeq`, `benchmark-autoeq-speaker`, `autoeq-download-speakers` |
+| `roomeq-cli` | `roomeq`, `convert-recording` |
+| `roomeq-qa` | `roomeq-fuzzer`, `roomeq-qa-quality`, `roomeq-qa-coverage`, `roomeq-qa-features`, `roomeq-qa-synthetic`, `roomeq-qa-acoustic` |
+| `autoeq-measurements` | `migrate_provenance` |
 
-QA commands that use recordings or generated fixtures require a workspace
-checkout: those data directories are excluded from the published package.
+QA recording/generated fixtures require a workspace checkout. RoomEQ schemas
+and their input manual live under `crates/roomeq-cli/schemas/`.
 
 ### Testing
 
@@ -252,17 +246,17 @@ checkout: those data directories are excluded from the published package.
 # Check all targets
 cargo check --workspace --all-targets --all-features
 
-# Run all tests
+# Fast library feedback
 just test
 
-# Run tests with nextest (faster)
+# Complete native inventory
 just ntest
 
 # Run specific test
 cargo test --lib test_name
 
-# Run tests for the autoeq package
-cargo test -p autoeq --lib
+# Run an owning library
+cargo test -p autoeq-core --lib
 ```
 
 ### Fuzzing
@@ -318,7 +312,7 @@ On a POSIX host, build the CLI and run the device-free process contracts with a
 new evidence directory:
 
 ```bash
-cargo build --locked --features cli --bin autoeq
+cargo build -p autoeq-cli --locked --bin autoeq
 python3 scripts/run_autoeq_exact_resume_process_contracts.py \
   --binary target/debug/autoeq --output target/qa/exact-process-new
 ```
@@ -357,3 +351,18 @@ cargo clippy --all -- -D warnings
 
 - Open an issue on [GitHub](https://github.com/pierreaubert/autoeq)
 - Send a PR
+
+For a built-in-only optimizer library build, use
+`cargo check -p autoeq-optim --lib --no-default-features`.
+The default `backend-metaheuristics` feature preserves all `mh:*` algorithms;
+shipping CLI packages keep that default registry.
+
+Library and desktop clients construct
+`autoeq_optim_types::OptimizationConfig::speaker_defaults()` (or the headphone
+and room variants), then convert with `autoeq_optim::OptimParams::from(&config)`.
+The shared `Args` parser and its enum adapters now belong to
+`autoeq_cli::cli`; lower libraries do not expose a CLI module.
+
+Network loading is owned by `autoeq-measurements` with its `api` feature.
+The legacy `read` aliases in objective/backend/plot packages have an explicit
+`api` forwarding feature; use the measurement owner directly for new callers.

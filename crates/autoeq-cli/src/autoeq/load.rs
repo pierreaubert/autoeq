@@ -11,7 +11,7 @@ use std::path::Path;
 
 /// Load input data and prepare frequency grid and curves
 pub(super) async fn load_and_prepare(
-    args: &autoeq::cli::Args,
+    args: &crate::cli::Args,
 ) -> Result<
     (
         ndarray::Array1<f64>,

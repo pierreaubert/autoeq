@@ -1402,8 +1402,8 @@ mod tests {
         let channels = HashMap::from([("L".to_string(), input), ("Sub".to_string(), output)]);
         let mut redirected = route("L", "Sub", 0.0);
         redirected.gain_db = 1.25;
-        let bound =
-            electrical_boost_bound_db(&channels, Some(&[redirected]), 0.0).expect("tagged route bound");
+        let bound = electrical_boost_bound_db(&channels, Some(&[redirected]), 0.0)
+            .expect("tagged route bound");
         assert!((bound - 7.25).abs() < 1e-9, "bound was {bound}");
     }
 
@@ -1413,15 +1413,9 @@ mod tests {
         // (opted into the chain) + 3 dB sub output gain. Only the
         // non-calibration remainder counts toward the correction boost
         // backstop; redirected-bass routes keep counting their full gain.
-        let mut input = chain_with_gains(
-            vec![stage_plugin(eq_plugin(&[1.0]), "pre_route")],
-            &[],
-        );
+        let mut input = chain_with_gains(vec![stage_plugin(eq_plugin(&[1.0]), "pre_route")], &[]);
         input.channel = "LFE".into();
-        let mut output = chain_with_gains(
-            vec![stage_plugin(eq_plugin(&[2.0]), "post_route")],
-            &[],
-        );
+        let mut output = chain_with_gains(vec![stage_plugin(eq_plugin(&[2.0]), "post_route")], &[]);
         output.channel = "Sub".into();
         let channels = HashMap::from([("LFE".to_string(), input), ("Sub".to_string(), output)]);
         let mut lfe = route("LFE", "Sub", 0.0);

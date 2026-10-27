@@ -80,12 +80,6 @@ jobs:
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-      - name: Packaged file-list gate (root crate)
-        run: |
-          cargo test -p autoeq --test packaging_excludes
-          leaked=$(cargo package -p autoeq --list --allow-dirty | grep -E '^(data_tests/|data_generated/|scripts/)|\.mdat$|~$' || true)
-          if [ -n "$leaked" ]; then echo "leaked files in published package:"; echo "$leaked"; exit 1; fi
-
       - name: Prepare crate test matrix
         id: crate-test-matrix
         run: echo "packages=$(python3 scripts/run_crate_test_matrix.py --list-json)" >> "$GITHUB_OUTPUT"
@@ -345,7 +339,7 @@ jobs:
           key: ${{ runner.os }}-cargo-roomeq-linux-acoustic-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Validate Linux acoustic PR baseline
-        run: cargo run --locked --release --features qa --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json --output target/qa/roomeq-acoustic-linux-pr.json
+        run: cargo run -p roomeq-qa --locked --release --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json --output target/qa/roomeq-acoustic-linux-pr.json
 
       - name: Upload Linux acoustic evidence
         if: always()
@@ -377,7 +371,7 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-roomeq-acoustic-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Validate native macOS acoustic baseline and held-out gates
-        run: cargo run --release --features qa --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.json
+        run: cargo run -p roomeq-qa --release --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.json
 
   coverage-gate:
     name: Library Unit-Test Coverage Gate (90 %)

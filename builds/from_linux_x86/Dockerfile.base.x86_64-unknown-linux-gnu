@@ -41,6 +41,6 @@ WORKDIR /project
 COPY . .
 
 # Build release binary
-RUN cargo build --release --target x86_64-unknown-linux-gnu && \
+RUN cargo build -p autoeq-cli -p roomeq-cli --release --target x86_64-unknown-linux-gnu && \
     find target/x86_64-unknown-linux-gnu/release -maxdepth 1 -type f -executable | xargs strip -v 2>/dev/null || true && \
     rm -rf target/.rustc_info.json target/.fingerprint target/x86_64-unknown-linux-gnu/release/deps/*.d

@@ -1822,11 +1822,11 @@ mod tests {
     }
 
     fn optimizer_params() -> OptimParams {
-        OptimParams::from(&crate::cli::Args::speaker_defaults())
+        OptimParams::from(&crate::OptimizationConfig::speaker_defaults())
     }
 
     fn headphone_optimizer_params() -> OptimParams {
-        OptimParams::from(&crate::cli::Args::headphone_defaults())
+        OptimParams::from(&crate::OptimizationConfig::headphone_defaults())
     }
 
     fn curve(spl: Vec<f64>) -> Curve {

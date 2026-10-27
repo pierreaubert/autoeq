@@ -1,0 +1,456 @@
+{
+  "command_sha256": "b7dad0966ad180d1fecadbf8c9598a13cffc8450bfba0266f9291f1a143a0790",
+  "output": "/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/targets/diagnostics/release/debug/build/autoeq-cli/4aa40a9f2cfa1f9a/out/autoeq_cli-4aa40a9f2cfa1f9a",
+  "driver_wall_seconds": 0.15749316685833037,
+  "exit_code": 0,
+  "max_process_rss_bytes": 544669696,
+  "apple_linker_timers": {
+    "resolve-libraries": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "parse-files": {
+      "max_ms": 39,
+      "total_ms": 49,
+      "user_ms": 323,
+      "sys_ms": 144
+    },
+    "resolve": {
+      "max_ms": 55,
+      "total_ms": 55,
+      "user_ms": 174,
+      "sys_ms": 28
+    },
+    "activate-libraries": {
+      "max_ms": 35,
+      "total_ms": 36,
+      "user_ms": 84,
+      "sys_ms": 24
+    },
+    "process-linker-opt-libraries": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "process-indirect-dylibs": {
+      "max_ms": 14,
+      "total_ms": 14,
+      "user_ms": 23,
+      "sys_ms": 21
+    },
+    "pop-files": {
+      "max_ms": 4,
+      "total_ms": 4,
+      "user_ms": 4,
+      "sys_ms": 0
+    },
+    "bundle-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "no-escape-blocks": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "objc-stubs-pass": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 15,
+      "sys_ms": 0
+    },
+    "boundary-pass": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 13,
+      "sys_ms": 0
+    },
+    "dtrace-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "aliases-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "coalesce-unwind-atoms": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 9,
+      "sys_ms": 0
+    },
+    "dead-strip": {
+      "max_ms": 9,
+      "total_ms": 9,
+      "user_ms": 18,
+      "sys_ms": 0
+    },
+    "dynamic-lookup-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "check-undefines": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 15,
+      "sys_ms": 0
+    },
+    "update-indirect-tables": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 5,
+      "sys_ms": 0
+    },
+    "check-duplicates": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "add-dylib-exports": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 2,
+      "sys_ms": 0
+    },
+    "set-side-info": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "softlinking-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "function-variants": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "objc-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 3,
+      "sys_ms": 0
+    },
+    "deferred-dylib-stubs-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "stubs-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 4,
+      "sys_ms": 0
+    },
+    "branch-shims-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "tlv-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "inits-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "content-patch-pass": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "libsystem-simulator": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "build-dylib-mapping": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "check-poison-symbols": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "layout": {
+      "max_ms": 31,
+      "total_ms": 31,
+      "user_ms": 77,
+      "sys_ms": 18
+    },
+    "assign-addresses": {
+      "max_ms": 8,
+      "total_ms": 8,
+      "user_ms": 19,
+      "sys_ms": 2
+    },
+    "partition-atoms": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 1,
+      "sys_ms": 0
+    },
+    "partition-non-local-st": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 3,
+      "sys_ms": 0
+    },
+    "sort-atoms-in-sections": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 3,
+      "sys_ms": 0
+    },
+    "sort-atoms": {
+      "max_ms": 0,
+      "total_ms": 2,
+      "user_ms": 7,
+      "sys_ms": 2
+    },
+    "sort-alias-atoms": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 1,
+      "sys_ms": 0
+    },
+    "sort-symbol-table": {
+      "max_ms": 2,
+      "total_ms": 2,
+      "user_ms": 5,
+      "sys_ms": 0
+    },
+    "record-dwarf-unwind-info": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 5,
+      "sys_ms": 0
+    },
+    "collect-debug-files": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 3,
+      "sys_ms": 0
+    },
+    "build-compact-unwind-vector": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 2,
+      "sys_ms": 0
+    },
+    "add-missing-unwind-infos": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "make-compact-unwind-table": {
+      "max_ms": 3,
+      "total_ms": 3,
+      "user_ms": 3,
+      "sys_ms": 0
+    },
+    "branch-island-generation": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "fill-section-atoms": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "partition-local-st": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 3,
+      "sys_ms": 0
+    },
+    "write-to-file": {
+      "max_ms": 22,
+      "total_ms": 22,
+      "user_ms": 58,
+      "sys_ms": 16
+    },
+    "build-linkedit": {
+      "max_ms": 4,
+      "total_ms": 4,
+      "user_ms": 12,
+      "sys_ms": 1
+    },
+    "build-symbol-table": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 4,
+      "sys_ms": 0
+    },
+    "synthesize-debug-notes": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 1,
+      "sys_ms": 0
+    },
+    "count-debug-stabs": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "layout-st": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 1,
+      "sys_ms": 0
+    },
+    "layout-nlist-strs": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "layout-nlist-stabs-strs": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 1,
+      "sys_ms": 0
+    },
+    "build-indr-st": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "function-starts": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "exports-trie": {
+      "max_ms": 2,
+      "total_ms": 2,
+      "user_ms": 8,
+      "sys_ms": 1
+    },
+    "fixups": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 6,
+      "sys_ms": 0
+    },
+    "write-output-chunks": {
+      "max_ms": 6,
+      "total_ms": 6,
+      "user_ms": 16,
+      "sys_ms": 4
+    },
+    "write-content-without-le": {
+      "max_ms": 3,
+      "total_ms": 3,
+      "user_ms": 12,
+      "sys_ms": 3
+    },
+    "write-cu": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "write-fixups": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "write-exports-trie": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 1,
+      "sys_ms": 0
+    },
+    "write-st": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "write-nlist": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "write-st-str-local": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "write-st-str-non-local": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "write-st-str-stabs": {
+      "max_ms": 0,
+      "total_ms": 0,
+      "user_ms": 0,
+      "sys_ms": 0
+    },
+    "uuid-content": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 11,
+      "sys_ms": 1
+    },
+    "code-sign": {
+      "max_ms": 1,
+      "total_ms": 1,
+      "user_ms": 17,
+      "sys_ms": 0
+    },
+    "file-commit": {
+      "max_ms": 9,
+      "total_ms": 9,
+      "user_ms": 0,
+      "sys_ms": 7
+    }
+  },
+  "lto_timers": {},
+  "raw_stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-independent-copy-baseline-j8-20261026T155829-0eef9eee/diagnostics/link-events/link-35967-1793051484914962000.stderr",
+  "arguments": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-controlled-independent-copy-baseline-j8-20261026T155829-0eef9eee/diagnostics/link-events/link-35967-1793051484914962000.argv.json"
+}

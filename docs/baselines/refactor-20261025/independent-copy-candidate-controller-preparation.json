@@ -1,0 +1,13 @@
+{
+  "status": "prepared_not_launched",
+  "controller": "/Volumes/home_worktrees/autoeq-refactor/target/qa/final-live-logs/run-independent-copy-candidate.py",
+  "sha256": "ea51a4b7ff05b35f71c7a2bda348bdc12deab2460564740679f7aa5cb7441a2e",
+  "normal_rows_expected": 210,
+  "repetitions": 3,
+  "jobs": 8,
+  "baseline_budgets_sha256": "cc998e500147396b60ff6e2ab2dd190bde05a7a4c648422146acc5b64215260b",
+  "source": "frozen candidate from the same baseline epoch",
+  "requires": "All heavy correctness jobs terminal; unchanged quiet-load gate",
+  "performance_acceptance": false,
+  "computes_comparison_without_claiming_acceptance": true
+}

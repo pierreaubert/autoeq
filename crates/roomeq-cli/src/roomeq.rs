@@ -690,7 +690,7 @@ struct Args {
     fallback_overrides: Vec<PathBuf>,
 
     /// Export DSP chain (camilladsp, apo, easyeffects, wavelet, pipewire, roon, rew, coefficients)
-    #[arg(long, value_enum)]
+    #[arg(long, value_parser = crate::export_args::parser())]
     export_format: Option<ExportFormat>,
 
     /// Export output file path (defaults to output path with format-appropriate extension)

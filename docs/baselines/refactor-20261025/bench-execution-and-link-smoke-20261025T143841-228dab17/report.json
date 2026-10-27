@@ -1,0 +1,3089 @@
+{
+  "schema": "refactor-20261025/bench/v2",
+  "label": "execution-and-link-smoke",
+  "status": "passed",
+  "tools": {
+    "description": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.1",
+    "host": "aarch64-apple-darwin",
+    "paths": {
+      "cargo": "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+      "rustc": "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc",
+      "rustdoc": "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustdoc"
+    },
+    "sha256": {
+      "cargo": "6d576d8058f8ca643e8fce55b64ee3c614ba64c9da2e536bae843e6a2e1f3951",
+      "rustc": "1ba7bb8e273bd64125f4048d2ecce530e0a6470e565ab1b3aecf0b82b532f7b1",
+      "rustdoc": "21f27299ea863556078be5074ab193672c0460049688cf0f08dc47c73b730c29"
+    },
+    "cargo_version": "cargo 1.99.1 (5f94df478 2026-08-27)",
+    "nextest_version": "cargo-nextest 0.9.148 (cd1d6d546 2026-10-07)\nrelease: 0.9.148\ncommit-hash: cd1d6d5467322dbc0d39a80cb671d000ac302798\ncommit-date: 2026-10-07\nhost: aarch64-apple-darwin",
+    "linker_version": "Apple clang version 21.0.0 (clang-2100.3.34.2)\nTarget: arm64-apple-darwin27.0.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin"
+  },
+  "environment": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "RUSTC_WRAPPER": null,
+    "RUSTC_WORKSPACE_WRAPPER": null,
+    "CARGO_INCREMENTAL": null
+  },
+  "host": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "cpu_count": 14,
+    "jobs": 8
+  },
+  "results": [
+    {
+      "command": [
+        "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+        "test",
+        "--lib",
+        "--no-run",
+        "--offline",
+        "--locked",
+        "--profile",
+        "test",
+        "--target-dir",
+        "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0",
+        "--timings",
+        "--message-format=json-render-diagnostics",
+        "-p",
+        "autoeq-core"
+      ],
+      "cwd": "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/autoeq",
+      "wall_seconds": 0.7120948750525713,
+      "exit_code": 0,
+      "max_process_rss_bytes": 379158528,
+      "sampled_tree_peak_rss_bytes": 434995200,
+      "rss_samples": 6,
+      "rss_sample_interval_seconds": 0.1,
+      "load_average_before": [
+        7.99267578125,
+        6.5947265625,
+        10.984375
+      ],
+      "load_average_after": [
+        7.99267578125,
+        6.5947265625,
+        10.984375
+      ],
+      "stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/measured.stdout",
+      "stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/measured.stderr",
+      "owning_test_execution": [
+        {
+          "command": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/autoeq_core-d9ba2647e2e0906f",
+            "--test-threads=1"
+          ],
+          "cwd": "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/autoeq/crates/autoeq-core",
+          "wall_seconds": 0.17140858387574553,
+          "exit_code": 0,
+          "max_process_rss_bytes": 227753984,
+          "sampled_tree_peak_rss_bytes": 160137216,
+          "rss_samples": 2,
+          "rss_sample_interval_seconds": 0.1,
+          "load_average_before": [
+            7.99267578125,
+            6.5947265625,
+            10.984375
+          ],
+          "load_average_after": [
+            7.99267578125,
+            6.5947265625,
+            10.984375
+          ],
+          "stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/execution-0.stdout",
+          "stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/execution-0.stderr"
+        }
+      ],
+      "case": "autoeq-core",
+      "scenario": "test-edit",
+      "profile": "test",
+      "repetition": 0,
+      "selected_packages": [
+        "autoeq-core"
+      ],
+      "compiler_artifacts": [
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.107",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proc-macro2-1.0.107/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/proc-macro2-26b6d3e1933d541e/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.47",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/quote-fc07686aba6609e2/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#unicode-ident@1.0.27",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "unicode_ident",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/unicode-ident-1.0.27/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libunicode_ident-12fb55c8c0427612.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libunicode_ident-12fb55c8c0427612.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#autocfg@1.5.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "autocfg",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/autocfg-1.5.1/src/lib.rs",
+            "edition": "2015",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libautocfg-68e23e90810eda2c.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libautocfg-68e23e90810eda2c.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crossbeam-utils@0.8.23",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-utils-0.8.23/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/crossbeam-utils-92796d28e827a513/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.229",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.229/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/serde_core-a64cb426fa686d3b/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crossbeam-epoch@0.9.21",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-epoch-0.9.21/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/crossbeam-epoch-ddb83e757ab197f4/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crossbeam-deque@0.8.8",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-deque-0.8.8/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/crossbeam-deque-3bda8c36bf1cf088/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#proc-macro2@1.0.107",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "proc_macro2",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/proc-macro2-1.0.107/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libproc_macro2-08c7669ae16c33d7.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libproc_macro2-08c7669ae16c33d7.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#num-traits@0.2.19",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-traits-0.2.19/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/num-traits-4182f614c058a64f/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#zmij@1.0.23",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/zmij-6baec448f2b853a0/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#quote@1.0.47",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "quote",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/quote-1.0.47/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libquote-2e10398137529d8f.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libquote-2e10398137529d8f.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crossbeam-utils@0.8.23",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "crossbeam_utils",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-utils-0.8.23/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrossbeam_utils-7e8250600605e9ed.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrossbeam_utils-7e8250600605e9ed.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde_core@1.0.229",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "serde_core",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_core-1.0.229/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_core-5d8fa1c66d2a8d97.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_core-5d8fa1c66d2a8d97.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/serde-3f419652752be174/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon-core@1.13.0",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-core-1.13.0/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/rayon-core-4102a38e82328e80/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#typenum@1.20.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "typenum",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/typenum-1.20.1/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libtypenum-c0474f2cfdc6cd04.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libtypenum-c0474f2cfdc6cd04.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#syn@3.0.9",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "syn",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/syn-3.0.9/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libsyn-1c02fcd577235a73.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libsyn-1c02fcd577235a73.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#num-traits@0.2.19",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "num_traits",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-traits-0.2.19/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libnum_traits-eeeb2116df43060f.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libnum_traits-eeeb2116df43060f.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crossbeam-epoch@0.9.21",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "crossbeam_epoch",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-epoch-0.9.21/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrossbeam_epoch-f0982353a380bac6.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrossbeam_epoch-f0982353a380bac6.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#hybrid-array@0.4.15",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "hybrid_array",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hybrid-array-0.4.15/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libhybrid_array-928fa392720a4e54.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libhybrid_array-928fa392720a4e54.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#matrixmultiply@0.3.11",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/matrixmultiply-0.3.11/build.rs",
+            "edition": "2018",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/matrixmultiply-b6818cea00f55535/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.154",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.154/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/serde_json-2216c60e3a3dadac/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#num-integer@0.1.47",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "num_integer",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-integer-0.1.47/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libnum_integer-3226e96f2ad1b6a4.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libnum_integer-3226e96f2ad1b6a4.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde_derive@1.0.229",
+          "target": {
+            "kind": [
+              "proc-macro"
+            ],
+            "crate_types": [
+              "proc-macro"
+            ],
+            "name": "serde_derive",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_derive-1.0.229/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_derive-0deb8401e2112abc.dylib"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crossbeam-deque@0.8.8",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "crossbeam_deque",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crossbeam-deque-0.8.8/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrossbeam_deque-f54ee1db7e7aa02c.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrossbeam_deque-f54ee1db7e7aa02c.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#utf8parse@0.2.2",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "utf8parse",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/utf8parse-0.2.2/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libutf8parse-0c459c3994032c4b.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libutf8parse-0c459c3994032c4b.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.191",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.191/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/libc-53c7bda083602eac/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#num-complex@0.4.6",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "num_complex",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/num-complex-0.4.6/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libnum_complex-62d42eb9479d36d3.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libnum_complex-62d42eb9479d36d3.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.229",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "serde",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde-1.0.229/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde-34bda4a0032135a7.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde-34bda4a0032135a7.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#anstyle-parse@1.0.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "anstyle_parse",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-parse-1.0.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstyle_parse-0243ae7ec6eeb1a5.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstyle_parse-0243ae7ec6eeb1a5.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon-core@1.13.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "rayon_core",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-core-1.13.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librayon_core-ff0427e5d94b54de.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librayon_core-ff0427e5d94b54de.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#zmij@1.0.23",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "zmij",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/zmij-1.0.23/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libzmij-6a8db959f17744f5.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libzmij-6a8db959f17744f5.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#anstyle@1.0.14",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "anstyle",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-1.0.14/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstyle-19a7875c7e0c93d2.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstyle-19a7875c7e0c93d2.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#is_terminal_polyfill@1.70.2",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "is_terminal_polyfill",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/is_terminal_polyfill-1.70.2/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libis_terminal_polyfill-b4550a1f877aca42.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libis_terminal_polyfill-b4550a1f877aca42.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#colorchoice@1.0.5",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "colorchoice",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/colorchoice-1.0.5/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcolorchoice-10f0da604dea69f9.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcolorchoice-10f0da604dea69f9.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#anstyle-query@1.1.5",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "anstyle_query",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstyle-query-1.1.5/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstyle_query-2ee60a86cb8daa48.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstyle_query-2ee60a86cb8daa48.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rawpointer@0.2.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "rawpointer",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rawpointer-0.2.1/src/lib.rs",
+            "edition": "2015",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librawpointer-3c09ad2c322e1cfd.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librawpointer-3c09ad2c322e1cfd.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#either@1.19.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "either",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/either-1.19.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libeither-e1a2fa11a90cebf1.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libeither-e1a2fa11a90cebf1.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#ref-cast@1.0.27",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/ref-cast-b8e27627490a973d/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#memchr@2.8.3",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "memchr",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/memchr-2.8.3/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libmemchr-72c37506272287c4.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libmemchr-72c37506272287c4.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#itoa@1.0.18",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "itoa",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/itoa-1.0.18/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libitoa-98999986bb3ac689.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libitoa-98999986bb3ac689.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#strength_reduce@0.2.4",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "strength_reduce",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/strength_reduce-0.2.4/src/lib.rs",
+            "edition": "2015",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libstrength_reduce-18cffaffbce2d13f.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libstrength_reduce-18cffaffbce2d13f.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.21",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/thiserror-76f0446a08f30dac/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.154",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "serde_json",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_json-1.0.154/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_json-fd5ea4be168fde17.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_json-fd5ea4be168fde17.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rayon@1.12.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "rayon",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rayon-1.12.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librayon-bf3cff36ddbd044f.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librayon-bf3cff36ddbd044f.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#anstream@1.0.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "anstream",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/anstream-1.0.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstream-dca5232108b811bf.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libanstream-dca5232108b811bf.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#matrixmultiply@0.3.11",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "matrixmultiply",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/matrixmultiply-0.3.11/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libmatrixmultiply-edc3db2ff58fc314.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libmatrixmultiply-edc3db2ff58fc314.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#transpose@0.2.3",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "transpose",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/transpose-0.2.3/src/lib.rs",
+            "edition": "2015",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libtranspose-432d0f837b850a22.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libtranspose-432d0f837b850a22.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#libc@0.2.191",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "libc",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libc-0.2.191/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/liblibc-ffa1f6bcf31989d9.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/liblibc-ffa1f6bcf31989d9.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#primal-check@0.3.4",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "primal_check",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/primal-check-0.3.4/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libprimal_check-ace2ba04b5cea650.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libprimal_check-ace2ba04b5cea650.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#crypto-common@0.2.2",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "crypto_common",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/crypto-common-0.2.2/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrypto_common-950358b07e7d4c66.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcrypto_common-950358b07e7d4c66.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#block-buffer@0.12.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "block_buffer",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/block-buffer-0.12.1/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libblock_buffer-2bf8cb992099472a.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libblock_buffer-2bf8cb992099472a.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#serde_derive_internals@0.30.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "serde_derive_internals",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/serde_derive_internals-0.30.0/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_derive_internals-976d55cc8d3f41da.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libserde_derive_internals-976d55cc8d3f41da.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#ref-cast-impl@1.0.27",
+          "target": {
+            "kind": [
+              "proc-macro"
+            ],
+            "crate_types": [
+              "proc-macro"
+            ],
+            "name": "ref_cast_impl",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-impl-1.0.27/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libref_cast_impl-71ed9f4a319e0f4a.dylib"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#thiserror-impl@2.0.21",
+          "target": {
+            "kind": [
+              "proc-macro"
+            ],
+            "crate_types": [
+              "proc-macro"
+            ],
+            "name": "thiserror_impl",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-impl-2.0.21/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libthiserror_impl-d6291a6a9c530677.dylib"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#heck@0.5.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "heck",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/heck-0.5.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libheck-b324c860bee1fb55.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libheck-b324c860bee1fb55.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#strsim@0.11.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "strsim",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/strsim-0.11.1/src/lib.rs",
+            "edition": "2015",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libstrsim-23f9fd9004922cf5.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libstrsim-23f9fd9004922cf5.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#clap_lex@1.1.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "clap_lex",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap_lex-1.1.1/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap_lex-4d82a58610ca3fed.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap_lex-4d82a58610ca3fed.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#const-oid@0.10.2",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "const_oid",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/const-oid-0.10.2/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libconst_oid-4b63bb2927384b3e.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libconst_oid-4b63bb2927384b3e.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#libm@0.2.16",
+          "target": {
+            "kind": [
+              "custom-build"
+            ],
+            "crate_types": [
+              "bin"
+            ],
+            "name": "build-script-build",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libm-0.2.16/build.rs",
+            "edition": "2021",
+            "doc": false,
+            "doctest": false,
+            "test": false
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/build/libm-f609a0c4a5940566/build-script-build"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#schemars_derive@1.2.3",
+          "target": {
+            "kind": [
+              "proc-macro"
+            ],
+            "crate_types": [
+              "proc-macro"
+            ],
+            "name": "schemars_derive",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars_derive-1.2.3/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libschemars_derive-9eba17c8cf11f1d8.dylib"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#ref-cast@1.0.27",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "ref_cast",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ref-cast-1.0.27/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libref_cast-04f801f557a9ae34.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libref_cast-04f801f557a9ae34.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#clap_derive@4.6.7",
+          "target": {
+            "kind": [
+              "proc-macro"
+            ],
+            "crate_types": [
+              "proc-macro"
+            ],
+            "name": "clap_derive",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap_derive-4.6.7/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": 0,
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap_derive-7f9f23e89b0eb3d8.dylib"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#thiserror@2.0.21",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "thiserror",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/thiserror-2.0.21/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libthiserror-14a5c267f55f23af.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libthiserror-14a5c267f55f23af.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#rustfft@6.4.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "rustfft",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/rustfft-6.4.1/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librustfft-70782a2d5c49cd76.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/librustfft-70782a2d5c49cd76.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#clap_builder@4.6.7",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "clap_builder",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap_builder-4.6.7/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap_builder-22c9e90cb3f63780.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap_builder-22c9e90cb3f63780.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#digest@0.11.3",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "digest",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/digest-0.11.3/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libdigest-ca3882a2746b373f.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libdigest-ca3882a2746b373f.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#cpufeatures@0.3.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "cpufeatures",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cpufeatures-0.3.1/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcpufeatures-548a9eac4cb46813.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcpufeatures-548a9eac4cb46813.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#ndarray@0.17.2",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "ndarray",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/ndarray-0.17.2/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libndarray-49c84989948af337.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libndarray-49c84989948af337.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#cfg-if@1.0.5",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "cfg_if",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/cfg-if-1.0.5/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcfg_if-ce0b9c1480a19d68.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libcfg_if-ce0b9c1480a19d68.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#hound@3.5.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "hound",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/hound-3.5.1/src/lib.rs",
+            "edition": "2015",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libhound-d7838a75d71b6af8.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libhound-d7838a75d71b6af8.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#byteorder@1.5.0",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "byteorder",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/byteorder-1.5.0/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libbyteorder-97ba216aba500c3d.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libbyteorder-97ba216aba500c3d.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#base64@0.23.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "base64",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/base64-0.23.1/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libbase64-fd55ad5fbfeca853.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libbase64-fd55ad5fbfeca853.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#dyn-clone@1.0.20",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "dyn_clone",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/dyn-clone-1.0.20/src/lib.rs",
+            "edition": "2018",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libdyn_clone-3584833826923209.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libdyn_clone-3584833826923209.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#sha2@0.11.1",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "sha2",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sha2-0.11.1/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libsha2-e2e76221702a0d10.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libsha2-e2e76221702a0d10.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#libm@0.2.16",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "libm",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libm-0.2.16/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/liblibm-38af6c02d70eb973.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/liblibm-38af6c02d70eb973.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#clap@4.6.7",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "clap",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clap-4.6.7/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap-187260b8d6b6183b.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libclap-187260b8d6b6183b.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#log@0.4.34",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "log",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/log-0.4.34/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/liblog-eb7807b0417d02c8.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/liblog-eb7807b0417d02c8.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "registry+https://github.com/rust-lang/crates.io-index#schemars@1.2.3",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "schemars",
+            "src_path": "/Users/pierre/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/schemars-1.2.3/src/lib.rs",
+            "edition": "2021",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libschemars-aa1f47524ff9de08.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libschemars-aa1f47524ff9de08.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "path+file:///Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/math-audio/crates/math-iir-fir#0.5.27",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "math_audio_iir_fir",
+            "src_path": "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/math-audio/crates/math-iir-fir/src/mod.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "3",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": false
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libmath_audio_iir_fir-7a08d542fc633e91.rlib",
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/libmath_audio_iir_fir-7a08d542fc633e91.rmeta"
+          ],
+          "executable": null,
+          "fresh": true
+        },
+        {
+          "package_id": "path+file:///Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/autoeq/crates/autoeq-core#0.5.12",
+          "target": {
+            "kind": [
+              "lib"
+            ],
+            "crate_types": [
+              "lib"
+            ],
+            "name": "autoeq_core",
+            "src_path": "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/autoeq/crates/autoeq-core/src/lib.rs",
+            "edition": "2024",
+            "doc": true,
+            "doctest": true,
+            "test": true
+          },
+          "profile": {
+            "opt_level": "1",
+            "debuginfo": "line-tables-only",
+            "debug_assertions": true,
+            "overflow_checks": true,
+            "test": true
+          },
+          "filenames": [
+            "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/autoeq_core-d9ba2647e2e0906f"
+          ],
+          "executable": "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/targets/autoeq-core/test-edit/0/debug/deps/autoeq_core-d9ba2647e2e0906f",
+          "fresh": false
+        }
+      ],
+      "rebuilt_unit_count": 1,
+      "target_dir_bytes": 435338415,
+      "cargo_timings": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/cargo-timings/cargo-timing-20261025T133847585Z-2c4c03eab0cc9205.html",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/cargo-timings/cargo-timing-20261025T133910421Z-2c4c03eab0cc9205.html",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/autoeq-core/test-edit/0/cargo-timings/cargo-timing.html"
+      ],
+      "probe": {
+        "path": "crates/autoeq-core/src/curve_interpolation_tests.rs",
+        "kind": "test-edit",
+        "line": 17,
+        "before_sha256": "3eae623b4fb69b627ad1429308c221f06973babdfb5f8f65fae0ede9a6fd8789",
+        "after_sha256": "6c7185279df5c76066b1249d73dde26405d25daae945c796add7398703a98331"
+      }
+    },
+    {
+      "command": [
+        "/Volumes/home_tmp/Binaries/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo",
+        "build",
+        "--offline",
+        "--locked",
+        "--release",
+        "--bins",
+        "--timings",
+        "--message-format=json-render-diagnostics",
+        "-p",
+        "autoeq-cli",
+        "-p",
+        "roomeq-cli",
+        "-p",
+        "autoeq-measurements"
+      ],
+      "cwd": "/Volumes/home_tmp/tmp/autoeq-build-bench-mu4l47ui/source/autoeq",
+      "wall_seconds": 704.8225225829519,
+      "exit_code": 0,
+      "max_process_rss_bytes": 1564999680,
+      "sampled_tree_peak_rss_bytes": 3829039104,
+      "rss_samples": 5473,
+      "rss_sample_interval_seconds": 0.1,
+      "load_average_before": [
+        7.99267578125,
+        6.5947265625,
+        10.984375
+      ],
+      "load_average_after": [
+        14.640625,
+        15.1650390625,
+        14.0849609375
+      ],
+      "stdout": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/measured.stdout",
+      "stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/measured.stderr",
+      "case": "workspace",
+      "scenario": "linker-llvm-diagnostic",
+      "profile": "release",
+      "diagnostic": true,
+      "link_events": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-10355-1792935737970750000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-10476-1792935744135039000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-10726-1792935758220571000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-20297-1792936255830779000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5059-1792935551800178000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5081-1792935551840198000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5082-1792935551840013000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5098-1792935551862479000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5128-1792935551950012000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5139-1792935551960042000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5173-1792935552089202000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5185-1792935552138702000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5206-1792935552251618000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5228-1792935552541609000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5249-1792935552671859000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5260-1792935552689450000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5275-1792935552736061000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5304-1792935552844601000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5336-1792935553186193000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5401-1792935554542433000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5447-1792935555421302000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5475-1792935555564883000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5476-1792935555565062000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5486-1792935555578829000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5518-1792935555826020000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5536-1792935555975738000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5551-1792935556067903000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5575-1792935556249339000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5614-1792935556783331000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5639-1792935556936003000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5657-1792935557039342000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5681-1792935557921150000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5698-1792935558058272000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5713-1792935558163866000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5727-1792935558242347000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5740-1792935558287250000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5774-1792935558525684000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5787-1792935558584588000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5818-1792935558701168000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5843-1792935558834946000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5882-1792935559165558000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-5925-1792935559497449000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6132-1792935561633362000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6371-1792935564773239000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6565-1792935568630692000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6581-1792935568711707000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6611-1792935568999715000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6622-1792935569019448000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6651-1792935569160440000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6756-1792935571239729000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6790-1792935572421678000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-6842-1792935574088537000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-8139-1792935616178452000.json",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/link-events/link-9600-1792935701694313000.json"
+      ],
+      "llvm_pass_timing_stderr": "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/measured.stderr",
+      "measurement_scope": "C driver wall time and native linker timer table; LLVM pass diagnostics are separate from normal samples",
+      "target_dir_bytes": 1265019021,
+      "cargo_timings": [
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/cargo-timings/cargo-timing.html",
+        "/Volumes/home_worktrees/autoeq-refactor/docs/baselines/refactor-20261025/bench-execution-and-link-smoke-20261025T143841-228dab17/diagnostics/cargo-timings/cargo-timing-20261025T133911428Z-2c4c03eab0cc9205.html"
+      ]
+    }
+  ],
+  "normal_timing_excludes_diagnostics": true,
+  "acceptance_repetitions_satisfied": false,
+  "sources": {
+    "autoeq": {
+      "origin": "/Volumes/home_worktrees/autoeq-refactor",
+      "requested_reference": null,
+      "origin_identity": {
+        "revision": "5aa31fc5afafaefaed3ca97e71751ac046e46a5b",
+        "tracked_patch_sha256": "f2b200d2d18c70563720d848dfc233669e1206d684b483139d4deb0c24f1dabd",
+        "untracked_source_sha256": {
+          ".config/nextest.toml": "b8bdf8fce8b6ab228e9668b45e1293eb8016ea94e21a7a477e450f0cc254dfca",
+          "crates/autoeq-cli/src/bin/autoeq-download-speakers.rs": "9d61699d58d33ed402b9b7588a216219442e704dc1d605896bc6be6c1a9c840d",
+          "crates/autoeq-cli/src/bin/autoeq.rs": "82aac522405dbac5a2342ff8281918d2c03d747688558dc54c8e5304e23a0686",
+          "crates/autoeq-cli/src/bin/benchmark-autoeq-speaker.rs": "1bd5d819b9d0134aafa739a9aca42653ffbfc4a13386f85a7e2d2521e3c10df4",
+          "crates/autoeq-cli/tests/autoeq_golden_tests.rs": "44fb482d1b2f094fa59fa4bdf75ecb0d95e038eac7ba088322dfea1cf8935176",
+          "crates/autoeq-cli/tests/autoeq_integration_test.rs": "b615303fd6c779058255d647988d8293d0d8722af9d1afa223c13ea16418df50",
+          "crates/autoeq-cli/tests/cli_de_parameters.rs": "4fce413d1bd4ed9b7132273897168e7cbfaaead9e3299288f54a8e715ddcb9d7",
+          "crates/autoeq-cli/tests/common/binary_runner.rs": "f7dc857ab5774f2141ef6ee6ad71f30c7f2136839f6e805f2f8b17ae49174469",
+          "crates/autoeq-cli/tests/common/mod.rs": "b6dd5d6a297a3574e107bdc44a8e9e86c2f5c77a8001fed40b93432df1957f1e",
+          "crates/autoeq-cli/tests/peq_model_bounds.rs": "6ccfb0632becbfacaebda318cf8ee230ae601944e26ad281f5b204baed4c9299",
+          "crates/autoeq-cli/tests/product_renderer_capabilities.rs": "449d676d0c0f0d85f20d49cb699f0484b4be2799dc4c7e2f521796af66f4b0f5",
+          "crates/autoeq-cli/tests/property_tests.rs": "ffa7ed15d99bf9f3c4db66a8d4b0c19991dd0a5bf659a43cd0ab3ae8702dc4e5",
+          "crates/autoeq-cli/tests/public_api_workflows.rs": "44f0373c3b4e29d232fc1dfa713a277680cae7bfea1ec6b1e0b75556fce9b7ec",
+          "crates/autoeq-cli/tests/test_free_filters.rs": "8afaf4cd31e012a7ac6577d5b726f46b42a553b39de498b65d4102df079af6ab",
+          "crates/autoeq-cli/tests/test_mh_callback.rs": "51af4228d151f5cf48359e17ecc2a7b4d85dced1eb3c1c72bf19f14c5bb4295e",
+          "crates/autoeq-fir/tests/fir_tests.rs": "8f0d3a4302f5e82c60b75a360f0bbf78b5770e6ecb015b19e13ce0074878db27",
+          "crates/autoeq-fir/tests/fir_tests/compute.rs": "9e7e32e62965644c24da9dd9f86340883916a106b2982e2f5a87bd078689d1a3",
+          "crates/autoeq-fir/tests/fir_tests/create.rs": "d5f26dfaf824f96f2f903e5bc899b644bf08474c5e021fd8607e22dbdedefd5b",
+          "crates/autoeq-fir/tests/fir_tests/misc.rs": "5051b05282f30f60b113b3712c80bfd88eddb3fc868bf5f529384d54e8729ec2",
+          "crates/autoeq-fir/tests/fir_tests/tests.rs": "57cd45ca7ede2d9ae20bf5ed1880d0a5a5f3b92f03de979e522df2c9bc26136c",
+          "crates/autoeq-measurements/examples/cea2034_score.rs": "a1f28e7287f6a41ddc90c25219ba5c14dc6fe12a42335bd885123aa4be1528dc",
+          "crates/autoeq-measurements/src/bin/migrate_provenance.rs": "fabb438637ca2cb0d6ce868613a09916efa857b14d0f38ce2ed208da4d18af18",
+          "crates/autoeq-objective/ARCHITECTURE.md": "92e63519d4ae5772346c342422c36c5df3cd237ed15b0d0a45a2c8e4efca36f1",
+          "crates/autoeq-objective/CHANGELOG.md": "1b894fd5b0bd9c55eb6844995419e17e4054fb486103ee8b9fd8966f6e8330af",
+          "crates/autoeq-objective/Cargo.toml": "59f92a31a4aba1c707741f53ff8b2bf4a02ac2e940eabb728bf9029529cc14f5",
+          "crates/autoeq-objective/README.md": "0a5110386d72aaec664df1a60803ea93f59b283a0fa2c509cb5e8623375c0a85",
+          "crates/autoeq-objective/benches/fixtures/mod.rs": "0d1f28fb1defb98f00bb5691b0bd8a376d138a2a2943b6f87df4309918b8f98b",
+          "crates/autoeq-objective/benches/objective_hot_path.rs": "225a659b14360a31d79df57468d0e769bec06dd2df6c7678a03ffd1a163ca605",
+          "crates/autoeq-objective/examples/headphone_loss_demo.rs": "f9de1b5e8800dceb4e963582c6439d92596894339f8aa37f040440da87d8a750",
+          "crates/autoeq-objective/examples/headphone_loss_validation.rs": "f3ce6847220a4cc5771639150c1da7f4dbc817612d76b0cccc046b509f58d700",
+          "crates/autoeq-objective/src/constraints/ceiling.rs": "fd19f5265ad6e11eeb4389808a11973d5a7eeaf95baedb254ac398ca1739034e",
+          "crates/autoeq-objective/src/constraints/crossover_monotonicity.rs": "7aff576e6c0599e27cd2953b40921a90232a5cdbc74a37a5208c17f5b4f7e246",
+          "crates/autoeq-objective/src/constraints/min_gain.rs": "3792ad904120a4036e5d8bb02a05aff87759c70e34309e7f2d9c5c8a6c4cffe8",
+          "crates/autoeq-objective/src/constraints/min_spacing.rs": "e8e7acf9dda1af2c937fec513c473c8dfe6bd272609ce4ec73d8ddd14fd9438f",
+          "crates/autoeq-objective/src/constraints/mod.rs": "8e3694dc997644c8ba34cd2911a77d9f62b5d77a6ba31cacb2b034fdbbe448a9",
+          "crates/autoeq-objective/src/constraints/spacing_projection.rs": "a5a758af3e6ab34d05c484c14dab31cf93d86c5deed1b0f27912d9d8c2a93798",
+          "crates/autoeq-objective/src/lib.rs": "4efbed85a5e996386aac9b1a7716c30172f836ef3bc9654d6e0be2bfda5c5696",
+          "crates/autoeq-objective/src/loss.rs": "534026fdd577c2dd2fa83a85cbb9797eb657c4fa20e3399cbeae73610f6b9256",
+          "crates/autoeq-objective/src/loss/asymmetric.rs": "cf0075e541c1058c87cce70bb4a24bdb6ca874dfe1c6bffc1f2c0f24665081e9",
+          "crates/autoeq-objective/src/loss/bass_boost.rs": "4f1f47b33147fddb909801da40bea8ba7bdc3319fe703e8def2533492329b158",
+          "crates/autoeq-objective/src/loss/drivers.rs": "950fc7210b5f7ae89a54510e882ff8488fbf403f099d43599b71444741c75ce0",
+          "crates/autoeq-objective/src/loss/drivers/build.rs": "17b26437316db95c155521e76de273c0c3e4f07efc403007c1e255bb567bca1e",
+          "crates/autoeq-objective/src/loss/drivers/compute.rs": "e97971332ed23e15b8123fe10797c8b5f49d4ecadbd78980616ed4f0faffde99",
+          "crates/autoeq-objective/src/loss/drivers/crossover_type.rs": "8327b7b7dac1b4e26a429bd2bc4f5fba8272839d487231b1856321dc2871ad75",
+          "crates/autoeq-objective/src/loss/drivers/driver_measurement.rs": "9aebd3062179211a0a955b06b565a7b65574bdfc0d5f944573d730ee60464f85",
+          "crates/autoeq-objective/src/loss/drivers/drivers_loss_data.rs": "58bae6ba38c819e3bf5d6b6b4025d7e7e3f5c29ccd6cc94bde14211064898f51",
+          "crates/autoeq-objective/src/loss/drivers/misc.rs": "d4e30f29d4d4a6d7c8aad814512016c27caf1b57c03de1577e2b67f759e1d6a9",
+          "crates/autoeq-objective/src/loss/enhanced_weights.rs": "84553cec272ac09794759be37322a33eef324b4195b9f35779e9a0b3189a08e5",
+          "crates/autoeq-objective/src/loss/epa/bark.rs": "e99151c5c27c79a7e1741069e1545e029f09bb727765ba888f2d454e78ff60da",
+          "crates/autoeq-objective/src/loss/epa/loudness.rs": "06e70a00c51feb6c993839c54c85117a0d65ce82e368f87a10eca9eb60205798",
+          "crates/autoeq-objective/src/loss/epa/mod.rs": "ffb3d950193a566342c8eb5970cbde2c95dfb8d89e1c60754f70e12994778572",
+          "crates/autoeq-objective/src/loss/epa/roughness.rs": "2080602bb260f83dc12a36f64596eb4b2b360113fdf300bd4e7dc87d0a69ecfb",
+          "crates/autoeq-objective/src/loss/epa/score.rs": "43a007c9c0503e473c646c491a46805bbe37b70c779c1f6d87832ca07d4442ad",
+          "crates/autoeq-objective/src/loss/epa/score/compute.rs": "c8394509203b36c975c115bd975fd41da841d16ed9a29b29697c422e2e9fd382",
+          "crates/autoeq-objective/src/loss/epa/score/db.rs": "2bfde04076c823ae6113c21e983fec48404c0d109b33439b310ed66da97f6561",
+          "crates/autoeq-objective/src/loss/epa/score/default.rs": "efd170b3fbece6e62696d9123629b00273f890bd400660db108b9364d7f8eae9",
+          "crates/autoeq-objective/src/loss/epa/score/epa.rs": "5b309782ad0ea72c402c95b5ba49d82c2071f264c46231a8e5637e8e490fae86",
+          "crates/autoeq-objective/src/loss/epa/score/epa_config.rs": "22b684fafb2d6a814a938406df3b7e9eb4051c4e808d3c737e5d41fa019b7a09",
+          "crates/autoeq-objective/src/loss/epa/score/level_matching.rs": "160913497090c71cee6333d5376e0cf4a3993ce6f332fea92e345315ebddc926",
+          "crates/autoeq-objective/src/loss/epa/score/misc.rs": "efbf77d73d0ff11e84128441d1baefdac51bc236c6f72fa6730ab6f542cd7b5e",
+          "crates/autoeq-objective/src/loss/epa/score/temporal.rs": "5aeed4676ec62f53b643298231f66c233307ee5021843ce4870bd6bbb82f9bff",
+          "crates/autoeq-objective/src/loss/epa/score/temporal_masking_config.rs": "451691e43dd43c01a02933052797dfab82fc03df8f38019027cd21ddc2926b7a",
+          "crates/autoeq-objective/src/loss/epa/score/tests.rs": "87354bf9d8be0c6be40c26fac50af3ed22c1d249f1f1fe78385ae6c4be915f8c",
+          "crates/autoeq-objective/src/loss/epa/score/types.rs": "4b9c0b8aeb2c9416d88dfa993f3fcfbc34f293a4d66e3e65211c7ebc73026c40",
+          "crates/autoeq-objective/src/loss/epa/sharpness.rs": "d493a20cbeb8d50ac2efc31135262b0c8d3dc36b5ac21d043da3ebc3303c3252",
+          "crates/autoeq-objective/src/loss/flat.rs": "9e4f15952d11e0375641952d0aede53a4dd77192bbf4b4a7460739989ecf8766",
+          "crates/autoeq-objective/src/loss/headphone.rs": "0f5fd7fd71802ed2e127092d154a7bf0111b81595a5ff0679d2bc9834de619f2",
+          "crates/autoeq-objective/src/loss/joint_multisub.rs": "10d23a44ae3b0d541e23ea5f11b67d30ce6784b051dd8037f906e4a0945f173e",
+          "crates/autoeq-objective/src/loss/multisub.rs": "5def6a2a99c9d18ceb669571e01b32a6a4fe338537b925599c930404b3b66379",
+          "crates/autoeq-objective/src/loss/phase_aware.rs": "c003e2058d0c755be21e7dcf00e6723e846997a1335f4695caab446569bb94c5",
+          "crates/autoeq-objective/src/loss/slope.rs": "65548b9a3579d25689200bb2fef1f851fcd9bcfa50f19b47e7765e6c2c1fbd2c",
+          "crates/autoeq-objective/src/loss/speaker.rs": "bca66240671e3740c8f9403de62c7f882b892ea2f254841f1e7af64d5899dd4f",
+          "crates/autoeq-objective/src/loss/types.rs": "a12f004d3b9c5070f35583bfdb730d9daa6ae8895b8782e6b50453bd5dc2d607",
+          "crates/autoeq-objective/src/optim.rs": "800e407a9bdf4b55c9f9dd65d5876c7785eaecc590887064296f0d5e45182348",
+          "crates/autoeq-objective/src/optim/clamp.rs": "4d6b876870a4be1264f13dd8c8ef00b29309ee43e4d27b7d1cdd275610858692",
+          "crates/autoeq-objective/src/optim/compute.rs": "52e8f7fdc17c4835cb19fa4d652e1ec595341089fb29055f8acdd1a86705a390",
+          "crates/autoeq-objective/src/optim/loss/context.rs": "ac1cb9c31498da7fd752cfd889e75e718b8895b1d7efe44a8415f54a82883819",
+          "crates/autoeq-objective/src/optim/loss/mod.rs": "1edc3bd5d459ba3f6c70a43c416f908a7fd7a9fd3d663a8a25318dc05fb42267",
+          "crates/autoeq-objective/src/optim/loss/strategies/asymmetric.rs": "5e349052cd6a7557dcef2998ba0ef0372935ac2ffa256ba65bf72fd632449a47",
+          "crates/autoeq-objective/src/optim/loss/strategies/drivers.rs": "518afa3ed38d5a34cf0e14a9b3d16b60c9f23cef8cf76b66485b3e0ff3c331d0",
+          "crates/autoeq-objective/src/optim/loss/strategies/epa.rs": "27aaac42ca36acb0a2df63e34db6f0a4d372823ccc9ed9b159903ae209307b84",
+          "crates/autoeq-objective/src/optim/loss/strategies/flat.rs": "25dd5249a6cb48539df0fb0208025314bcd202c0a0dbb2289e52b9cd59e77b10",
+          "crates/autoeq-objective/src/optim/loss/strategies/mod.rs": "22c51ddbc84e7b187bb8bfa937604d70a1d086ab2fb1e2138937ba359f3e927a",
+          "crates/autoeq-objective/src/optim/loss/strategies/score.rs": "ebd8c594b8a57ec0c31b61925b740cd945bd022e93212b6757eae1a8012ad92d",
+          "crates/autoeq-objective/src/optim/matched_resolution.rs": "c1309297adb90e76e594c297632d2ca0f3413ff894b5e38b5ae127e74f8c4d23",
+          "crates/autoeq-objective/src/optim/misc.rs": "ce4fa1075fdfd177dcea1c6b4f24804c30b35d957afa5e78a04413284e776cac",
+          "crates/autoeq-objective/src/optim/objective_data.rs": "1a120ac4934da3cbf97c6206d30ecf53f8344463ddb1ce076061092f801cd737",
+          "crates/autoeq-objective/src/optim/objective_data_builder.rs": "71adfd29c2b24f1d1facdea917684217e1961a0dd5b9f999891b80cb38cdc2c6",
+          "crates/autoeq-objective/src/optim/prepared_objective.rs": "565b46adf1301014f41eba75172bc0527ffde7c7397185320267455d0b98c22c",
+          "crates/autoeq-objective/src/optim/resolution_guard.rs": "93f15fe13b407ba0c02b200dd9f91fe06ef753c1da3f49e73539b180962e8210",
+          "crates/autoeq-objective/src/optim/run_control.rs": "5c7d949a1498db162d37c2e03b88b62db92d6b67920b802166b9d95b1e752330",
+          "crates/autoeq-objective/src/optim/types.rs": "38eb25f9b423d3e1a576b0bf17018e710e5b3440671a34b0519136ee6be9d466",
+          "crates/autoeq-objective/src/penalty_mode.rs": "38621844a36c36c1709bc45189ce3b51b46e8898d6beadc418f7e9249cbf24d5",
+          "crates/autoeq-objective/src/roomeq_types.rs": "ba5e89b02bf265ab6283025874b99402a0342a3ad491132157e4740f0aa79d5f",
+          "crates/autoeq-objective/src/smoothness_penalty_config.rs": "8aa48f07f50acaa7ca730c53ab30a32ef0176b1a9468a9d9dfe093d1cc618806",
+          "crates/autoeq-optim-types/ARCHITECTURE.md": "63e6ba55c25f1c551433de8b192b2fe66b7d739ca885dba6a7d126308b939ce1",
+          "crates/autoeq-optim-types/CHANGELOG.md": "26e02d0cf21cbb8923bc280664a32067614437e49b922c7eb8d3fd5a1e3c481e",
+          "crates/autoeq-optim-types/Cargo.toml": "a54b66a0f833e13343d83afe741be25e4c164d1c555f6783d9d173df6b1c634a",
+          "crates/autoeq-optim-types/README.md": "e6c005487f029351e420da239b73cd768042e0e53c17499009cfe9e22aa3a372",
+          "crates/autoeq-optim-types/src/evidence.rs": "1f858c4f6fac7814443e4146d771ca0e9a1f04f353bc4ef3f8f575ff0136348b",
+          "crates/autoeq-optim-types/src/lib.rs": "eaad743d9986a9ac011d4e38847132546bc195c893def520b61143f5c2c226ab",
+          "crates/autoeq-optim-types/src/reference_registry.rs": "5a1e6ce383d220a5e03cddbbd10094210284eb4175b9ba552bff8cab473d8b14",
+          "crates/autoeq-optim/benches/solver_generation.rs": "72e8b7e226c0852498eaa02e6a15c400db85444c4634d55366c7d267ef9bdf3d",
+          "crates/autoeq-qa/tests/oracle_analysis_quality.rs": "aee0ad799a1cc5f05dd119f8ed0f8493f234feae476bfee991011ffd44b721a9",
+          "crates/autoeq-qa/tests/oracle_core.rs": "aee096ffc0796fcb1ce46009aa9b0a7646dd652cd88918b7dd403ad503e3a622",
+          "crates/autoeq-qa/tests/oracle_engine.rs": "db0ecbca46be1412d111430fcac69ce814334da24c3b61c6cca597d3c7dbaa07",
+          "crates/autoeq-qa/tests/oracle_export.rs": "1518147ce37f303e0933f23fbefc72fb0ebe298beda1ac237214dadf3c422ac7",
+          "crates/autoeq-qa/tests/oracle_optim.rs": "0998a7ffb23b847fa8f8a1ba35a0176acd71bc1625fc51b0af9bf0b3f0385106",
+          "crates/autoeq-qa/tests/oracle_workflow.rs": "4e00edecf75c35eaa822f801361c56465f84e4e6572b9eb21090515fbd720baa",
+          "crates/roomeq-analysis/tests/spatial_robustness_bootstrap_test.rs": "bb65f0ab4c8e3614eccc1e36ebf4c4db0d83ebcc9449b6aba09a9e24b4f41448",
+          "crates/roomeq-cli/schemas/input_schema.json": "77d743c1a0b03aed34584a62f38cb5b8003d2a43e9edb6827bc0a096673d55b7",
+          "crates/roomeq-cli/schemas/output_schema.json": "c10c0abae0208a8f54f3a6156ac974c37d25ac149a44a7238cd1295f04e15795",
+          "crates/roomeq-cli/schemas/test_config_2_1.json": "710cb2bc518f07cf811dfee6ce9444bddc4c56455e01ae9990dd756097f0be11",
+          "crates/roomeq-cli/schemas/validate_schema.py": "2234d01d5ac11a27b68ea8621d3a8996107385cf1e42a7f936dab10bb5f80fab",
+          "crates/roomeq-cli/src/bin/convert-recording.rs": "b1c171bf6aafa36571aeb4af4f6f5a32d032ff2f66775b481cec867593ee2bd5",
+          "crates/roomeq-cli/src/bin/roomeq.rs": "4c40b991649a0a2da2d0cbf5a2a42aa136f5fe4167212d032514e361406c78ad",
+          "crates/roomeq-cli/tests/broadband_matching_test.rs": "8b62adb618e06681ff0ce63f65c06043c344666a4b4f32531a029988a1ae0eb1",
+          "crates/roomeq-cli/tests/multi_measurement_test.rs": "e6147ce70f48f4629991cc12ff28612f4d49e2791bba36fa30431c9280ffed31",
+          "crates/roomeq-cli/tests/roomeq_capture_verification.rs": "31ede0982279be5ef73b1d48e8c423ec66f43ead32c880d493556ba14346d620",
+          "crates/roomeq-cli/tests/roomeq_integration_test.rs": "8fff762dd3cef24282e2ad0d0aa1075d7ca32b34d6d6015e1014c305a88c24b9",
+          "crates/roomeq-dsp/ARCHITECTURE.md": "e886e4d42e4dc789af6fa380f100ec5e297ecf2df056b9224e287775fa438493",
+          "crates/roomeq-dsp/CHANGELOG.md": "b72ec189b4502ef9a3f182b542aeed203080782dd9f4da4afe2415f3b70e2b92",
+          "crates/roomeq-dsp/Cargo.toml": "4db0ee653c48a349c82507d2b4797bfa09e731a930c3fbbb0c2b6d166d93ff91",
+          "crates/roomeq-dsp/README.md": "078174274dad6f4fc832d94ddca6406c78201e2a1c604b724a99ff23fe6e78d1",
+          "crates/roomeq-dsp/src/fir.rs": "c2d46c3655792a24191a187035285fbdee2395f4d94887c8a3a648b212068f0e",
+          "crates/roomeq-dsp/src/lib.rs": "86bc60ad7279038b7a8b8831816c78724aec1c1e1e2f785c3ba61b229ed0766a",
+          "crates/roomeq-dsp/src/output.rs": "f0be8ec27c7f1ebd7ecc2cbf9763abb5073f650f2d5548a81abcab5f8086d3a2",
+          "crates/roomeq-dsp/src/output/biquad.rs": "d854a832fee46b201633f74ad0f2a150ef799e7ceca000ed84e5a5009d1bccc4",
+          "crates/roomeq-dsp/src/output/create.rs": "60a8a0b4f66cd6ebf8c1ece230dc22769f2c906742704b3a6966efb55f5d5f35",
+          "crates/roomeq-dsp/src/physical_routing.rs": "2bb71ab2c97826a6cd6a9beef5edbe892cecac79792c20cc5cb4f78e436adca9",
+          "crates/roomeq-engine/src/output/mixed_phase_transport.rs": "c8ea0af2f20ce3af8c60a14267c4a7d2d72d3c957b561f810ea237fe470a4dc0",
+          "crates/roomeq-engine/src/physical_routing_integration_tests.rs": "d71e816326b25c117b10febde7f4490e5477b7fc11c625ae25cb09217e13a85f",
+          "crates/roomeq-engine/tests/multiseat_continuous_area_test.rs": "7f35feabd40e276b17e1a698349d0b6f91541c6a9e260fb76bd921a3907181cc",
+          "crates/roomeq-model/tests/channel_matching_defaults_test.rs": "9e61fef166182d8b7c2c4ee1c232eb19a5c613de6a63d117864d84d765be2d04",
+          "crates/roomeq-model/tests/option_precedence_test.rs": "443f6313dfc423af8896422e19c41eedcaa5877adde191aa191a681bd1622e35",
+          "crates/roomeq-model/tests/validator_warnings_test.rs": "4adcb8d8b2404f5795ff9183368db7966bd901aa94346fea8acac28fcb721a6f",
+          "crates/roomeq-qa/src/bin/roomeq-fuzzer.rs": "5f9842b882e122e6c03508e40005ce9b24719e9a3d9a2e8e0f09bc22f8994e09",
+          "crates/roomeq-qa/src/bin/roomeq-qa-acoustic.rs": "31c80c686a54f3c5aac4c597d380dfedda787ce76cfae6fbd13f6a826d705280",
+          "crates/roomeq-qa/src/bin/roomeq-qa-coverage.rs": "8782f54898a66ff47e769058d3ac5e5483ff9a5d9ae5597931bf39baba267bb1",
+          "crates/roomeq-qa/src/bin/roomeq-qa-features.rs": "53cc17c95c1e54117aa9b10896486ed1e340ef3d85e5ba7c5f3f7a4e7440e35e",
+          "crates/roomeq-qa/src/bin/roomeq-qa-quality.rs": "24d80aa3d4ace5642cca8d6f6630766ce4e0972a01a665e36c3d9e6518e2e9cf",
+          "crates/roomeq-qa/src/bin/roomeq-qa-synthetic.rs": "3d78f57121fc6135bd23cecf27dc0ac331a511983e99236bab7f720306eae5f0",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test.rs": "97bdbb376a7219bc8774ad0e41495b3436189debcb3ab078fe5976e9ef0c1a64",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/consts.rs": "9f862085c516c8ca2b3f28f4b43953477e6f2ebbcec4926e75640a8211051784",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/misc.rs": "5fac6c895e6f1118164e601cb994d4d2cd4edbedb8dbda78b5cc4dec692eb791",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/run.rs": "1dab2da9a5f939942b34ae947ef7616fe21821ca446da49db1ed14bd533c7cb0",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/types.rs": "69e184a114cde74a8d3dd5ecc173d22fe6f98eb039da6bdec2a52a7d81e9b004",
+          "crates/roomeq-workflow/tests/realized_transfer_conformance.rs": "479e7772b530f20d30cb1eee26e77cc0d42efa4bbd2cf5faebbeec896a616739",
+          "crates/roomeq-workflow/tests/roomeq_admission_correction.rs": "d2450455be8f42a0ee7728ece410a0f07a09c08b9af1d988e63ed5063ad51ecc",
+          "crates/roomeq-workflow/tests/roomeq_pipeline_test.rs": "876bd39622de5b1247f5311110187594e9d2486ac428ff03e515d28924805714",
+          "crates/roomeq-workflow/tests/roomeq_supporting_source.rs": "ecd403ef0e4132266431585920a8edd78b6eff09f80fe0c9068725446f7803a8",
+          "crates/roomeq-workflow/tests/system_config_test.rs": "c451658535a3ef5592e690dc11fa3e9021719e5dcf89138b2ffe69acf49c2846",
+          "crates/roomeq-workflow/tests/workflow_feature_parity_test.rs": "022402c9ab40462ab47b50d41e30685863211212cdb2a2d5057f29aa7d736647",
+          "crates/roomeq-workflow/tests/workflow_test.rs": "a673a111a9338e0f3b14bbc2085c8efd290495812ae6ce209159e7d6e1eef7d9",
+          "docs/baselines/refactor-20261025/autoeq-qa-test-identity-map.tsv": "880456eae50a94b8b2989adabb5de42e033324105169adac46ddac55e1c4f044",
+          "docs/baselines/refactor-20261025/benchmark-ownership-proof.json": "df2177d23cc515cccd3f4ab5c2a4e6b9aeef4ba3de225cea30d037d154ba7bed",
+          "docs/baselines/refactor-20261025/cli-after-product-move.json": "0b0ac626a3ad1d65fdde9f251cb7ff34b0a8290770e82df8eabb99b562197ad5",
+          "docs/baselines/refactor-20261025/cli-before-product-move.json": "0b0ac626a3ad1d65fdde9f251cb7ff34b0a8290770e82df8eabb99b562197ad5",
+          "docs/baselines/refactor-20261025/cli-freeze.txt": "fccb987313a88b7e457f23c8e4bf283879cece8502eea8162d145201cd9c79f7",
+          "docs/baselines/refactor-20261025/cli-tests-before-product-move.json": "fd7fb54fef1667b4bc2131e03abcae114c9547aa15e7e3f59f8bbcda197e23dd",
+          "docs/baselines/refactor-20261025/consumer-metadata-after-retirement.json": "c4c5d2d7cd386cfa5d84a87f3679838e3ca0b6394dbc2e825b1a9d19c9855631",
+          "docs/baselines/refactor-20261025/inventory.json": "26226251ea2b1a7dd917c4dda55d812f0f479e48576ff2775d3bb2408633cce8",
+          "docs/baselines/refactor-20261025/native-tests-after-facade-retirement.json": "1ed2e5659513a3bb9592f6f8da007f00b520c79660839819a56cf294413e9995",
+          "docs/baselines/refactor-20261025/native-tests-after-ownership-move.json": "fbb0bac3bc5e69316a6dd94f7bc1dbb657d99628d73ff1bbbab72f3ac89f4c1a",
+          "docs/baselines/refactor-20261025/nextest-autoeq-qa-after.json": "2838fd4b01977c6010e13331cf88ad25c638f73776aa5aa74cc412f3d8d6bc36",
+          "docs/baselines/refactor-20261025/nextest-autoeq-qa-before.json": "264e823797d93d7a06898268d5bad8ef4b9743413f9b0ced14840d6b41ad898f",
+          "docs/baselines/refactor-20261025/root-test-identity-map.tsv": "22c691502e0609afd02a941c37a9e24ef04333454733d6fb5ee6cb596c4175d2",
+          "docs/baselines/refactor-20261025/root-tests-before-facade-move.json": "e873d31322cc5a462327a863d0db5b7935b97cfb24c0f33814fd7349985fe1b6",
+          "docs/baselines/refactor-20261025/sotf-validation-fixture-overlay.patch": "4937044aef5d6a05091f450a9b68fe6b94dd76beb12cd843bd7c28e5ce61576b",
+          "docs/baselines/refactor-20261025/test-target-ownership.json": "68d2d5b506c264cb72b59628b325ef55c330d43a0b412cca86626c990fc3d507",
+          "scripts/baseline_inventory.py": "8796b2931fe40331e710678f5e3bc697ca4583d77ce7ce3b29e72fd10a1b70a6",
+          "scripts/bench_build.py": "e461738049bca32e890efe896c3a3289a32d012069d3bd783000710c9f422e96",
+          "scripts/build_bench/__init__.py": "197e8d9ea96ec92b6ba3aa589988aadca35163c7e9191055121ca7a9bd357e53",
+          "scripts/build_bench/execution.py": "789e33b8ac754b123883cec9768d6e0d6413c66ce9f4c034f65e27242498511d",
+          "scripts/build_bench/linker.py": "0855f694537dc39d7f37e045ae5452d1c771556f9baa98b92fb9a590c52ec059",
+          "scripts/build_bench/plans.py": "fc19238e61f68cf5594f308055285dd5ce17ee94205966e8e5a06079761d4547",
+          "scripts/build_bench/probes.py": "3575b1442554cd3002efa1e6eaa921011a428dddb14e328df6643f37f46bf8ca",
+          "scripts/build_bench/snapshots.py": "fd0b442d2abe8845a7521c8c0a690844df2efb1b3d681dece8ec7a03d58d4e04",
+          "scripts/changed_packages.py": "e1b645fff14be5464321f22d080944b452e3702c855bf31580356a836c668022",
+          "scripts/check_test_identity_migration.py": "959b9b85b93d2dd948220853026c7838bd9c43c7a783f207d8870cf88c3ac202",
+          "scripts/freeze_cli_contract.py": "1f930c8486123d5d3ad0f93673aea375c534b0143cb4bef19fbcdda21b67373f",
+          "scripts/test_bench_build.py": "65289ae95feeeb5e5f18e99155ff7e04ddc57d434fadacfe1fd7e2ff1bcdd3c4",
+          "scripts/test_changed_packages.py": "9986941417cb72079a6ea956e81c4249ada32c89ec74975f4ba846e30ec33b86",
+          "scripts/test_check_test_identity_migration.py": "20935520cf299733e3131752dee3c47b2d0db2db85e1787b661793af6d0753af"
+        },
+        "lockfile_sha256": "3e667a5d1e8b05859682fc492ea918d94df3dbd0560e6ed80d0663e2c38bf4f1"
+      },
+      "snapshot_identity": {
+        "revision": "5aa31fc5afafaefaed3ca97e71751ac046e46a5b",
+        "tracked_patch_sha256": "d9435f6c514fb321e757e066ad485d80bb8951128497d5a0782617298b584657",
+        "untracked_source_sha256": {
+          ".config/nextest.toml": "b8bdf8fce8b6ab228e9668b45e1293eb8016ea94e21a7a477e450f0cc254dfca",
+          "crates/autoeq-cli/src/bin/autoeq-download-speakers.rs": "9d61699d58d33ed402b9b7588a216219442e704dc1d605896bc6be6c1a9c840d",
+          "crates/autoeq-cli/src/bin/autoeq.rs": "82aac522405dbac5a2342ff8281918d2c03d747688558dc54c8e5304e23a0686",
+          "crates/autoeq-cli/src/bin/benchmark-autoeq-speaker.rs": "1bd5d819b9d0134aafa739a9aca42653ffbfc4a13386f85a7e2d2521e3c10df4",
+          "crates/autoeq-cli/tests/autoeq_golden_tests.rs": "44fb482d1b2f094fa59fa4bdf75ecb0d95e038eac7ba088322dfea1cf8935176",
+          "crates/autoeq-cli/tests/autoeq_integration_test.rs": "b615303fd6c779058255d647988d8293d0d8722af9d1afa223c13ea16418df50",
+          "crates/autoeq-cli/tests/cli_de_parameters.rs": "4fce413d1bd4ed9b7132273897168e7cbfaaead9e3299288f54a8e715ddcb9d7",
+          "crates/autoeq-cli/tests/common/binary_runner.rs": "f7dc857ab5774f2141ef6ee6ad71f30c7f2136839f6e805f2f8b17ae49174469",
+          "crates/autoeq-cli/tests/common/mod.rs": "b6dd5d6a297a3574e107bdc44a8e9e86c2f5c77a8001fed40b93432df1957f1e",
+          "crates/autoeq-cli/tests/peq_model_bounds.rs": "6ccfb0632becbfacaebda318cf8ee230ae601944e26ad281f5b204baed4c9299",
+          "crates/autoeq-cli/tests/product_renderer_capabilities.rs": "449d676d0c0f0d85f20d49cb699f0484b4be2799dc4c7e2f521796af66f4b0f5",
+          "crates/autoeq-cli/tests/property_tests.rs": "ffa7ed15d99bf9f3c4db66a8d4b0c19991dd0a5bf659a43cd0ab3ae8702dc4e5",
+          "crates/autoeq-cli/tests/public_api_workflows.rs": "44f0373c3b4e29d232fc1dfa713a277680cae7bfea1ec6b1e0b75556fce9b7ec",
+          "crates/autoeq-cli/tests/test_free_filters.rs": "8afaf4cd31e012a7ac6577d5b726f46b42a553b39de498b65d4102df079af6ab",
+          "crates/autoeq-cli/tests/test_mh_callback.rs": "51af4228d151f5cf48359e17ecc2a7b4d85dced1eb3c1c72bf19f14c5bb4295e",
+          "crates/autoeq-fir/tests/fir_tests.rs": "8f0d3a4302f5e82c60b75a360f0bbf78b5770e6ecb015b19e13ce0074878db27",
+          "crates/autoeq-fir/tests/fir_tests/compute.rs": "9e7e32e62965644c24da9dd9f86340883916a106b2982e2f5a87bd078689d1a3",
+          "crates/autoeq-fir/tests/fir_tests/create.rs": "d5f26dfaf824f96f2f903e5bc899b644bf08474c5e021fd8607e22dbdedefd5b",
+          "crates/autoeq-fir/tests/fir_tests/misc.rs": "5051b05282f30f60b113b3712c80bfd88eddb3fc868bf5f529384d54e8729ec2",
+          "crates/autoeq-fir/tests/fir_tests/tests.rs": "57cd45ca7ede2d9ae20bf5ed1880d0a5a5f3b92f03de979e522df2c9bc26136c",
+          "crates/autoeq-measurements/examples/cea2034_score.rs": "a1f28e7287f6a41ddc90c25219ba5c14dc6fe12a42335bd885123aa4be1528dc",
+          "crates/autoeq-measurements/src/bin/migrate_provenance.rs": "fabb438637ca2cb0d6ce868613a09916efa857b14d0f38ce2ed208da4d18af18",
+          "crates/autoeq-objective/ARCHITECTURE.md": "92e63519d4ae5772346c342422c36c5df3cd237ed15b0d0a45a2c8e4efca36f1",
+          "crates/autoeq-objective/CHANGELOG.md": "1b894fd5b0bd9c55eb6844995419e17e4054fb486103ee8b9fd8966f6e8330af",
+          "crates/autoeq-objective/Cargo.toml": "59f92a31a4aba1c707741f53ff8b2bf4a02ac2e940eabb728bf9029529cc14f5",
+          "crates/autoeq-objective/README.md": "0a5110386d72aaec664df1a60803ea93f59b283a0fa2c509cb5e8623375c0a85",
+          "crates/autoeq-objective/benches/fixtures/mod.rs": "0d1f28fb1defb98f00bb5691b0bd8a376d138a2a2943b6f87df4309918b8f98b",
+          "crates/autoeq-objective/benches/objective_hot_path.rs": "225a659b14360a31d79df57468d0e769bec06dd2df6c7678a03ffd1a163ca605",
+          "crates/autoeq-objective/examples/headphone_loss_demo.rs": "f9de1b5e8800dceb4e963582c6439d92596894339f8aa37f040440da87d8a750",
+          "crates/autoeq-objective/examples/headphone_loss_validation.rs": "f3ce6847220a4cc5771639150c1da7f4dbc817612d76b0cccc046b509f58d700",
+          "crates/autoeq-objective/src/constraints/ceiling.rs": "fd19f5265ad6e11eeb4389808a11973d5a7eeaf95baedb254ac398ca1739034e",
+          "crates/autoeq-objective/src/constraints/crossover_monotonicity.rs": "7aff576e6c0599e27cd2953b40921a90232a5cdbc74a37a5208c17f5b4f7e246",
+          "crates/autoeq-objective/src/constraints/min_gain.rs": "3792ad904120a4036e5d8bb02a05aff87759c70e34309e7f2d9c5c8a6c4cffe8",
+          "crates/autoeq-objective/src/constraints/min_spacing.rs": "e8e7acf9dda1af2c937fec513c473c8dfe6bd272609ce4ec73d8ddd14fd9438f",
+          "crates/autoeq-objective/src/constraints/mod.rs": "8e3694dc997644c8ba34cd2911a77d9f62b5d77a6ba31cacb2b034fdbbe448a9",
+          "crates/autoeq-objective/src/constraints/spacing_projection.rs": "a5a758af3e6ab34d05c484c14dab31cf93d86c5deed1b0f27912d9d8c2a93798",
+          "crates/autoeq-objective/src/lib.rs": "4efbed85a5e996386aac9b1a7716c30172f836ef3bc9654d6e0be2bfda5c5696",
+          "crates/autoeq-objective/src/loss.rs": "534026fdd577c2dd2fa83a85cbb9797eb657c4fa20e3399cbeae73610f6b9256",
+          "crates/autoeq-objective/src/loss/asymmetric.rs": "cf0075e541c1058c87cce70bb4a24bdb6ca874dfe1c6bffc1f2c0f24665081e9",
+          "crates/autoeq-objective/src/loss/bass_boost.rs": "4f1f47b33147fddb909801da40bea8ba7bdc3319fe703e8def2533492329b158",
+          "crates/autoeq-objective/src/loss/drivers.rs": "950fc7210b5f7ae89a54510e882ff8488fbf403f099d43599b71444741c75ce0",
+          "crates/autoeq-objective/src/loss/drivers/build.rs": "17b26437316db95c155521e76de273c0c3e4f07efc403007c1e255bb567bca1e",
+          "crates/autoeq-objective/src/loss/drivers/compute.rs": "e97971332ed23e15b8123fe10797c8b5f49d4ecadbd78980616ed4f0faffde99",
+          "crates/autoeq-objective/src/loss/drivers/crossover_type.rs": "8327b7b7dac1b4e26a429bd2bc4f5fba8272839d487231b1856321dc2871ad75",
+          "crates/autoeq-objective/src/loss/drivers/driver_measurement.rs": "9aebd3062179211a0a955b06b565a7b65574bdfc0d5f944573d730ee60464f85",
+          "crates/autoeq-objective/src/loss/drivers/drivers_loss_data.rs": "58bae6ba38c819e3bf5d6b6b4025d7e7e3f5c29ccd6cc94bde14211064898f51",
+          "crates/autoeq-objective/src/loss/drivers/misc.rs": "d4e30f29d4d4a6d7c8aad814512016c27caf1b57c03de1577e2b67f759e1d6a9",
+          "crates/autoeq-objective/src/loss/enhanced_weights.rs": "84553cec272ac09794759be37322a33eef324b4195b9f35779e9a0b3189a08e5",
+          "crates/autoeq-objective/src/loss/epa/bark.rs": "e99151c5c27c79a7e1741069e1545e029f09bb727765ba888f2d454e78ff60da",
+          "crates/autoeq-objective/src/loss/epa/loudness.rs": "06e70a00c51feb6c993839c54c85117a0d65ce82e368f87a10eca9eb60205798",
+          "crates/autoeq-objective/src/loss/epa/mod.rs": "ffb3d950193a566342c8eb5970cbde2c95dfb8d89e1c60754f70e12994778572",
+          "crates/autoeq-objective/src/loss/epa/roughness.rs": "2080602bb260f83dc12a36f64596eb4b2b360113fdf300bd4e7dc87d0a69ecfb",
+          "crates/autoeq-objective/src/loss/epa/score.rs": "43a007c9c0503e473c646c491a46805bbe37b70c779c1f6d87832ca07d4442ad",
+          "crates/autoeq-objective/src/loss/epa/score/compute.rs": "c8394509203b36c975c115bd975fd41da841d16ed9a29b29697c422e2e9fd382",
+          "crates/autoeq-objective/src/loss/epa/score/db.rs": "2bfde04076c823ae6113c21e983fec48404c0d109b33439b310ed66da97f6561",
+          "crates/autoeq-objective/src/loss/epa/score/default.rs": "efd170b3fbece6e62696d9123629b00273f890bd400660db108b9364d7f8eae9",
+          "crates/autoeq-objective/src/loss/epa/score/epa.rs": "5b309782ad0ea72c402c95b5ba49d82c2071f264c46231a8e5637e8e490fae86",
+          "crates/autoeq-objective/src/loss/epa/score/epa_config.rs": "22b684fafb2d6a814a938406df3b7e9eb4051c4e808d3c737e5d41fa019b7a09",
+          "crates/autoeq-objective/src/loss/epa/score/level_matching.rs": "160913497090c71cee6333d5376e0cf4a3993ce6f332fea92e345315ebddc926",
+          "crates/autoeq-objective/src/loss/epa/score/misc.rs": "efbf77d73d0ff11e84128441d1baefdac51bc236c6f72fa6730ab6f542cd7b5e",
+          "crates/autoeq-objective/src/loss/epa/score/temporal.rs": "5aeed4676ec62f53b643298231f66c233307ee5021843ce4870bd6bbb82f9bff",
+          "crates/autoeq-objective/src/loss/epa/score/temporal_masking_config.rs": "451691e43dd43c01a02933052797dfab82fc03df8f38019027cd21ddc2926b7a",
+          "crates/autoeq-objective/src/loss/epa/score/tests.rs": "87354bf9d8be0c6be40c26fac50af3ed22c1d249f1f1fe78385ae6c4be915f8c",
+          "crates/autoeq-objective/src/loss/epa/score/types.rs": "4b9c0b8aeb2c9416d88dfa993f3fcfbc34f293a4d66e3e65211c7ebc73026c40",
+          "crates/autoeq-objective/src/loss/epa/sharpness.rs": "d493a20cbeb8d50ac2efc31135262b0c8d3dc36b5ac21d043da3ebc3303c3252",
+          "crates/autoeq-objective/src/loss/flat.rs": "9e4f15952d11e0375641952d0aede53a4dd77192bbf4b4a7460739989ecf8766",
+          "crates/autoeq-objective/src/loss/headphone.rs": "0f5fd7fd71802ed2e127092d154a7bf0111b81595a5ff0679d2bc9834de619f2",
+          "crates/autoeq-objective/src/loss/joint_multisub.rs": "10d23a44ae3b0d541e23ea5f11b67d30ce6784b051dd8037f906e4a0945f173e",
+          "crates/autoeq-objective/src/loss/multisub.rs": "5def6a2a99c9d18ceb669571e01b32a6a4fe338537b925599c930404b3b66379",
+          "crates/autoeq-objective/src/loss/phase_aware.rs": "c003e2058d0c755be21e7dcf00e6723e846997a1335f4695caab446569bb94c5",
+          "crates/autoeq-objective/src/loss/slope.rs": "65548b9a3579d25689200bb2fef1f851fcd9bcfa50f19b47e7765e6c2c1fbd2c",
+          "crates/autoeq-objective/src/loss/speaker.rs": "bca66240671e3740c8f9403de62c7f882b892ea2f254841f1e7af64d5899dd4f",
+          "crates/autoeq-objective/src/loss/types.rs": "a12f004d3b9c5070f35583bfdb730d9daa6ae8895b8782e6b50453bd5dc2d607",
+          "crates/autoeq-objective/src/optim.rs": "800e407a9bdf4b55c9f9dd65d5876c7785eaecc590887064296f0d5e45182348",
+          "crates/autoeq-objective/src/optim/clamp.rs": "4d6b876870a4be1264f13dd8c8ef00b29309ee43e4d27b7d1cdd275610858692",
+          "crates/autoeq-objective/src/optim/compute.rs": "52e8f7fdc17c4835cb19fa4d652e1ec595341089fb29055f8acdd1a86705a390",
+          "crates/autoeq-objective/src/optim/loss/context.rs": "ac1cb9c31498da7fd752cfd889e75e718b8895b1d7efe44a8415f54a82883819",
+          "crates/autoeq-objective/src/optim/loss/mod.rs": "1edc3bd5d459ba3f6c70a43c416f908a7fd7a9fd3d663a8a25318dc05fb42267",
+          "crates/autoeq-objective/src/optim/loss/strategies/asymmetric.rs": "5e349052cd6a7557dcef2998ba0ef0372935ac2ffa256ba65bf72fd632449a47",
+          "crates/autoeq-objective/src/optim/loss/strategies/drivers.rs": "518afa3ed38d5a34cf0e14a9b3d16b60c9f23cef8cf76b66485b3e0ff3c331d0",
+          "crates/autoeq-objective/src/optim/loss/strategies/epa.rs": "27aaac42ca36acb0a2df63e34db6f0a4d372823ccc9ed9b159903ae209307b84",
+          "crates/autoeq-objective/src/optim/loss/strategies/flat.rs": "25dd5249a6cb48539df0fb0208025314bcd202c0a0dbb2289e52b9cd59e77b10",
+          "crates/autoeq-objective/src/optim/loss/strategies/mod.rs": "22c51ddbc84e7b187bb8bfa937604d70a1d086ab2fb1e2138937ba359f3e927a",
+          "crates/autoeq-objective/src/optim/loss/strategies/score.rs": "ebd8c594b8a57ec0c31b61925b740cd945bd022e93212b6757eae1a8012ad92d",
+          "crates/autoeq-objective/src/optim/matched_resolution.rs": "c1309297adb90e76e594c297632d2ca0f3413ff894b5e38b5ae127e74f8c4d23",
+          "crates/autoeq-objective/src/optim/misc.rs": "ce4fa1075fdfd177dcea1c6b4f24804c30b35d957afa5e78a04413284e776cac",
+          "crates/autoeq-objective/src/optim/objective_data.rs": "1a120ac4934da3cbf97c6206d30ecf53f8344463ddb1ce076061092f801cd737",
+          "crates/autoeq-objective/src/optim/objective_data_builder.rs": "71adfd29c2b24f1d1facdea917684217e1961a0dd5b9f999891b80cb38cdc2c6",
+          "crates/autoeq-objective/src/optim/prepared_objective.rs": "565b46adf1301014f41eba75172bc0527ffde7c7397185320267455d0b98c22c",
+          "crates/autoeq-objective/src/optim/resolution_guard.rs": "93f15fe13b407ba0c02b200dd9f91fe06ef753c1da3f49e73539b180962e8210",
+          "crates/autoeq-objective/src/optim/run_control.rs": "5c7d949a1498db162d37c2e03b88b62db92d6b67920b802166b9d95b1e752330",
+          "crates/autoeq-objective/src/optim/types.rs": "38eb25f9b423d3e1a576b0bf17018e710e5b3440671a34b0519136ee6be9d466",
+          "crates/autoeq-objective/src/penalty_mode.rs": "38621844a36c36c1709bc45189ce3b51b46e8898d6beadc418f7e9249cbf24d5",
+          "crates/autoeq-objective/src/roomeq_types.rs": "ba5e89b02bf265ab6283025874b99402a0342a3ad491132157e4740f0aa79d5f",
+          "crates/autoeq-objective/src/smoothness_penalty_config.rs": "8aa48f07f50acaa7ca730c53ab30a32ef0176b1a9468a9d9dfe093d1cc618806",
+          "crates/autoeq-optim-types/ARCHITECTURE.md": "63e6ba55c25f1c551433de8b192b2fe66b7d739ca885dba6a7d126308b939ce1",
+          "crates/autoeq-optim-types/CHANGELOG.md": "26e02d0cf21cbb8923bc280664a32067614437e49b922c7eb8d3fd5a1e3c481e",
+          "crates/autoeq-optim-types/Cargo.toml": "a54b66a0f833e13343d83afe741be25e4c164d1c555f6783d9d173df6b1c634a",
+          "crates/autoeq-optim-types/README.md": "e6c005487f029351e420da239b73cd768042e0e53c17499009cfe9e22aa3a372",
+          "crates/autoeq-optim-types/src/evidence.rs": "1f858c4f6fac7814443e4146d771ca0e9a1f04f353bc4ef3f8f575ff0136348b",
+          "crates/autoeq-optim-types/src/lib.rs": "eaad743d9986a9ac011d4e38847132546bc195c893def520b61143f5c2c226ab",
+          "crates/autoeq-optim-types/src/reference_registry.rs": "5a1e6ce383d220a5e03cddbbd10094210284eb4175b9ba552bff8cab473d8b14",
+          "crates/autoeq-optim/benches/solver_generation.rs": "72e8b7e226c0852498eaa02e6a15c400db85444c4634d55366c7d267ef9bdf3d",
+          "crates/autoeq-qa/tests/oracle_analysis_quality.rs": "aee0ad799a1cc5f05dd119f8ed0f8493f234feae476bfee991011ffd44b721a9",
+          "crates/autoeq-qa/tests/oracle_core.rs": "aee096ffc0796fcb1ce46009aa9b0a7646dd652cd88918b7dd403ad503e3a622",
+          "crates/autoeq-qa/tests/oracle_engine.rs": "db0ecbca46be1412d111430fcac69ce814334da24c3b61c6cca597d3c7dbaa07",
+          "crates/autoeq-qa/tests/oracle_export.rs": "1518147ce37f303e0933f23fbefc72fb0ebe298beda1ac237214dadf3c422ac7",
+          "crates/autoeq-qa/tests/oracle_optim.rs": "0998a7ffb23b847fa8f8a1ba35a0176acd71bc1625fc51b0af9bf0b3f0385106",
+          "crates/autoeq-qa/tests/oracle_workflow.rs": "4e00edecf75c35eaa822f801361c56465f84e4e6572b9eb21090515fbd720baa",
+          "crates/roomeq-analysis/tests/spatial_robustness_bootstrap_test.rs": "bb65f0ab4c8e3614eccc1e36ebf4c4db0d83ebcc9449b6aba09a9e24b4f41448",
+          "crates/roomeq-cli/schemas/input_schema.json": "77d743c1a0b03aed34584a62f38cb5b8003d2a43e9edb6827bc0a096673d55b7",
+          "crates/roomeq-cli/schemas/output_schema.json": "c10c0abae0208a8f54f3a6156ac974c37d25ac149a44a7238cd1295f04e15795",
+          "crates/roomeq-cli/schemas/test_config_2_1.json": "710cb2bc518f07cf811dfee6ce9444bddc4c56455e01ae9990dd756097f0be11",
+          "crates/roomeq-cli/schemas/validate_schema.py": "2234d01d5ac11a27b68ea8621d3a8996107385cf1e42a7f936dab10bb5f80fab",
+          "crates/roomeq-cli/src/bin/convert-recording.rs": "b1c171bf6aafa36571aeb4af4f6f5a32d032ff2f66775b481cec867593ee2bd5",
+          "crates/roomeq-cli/src/bin/roomeq.rs": "4c40b991649a0a2da2d0cbf5a2a42aa136f5fe4167212d032514e361406c78ad",
+          "crates/roomeq-cli/tests/broadband_matching_test.rs": "8b62adb618e06681ff0ce63f65c06043c344666a4b4f32531a029988a1ae0eb1",
+          "crates/roomeq-cli/tests/multi_measurement_test.rs": "e6147ce70f48f4629991cc12ff28612f4d49e2791bba36fa30431c9280ffed31",
+          "crates/roomeq-cli/tests/roomeq_capture_verification.rs": "31ede0982279be5ef73b1d48e8c423ec66f43ead32c880d493556ba14346d620",
+          "crates/roomeq-cli/tests/roomeq_integration_test.rs": "8fff762dd3cef24282e2ad0d0aa1075d7ca32b34d6d6015e1014c305a88c24b9",
+          "crates/roomeq-dsp/ARCHITECTURE.md": "e886e4d42e4dc789af6fa380f100ec5e297ecf2df056b9224e287775fa438493",
+          "crates/roomeq-dsp/CHANGELOG.md": "b72ec189b4502ef9a3f182b542aeed203080782dd9f4da4afe2415f3b70e2b92",
+          "crates/roomeq-dsp/Cargo.toml": "4db0ee653c48a349c82507d2b4797bfa09e731a930c3fbbb0c2b6d166d93ff91",
+          "crates/roomeq-dsp/README.md": "078174274dad6f4fc832d94ddca6406c78201e2a1c604b724a99ff23fe6e78d1",
+          "crates/roomeq-dsp/src/fir.rs": "c2d46c3655792a24191a187035285fbdee2395f4d94887c8a3a648b212068f0e",
+          "crates/roomeq-dsp/src/lib.rs": "86bc60ad7279038b7a8b8831816c78724aec1c1e1e2f785c3ba61b229ed0766a",
+          "crates/roomeq-dsp/src/output.rs": "f0be8ec27c7f1ebd7ecc2cbf9763abb5073f650f2d5548a81abcab5f8086d3a2",
+          "crates/roomeq-dsp/src/output/biquad.rs": "d854a832fee46b201633f74ad0f2a150ef799e7ceca000ed84e5a5009d1bccc4",
+          "crates/roomeq-dsp/src/output/create.rs": "60a8a0b4f66cd6ebf8c1ece230dc22769f2c906742704b3a6966efb55f5d5f35",
+          "crates/roomeq-dsp/src/physical_routing.rs": "2bb71ab2c97826a6cd6a9beef5edbe892cecac79792c20cc5cb4f78e436adca9",
+          "crates/roomeq-engine/src/output/mixed_phase_transport.rs": "c8ea0af2f20ce3af8c60a14267c4a7d2d72d3c957b561f810ea237fe470a4dc0",
+          "crates/roomeq-engine/src/physical_routing_integration_tests.rs": "d71e816326b25c117b10febde7f4490e5477b7fc11c625ae25cb09217e13a85f",
+          "crates/roomeq-engine/tests/multiseat_continuous_area_test.rs": "7f35feabd40e276b17e1a698349d0b6f91541c6a9e260fb76bd921a3907181cc",
+          "crates/roomeq-model/tests/channel_matching_defaults_test.rs": "9e61fef166182d8b7c2c4ee1c232eb19a5c613de6a63d117864d84d765be2d04",
+          "crates/roomeq-model/tests/option_precedence_test.rs": "443f6313dfc423af8896422e19c41eedcaa5877adde191aa191a681bd1622e35",
+          "crates/roomeq-model/tests/validator_warnings_test.rs": "4adcb8d8b2404f5795ff9183368db7966bd901aa94346fea8acac28fcb721a6f",
+          "crates/roomeq-qa/src/bin/roomeq-fuzzer.rs": "5f9842b882e122e6c03508e40005ce9b24719e9a3d9a2e8e0f09bc22f8994e09",
+          "crates/roomeq-qa/src/bin/roomeq-qa-acoustic.rs": "31c80c686a54f3c5aac4c597d380dfedda787ce76cfae6fbd13f6a826d705280",
+          "crates/roomeq-qa/src/bin/roomeq-qa-coverage.rs": "8782f54898a66ff47e769058d3ac5e5483ff9a5d9ae5597931bf39baba267bb1",
+          "crates/roomeq-qa/src/bin/roomeq-qa-features.rs": "53cc17c95c1e54117aa9b10896486ed1e340ef3d85e5ba7c5f3f7a4e7440e35e",
+          "crates/roomeq-qa/src/bin/roomeq-qa-quality.rs": "24d80aa3d4ace5642cca8d6f6630766ce4e0972a01a665e36c3d9e6518e2e9cf",
+          "crates/roomeq-qa/src/bin/roomeq-qa-synthetic.rs": "3d78f57121fc6135bd23cecf27dc0ac331a511983e99236bab7f720306eae5f0",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test.rs": "97bdbb376a7219bc8774ad0e41495b3436189debcb3ab078fe5976e9ef0c1a64",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/consts.rs": "9f862085c516c8ca2b3f28f4b43953477e6f2ebbcec4926e75640a8211051784",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/misc.rs": "5fac6c895e6f1118164e601cb994d4d2cd4edbedb8dbda78b5cc4dec692eb791",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/run.rs": "1dab2da9a5f939942b34ae947ef7616fe21821ca446da49db1ed14bd533c7cb0",
+          "crates/roomeq-qa/tests/roomeq_generated_data_test/types.rs": "69e184a114cde74a8d3dd5ecc173d22fe6f98eb039da6bdec2a52a7d81e9b004",
+          "crates/roomeq-workflow/tests/realized_transfer_conformance.rs": "479e7772b530f20d30cb1eee26e77cc0d42efa4bbd2cf5faebbeec896a616739",
+          "crates/roomeq-workflow/tests/roomeq_admission_correction.rs": "d2450455be8f42a0ee7728ece410a0f07a09c08b9af1d988e63ed5063ad51ecc",
+          "crates/roomeq-workflow/tests/roomeq_pipeline_test.rs": "876bd39622de5b1247f5311110187594e9d2486ac428ff03e515d28924805714",
+          "crates/roomeq-workflow/tests/roomeq_supporting_source.rs": "ecd403ef0e4132266431585920a8edd78b6eff09f80fe0c9068725446f7803a8",
+          "crates/roomeq-workflow/tests/system_config_test.rs": "c451658535a3ef5592e690dc11fa3e9021719e5dcf89138b2ffe69acf49c2846",
+          "crates/roomeq-workflow/tests/workflow_feature_parity_test.rs": "022402c9ab40462ab47b50d41e30685863211212cdb2a2d5057f29aa7d736647",
+          "crates/roomeq-workflow/tests/workflow_test.rs": "a673a111a9338e0f3b14bbc2085c8efd290495812ae6ce209159e7d6e1eef7d9",
+          "docs/baselines/refactor-20261025/autoeq-qa-test-identity-map.tsv": "880456eae50a94b8b2989adabb5de42e033324105169adac46ddac55e1c4f044",
+          "docs/baselines/refactor-20261025/benchmark-ownership-proof.json": "df2177d23cc515cccd3f4ab5c2a4e6b9aeef4ba3de225cea30d037d154ba7bed",
+          "docs/baselines/refactor-20261025/cli-after-product-move.json": "0b0ac626a3ad1d65fdde9f251cb7ff34b0a8290770e82df8eabb99b562197ad5",
+          "docs/baselines/refactor-20261025/cli-before-product-move.json": "0b0ac626a3ad1d65fdde9f251cb7ff34b0a8290770e82df8eabb99b562197ad5",
+          "docs/baselines/refactor-20261025/cli-freeze.txt": "fccb987313a88b7e457f23c8e4bf283879cece8502eea8162d145201cd9c79f7",
+          "docs/baselines/refactor-20261025/cli-tests-before-product-move.json": "fd7fb54fef1667b4bc2131e03abcae114c9547aa15e7e3f59f8bbcda197e23dd",
+          "docs/baselines/refactor-20261025/consumer-metadata-after-retirement.json": "c4c5d2d7cd386cfa5d84a87f3679838e3ca0b6394dbc2e825b1a9d19c9855631",
+          "docs/baselines/refactor-20261025/inventory.json": "26226251ea2b1a7dd917c4dda55d812f0f479e48576ff2775d3bb2408633cce8",
+          "docs/baselines/refactor-20261025/native-tests-after-facade-retirement.json": "1ed2e5659513a3bb9592f6f8da007f00b520c79660839819a56cf294413e9995",
+          "docs/baselines/refactor-20261025/native-tests-after-ownership-move.json": "fbb0bac3bc5e69316a6dd94f7bc1dbb657d99628d73ff1bbbab72f3ac89f4c1a",
+          "docs/baselines/refactor-20261025/nextest-autoeq-qa-after.json": "2838fd4b01977c6010e13331cf88ad25c638f73776aa5aa74cc412f3d8d6bc36",
+          "docs/baselines/refactor-20261025/nextest-autoeq-qa-before.json": "264e823797d93d7a06898268d5bad8ef4b9743413f9b0ced14840d6b41ad898f",
+          "docs/baselines/refactor-20261025/root-test-identity-map.tsv": "22c691502e0609afd02a941c37a9e24ef04333454733d6fb5ee6cb596c4175d2",
+          "docs/baselines/refactor-20261025/root-tests-before-facade-move.json": "e873d31322cc5a462327a863d0db5b7935b97cfb24c0f33814fd7349985fe1b6",
+          "docs/baselines/refactor-20261025/sotf-validation-fixture-overlay.patch": "4937044aef5d6a05091f450a9b68fe6b94dd76beb12cd843bd7c28e5ce61576b",
+          "docs/baselines/refactor-20261025/test-target-ownership.json": "68d2d5b506c264cb72b59628b325ef55c330d43a0b412cca86626c990fc3d507",
+          "scripts/baseline_inventory.py": "8796b2931fe40331e710678f5e3bc697ca4583d77ce7ce3b29e72fd10a1b70a6",
+          "scripts/bench_build.py": "e461738049bca32e890efe896c3a3289a32d012069d3bd783000710c9f422e96",
+          "scripts/build_bench/__init__.py": "197e8d9ea96ec92b6ba3aa589988aadca35163c7e9191055121ca7a9bd357e53",
+          "scripts/build_bench/execution.py": "789e33b8ac754b123883cec9768d6e0d6413c66ce9f4c034f65e27242498511d",
+          "scripts/build_bench/linker.py": "0855f694537dc39d7f37e045ae5452d1c771556f9baa98b92fb9a590c52ec059",
+          "scripts/build_bench/plans.py": "fc19238e61f68cf5594f308055285dd5ce17ee94205966e8e5a06079761d4547",
+          "scripts/build_bench/probes.py": "3575b1442554cd3002efa1e6eaa921011a428dddb14e328df6643f37f46bf8ca",
+          "scripts/build_bench/snapshots.py": "fd0b442d2abe8845a7521c8c0a690844df2efb1b3d681dece8ec7a03d58d4e04",
+          "scripts/changed_packages.py": "e1b645fff14be5464321f22d080944b452e3702c855bf31580356a836c668022",
+          "scripts/check_test_identity_migration.py": "959b9b85b93d2dd948220853026c7838bd9c43c7a783f207d8870cf88c3ac202",
+          "scripts/freeze_cli_contract.py": "1f930c8486123d5d3ad0f93673aea375c534b0143cb4bef19fbcdda21b67373f",
+          "scripts/test_bench_build.py": "65289ae95feeeb5e5f18e99155ff7e04ddc57d434fadacfe1fd7e2ff1bcdd3c4",
+          "scripts/test_changed_packages.py": "9986941417cb72079a6ea956e81c4249ada32c89ec74975f4ba846e30ec33b86",
+          "scripts/test_check_test_identity_migration.py": "20935520cf299733e3131752dee3c47b2d0db2db85e1787b661793af6d0753af"
+        },
+        "lockfile_sha256": "3e667a5d1e8b05859682fc492ea918d94df3dbd0560e6ed80d0663e2c38bf4f1"
+      }
+    },
+    "math-audio": {
+      "origin": "/Volumes/home_tmp/src/all_of_sotf/math-audio",
+      "requested_reference": null,
+      "origin_identity": {
+        "revision": "d515d16910f4807dd2be429cad5c6c9c7305b906",
+        "tracked_patch_sha256": "f2f7ee5ec8fd5e03df9580dbf2a2ff71c005147bb8f1ad992af04461c771001e",
+        "untracked_source_sha256": {
+          "audit-20261018-implementation.md": "110fbd6992edd0d6cece293184a2759d7d821438646418af2155e857a4f6f1c7",
+          "audit-20261018.md": "e8afea951d811a03fcdbd4b27c449842882998a2adac18f4f2b2b26b1a18cfae"
+        },
+        "lockfile_sha256": "e5c669090a8de4551236dccc91389ee5235861516c65b3d63589c83e354a044d"
+      },
+      "snapshot_identity": {
+        "revision": "d515d16910f4807dd2be429cad5c6c9c7305b906",
+        "tracked_patch_sha256": "0819ab60b6e0c81c67fc845c083e105c522bb4ff0115774ced9b1e592ee89180",
+        "untracked_source_sha256": {
+          "audit-20261018-implementation.md": "110fbd6992edd0d6cece293184a2759d7d821438646418af2155e857a4f6f1c7",
+          "audit-20261018.md": "e8afea951d811a03fcdbd4b27c449842882998a2adac18f4f2b2b26b1a18cfae"
+        },
+        "lockfile_sha256": "e5c669090a8de4551236dccc91389ee5235861516c65b3d63589c83e354a044d"
+      }
+    }
+  },
+  "summary": [
+    {
+      "case": "autoeq-core",
+      "scenario": "test-edit",
+      "profile": "test",
+      "samples": 1,
+      "median_wall_seconds": 0.7120948750525713,
+      "min_wall_seconds": 0.7120948750525713,
+      "max_wall_seconds": 0.7120948750525713,
+      "spread_seconds": 0.0
+    }
+  ]
+}

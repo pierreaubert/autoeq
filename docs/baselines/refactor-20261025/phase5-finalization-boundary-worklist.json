@@ -1,0 +1,112 @@
+{
+  "status": "concrete production-boundary classification worklist; no extraction decision",
+  "checked_utc": "2026-10-26T09:42:12.514138+00:00",
+  "source_inventory": "phase5-finalization-replay-reference-inventory.json",
+  "test_attribute_classification": "phase5-finalization-reference-test-classification.json",
+  "verified_annotation_item_ranges": 179,
+  "external_test_only_files": 1,
+  "known_test_fixture_references": 43,
+  "outside_test_fixture_references": 0,
+  "boundaries": [
+    {
+      "references": [
+        "pipeline::FinalizationDiagnosticSink",
+        "pipeline::FinalizationDiagnosticTrial"
+      ],
+      "role": "shared application diagnostic contracts",
+      "candidate_action": "use the prepared lower pipeline-contract owner with compatible workflow reexports",
+      "required_proof": "materialized compiler/consumer and existing no-overwrite/diagnostic-failure behavior"
+    },
+    {
+      "references": [
+        "export::bind_final_convolution_artifacts",
+        "export::validate_final_routed_stage_ownership"
+      ],
+      "role": "existing production export/ownership contracts",
+      "candidate_action": "resolve workflow wrappers to their existing production owner; do not create an engine dependency in exporters",
+      "required_proof": "exact signatures, resource failure behavior, final graph rebinding and export-equivalence scope"
+    },
+    {
+      "references": [
+        "ctc::checked_sample_rate",
+        "ctc::read_wav_channels_f64",
+        "ctc::apply_channel_dsp_chain_to_curve_with_embedded_irs"
+      ],
+      "role": "mixed checked sample-rate, resource decoding and realized-response operations",
+      "candidate_action": "separate loader/provider operations from shared response computation after inspecting complete imports; preserve channel layout and sample precision",
+      "required_proof": "actual production callers and imports; decoded data/IR ownership; unchanged transfer and resource-error checks"
+    },
+    {
+      "references": [
+        "delay_compile::applied_lfe_playback_gain_db",
+        "delay_compile::correction_strength_for_electrical_ceiling",
+        "delay_compile::electrical_boost_bound_db"
+      ],
+      "role": "shared playback gain and electrical-bound computations",
+      "candidate_action": "evaluate a shared computational owner below routed and finalization; preserve exactly-once LFE gain and existing bounds",
+      "required_proof": "source/caller/feature closure and original electrical, LFE and causal-delay contracts"
+    },
+    {
+      "references": [
+        "electrical_headroom::assess_final_graph",
+        "electrical_headroom::assess_final_graph_physical_drive",
+        "electrical_headroom::independent_graph_output_ports",
+        "electrical_headroom::room_eq_safety_attenuation_by_output"
+      ],
+      "role": "production serialized-graph electrical verification",
+      "candidate_action": "retain real graph/path assessment in production and preserve existing resource providers and physical-output coverage",
+      "required_proof": "actual complete imports, response/resource loading boundary, limiter/attenuation behavior and every-output negative controls"
+    },
+    {
+      "references": [
+        "evidence_intake::WorkflowIntake",
+        "evidence_intake::WorkflowOutcome",
+        "evidence_intake::crossover_timing_reference",
+        "evidence_intake::shared_timing_reference"
+      ],
+      "role": "production retained input and timing evidence",
+      "candidate_action": "keep immutable acquisition/conditioning provenance semantics in production; determine the smallest shared resource/replay contract without exposing Capture fields",
+      "required_proof": "loaded-response receipt equality, seat/source axes, timing admission/refusal, confidence and no invented acquisition claims"
+    },
+    {
+      "references": [
+        "group_measurements::seat_labels"
+      ],
+      "role": "shared declared-seat label interpretation",
+      "candidate_action": "inspect the pure label operation separately from group loading; reuse one implementation",
+      "required_proof": "known/unknown labels, order, source binding and no physical identity inferred from filenames"
+    },
+    {
+      "references": [
+        "prepare_eq_resources"
+      ],
+      "role": "prepared target/IR resource boundary",
+      "candidate_action": "classify its two outside-test references by actual call context and imports; preserve prepared data and provider ownership",
+      "required_proof": "target/grid alignment, IR bytes/rate handling, errors and no resource work silently removed"
+    },
+    {
+      "references": [
+        "final_ledger::processing_snapshot"
+      ],
+      "role": "production delivered-graph/decision ledger binding",
+      "candidate_action": "retain canonical ledger and identity operations in a responsible production owner; never move them to a terminal QA package",
+      "required_proof": "all ledger contributors, tamper detection, diagnostics-only changes, final playback and serialized projections"
+    },
+    {
+      "references": [
+        "topology::CROSSOVER_CANCELLATION_UNASSESSED_ADVISORY",
+        "topology::RoleSpliceOutcome",
+        "topology::collect_routed_splice_outcomes",
+        "topology::crossover_timing_refused",
+        "topology::recalibrate_post_dsp_levels",
+        "topology::reconstruct_deployed_source_curves_unenforced",
+        "topology::reconstruct_deployed_source_curves_with_evidence"
+      ],
+      "role": "data/diagnostic vocabulary plus coupled routed source reconstruction, crossover and level computations",
+      "candidate_action": "classify data and computations separately; move shared production computation below both consumers rather than making finalization depend on the complete routed implementation",
+      "required_proof": "complete signatures/imports, production versus test callers, emitted labels, physical/relative gains, phase/seat validity, runtime assets and RoomEQ fast-lane behavior"
+    }
+  ],
+  "qualification": "Outside-test references are a conservative lexical overapproximation, not a complete production/feature closure. Proposed ownership requires source and compiler evidence. Forty-three fixture references are verified test-only and must not be used to infer a production dependency; all their tests still have to remain mapped. No before/after timing, memory, numerical acceptance or accept/reject decision is implied.",
+  "performance_acceptance": false
+}

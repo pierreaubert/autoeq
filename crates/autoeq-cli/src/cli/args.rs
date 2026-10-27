@@ -1,0 +1,758 @@
+use super::parse::parse_finite_f64;
+use super::parse::parse_nonnegative_f64;
+use super::parse::parse_recombination_probability;
+use super::peq_model::PeqModel;
+use autoeq_optim_types::LossType;
+use clap::Parser;
+use std::path::PathBuf;
+use std::process;
+
+/// Shared CLI arguments for AutoEQ binaries.
+#[derive(Parser, Debug, Clone)]
+#[command(author = "", about = "AutoEQ objectives, constraints, and optimizer backends", long_about = None)]
+pub struct Args {
+    /// Print the installed program's package version and exit.
+    #[arg(short = 'V', long, default_value_t = false)]
+    pub program_version: bool,
+
+    /// Number of IIR filters to use for optimization.
+    #[arg(short = 'n', long, default_value_t = 7)]
+    pub num_filters: usize,
+
+    /// Path to the input curve CSV file (format: frequency,spl).
+    /// Required unless speaker, version, and measurement are provided for API data.
+    #[arg(short, long)]
+    pub curve: Option<PathBuf>,
+
+    /// Path to the optional target curve CSV file (format: frequency,spl).
+    /// If not provided, a flat 0 dB target is assumed.
+    #[arg(short, long)]
+    pub target: Option<PathBuf>,
+
+    /// Product workflow JSON describing source, independent target support,
+    /// and an explicit playback device profile.
+    #[arg(long, value_name = "PATH")]
+    pub product_config: Option<PathBuf>,
+
+    /// Print the versioned product-renderer capability report as JSON and exit.
+    /// This query must be used alone; it does not load measurements or devices.
+    #[arg(long, default_value_t = false)]
+    pub product_renderer_capabilities: bool,
+
+    /// The sample rate for the IIR filters.
+    #[arg(short, long, default_value_t = 48000.0)]
+    pub sample_rate: f64,
+
+    /// Maximum absolute dB gain allowed for each filter.
+    #[arg(long, default_value_t = 3.0, value_parser = parse_nonnegative_f64)]
+    pub max_db: f64,
+
+    /// Minimum signed dB gain allowed for each filter (the cut bound).
+    #[arg(long, default_value_t = -12.0, value_parser = parse_finite_f64)]
+    pub min_db: f64,
+
+    /// Maximum Q factor allowed for each filter.
+    #[arg(long, default_value_t = 3.0)]
+    pub max_q: f64,
+
+    /// Minimum Q factor allowed for each filter.
+    #[arg(long, default_value_t = 1.0)]
+    pub min_q: f64,
+
+    /// Minimum frequency allowed for each filter.
+    #[arg(long, default_value_t = 60.0)]
+    pub min_freq: f64,
+
+    /// Maximum frequency allowed for each filter.
+    #[arg(long, default_value_t = 16000.0)]
+    pub max_freq: f64,
+
+    /// Output PNG file for plotting results.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+
+    /// Speaker name for API data fetching.
+    #[arg(long)]
+    pub speaker: Option<String>,
+
+    /// Version for API data fetching.
+    #[arg(long)]
+    pub version: Option<String>,
+
+    /// Measurement type for API data fetching.
+    #[arg(long)]
+    pub measurement: Option<String>,
+
+    /// Curve name inside CEA2034 plots to use (only when --measurement CEA2034)
+    /// e.g., "Listening Window", "On Axis", "Early Reflections". Default: Listening Window
+    #[arg(long, default_value = "Listening Window")]
+    pub curve_name: String,
+
+    /// Optimization algorithm to use (e.g., autoeq:isres, autoeq:cobyla)
+    #[arg(long, default_value = "autoeq:cobyla")]
+    pub algo: String,
+
+    /// Optional population size for population-based algorithms (e.g., ISRES)
+    #[arg(long, default_value_t = 300)]
+    pub population: usize,
+
+    /// Maximum number of evaluations for the optimizer
+    #[arg(long, default_value_t = 2_000)]
+    pub maxeval: usize,
+
+    /// Load a checked warm-start candidate from this checkpoint file.
+    #[arg(long, value_name = "PATH")]
+    pub resume_state: Option<PathBuf>,
+
+    /// Atomically save a recoverable warm-start checkpoint to this file.
+    #[arg(long, value_name = "PATH")]
+    pub checkpoint_state: Option<PathBuf>,
+
+    /// Resume the complete seeded AutoEQ DE optimizer state from this file.
+    /// Exact continuation requires the same measurement, config, seed, executable,
+    /// and numeric runtime environment.
+    #[arg(long, value_name = "PATH")]
+    pub resume_exact: Option<PathBuf>,
+
+    /// Atomically save complete AutoEQ DE state after each safe generation barrier.
+    #[arg(long, value_name = "PATH")]
+    pub checkpoint_exact: Option<PathBuf>,
+
+    /// Whether to run a local refinement after global optimization
+    #[arg(long, default_value_t = false)]
+    pub refine: bool,
+
+    /// Local optimizer to use for refinement (e.g., cobyla)
+    #[arg(long, default_value = "cobyla")]
+    pub local_algo: String,
+
+    /// Bayesian optimization Sobol hot-start samples (0 = automatic)
+    #[arg(long, default_value_t = 0)]
+    pub bo_initial_samples: usize,
+
+    /// Bayesian optimization batch size for parallel expensive evaluations (0 = automatic)
+    #[arg(long, default_value_t = 0)]
+    pub bo_batch_size: usize,
+
+    /// Bayesian optimization posterior-std threshold for local-refiner handoff (0 disables)
+    #[arg(long, default_value_t = 0.0)]
+    pub bo_posterior_std_threshold: f64,
+
+    /// Bayesian optimization acquisition: ei, qei, or thompson
+    #[arg(long, default_value = "qei")]
+    pub bo_acquisition: String,
+
+    /// Use Monte-Carlo qEHVI Bayesian optimization for multi-objective data
+    #[arg(long, default_value_t = false)]
+    pub bo_ehvi: bool,
+
+    /// Minimum spacing between filter center frequencies in octaves (0 disables)
+    #[arg(long, default_value_t = 0.2)]
+    pub min_spacing_oct: f64,
+
+    /// Weight for the spacing penalty in the objective function
+    #[arg(long, default_value_t = 20.0)]
+    pub spacing_weight: f64,
+
+    /// Second-difference penalty weight on the correction curve (dB/decade^2).
+    /// 0 disables. Suggested starting point: 0.05.
+    #[arg(long, default_value_t = 0.0)]
+    pub smoothness_weight: f64,
+
+    /// L_p exponent for smoothness penalty (1.0 = TV^2/sparsifier, 2.0 = L2).
+    #[arg(long, default_value_t = 1.0)]
+    pub smoothness_exponent: f64,
+
+    /// Schroeder cutoff for relaxed smoothness in the modal region.
+    #[arg(long)]
+    pub smoothness_schroeder_hz: Option<f64>,
+
+    /// Modal-region weight multiplier (0 = exempt modal region entirely).
+    #[arg(long, default_value_t = 0.1)]
+    pub smoothness_modal_scale: f64,
+
+    /// Enable smoothing (regularization) of the inverted target curve
+    #[arg(long, default_value_t = true)]
+    pub smooth: bool,
+
+    /// Smoothing level as 1/N octave (N in [1..24]). Example: N=6 => 1/6 octave smoothing
+    #[arg(long, default_value_t = 2)]
+    pub smooth_n: usize,
+
+    /// Loss function to optimize (flat or score).
+    #[arg(long, value_parser = super::enums::loss_type_parser(), default_value = "speaker-flat")]
+    pub loss: LossType,
+
+    /// PEQ model that defines the filter structure
+    #[arg(long, value_parser = super::enums::peq_model_parser(), default_value = "pk")]
+    pub peq_model: PeqModel,
+
+    /// Display list of available PEQ models with descriptions and exit.
+    #[arg(long, default_value_t = false)]
+    pub peq_model_list: bool,
+
+    /// Display list of available optimization algorithms with descriptions and exit.
+    #[arg(long, default_value_t = false)]
+    pub algo_list: bool,
+
+    /// Optimization tolerance (tol parameter for DE algorithm)
+    #[arg(long, default_value_t = 1e-3)]
+    pub tolerance: f64,
+
+    /// Absolute tolerance (atol parameter for DE algorithm)
+    #[arg(long, default_value_t = 1e-4)]
+    pub atolerance: f64,
+
+    /// Recombination probability for DE algorithm (0.0 to 1.0)
+    #[arg(long, default_value_t = 0.9, value_parser = parse_recombination_probability)]
+    pub recombination: f64,
+
+    /// DE strategy to use (e.g., best1bin, rand1bin, currenttobest1bin, adaptive)
+    #[arg(long, default_value = "currenttobest1bin")]
+    pub strategy: String,
+
+    /// Display list of available DE strategies and exit.
+    #[arg(long, default_value_t = false)]
+    pub strategy_list: bool,
+
+    /// Adaptive weight for F parameter (DE adaptive strategies only)
+    #[arg(long, default_value_t = 0.9)]
+    pub adaptive_weight_f: f64,
+
+    /// Adaptive weight for CR parameter (DE adaptive strategies only)
+    #[arg(long, default_value_t = 0.9)]
+    pub adaptive_weight_cr: f64,
+
+    /// Disable parallel evaluation for DE algorithm (default: parallel is enabled)
+    #[arg(long = "no-parallel", default_value_t = false)]
+    pub no_parallel: bool,
+
+    /// Number of threads to use for parallel evaluation (0 = use all available cores)
+    #[arg(long, default_value_t = 0)]
+    pub parallel_threads: usize,
+
+    /// Random seed for deterministic optimization (default: random seed for each run)
+    /// Setting this makes optimization results reproducible
+    #[arg(long)]
+    pub seed: Option<u64>,
+
+    /// Quality assurance mode with optional threshold: suppress normal output, show summary line and analysis
+    /// Bare `--qa` requires strict improvement at threshold zero, convergence, and spacing.
+    /// A supplied threshold (e.g., `--qa 0.4`) keeps the same strict predicate.
+    #[arg(long, value_name = "THRESHOLD", num_args = 0..=1, default_missing_value = "0")]
+    pub qa: Option<f64>,
+
+    /// Path to first driver measurement CSV file (for multi-driver optimization with --loss drivers-flat)
+    #[arg(long)]
+    pub driver1: Option<PathBuf>,
+
+    /// Path to second driver measurement CSV file (for multi-driver optimization with --loss drivers-flat)
+    #[arg(long)]
+    pub driver2: Option<PathBuf>,
+
+    /// Path to third driver measurement CSV file (for multi-driver optimization with --loss drivers-flat)
+    #[arg(long)]
+    pub driver3: Option<PathBuf>,
+
+    /// Path to fourth driver measurement CSV file (for multi-driver optimization with --loss drivers-flat)
+    #[arg(long)]
+    pub driver4: Option<PathBuf>,
+
+    /// Crossover type for multi-driver optimization (butterworth2, linkwitzriley2, linkwitzriley4)
+    #[arg(long, default_value = "linkwitzriley4")]
+    pub crossover_type: String,
+
+    /// Use a named preset that sets all optimizer parameters at once.
+    /// Available presets: quick, balanced, max-quality, score (speakers only).
+    /// Individual parameter flags override preset values when both are specified.
+    #[arg(long)]
+    pub preset: Option<String>,
+}
+
+impl Args {
+    /// Get the effective PEQ model
+    pub fn effective_peq_model(&self) -> PeqModel {
+        self.peq_model
+    }
+
+    /// Check if the first filter should be a highpass (for compatibility)
+    pub fn uses_highpass_first(&self) -> bool {
+        matches!(
+            self.effective_peq_model(),
+            PeqModel::HpPk | PeqModel::HpPkLp
+        )
+    }
+
+    /// Create arguments with tuned speaker defaults.
+    pub fn speaker_defaults() -> Self {
+        autoeq_optim_types::OptimizationConfig::speaker_defaults().into()
+    }
+
+    /// Create arguments with tuned headphone defaults.
+    pub fn headphone_defaults() -> Self {
+        autoeq_optim_types::OptimizationConfig::headphone_defaults().into()
+    }
+
+    /// Create arguments with tuned room defaults.
+    pub fn roomeq_defaults() -> Self {
+        autoeq_optim_types::OptimizationConfig::roomeq_defaults().into()
+    }
+
+    /// Apply a named preset, setting optimizer parameters to tuned values.
+    /// Call this after parsing CLI args. Parameters explicitly set by the user
+    /// are not tracked by clap, so this method overwrites all optimizer fields.
+    /// The caller should parse args, call `apply_preset()`, then override
+    /// any fields they want to customize.
+    ///
+    /// NOTE: These preset values are intentionally duplicated from
+    /// `sotf-player::autoeq::presets` because the `autoeq` crate cannot
+    /// depend on `sotf-player`. Keep values in sync when updating presets.
+    ///
+    /// Available presets:
+    /// - `quick`: 5 filters, fast (pop 40, maxeval 2000, no refine)
+    /// - `balanced`: 7 filters, good balance (pop 80, maxeval 5000, refine)
+    /// - `max-quality`: 10 filters, best results (pop 200, maxeval 20000, ls-pk-hs, refine)
+    /// - `score`: 7 filters, listener preference score (speaker-score loss)
+    pub fn apply_preset(&mut self) {
+        let preset_name = match &self.preset {
+            Some(name) => name.clone(),
+            None => return,
+        };
+        match preset_name.as_str() {
+            "quick" => {
+                self.num_filters = 5;
+                self.population = 40;
+                self.maxeval = 2000;
+                self.refine = false;
+                self.min_q = 0.5;
+                self.max_q = 6.0;
+                self.min_db = -12.0;
+                self.max_db = 6.0;
+            }
+            "balanced" => {
+                self.num_filters = 7;
+                self.population = 80;
+                self.maxeval = 5000;
+                self.refine = true;
+                self.min_q = 0.5;
+                self.max_q = 6.0;
+                self.min_db = -12.0;
+                self.max_db = 6.0;
+            }
+            "max-quality" => {
+                self.num_filters = 10;
+                self.peq_model = PeqModel::LsPkHs;
+                self.population = 200;
+                self.maxeval = 20000;
+                self.refine = true;
+                self.min_q = 0.5;
+                self.max_q = 6.0;
+                self.min_db = -12.0;
+                self.max_db = 6.0;
+            }
+            "score" => {
+                self.num_filters = 7;
+                self.loss = LossType::SpeakerScore;
+                self.population = 100;
+                self.maxeval = 10000;
+                self.refine = true;
+                self.min_q = 0.5;
+                self.max_q = 6.0;
+                self.min_db = -12.0;
+                self.max_db = 6.0;
+            }
+            other => {
+                eprintln!(
+                    "Warning: unknown preset '{}'. Available: quick, balanced, max-quality, score",
+                    other
+                );
+            }
+        }
+    }
+
+    /// Display available presets and exit.
+    pub fn display_preset_list() -> ! {
+        println!("Available Presets");
+        println!("=================\n");
+        println!("  quick        5 filters, fast optimization (seconds)");
+        println!("  balanced     7 filters, good balance of quality and speed (default)");
+        println!("  max-quality  10 filters with shelves, best results (slow)");
+        println!("  score        7 filters, listener preference score optimization");
+        println!("\nUse: --preset <name>");
+        println!("Individual flags (e.g. -n, --max-q) override preset values.");
+        process::exit(0);
+    }
+}
+
+impl From<&Args> for autoeq_optim_types::OptimizationConfig {
+    fn from(args: &Args) -> Self {
+        Self {
+            num_filters: args.num_filters,
+            curve: args.curve.clone(),
+            target: args.target.clone(),
+            product_config: args.product_config.clone(),
+            sample_rate: args.sample_rate,
+            max_db: args.max_db,
+            min_db: args.min_db,
+            max_q: args.max_q,
+            min_q: args.min_q,
+            min_freq: args.min_freq,
+            max_freq: args.max_freq,
+            output: args.output.clone(),
+            speaker: args.speaker.clone(),
+            version: args.version.clone(),
+            measurement: args.measurement.clone(),
+            curve_name: args.curve_name.clone(),
+            algo: args.algo.clone(),
+            population: args.population,
+            maxeval: args.maxeval,
+            resume_state: args.resume_state.clone(),
+            checkpoint_state: args.checkpoint_state.clone(),
+            resume_exact: args.resume_exact.clone(),
+            checkpoint_exact: args.checkpoint_exact.clone(),
+            refine: args.refine,
+            local_algo: args.local_algo.clone(),
+            bo_initial_samples: args.bo_initial_samples,
+            bo_batch_size: args.bo_batch_size,
+            bo_posterior_std_threshold: args.bo_posterior_std_threshold,
+            bo_acquisition: args.bo_acquisition.clone(),
+            bo_ehvi: args.bo_ehvi,
+            min_spacing_oct: args.min_spacing_oct,
+            spacing_weight: args.spacing_weight,
+            smoothness_weight: args.smoothness_weight,
+            smoothness_exponent: args.smoothness_exponent,
+            smoothness_schroeder_hz: args.smoothness_schroeder_hz,
+            smoothness_modal_scale: args.smoothness_modal_scale,
+            smooth: args.smooth,
+            smooth_n: args.smooth_n,
+            loss: args.loss,
+            peq_model: args.peq_model,
+            tolerance: args.tolerance,
+            atolerance: args.atolerance,
+            recombination: args.recombination,
+            strategy: args.strategy.clone(),
+            adaptive_weight_f: args.adaptive_weight_f,
+            adaptive_weight_cr: args.adaptive_weight_cr,
+            no_parallel: args.no_parallel,
+            parallel_threads: args.parallel_threads,
+            seed: args.seed,
+            qa: args.qa,
+            driver1: args.driver1.clone(),
+            driver2: args.driver2.clone(),
+            driver3: args.driver3.clone(),
+            driver4: args.driver4.clone(),
+            crossover_type: args.crossover_type.clone(),
+        }
+    }
+}
+
+impl From<autoeq_optim_types::OptimizationConfig> for Args {
+    fn from(config: autoeq_optim_types::OptimizationConfig) -> Self {
+        Self {
+            program_version: false,
+            num_filters: config.num_filters,
+            curve: config.curve,
+            target: config.target,
+            product_config: config.product_config,
+            product_renderer_capabilities: false,
+            sample_rate: config.sample_rate,
+            max_db: config.max_db,
+            min_db: config.min_db,
+            max_q: config.max_q,
+            min_q: config.min_q,
+            min_freq: config.min_freq,
+            max_freq: config.max_freq,
+            output: config.output,
+            speaker: config.speaker,
+            version: config.version,
+            measurement: config.measurement,
+            curve_name: config.curve_name,
+            algo: config.algo,
+            population: config.population,
+            maxeval: config.maxeval,
+            resume_state: config.resume_state,
+            checkpoint_state: config.checkpoint_state,
+            resume_exact: config.resume_exact,
+            checkpoint_exact: config.checkpoint_exact,
+            refine: config.refine,
+            local_algo: config.local_algo,
+            bo_initial_samples: config.bo_initial_samples,
+            bo_batch_size: config.bo_batch_size,
+            bo_posterior_std_threshold: config.bo_posterior_std_threshold,
+            bo_acquisition: config.bo_acquisition,
+            bo_ehvi: config.bo_ehvi,
+            min_spacing_oct: config.min_spacing_oct,
+            spacing_weight: config.spacing_weight,
+            smoothness_weight: config.smoothness_weight,
+            smoothness_exponent: config.smoothness_exponent,
+            smoothness_schroeder_hz: config.smoothness_schroeder_hz,
+            smoothness_modal_scale: config.smoothness_modal_scale,
+            smooth: config.smooth,
+            smooth_n: config.smooth_n,
+            loss: config.loss,
+            peq_model: config.peq_model,
+            peq_model_list: false,
+            algo_list: false,
+            tolerance: config.tolerance,
+            atolerance: config.atolerance,
+            recombination: config.recombination,
+            strategy: config.strategy,
+            strategy_list: false,
+            adaptive_weight_f: config.adaptive_weight_f,
+            adaptive_weight_cr: config.adaptive_weight_cr,
+            no_parallel: config.no_parallel,
+            parallel_threads: config.parallel_threads,
+            seed: config.seed,
+            qa: config.qa,
+            driver1: config.driver1,
+            driver2: config.driver2,
+            driver3: config.driver3,
+            driver4: config.driver4,
+            crossover_type: config.crossover_type,
+            preset: None,
+        }
+    }
+}
+
+impl From<&Args> for autoeq_optim::OptimParams {
+    fn from(args: &Args) -> Self {
+        Self::from(&autoeq_optim_types::OptimizationConfig::from(args))
+    }
+}
+
+impl From<&Args> for autoeq_workflow::InputConfig {
+    fn from(args: &Args) -> Self {
+        Self::from(&autoeq_optim_types::OptimizationConfig::from(args))
+    }
+}
+
+impl From<&Args> for autoeq_workflow::TargetConfig {
+    fn from(args: &Args) -> Self {
+        Self::from(&autoeq_optim_types::OptimizationConfig::from(args))
+    }
+}
+
+impl From<&Args> for autoeq_plot::PlotConfig {
+    fn from(args: &Args) -> Self {
+        Self::from(&autoeq_optim_types::OptimizationConfig::from(args))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::peq_model::PeqModel;
+    use super::Args;
+    use autoeq_optim_types::LossType;
+    use clap::{CommandFactory, Parser};
+
+    fn parsed_base() -> Args {
+        Args::try_parse_from::<&[&str], _>(&["prog"]).unwrap()
+    }
+
+    #[test]
+    fn parsed_defaults_match_parser_independent_configuration() {
+        let args = Args::parse_from(["autoeq"]);
+        assert_eq!(
+            autoeq_optim_types::OptimizationConfig::from(&args),
+            autoeq_optim_types::OptimizationConfig::default()
+        );
+    }
+
+    #[test]
+    fn warm_start_paths_parse_and_default_to_none() {
+        let defaults = Args::speaker_defaults();
+        assert!(defaults.resume_state.is_none());
+        assert!(defaults.checkpoint_state.is_none());
+        assert!(defaults.resume_exact.is_none());
+        assert!(defaults.checkpoint_exact.is_none());
+        assert!(defaults.product_config.is_none());
+
+        let parsed = Args::try_parse_from([
+            "prog",
+            "--resume-state",
+            "prior.json",
+            "--checkpoint-state",
+            "next.json",
+        ])
+        .expect("warm-start paths should be parsed");
+        assert_eq!(parsed.resume_state, Some("prior.json".into()));
+        assert_eq!(parsed.checkpoint_state, Some("next.json".into()));
+
+        let parsed = Args::try_parse_from([
+            "prog",
+            "--resume-exact",
+            "exact-prior.json",
+            "--checkpoint-exact",
+            "exact-next.json",
+        ])
+        .expect("exact-state paths should be parsed");
+        assert_eq!(parsed.resume_exact, Some("exact-prior.json".into()));
+        assert_eq!(parsed.checkpoint_exact, Some("exact-next.json".into()));
+    }
+
+    #[test]
+    fn product_config_path_is_additive_and_optional() {
+        let parsed = Args::try_parse_from(["prog", "--product-config", "run.json"])
+            .expect("product workflow config should be accepted");
+        assert_eq!(parsed.product_config, Some("run.json".into()));
+        assert!(parsed.curve.is_none());
+        assert!(parsed.target.is_none());
+    }
+
+    #[test]
+    fn product_renderer_capability_query_is_additive_and_optional() {
+        let defaults = Args::speaker_defaults();
+        assert!(!defaults.product_renderer_capabilities);
+
+        let parsed = Args::try_parse_from(["prog", "--product-renderer-capabilities"])
+            .expect("renderer capability query should parse");
+        assert!(parsed.product_renderer_capabilities);
+        assert!(parsed.product_config.is_none());
+        assert!(parsed.curve.is_none());
+    }
+
+    #[test]
+    fn speaker_defaults_match_expected_values() {
+        let args = Args::speaker_defaults();
+        assert_eq!(args.num_filters, 5);
+        assert_eq!(args.sample_rate, 48000.0);
+        assert_eq!(args.loss, LossType::SpeakerFlat);
+        assert_eq!(args.algo, "autoeq:de");
+        assert_eq!(args.population, 300);
+        assert_eq!(args.maxeval, 50000);
+        assert_eq!(args.strategy, "lshade");
+        assert_eq!(args.min_db, -12.0);
+        assert_eq!(args.max_db, 12.0);
+        assert_eq!(args.min_q, 0.5);
+        assert_eq!(args.max_q, 10.0);
+        assert_eq!(args.min_freq, 20.0);
+        assert_eq!(args.max_freq, 20000.0);
+        assert_eq!(args.min_spacing_oct, 0.5);
+        assert_eq!(args.smoothness_weight, 0.0);
+        assert_eq!(args.smoothness_exponent, 1.0);
+        assert_eq!(args.smoothness_modal_scale, 0.1);
+        assert!(args.smooth);
+        assert_eq!(args.smooth_n, 1);
+        assert!(!args.refine);
+        assert_eq!(args.peq_model, PeqModel::Pk);
+    }
+
+    #[test]
+    fn parsed_cli_uses_canonical_cobyla_default() {
+        assert_eq!(parsed_base().algo, "autoeq:cobyla");
+    }
+
+    #[test]
+    fn program_version_flag_preserves_api_data_version_argument() {
+        let program = Args::try_parse_from(["autoeq", "--program-version"])
+            .expect("program version flag should parse");
+        assert!(program.program_version);
+        assert_eq!(program.version, None);
+
+        let short = Args::try_parse_from(["autoeq", "-V"])
+            .expect("short program version flag should parse");
+        assert!(short.program_version);
+
+        let api = Args::try_parse_from(["autoeq", "--version", "spinorama-v1"])
+            .expect("existing API data version argument should remain unchanged");
+        assert!(!api.program_version);
+        assert_eq!(api.version.as_deref(), Some("spinorama-v1"));
+
+        let help = Args::command().render_help().to_string();
+        assert!(help.contains("-V, --program-version"));
+        assert!(help.contains("--version <VERSION>"));
+    }
+
+    #[test]
+    fn headphone_defaults_use_headphone_score_loss() {
+        let args = Args::headphone_defaults();
+        assert_eq!(args.loss, LossType::HeadphoneScore);
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.sample_rate, 48000.0);
+    }
+
+    #[test]
+    fn roomeq_defaults_set_num_filters_and_max_freq() {
+        let args = Args::roomeq_defaults();
+        assert_eq!(args.num_filters, 10);
+        assert_eq!(args.max_freq, 500.0);
+    }
+
+    #[test]
+    fn apply_preset_quick_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("quick".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 5);
+        assert_eq!(args.population, 40);
+        assert_eq!(args.maxeval, 2000);
+        assert!(!args.refine);
+        assert_eq!(args.min_q, 0.5);
+        assert_eq!(args.max_q, 6.0);
+        assert_eq!(args.min_db, -12.0);
+        assert_eq!(args.max_db, 6.0);
+    }
+
+    #[test]
+    fn apply_preset_balanced_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("balanced".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.population, 80);
+        assert_eq!(args.maxeval, 5000);
+        assert!(args.refine);
+        assert_eq!(args.min_q, 0.5);
+        assert_eq!(args.max_q, 6.0);
+    }
+
+    #[test]
+    fn apply_preset_max_quality_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("max-quality".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 10);
+        assert_eq!(args.peq_model, PeqModel::LsPkHs);
+        assert_eq!(args.population, 200);
+        assert_eq!(args.maxeval, 20000);
+        assert!(args.refine);
+    }
+
+    #[test]
+    fn apply_preset_score_sets_expected_fields() {
+        let mut args = parsed_base();
+        args.preset = Some("score".to_string());
+        args.apply_preset();
+        assert_eq!(args.num_filters, 7);
+        assert_eq!(args.loss, LossType::SpeakerScore);
+        assert_eq!(args.population, 100);
+        assert_eq!(args.maxeval, 10000);
+        assert!(args.refine);
+    }
+
+    #[test]
+    fn apply_preset_unknown_does_not_panic() {
+        let result = std::panic::catch_unwind(|| {
+            let mut args = parsed_base();
+            args.preset = Some("unknown-preset".to_string());
+            args.apply_preset();
+            args.num_filters
+        });
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn audit_cli_min_db_is_signed_lower_gain_bound() {
+        assert_eq!(Args::speaker_defaults().min_db, -12.0);
+
+        for preset in ["quick", "balanced", "max-quality", "score"] {
+            let mut args = parsed_base();
+            args.preset = Some(preset.to_string());
+            args.apply_preset();
+            assert_eq!(args.min_db, -12.0, "preset {preset}");
+        }
+
+        let parsed = Args::try_parse_from(["autoeq", "--min-db=-12"]).unwrap();
+        assert_eq!(parsed.min_db, -12.0);
+    }
+}

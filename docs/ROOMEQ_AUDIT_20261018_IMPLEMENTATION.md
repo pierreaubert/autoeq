@@ -255,7 +255,7 @@ python3 scripts/audit_oct18_mutations.py --output /Volumes/home_tmp/tmp/autoeq-o
 ROOMEQ_CAMILLADSP_VALIDATE_CMD='/Users/pierre/.cargo/bin/camilladsp --check {config}' \
   cargo test --release --offline --locked -p roomeq-export -p roomeq-workflow \
   --lib tool_contract_camilladsp -- --nocapture
-cargo run --release --offline --locked --features qa --bin roomeq-qa-coverage -- \
+cargo run -p roomeq-qa --release --offline --locked --bin roomeq-qa-coverage -- \
   --quick --tier pr --case 'home cinema' --jobs 1 --maxeval 200 \
   --json /Volumes/home_tmp/tmp/autoeq-oct18-published-qa-outcomes.json
 env -u ROOMEQ_RESOURCE_TRACE -u ROOMEQ_RESOURCE_DIAGNOSTICS \

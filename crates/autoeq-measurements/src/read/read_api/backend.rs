@@ -7,9 +7,9 @@
 //! - [`MeasurementCache`] persists and loads cached responses.
 //!
 //! Production implementations (`ReqwestMeasurementBackend`,
-//! `FsMeasurementCache`) are used by the public free functions by default.
-//! Tests can swap in an in-memory cache and a mock backend to run fully
-//! offline and deterministically.
+//! `FsMeasurementCache`, behind the `api` feature) are used by the
+//! public free functions by default. Tests can swap in an in-memory
+//! cache and a mock backend to run fully offline and deterministically.
 
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -40,9 +40,11 @@ pub trait MeasurementCache: Send + Sync {
 }
 
 /// Production backend that issues real HTTP GET requests via `reqwest`.
+#[cfg(feature = "api")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ReqwestMeasurementBackend;
 
+#[cfg(feature = "api")]
 impl ReqwestMeasurementBackend {
     /// Create a new production backend.
     pub fn new() -> Self {
@@ -50,6 +52,7 @@ impl ReqwestMeasurementBackend {
     }
 }
 
+#[cfg(feature = "api")]
 #[async_trait]
 impl MeasurementBackend for ReqwestMeasurementBackend {
     async fn get_text(&self, url: &str) -> BackendResult<String> {
@@ -62,9 +65,11 @@ impl MeasurementBackend for ReqwestMeasurementBackend {
 }
 
 /// Production cache backed by the local filesystem.
+#[cfg(feature = "api")]
 #[derive(Debug, Default, Clone, Copy)]
 pub struct FsMeasurementCache;
 
+#[cfg(feature = "api")]
 impl FsMeasurementCache {
     /// Create a new filesystem-backed cache.
     pub fn new() -> Self {
@@ -72,6 +77,7 @@ impl FsMeasurementCache {
     }
 }
 
+#[cfg(feature = "api")]
 #[async_trait]
 impl MeasurementCache for FsMeasurementCache {
     async fn read_to_string(&self, path: &Path) -> BackendResult<Option<String>> {
@@ -177,9 +183,10 @@ impl MeasurementBackend for MockMeasurementBackend {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "api")]
+    use super::FsMeasurementCache;
     use super::{
-        FsMeasurementCache, InMemoryMeasurementCache, MeasurementBackend, MeasurementCache,
-        MockMeasurementBackend,
+        InMemoryMeasurementCache, MeasurementBackend, MeasurementCache, MockMeasurementBackend,
     };
 
     #[tokio::test]
@@ -198,6 +205,7 @@ mod tests {
         assert_eq!(backend.get_text("any-url").await.unwrap(), "hello");
     }
 
+    #[cfg(feature = "api")]
     #[tokio::test]
     async fn fs_cache_round_trip() {
         let tmp = tempfile::TempDir::new().unwrap();

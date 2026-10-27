@@ -299,6 +299,8 @@ pub(super) fn run_test_case(tc: &TestCase, maxeval: usize, options: CaseOptions)
             &config,
             tc.method,
             expectations,
+            SAMPLE_RATE,
+            &temp_dir,
         ));
     }
     validation_failures.extend(crate::registry::verify_result_claims(&result, &tc.claims));

@@ -9,6 +9,8 @@ license = "GPL-3.0-or-later"
 [[bin]]
 name = "report-producer"
 path = "src/bin/report_producer.rs"
+test = false
+bench = false
 
 # Plain rlib: the cdylib shell lives in autoeq-report-wasm-shell. A
 # cdylib+rlib crate linked by host code is built twice under
@@ -21,11 +23,18 @@ workspace = true
 [dependencies]
 autoeq-core = { workspace = true }
 serde = { workspace = true }
-serde_json = { workspace = true }
+# Report payloads are byte-compared against pre-port snapshots, so
+# JSON object key order is part of the output contract. This used to
+# be enabled transitively by the GPUI stack; declare it directly.
+serde_json = { workspace = true, features = ["preserve_order"] }
 base64 = "0.23"
 rustfft = { workspace = true }
 csv = { workspace = true }
-# grid.rs uses d3rs::surface, which gpui-d3rs gates behind its "gpui"
-# feature. Declare it here instead of relying on feature unification
-# from elsewhere in the graph (nothing else enables it).
-d3rs = { package = "gpui-d3rs", version = "0.10", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false, features = ["gpui"] }
+# Renderer-independent geometry only (refactor-20261025 Phase 3b):
+# at the locked gpui-d3rs revision (0.10.44, f556d489) the
+# axis/color/sankey/scale/surface modules this crate uses are
+# unconditional, so no d3rs feature is enabled and the GPUI host
+# stack (gpui, smol, fontdue, image) stays out of the native
+# renderer. Do not re-add the "gpui" feature here; GPUI rendering
+# lives in autoeq-report-gpui.
+d3rs = { package = "gpui-d3rs", version = "0.10", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false }

@@ -1,0 +1,3 @@
+   Compiling roomeq-model v0.5.15 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-g6iknktd/source/autoeq/crates/roomeq-model)
+      Timing report saved to /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-g6iknktd/targets/primed/0/test/config/test/cargo-timings/cargo-timing-20261025T200105449Z-1c1d73ea604632b2.html
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.92s

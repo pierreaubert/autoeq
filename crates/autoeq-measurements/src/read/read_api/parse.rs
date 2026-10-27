@@ -8,6 +8,7 @@ use std::error::Error;
 ///
 /// # Returns
 /// * Some(angle) if the angle could be parsed, None otherwise
+#[cfg(feature = "api")]
 pub(super) fn parse_angle_from_trace_name(name: &str) -> Option<f64> {
     let normalized = name.replace('\u{2212}', "-").replace('°', " ");
 
@@ -84,6 +85,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(feature = "api")]
     fn parse_angle_from_trace_name_accepts_spinorama_directivity_labels() {
         assert_eq!(parse_angle_from_trace_name("-60°"), Some(-60.0));
         assert_eq!(parse_angle_from_trace_name("−60°"), Some(-60.0));

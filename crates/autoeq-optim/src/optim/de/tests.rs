@@ -93,7 +93,7 @@ fn setup_de_common_respects_large_maxeval() {
 
 #[test]
 fn explicit_initial_candidate_rejects_invalid_shape_values_and_bounds() {
-    let mut args = crate::cli::Args::speaker_defaults();
+    let mut args = crate::OptimizationConfig::speaker_defaults();
     args.num_filters = 1;
     let mut params = crate::OptimParams::from(&args);
     params.algo = "autoeq:de".to_string();
@@ -124,7 +124,7 @@ fn explicit_initial_candidate_rejects_invalid_shape_values_and_bounds() {
 
 #[test]
 fn registered_de_route_returns_report_for_the_final_selected_vector() {
-    let mut args = crate::cli::Args::speaker_defaults();
+    let mut args = crate::OptimizationConfig::speaker_defaults();
     args.num_filters = 1;
     let mut params = crate::OptimParams::from(&args);
     params.algo = "autoeq:de".to_string();
@@ -152,4 +152,54 @@ fn registered_de_route_returns_report_for_the_final_selected_vector() {
             .zip(upper)
             .all(|((&value, low), high)| { value >= low && value <= high })
     );
+}
+
+use super::optimize::epa_progress_input_spl;
+use crate::Curve;
+
+#[test]
+fn epa_progress_uses_unmasked_input_curve() {
+    let frequencies = array![100.0, 1_000.0];
+    let input = Curve {
+        freq: frequencies.clone(),
+        spl: array![81.0, 73.0],
+        ..Curve::default()
+    };
+    let objective = ObjectiveDataBuilder::speaker_flat(
+        frequencies.clone(),
+        array![0.0, 0.0],
+        array![0.0, 0.0],
+        48_000.0,
+        PeqModel::Pk,
+    )
+    .input_curve(input)
+    .min_db(-12.0)
+    .max_db(12.0)
+    .freq_range(20.0, 20_000.0)
+    .build()
+    .expect("objective");
+
+    assert_eq!(
+        epa_progress_input_spl(&objective, &frequencies),
+        Some(vec![81.0, 73.0])
+    );
+}
+
+#[test]
+fn epa_progress_skips_when_only_weighted_deviation_is_available() {
+    let frequencies = array![100.0, 1_000.0];
+    let objective = ObjectiveDataBuilder::speaker_flat(
+        frequencies.clone(),
+        array![0.0, 0.0],
+        array![1.0, -1.0],
+        48_000.0,
+        PeqModel::Pk,
+    )
+    .min_db(-12.0)
+    .max_db(12.0)
+    .freq_range(20.0, 20_000.0)
+    .build()
+    .expect("objective");
+
+    assert_eq!(epa_progress_input_spl(&objective, &frequencies), None);
 }

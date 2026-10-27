@@ -2,12 +2,12 @@
 
 High-level view of the `autoeq` workspace: automatic equalization for
 speakers, headphones, and rooms. Per-crate details live in each crate's
-`ARCHITECTURE.md` (linked below). The root package (facade + binaries) is
-described in §5.
+`ARCHITECTURE.md` (linked below). The virtual workspace and executable
+ownership are described in §5.
 
 Design rules that hold everywhere:
 
-- `autoeq_iir::Biquad` is the core filter type.
+- `autoeq_core::iir::Biquad` is the core filter type.
 - Filters stay inside trustworthy measurement-data frequency bounds, and no
   finer than the measurement/smoothing resolution warrants.
 - Mismatched response grids are aligned or resampled explicitly, never zipped
@@ -26,13 +26,27 @@ flowchart LR
         direction LR
         core[autoeq-core]
         meas[autoeq-measurements]
+        objective[autoeq-objective]
+        neutral[autoeq-optim-types]
         opt[autoeq-optim]
         wf[autoeq-workflow]
         cli[autoeq-cli]
         fir[autoeq-fir]
         plot[autoeq-plot]
         art[autoeq-artifacts]
+        oracle[autoeq-qa]
+        renderer[autoeq-report-wasm]
+        shell[autoeq-report-wasm-shell]
+        viewer[autoeq-report-gpui]
         meas --> core
+        neutral --> core
+        cli --> neutral
+        wf --> neutral
+        plot --> neutral
+        opt --> objective
+        objective --> core
+        objective --> meas
+        objective --> neutral
         opt --> core
         opt --> meas
         wf --> opt
@@ -41,11 +55,18 @@ flowchart LR
         fir --> core
         plot --> opt
         art --> core
+        plot --> renderer
+        renderer --> core
+        shell --> renderer
+        viewer --> renderer
+        oracle --> opt
+        oracle --> cli
     end
     subgraph roomeq["RoomEQ stack (rooms)"]
         direction LR
         model[roomeq-model]
         analysis[roomeq-analysis]
+        dsp[roomeq-dsp]
         engine[roomeq-engine]
         rworkflow[roomeq-workflow]
         quality[roomeq-quality]
@@ -53,6 +74,11 @@ flowchart LR
         synth[roomeq-synthetic]
         rcli[roomeq-cli]
         export[roomeq-export]
+        model --> neutral
+        dsp --> model
+        export --> dsp
+        export --> quality
+        engine --> dsp
         analysis --> model
         engine --> model
         engine --> analysis
@@ -65,29 +91,33 @@ flowchart LR
         qa --> synth
         rcli --> rworkflow
         rworkflow --> export
-        engine -.types.-> export
     end
     engine -.- core
     rworkflow -.- meas
 ```
 
-Legend: solid arrows point from a crate to what it depends on (opposite to
-runtime data flow); dotted lines are shared-type relations without a
-dependency. `roomeq-export` is last because it only serializes already
+The map includes all 24 workspace packages and selected dependency edges.
+Local GPUI demos are excluded from this workspace (see below).
+
+Legend: solid arrows point from a crate to its dependencies (opposite to
+runtime data flow); dotted lines indicate shared primitives. `roomeq-export` is last because it only serializes already
 finalized DSP chains — runtime data flow is §2, where export is step 11.
 
 | Crate | Role | Doc |
 |---|---|---|
 | `autoeq-core` | Domain + DSP primitives (`Curve`, `Biquad`, `PeqLayout`, `x2peq`) | [link](../crates/autoeq-core/ARCHITECTURE.md) |
 | `autoeq-measurements` | Loaders, conditioning, CEA-2034, provenance | [link](../crates/autoeq-measurements/ARCHITECTURE.md) |
-| `autoeq-optim` | Losses + optimizer backends + registry | [link](../crates/autoeq-optim/ARCHITECTURE.md) |
+| `autoeq-objective` | Prepared evaluation, losses, objective data | [link](../crates/autoeq-objective/ARCHITECTURE.md) |
+| `autoeq-optim-types` | Neutral configuration, objective selection, and optimizer evidence | [link](../crates/autoeq-optim-types/ARCHITECTURE.md) |
+| `autoeq-optim` | Optimizer backends + registry | [link](../crates/autoeq-optim/ARCHITECTURE.md) |
 | `autoeq-workflow` | Speaker/headphone end-to-end runs | [link](../crates/autoeq-workflow/ARCHITECTURE.md) |
 | `autoeq-cli` | `autoeq` CLI adapters | [link](../crates/autoeq-cli/ARCHITECTURE.md) |
 | `autoeq-fir` | FIR design on curves | [link](../crates/autoeq-fir/ARCHITECTURE.md) |
-| `autoeq-plot` | Plotly reports, static export | [link](../crates/autoeq-plot/ARCHITECTURE.md) |
+| `autoeq-plot` | Native HTML/WASM reports | [link](../crates/autoeq-plot/ARCHITECTURE.md) |
 | `autoeq-artifacts` | `ArtifactStore` + sidecar naming | [link](../crates/autoeq-artifacts/ARCHITECTURE.md) |
 | `roomeq-model` | Config + DSP-chain contracts | [link](../crates/roomeq-model/ARCHITECTURE.md) |
 | `roomeq-analysis` | Measurement-analysis primitives | [link](../crates/roomeq-analysis/ARCHITECTURE.md) |
+| `roomeq-dsp` | Shared path-free routing and realization | [link](../crates/roomeq-dsp/ARCHITECTURE.md) |
 | `roomeq-engine` | In-memory execution, DSP kernels, pipeline order | [link](../crates/roomeq-engine/ARCHITECTURE.md) |
 | `roomeq-workflow` | `optimize_room`, topology routing, finalization | [link](../crates/roomeq-workflow/ARCHITECTURE.md) |
 | `roomeq-export` | CamillaDSP/APO/EasyEffects/… exporters | [link](../crates/roomeq-export/ARCHITECTURE.md) |
@@ -95,11 +125,18 @@ finalized DSP chains — runtime data flow is §2, where export is step 11.
 | `roomeq-qa` | Regression matrices + runners | [link](../crates/roomeq-qa/ARCHITECTURE.md) |
 | `roomeq-synthetic` | Deterministic ground-truth curves | [link](../crates/roomeq-synthetic/ARCHITECTURE.md) |
 | `roomeq-cli` | `roomeq` CLI surface | [link](../crates/roomeq-cli/ARCHITECTURE.md) |
+| `autoeq-qa` | Numerical oracles, negative controls, and optimizer benchmarks | [link](../crates/autoeq-qa/ARCHITECTURE.md) |
+| `autoeq-report-wasm` | Shared payload schema, report assembly, and drawing geometry | [link](../crates/autoeq-report-wasm/ARCHITECTURE.md) |
+| `autoeq-report-wasm-shell` | Terminal WASM/Canvas export shell | [link](../crates/autoeq-report-wasm-shell/ARCHITECTURE.md) |
+| `autoeq-report-gpui` | Host explorer model and optional wasm32 GPUI viewer | [link](../crates/autoeq-report-gpui/ARCHITECTURE.md) |
+
+The separately excluded [GPUI demos](../crates/autoeq-gpui-examples/ARCHITECTURE.md)
+use their own manifest and lockfile. Root workspace commands do not select them.
 
 ## 2. RoomEQ data flow, step by step
 
 Entry: `roomeq --config <recordings.json> --override-config <optimizer.json>`
-(input contract: `src/bin/roomeq/INPUT_FORMAT.md` + `input_schema.json`).
+(input contract: `crates/roomeq-cli/schemas/INPUT_FORMAT.md` + `input_schema.json`).
 
 ```mermaid
 flowchart TD
@@ -154,28 +191,30 @@ flowchart TD
 - Corpus intake rules (opaque IDs, no personal data, rights classification)
   are documented in `data_tests/roomeq/acoustic_corpus/PROVENANCE.md`.
 
-## 5. Root package
+## 5. Virtual workspace and executable ownership
 
-The workspace root crate (`autoeq`, v0.5.73) holds the compatibility facade
-(`src/roomeq/` re-exports the `roomeq-*` partitions) and all binaries:
+The root has no package or facade sources. Libraries are the default members;
+CLI, QA, and report packages are selected explicitly. Dependency policy rejects
+root-package resurrection, production-to-terminal edges, and normal/dev/build
+cycles. Terminal/tool/report-shell packages set `publish = false`.
 
-| Binary | Role |
+| Package | Executables |
 |---|---|
-| `autoeq` | Speaker/headphone EQ |
-| `benchmark-autoeq-speaker` | Optimizer benchmarks |
-| `autoeq-download-speakers` | Spinorama fetch |
-| `roomeq` | Room optimization (`--config … --output …`) |
-| `roomeq-fuzzer` | Fuzzing entry |
-| `roomeq-qa-quality/coverage/features/synthetic/acoustic` | QA runners |
-| `roomeq-qa-coverage` | Coverage-gate runner (90% library line gate) |
-| `convert-recording` | Measurement format conversion |
+| `autoeq-cli` | `autoeq`, `benchmark-autoeq-speaker`, `autoeq-download-speakers` |
+| `roomeq-cli` | `roomeq`, `convert-recording` |
+| `roomeq-qa` | Fuzzer and the five `roomeq-qa-*` runners |
+| `autoeq-measurements` | `migrate_provenance` |
 
-Useful commands: `cargo check -p autoeq`, `cargo clippy -p autoeq --no-deps`,
-`cargo test -p autoeq --lib`, `just qa-roomeq`.
+RoomEQ schemas and their input manual belong to `roomeq-cli/schemas/`.
+Integration tests import production owners and live with their subject or a
+terminal QA owner. Native report assets remain with `autoeq-report-wasm`.
+
+Use `just test-crate <package>` for focused feedback, `just test-cli` for
+executable contracts, and `just ntest` for the complete native inventory.
 
 ## 6. Further reading
 
 - `docs/ROOMEQ_MANUAL.md` — user manual; `docs/ROOMEQ_101.md` — concepts.
-- `src/bin/roomeq/INPUT_FORMAT.md` — input contract.
+- `crates/roomeq-cli/schemas/INPUT_FORMAT.md` — input contract.
 - `data_tests/roomeq/acoustic_corpus/PROVENANCE.md` — corpus intake rules.
 - `CHANGELOG.md` — behavioral history.

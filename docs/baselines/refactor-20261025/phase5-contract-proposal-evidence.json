@@ -1,0 +1,25 @@
+{
+  "status": "proposal_not_implemented_or_measured",
+  "recorded_utc": "2026-10-26T06:30:40.561687+00:00",
+  "proposal": "phase5-contract-proposal.md",
+  "source_sha256": {
+    "crates/roomeq-engine/src/eq/resources.rs": "7700b71c8469adb201cd053afab179721771096dd32db472ee1b31640ed93219",
+    "crates/roomeq-engine/src/channel_input.rs": "7100da6d5a0be3a971f78b2897cfba8477a307f24df97c61f9040c5dda3bd2f4",
+    "crates/roomeq-workflow/src/pipeline.rs": "eef678917ec066453cf269aa06abd94aa518ee06aabd59a2fb45383bcde37a6b",
+    "crates/roomeq-workflow/src/room_optimization/seat_replay.rs": "2a536e32f65d98c6eab42a087445746eac5f7ef753f7807e431b1f1aae1670a9",
+    "crates/roomeq-model/Cargo.toml": "623811085d853461d9900cc9b70fa241f2c79dacc9e681b383422cbce4652987"
+  },
+  "verified_resource_data_types": [
+    "PreparedEqTarget",
+    "PreparedImpulseResponse",
+    "EqResources"
+  ],
+  "verified_observer_owner": "roomeq-engine",
+  "candidate_decisions": {
+    "channel": "pending actual viable prototype, correctness, timings/memory and maintenance cost",
+    "system": "pending actual viable prototype, correctness, timings/memory and maintenance cost",
+    "routed": "pending actual viable prototype, correctness, timings/memory and maintenance cost",
+    "finalization": "pending actual viable prototype, correctness, timings/memory and maintenance cost"
+  },
+  "baseline_inputs_or_producer_modified": false
+}

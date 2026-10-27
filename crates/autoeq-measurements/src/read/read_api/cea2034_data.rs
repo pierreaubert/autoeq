@@ -1,4 +1,6 @@
+#[cfg(feature = "api")]
 use super::extract::extract_cea2034_curves_original;
+#[cfg(feature = "api")]
 use super::fetch::{
     fetch_measurement_plot_data, fetch_measurement_plot_data_at_cache_root, read_spinorama,
     read_spinorama_at_cache_root,
@@ -7,6 +9,7 @@ use super::types::Cea2034Data;
 use crate::Curve;
 use std::collections::HashMap;
 use std::error::Error;
+#[cfg(feature = "api")]
 use std::path::Path;
 
 /// Load spinorama measurement with full CEA2034 spin data
@@ -22,6 +25,7 @@ use std::path::Path;
 ///
 /// # Returns
 /// Tuple of (primary curve, optional spin data)
+#[cfg(feature = "api")]
 pub async fn load_spinorama_with_spin(
     speaker: &str,
     version: &str,
@@ -32,6 +36,7 @@ pub async fn load_spinorama_with_spin(
 }
 
 /// Load spinorama measurement data using an explicit cache root.
+#[cfg(feature = "api")]
 pub async fn load_spinorama_with_spin_at_cache_root(
     speaker: &str,
     version: &str,
@@ -49,6 +54,7 @@ pub async fn load_spinorama_with_spin_at_cache_root(
     .await
 }
 
+#[cfg(feature = "api")]
 async fn load_spinorama_with_spin_from_cache_root(
     speaker: &str,
     version: &str,
@@ -94,6 +100,7 @@ async fn load_spinorama_with_spin_from_cache_root(
     Ok((curve, spin_data))
 }
 
+#[cfg(feature = "api")]
 async fn fetch_plot_data(
     speaker: &str,
     version: &str,

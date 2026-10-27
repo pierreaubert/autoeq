@@ -1,0 +1,16 @@
+{
+  "status": "passed",
+  "previous_collected": 803,
+  "current_collected": 806,
+  "original_identities_preserved": 714,
+  "removed": [],
+  "added": [
+    "scripts/test_compare_build_bench.py::BudgetTests::test_effective_build_flags_change_invalidates_comparison",
+    "scripts/test_compare_build_bench.py::BudgetTests::test_nightly_compiler_change_invalidates_comparison",
+    "scripts/test_compare_build_bench.py::BudgetTests::test_non_measurement_runtime_asset_change_invalidates_comparison"
+  ],
+  "prior_proof": "python-post-contract-identity-preservation.json",
+  "collection": "python-acceptance-fix-test-identities.json",
+  "new_case_execution": "comparator-identity-regressions-green.log",
+  "full_current_suite_execution": false
+}

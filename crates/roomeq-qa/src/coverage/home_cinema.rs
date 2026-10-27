@@ -1,3 +1,5 @@
+mod delivered_safety;
+
 use super::processing_method::ProcessingMethod;
 use super::solver::Solver;
 use super::test_case::TestCase;
@@ -118,14 +120,121 @@ pub(super) fn build_quick_home_cinema_matrix(
         .collect()
 }
 
+// Match each advisory emitted by baseline publication independently. The presence
+// of the publication marker must never suppress an unrelated failure or a safety
+// attenuation budget refusal in the same stage.
+fn known_baseline_advisory(advisory: &str) -> bool {
+    if matches!(
+        advisory,
+        "structural_baseline_published"
+            | "no_candidate_within_electrical_acoustic_limits"
+            | "no_candidate_with_meaningful_improvement"
+            | "fallback_controls=configured"
+            | "fallback_controls=optimized_structural"
+            | "crossover_residual_unassessed:coherent_timing_refused"
+    ) {
+        return true;
+    }
+    if let Some(value) = advisory.strip_prefix("baseline_safety_attenuation_db=") {
+        return value
+            .parse::<f64>()
+            .is_ok_and(|db| db.is_finite() && db >= 0.0);
+    }
+    // These retain the production publisher's diagnostic payload. Delivered
+    // electrical safety is checked separately before this allowlist is used.
+    if [
+        "baseline_evidence_insufficient: ",
+        "baseline_quality_limit: ",
+        "source_candidate=optimized_structural_controls; baseline_quality_limit: ",
+        "crossover_residual_unassessed:",
+    ]
+    .iter()
+    .any(|prefix| {
+        advisory
+            .strip_prefix(prefix)
+            .is_some_and(|value| !value.is_empty())
+    }) {
+        return true;
+    }
+    advisory
+        .strip_prefix("crossover_residual:")
+        .and_then(|value| value.split_once(':'))
+        .is_some_and(|(channel, evidence)| {
+            !channel.is_empty()
+                && evidence.contains(":branches=")
+                && (evidence.starts_with("underfill_db=") || evidence.starts_with("unassessed:"))
+        })
+}
+
 fn validate_stage_outcomes(
     outcomes: &[StageOutcome],
     expect_height_alignment: bool,
     allow_safe_revert: bool,
+    verified_fallback: bool,
 ) -> Vec<String> {
     let mut failures = Vec::new();
 
     for outcome in outcomes {
+        // These diagnostics describe an unselected correction or unavailable
+        // measurement provenance, not the independently replayed fallback.
+        // Failed safety/structural checks and unrelated stages still fail.
+        let candidate_diagnostic = verified_fallback
+            && outcome.status == StageStatus::Degraded
+            && outcome
+                .checks
+                .iter()
+                .all(|check| check.kind == roomeq_model::StageCheckKind::Quality)
+            && match outcome.stage.as_str() {
+                "correction_candidate_requires_final_refinement" => {
+                    outcome.checks.is_empty()
+                        && matches!(outcome.advisories.as_slice(), [advisory]
+                            if advisory.starts_with("optimization failed: final routed crossover underfill for '")
+                                && advisory.ends_with(')'))
+                }
+                "optimizer_confidence" => {
+                    !outcome.advisories.is_empty()
+                        && outcome
+                            .advisories
+                            .iter()
+                            .all(|advisory| advisory == "optimizer_no_selected_run")
+                }
+                "final_correction_selection" => {
+                    outcome
+                        .advisories
+                        .iter()
+                        .any(|advisory| advisory == "structural_baseline_published")
+                        && outcome
+                            .advisories
+                            .iter()
+                            .all(|advisory| known_baseline_advisory(advisory))
+                }
+                "measurement_input_conditioning" => {
+                    outcome.checks.is_empty()
+                        && matches!(outcome.advisories.as_slice(), [coverage, missing]
+                            if coverage == "partial_conditioning_coverage;_absence_is_not_evidence_of_unchanged_input"
+                                && missing.strip_prefix("channels_without_loading_receipts:")
+                                    .and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
+                                    .is_some_and(|channels| !channels.is_empty()
+                                        && channels.iter().all(|channel| !channel.is_empty())))
+                }
+                stage if stage.starts_with("post_eq_main_target_preservation_") => {
+                    outcome.checks.len() == 1
+                        && outcome.checks[0].id == "preserved_main_target_weighted_rms_db"
+                        && matches!(outcome.advisories.as_slice(), [advisory]
+                            if advisory == "historical_common_peq_candidate_screen; final_native_graph_validation_required")
+                }
+                "routed_splice_final_replay" => {
+                    outcome.checks.is_empty()
+                        && matches!(outcome.advisories.as_slice(), [advisory]
+                            if advisory.strip_prefix("splice_cancellation_reverted_")
+                                .and_then(|value| value.strip_suffix(":improved_residual_cancellation"))
+                                .is_some_and(|channel| !channel.is_empty()))
+                }
+                _ => false,
+            };
+        if candidate_diagnostic {
+            continue;
+        }
         let safe_reversion_stage = outcome.stage.starts_with("final_correction_safety_")
             || outcome.stage == "final_runtime_acceptance";
         if matches!(outcome.status, StageStatus::Degraded | StageStatus::Failed)
@@ -201,6 +310,7 @@ fn validate_bass_management(
     report: Option<&BassManagementReport>,
     config: &RoomConfig,
     expectation: BassRoutingExpectation,
+    require_objective_progress: bool,
 ) -> Vec<String> {
     let mut failures = Vec::new();
     let Some(report) = report else {
@@ -297,14 +407,16 @@ fn validate_bass_management(
 
     match report.headroom_simulation.as_ref() {
         Some(simulation) => {
-            if !simulation.pass || simulation.margin_db < 0.0 {
+            // This simulation intentionally precedes physical-output safety
+            // gains. The caller separately replays the complete delivered graph.
+            if !simulation.margin_db.is_finite() {
                 failures.push(format!(
                     "bass headroom simulation failed with {:.2} dB margin",
                     simulation.margin_db
                 ));
             }
             for output in &simulation.per_output {
-                if !output.pass || output.margin_db < 0.0 {
+                if !output.margin_db.is_finite() {
                     failures.push(format!(
                         "bass output '{}' failed headroom with {:.2} dB margin",
                         output.output_role, output.margin_db
@@ -343,7 +455,8 @@ fn validate_bass_management(
                     group.group_id, selected, minimum, maximum
                 ));
             }
-            if let (Some(before), Some(after)) = (group.objective_before, group.objective_after)
+            if require_objective_progress
+                && let (Some(before), Some(after)) = (group.objective_before, group.objective_after)
                 && after > before + 1.0e-9
             {
                 failures.push(format!(
@@ -382,7 +495,8 @@ fn validate_bass_management(
             if source.accepted && source.safety_restored {
                 continue;
             }
-            match (source.objective_before, source.objective_after) {
+            if require_objective_progress {
+                match (source.objective_before, source.objective_after) {
                     (Some(before), Some(after))
                         if before.is_finite()
                             && after.is_finite()
@@ -394,6 +508,7 @@ fn validate_bass_management(
                         "bass source '{source_channel}' is missing objective evidence"
                     )),
                 }
+            }
         }
 
         if let Some(graph) = report.routing_graph.as_ref() {
@@ -706,6 +821,8 @@ pub(super) fn validate_home_cinema_result(
     config: &RoomConfig,
     method: ProcessingMethod,
     expectations: HomeCinemaExpectations,
+    sample_rate: f64,
+    sidecar_dir: &std::path::Path,
 ) -> Vec<String> {
     let mut failures = Vec::new();
     let correction_decision = result
@@ -723,6 +840,24 @@ pub(super) fn validate_home_cinema_result(
                     | CorrectionDecision::SafeFallback
             )
         );
+
+    let delivered_electrical = expectations.bass_routing.map(|_| {
+        delivered_safety::validate(
+            &result.to_dsp_chain_output(),
+            sample_rate,
+            sidecar_dir,
+            &config.optimizer.finalization,
+        )
+    });
+    let verified_fallback = expectations.allow_safe_revert
+        && matches!(
+            correction_decision,
+            Some(CorrectionDecision::IdentityFallback | CorrectionDecision::SafeFallback)
+        )
+        && delivered_electrical.as_ref().is_some_and(Result::is_ok);
+    if let Some(Err(error)) = delivered_electrical {
+        failures.push(format!("delivered electrical replay failed: {error}"));
+    }
 
     if let Some(expected_phase) = expectations.fir_phase {
         match config.optimizer.fir.as_ref() {
@@ -794,6 +929,7 @@ pub(super) fn validate_home_cinema_result(
         &result.metadata.stage_outcomes,
         expectations.height_alignment,
         expectations.allow_safe_revert || partially_reverted,
+        verified_fallback,
     ));
 
     if expectations.channel_matching
@@ -870,6 +1006,7 @@ pub(super) fn validate_home_cinema_result(
             result.metadata.bass_management.as_ref(),
             config,
             bass,
+            !verified_fallback,
         ));
         if let Some(report) = result.metadata.bass_management.as_ref() {
             failures.extend(validate_realized_main_crossovers(result, report));
@@ -1029,6 +1166,133 @@ mod tests {
     use roomeq_model::{SpeakerConfig, StageOutcome, StageStatus};
 
     #[test]
+    fn candidate_diagnostics_require_verified_fallback_safety() {
+        let outcomes = vec![
+            StageOutcome {
+                stage: "correction_candidate_requires_final_refinement".into(),
+                status: StageStatus::Degraded,
+                advisories: vec!["optimization failed: final routed crossover underfill for 'R' is 3.483 dB at 80.0 Hz (limit 3.0 dB)".into()],
+                checks: vec![],
+            },
+            StageOutcome {
+                stage: "measurement_input_conditioning".into(),
+                status: StageStatus::Degraded,
+                advisories: vec![
+                    "partial_conditioning_coverage;_absence_is_not_evidence_of_unchanged_input".into(),
+                    "channels_without_loading_receipts:[\"L\",\"R\"]".into(),
+                ],
+                checks: vec![],
+            },
+            StageOutcome {
+                stage: "optimizer_confidence".into(),
+                status: StageStatus::Degraded,
+                advisories: vec!["optimizer_no_selected_run".into()],
+                checks: vec![],
+            },
+            StageOutcome {
+                stage: "final_correction_selection".into(),
+                status: StageStatus::Degraded,
+                advisories: vec![
+                    "no_candidate_with_meaningful_improvement".into(),
+                    "structural_baseline_published".into(),
+                    "baseline_safety_attenuation_db=3.500000".into(),
+                    "fallback_controls=optimized_structural".into(),
+                    "crossover_residual:L:underfill_db=0.500:limit_db=3.000:worst_hz=80.0:reason=within_limit:baseline_db=0.500:improvement_db=0.000:branches=L->L|L->Sub1".into(),
+                ],
+                checks: vec![],
+            },
+            StageOutcome {
+                stage: "post_eq_main_target_preservation_R".into(),
+                status: StageStatus::Degraded,
+                advisories: vec!["historical_common_peq_candidate_screen; final_native_graph_validation_required".into()],
+                checks: vec![roomeq_model::StageCheck::fail(
+                    "preserved_main_target_weighted_rms_db",
+                    roomeq_model::StageCheckKind::Quality,
+                    "unselected candidate",
+                )],
+            },
+            StageOutcome {
+                stage: "routed_splice_final_replay".into(),
+                status: StageStatus::Degraded,
+                advisories: vec!["splice_cancellation_reverted_TFL:improved_residual_cancellation".into()],
+                checks: vec![],
+            },
+        ];
+        assert_eq!(
+            validate_stage_outcomes(&outcomes, false, true, false).len(),
+            outcomes.len()
+        );
+        assert!(validate_stage_outcomes(&outcomes, false, true, true).is_empty());
+        for mut outcome in outcomes {
+            for extra in [
+                "unrecognized_final_graph_failure",
+                "baseline_exceeds_output_safety_attenuation_budget",
+                "baseline_safety_attenuation_db=NaN",
+                "baseline_safety_attenuation_db=-1.0",
+                "fallback_controls=unknown",
+            ] {
+                let mut mixed = outcome.clone();
+                mixed.advisories.push(extra.into());
+                assert!(
+                    !validate_stage_outcomes(&[mixed], false, true, true).is_empty(),
+                    "a known diagnostic must not hide {extra} in {}",
+                    outcome.stage,
+                );
+            }
+            for kind in [
+                roomeq_model::StageCheckKind::Safety,
+                roomeq_model::StageCheckKind::Structural,
+            ] {
+                let mut unsafe_diagnostic = outcome.clone();
+                unsafe_diagnostic
+                    .checks
+                    .push(roomeq_model::StageCheck::fail(
+                        "delivered-output-check",
+                        kind,
+                        "unsafe delivered graph",
+                    ));
+                assert!(
+                    !validate_stage_outcomes(&[unsafe_diagnostic], false, true, true).is_empty()
+                );
+            }
+            outcome.status = StageStatus::Failed;
+            assert!(!validate_stage_outcomes(&[outcome.clone()], false, true, true).is_empty());
+            outcome.status = StageStatus::Degraded;
+            outcome.advisories = vec!["unrecognized_final_graph_failure".into()];
+            assert!(!validate_stage_outcomes(&[outcome], false, true, true).is_empty());
+        }
+    }
+
+    #[test]
+    fn verified_fallback_cannot_hide_failed_safety_or_unknown_stages() {
+        let mut outcome = StageOutcome {
+            stage: "final_correction_selection".into(),
+            status: StageStatus::Degraded,
+            advisories: vec!["structural_baseline_published".into()],
+            checks: vec![roomeq_model::StageCheck::fail(
+                "unsafe-output",
+                roomeq_model::StageCheckKind::Safety,
+                "overload",
+            )],
+        };
+        assert!(!validate_stage_outcomes(&[outcome.clone()], false, true, true).is_empty());
+        outcome.checks.clear();
+        outcome.stage = "routed_common_eq_timing_L".into();
+        assert!(!validate_stage_outcomes(&[outcome], false, true, true).is_empty());
+    }
+
+    #[test]
+    fn fallback_diagnostics_never_hide_a_failed_operation() {
+        let outcome = StageOutcome {
+            stage: "optimizer_confidence".into(),
+            status: StageStatus::Failed,
+            advisories: vec!["optimizer_no_selected_run".into()],
+            checks: vec![],
+        };
+        assert!(!validate_stage_outcomes(&[outcome], false, true, true).is_empty());
+    }
+
+    #[test]
     fn safe_fallback_needs_no_stage_reversion_but_keeps_required_stage_failures() {
         let curve = roomeq_model::Curve {
             freq: ndarray::array![20.0, 40.0, 80.0, 160.0, 320.0, 640.0, 1280.0, 2560.0],
@@ -1075,6 +1339,8 @@ mod tests {
                 &config,
                 super::ProcessingMethod::Iir,
                 expectations.clone(),
+                48_000.0,
+                std::path::Path::new("."),
             )
         };
         assert!(validate(&result).is_empty());
@@ -1083,6 +1349,8 @@ mod tests {
             &config,
             super::ProcessingMethod::Iir,
             super::HomeCinemaExpectations::default(),
+            48_000.0,
+            std::path::Path::new("."),
         );
         assert!(
             strict
@@ -1134,7 +1402,7 @@ mod tests {
             route.low_pass_hz = report.crossover_frequency_hz;
         }
 
-        let failures = validate_bass_management(Some(&report), &config, expectation);
+        let failures = validate_bass_management(Some(&report), &config, expectation, true);
         assert!(
             failures
                 .iter()
@@ -1183,7 +1451,7 @@ mod tests {
             status: StageStatus::Degraded,
             advisories: vec!["height_objective_acceptance_failed".to_string()],
         }];
-        let failures = validate_stage_outcomes(&outcomes, true, false);
+        let failures = validate_stage_outcomes(&outcomes, true, false, false);
         assert!(
             failures
                 .iter()
@@ -1204,7 +1472,7 @@ mod tests {
             status: StageStatus::Applied,
             advisories: Vec::new(),
         }];
-        assert!(validate_stage_outcomes(&outcomes, true, false).is_empty());
+        assert!(validate_stage_outcomes(&outcomes, true, false, false).is_empty());
     }
 
     #[test]

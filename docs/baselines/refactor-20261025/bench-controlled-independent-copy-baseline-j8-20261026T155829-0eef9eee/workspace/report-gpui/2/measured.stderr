@@ -1,0 +1,448 @@
+warning: unused workspace dependency `autoeq-report-gpui`
+  --> Cargo.toml:79:1
+   |
+79 | autoeq-report-gpui = { path = "crates/autoeq-report-gpui", version = "0.5" }
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `autoeq-report-gpui`
+warning: unused workspace dependency `autoeq-report-wasm-shell`
+  --> Cargo.toml:78:1
+   |
+78 | autoeq-report-wasm-shell = { path = "crates/autoeq-report-wasm-shell", version = "0.5" }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: consider removing the workspace dependency `autoeq-report-wasm-shell`
+warning: unused workspace dependency `build_html`
+  --> Cargo.toml:92:1
+   |
+92 | build_html = "2.7"
+   | ^^^^^^^^^^
+   |
+help: consider removing the workspace dependency `build_html`
+warning: unused workspace dependency `wide`
+   --> Cargo.toml:125:1
+    |
+125 | wide = "0.6.1"
+    | ^^^^
+    |
+help: consider removing the workspace dependency `wide`
+warning: workspace (manifest) generated 4 warnings
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/math-audio/crates/math-iir-fir/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+51 ~ harness = false
+52 + [lints]
+53 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+51 ~ harness = false
+52 + [lints]
+   |
+warning: `math-iir-fir` (manifest) generated 1 warning
+warning: `package.homepage` is redundant with `package.repository`
+ --> crates/autoeq-qa/Cargo.toml:7:12
+  |
+7 | homepage = "https://github.com/pierreaubert/autoeq"
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+8 | repository = "https://github.com/pierreaubert/autoeq"
+  |              ----------------------------------------
+  |
+  = note: `cargo::redundant_homepage` is set to `warn` by default
+help: consider removing `package.homepage`
+warning: `autoeq-qa` (manifest) generated 1 warning
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/math-audio/crates/math-rir/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+28 ~ harness = false
+29 + [lints]
+30 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+28 ~ harness = false
+29 + [lints]
+   |
+warning: `math-rir` (manifest) generated 1 warning
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/math-audio/crates/math-dsp/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+72 ~ harness = false
+73 + [lints]
+74 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+72 ~ harness = false
+73 + [lints]
+   |
+warning: `math-dsp` (manifest) generated 1 warning
+warning: missing `[lints]` to inherit `[workspace.lints]`
+  --> /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/math-audio/crates/math-optimisation/Cargo.toml
+   = note: `cargo::missing_lints_inheritance` is set to `warn` by default
+help: to inherit `workspace.lints, add:
+   |
+86 ~ path = "src/mod.rs"
+87 + [lints]
+88 + workspace = true
+   |
+help: to clarify your intent to not inherit, add:
+   |
+86 ~ path = "src/mod.rs"
+87 + [lints]
+   |
+warning: `math-optimisation` (manifest) generated 1 warning
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.27
+   Compiling quote v1.0.47
+   Compiling cfg-if v1.0.5
+   Compiling serde_core v1.0.229
+   Compiling typeid v1.0.3
+   Compiling erased-serde v0.4.10
+   Compiling memchr v2.8.3
+   Compiling libm v0.2.16
+   Compiling once_cell v1.21.4
+   Compiling autocfg v1.5.1
+   Compiling wasm-bindgen-shared v0.2.129
+   Compiling rustversion v1.0.23
+   Compiling pin-project-lite v0.2.17
+   Compiling bumpalo v3.20.3
+   Compiling num-traits v0.2.19
+   Compiling smallvec v1.16.3
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling wasm-bindgen v0.2.129
+   Compiling futures-core v0.3.34
+   Compiling zmij v1.0.23
+   Compiling futures-io v0.3.34
+   Compiling stable_deref_trait v1.2.1
+   Compiling futures-sink v0.3.34
+   Compiling simd-adler32 v0.3.10
+   Compiling futures-channel v0.3.34
+   Compiling slab v0.4.12
+   Compiling adler2 v2.0.1
+   Compiling arrayvec v0.7.8
+   Compiling futures-task v0.3.34
+   Compiling crossbeam-utils v0.8.23
+   Compiling serde_fmt v1.1.0
+   Compiling serde v1.0.229
+   Compiling crc32fast v1.5.2
+   Compiling anyhow v1.0.104
+   Compiling value-bag-serde1 v1.14.1
+   Compiling value-bag v1.14.1
+   Compiling hashbrown v0.17.1
+   Compiling equivalent v1.0.3
+   Compiling itoa v1.0.18
+   Compiling bitflags v2.13.2
+   Compiling log v0.4.34
+   Compiling miniz_oxide v0.9.1
+   Compiling crossbeam-epoch v0.9.21
+   Compiling indexmap v2.14.2
+   Compiling libc v0.2.191
+   Compiling zerocopy v0.8.63
+   Compiling foldhash v0.2.0
+   Compiling flate2 v1.1.10
+   Compiling writeable v0.6.4
+   Compiling wasm-bindgen-macro-support v0.2.129
+   Compiling synstructure v0.14.0
+   Compiling version_check v0.9.5
+   Compiling find-msvc-tools v0.1.14
+   Compiling crossbeam-deque v0.8.8
+   Compiling litemap v0.8.3
+   Compiling shlex v2.0.1
+   Compiling object v0.39.1
+   Compiling slotmap v1.1.1
+   Compiling cc v1.8.0
+   Compiling zerocopy-derive v0.8.63
+   Compiling serde_derive v1.0.229
+   Compiling bytemuck_derive v1.12.1
+   Compiling zerofrom-derive v0.1.8
+   Compiling yoke-derive v0.8.4
+   Compiling futures-macro v0.3.34
+   Compiling zerovec-derive v0.11.6
+   Compiling bytemuck v1.25.2
+   Compiling displaydoc v0.2.7
+   Compiling zerofrom v0.1.8
+   Compiling font-types v0.12.7
+   Compiling yoke v0.8.3
+   Compiling futures-util v0.3.34
+   Compiling icu_properties_data v2.3.0
+   Compiling zerotrie v0.2.5
+   Compiling serde_json v1.0.154
+   Compiling zerovec v0.11.8
+   Compiling icu_normalizer_data v2.3.0
+   Compiling utf8_iter v1.0.4
+   Compiling rayon-core v1.13.0
+   Compiling read-fonts v0.41.0
+   Compiling tinystr v0.8.4
+   Compiling potential_utf v0.1.6
+   Compiling icu_locale_core v2.3.0
+   Compiling icu_collections v2.3.0
+   Compiling wasm-bindgen-macro v0.2.129
+   Compiling miniz_oxide v0.8.9
+   Compiling icu_provider v2.3.1
+   Compiling euclid v0.22.14
+   Compiling core_maths v0.1.1
+   Compiling either v1.19.0
+   Compiling rustix v1.1.5
+   Compiling js-sys v0.3.106
+   Compiling getrandom v0.3.4
+   Compiling parking_lot_core v0.9.12
+   Compiling heck v0.5.0
+   Compiling getrandom v0.4.3
+   Compiling serde_spanned v0.6.9
+   Compiling toml_datetime v0.6.11
+   Compiling errno v0.3.14
+   Compiling float-cmp v0.9.0
+   Compiling toml_write v0.1.2
+   Compiling ar_archive_writer v0.5.3
+   Compiling byteorder v1.5.0
+   Compiling winnow v0.7.15
+   Compiling ref-cast v1.0.27
+   Compiling scopeguard v1.2.0
+   Compiling lock_api v0.4.14
+   Compiling strict-num v0.1.1
+   Compiling icu_normalizer v2.3.0
+   Compiling psm v0.1.32
+   Compiling icu_properties v2.3.0
+   Compiling rayon v1.12.0
+   Compiling toml_edit v0.22.27
+   Compiling lyon_geom v1.0.19
+   Compiling futures-executor v0.3.34
+   Compiling ref-cast-impl v1.0.27
+   Compiling serde_derive_internals v0.30.0
+   Compiling polycool v0.4.0
+   Compiling skrifa v0.44.0
+   Compiling fdeflate v0.3.7
+   Compiling fastrand v2.5.0
+   Compiling base64 v0.23.1
+   Compiling percent-encoding v2.3.2
+   Compiling libbz2-rs-sys v0.2.5
+   Compiling quick-error v2.0.1
+   Compiling thiserror v2.0.21
+   Compiling weezl v0.1.12
+   Compiling zune-core v0.5.3
+   Compiling cbindgen v0.28.0
+   Compiling arrayref v0.3.9
+   Compiling unicode-segmentation v1.13.3
+   Compiling tinyvec v1.13.3
+   Compiling object v0.37.3
+   Compiling memmap2 v0.9.11
+   Compiling fontdb v0.24.0
+   Compiling convert_case v0.11.0
+   Compiling tempfile v3.27.0
+   Compiling tiny-skia-path v0.12.0
+   Compiling zune-jpeg v0.5.15
+   Compiling bzip2 v0.6.1
+   Compiling form_urlencoded v1.2.2
+   Compiling toml v0.8.23
+   Compiling schemars_derive v1.2.3
+   Compiling png v0.18.1
+   Compiling kurbo v0.13.1
+   Compiling lyon_path v1.0.19
+   Compiling futures v0.3.34
+   Compiling rand_core v0.9.5
+   Compiling idna_adapter v1.2.2
+   Compiling parking_lot v0.12.5
+   Compiling sotf-gpui_util v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling ppv-lite86 v0.2.21
+   Compiling stacker v0.1.25
+   Compiling thiserror-impl v2.0.21
+   Compiling ryu v1.0.23
+   Compiling compression-core v0.4.34
+   Compiling gimli v0.32.3
+   Compiling bytes v1.12.1
+   Compiling unicode-bidi v0.3.18
+   Compiling color_quant v1.1.0
+   Compiling heck v0.4.1
+   Compiling dyn-clone v1.0.20
+   Compiling unicode-script v0.5.8
+   Compiling unicode-xid v0.2.6
+   Compiling heapless v0.9.3
+   Compiling byteorder-lite v0.1.0
+   Compiling rustc-hash v2.1.3
+   Compiling siphasher v1.0.4
+   Compiling image-webp v0.2.4
+   Compiling sotf-collections v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling svgtypes v0.16.1
+   Compiling sotf-derive_more-impl v2.1.2 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling schemars v1.2.3
+   Compiling addr2line v0.25.1
+   Compiling gif v0.14.2
+   Compiling http v1.5.0
+   Compiling compression-codecs v0.4.46
+   Compiling rand_chacha v0.9.0
+   Compiling idna v1.1.0
+   Compiling harfrust v0.12.0
+   Compiling hash32 v0.3.1
+   Compiling half v2.7.1
+   Compiling tracing-attributes v0.1.31
+   Compiling profiling-procmacros v1.0.18
+   Compiling pin-project-internal v1.1.13
+   Compiling simplecss v0.2.2
+   Compiling event-listener v5.4.2
+   Compiling roxmltree v0.21.1
+   Compiling aho-corasick v1.1.5
+   Compiling tracing-core v0.1.36
+   Compiling regex-syntax v0.8.11
+   Compiling pxfm v0.1.30
+   Compiling raw-window-handle v0.6.2
+   Compiling xmlwriter v0.1.0
+   Compiling float_next_after v1.0.0
+   Compiling fax v0.2.7
+   Compiling pico-args v0.5.0
+   Compiling parking v2.2.1
+   Compiling smol_str v0.3.6
+   Compiling data-url v0.3.2
+   Compiling imagesize v0.15.0
+   Compiling sha1_smol v1.0.1
+   Compiling unicode-vo v0.1.0
+   Compiling rustc-demangle v0.1.28
+   Compiling usvg v0.48.1
+   Compiling backtrace v0.3.76
+   Compiling moxcms v0.8.1
+   Compiling uuid v1.28.0
+   Compiling regex-automata v0.4.18
+   Compiling futures-lite v2.6.1
+   Compiling tiff v0.11.3
+   Compiling lyon_tessellation v1.0.22
+   Compiling tracing v0.1.44
+   Compiling pin-project v1.1.13
+   Compiling event-listener-strategy v0.5.4
+   Compiling profiling v1.0.18
+   Compiling sotf-gpui-toolkit-gpui v0.2.3 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling url v2.5.8
+   Compiling rand v0.9.5
+   Compiling async-compression v0.4.51
+   Compiling http-body v1.1.0
+   Compiling sotf-derive_more v2.1.2 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-gpui-toolkit-perf v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling chrono v0.4.45
+   Compiling web-time v1.1.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling tiny-skia v0.12.0
+   Compiling lyon_algorithms v1.0.21
+   Compiling strum_macros v0.28.0
+   Compiling ttf-parser v0.25.1
+   Compiling rgb v0.8.53
+   Compiling stacksafe-macro v1.0.3
+   Compiling sotf-derive_refineable v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling concurrent-queue v2.5.0
+   Compiling num-integer v0.1.47
+   Compiling async-task v4.7.1
+   Compiling linktime-proc-macro v0.2.3
+   Compiling svg_fmt v0.4.5
+   Compiling typenum v1.20.1
+   Compiling fixedbitset v0.5.7
+   Compiling link-section v0.19.3
+   Compiling ctor v1.0.13
+   Compiling futures-concurrency v7.7.1
+   Compiling etagere v0.2.15
+   Compiling sotf-gpui-toolkit-scheduler v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling async-channel v2.5.0
+   Compiling hybrid-array v0.4.15
+   Compiling strum v0.28.0
+   Compiling sotf-refineable v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling stacksafe v1.0.3
+   Compiling resvg v0.48.1
+   Compiling lyon v1.0.19
+   Compiling sotf-gpui-toolkit-http-client v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-gpui-toolkit-util-macros v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling sotf-gpui-toolkit-sum-tree v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling image v0.25.10
+   Compiling regex v1.13.1
+   Compiling accesskit v0.24.1
+   Compiling sotf-gpui_shared_string v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling num_cpus v1.17.0
+   Compiling taffy v0.14.0
+   Compiling sotf-gpui-toolkit-gpui-macros v0.1.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling itertools v0.15.0
+   Compiling font-types v0.11.3
+   Compiling inventory v0.3.25
+   Compiling matrixmultiply v0.3.11
+   Compiling pollster v1.0.1
+   Compiling seahash v4.1.0
+   Compiling utf8parse v0.2.2
+   Compiling waker-fn v1.2.0
+   Compiling anstyle-parse v1.0.0
+   Compiling read-fonts v0.37.0
+   Compiling web-sys v0.3.106
+   Compiling wasm-bindgen-futures v0.4.79
+   Compiling num-complex v0.4.6
+   Compiling anstyle v1.0.14
+   Compiling anstyle-query v1.1.5
+   Compiling cfg_aliases v0.2.2
+   Compiling rawpointer v0.2.1
+   Compiling colorchoice v1.0.5
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling strength_reduce v0.2.4
+   Compiling anstream v1.0.0
+   Compiling transpose v0.2.3
+   Compiling sotf-wgpu v29.0.3 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling crypto-common v0.2.2
+   Compiling block-buffer v0.12.1
+   Compiling primal-check v0.3.4
+   Compiling litrs v1.0.1
+   Compiling allocator-api2 v0.2.21
+   Compiling yazi v0.2.1
+   Compiling clap_lex v1.1.1
+   Compiling robust v1.2.0
+   Compiling const-oid v0.10.2
+   Compiling foldhash v0.1.5
+   Compiling zeno v0.3.3
+   Compiling strsim v0.11.1
+   Compiling hashbrown v0.15.5
+   Compiling swash v0.2.10
+   Compiling clap_builder v4.6.7
+   Compiling digest v0.11.3
+   Compiling delaunator v1.1.0
+   Compiling document-features v0.2.12
+   Compiling rustfft v6.4.1
+   Compiling ndarray v0.17.2
+   Compiling skrifa v0.40.0
+   Compiling harfrust v0.5.2
+   Compiling sotf-wgpu-types v29.0.3 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling clap_derive v4.6.7
+   Compiling hashbrown v0.16.1
+   Compiling unicode-linebreak v0.1.5
+   Compiling static_assertions v1.1.0
+   Compiling linebender_resource_handle v0.1.1
+   Compiling rangemap v1.8.0
+   Compiling sys-locale v0.3.2
+   Compiling self_cell v1.3.0
+   Compiling hound v3.5.1
+   Compiling sotf-cosmic-text v0.19.0 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling math-iir-fir v0.5.27 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/math-audio/crates/math-iir-fir)
+   Compiling clap v4.6.7
+   Compiling gpui-design v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+warning: function `uses_f64_simd` is never used
+  --> /Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/math-audio/crates/math-iir-fir/src/fir.rs:66:4
+   |
+66 | fn uses_f64_simd<T: 'static>() -> bool {
+   |    ^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+   Compiling math-delaunay v0.5.4
+   Compiling sha2 v0.11.1
+   Compiling fontdue v0.9.5
+   Compiling csv-core v0.1.13
+   Compiling gpui-profiler v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling gpui-d3rs v0.10.44 (https://github.com/pierreaubert/gpui-toolkit#f556d489)
+   Compiling csv v1.4.0
+   Compiling autoeq-core v0.5.12 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-core)
+   Compiling wasm_thread v0.3.3
+   Compiling sotf-gpui-toolkit-gpui-wgpu v0.1.3 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+   Compiling console_error_panic_hook v0.1.7
+   Compiling sotf-gpui-toolkit-gpui-web v0.1.1 (https://github.com/pierreaubert/sotf-3rdparties#d476ae9b)
+warning: `math-iir-fir` (lib) generated 1 warning
+   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-wasm)
+   Compiling autoeq-report-gpui v0.5.0 (/Volumes/home_tmp/tmp/autoeq-controlled-builds/autoeq-build-bench-9yc9l6gn/source/autoeq/crates/autoeq-report-gpui)
+    Finished `release` profile [optimized] target(s) in 45.59s

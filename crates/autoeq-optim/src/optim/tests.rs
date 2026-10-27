@@ -482,6 +482,7 @@ mod backend_tests {
     use super::super::backend::FilterOptimizer;
     use super::super::bo::AutoeqBoBackend;
     use super::super::isres::AutoeqIsresBackend;
+    #[cfg(feature = "backend-metaheuristics")]
     use super::super::mh::MhBackend;
     use super::super::nsga::AutoeqNsgaBackend;
     use super::super::params::OptimParams;
@@ -496,20 +497,20 @@ mod backend_tests {
     use super::super::types::MultiObjectiveData;
     use crate::Curve;
     use crate::FrequencyQPolicy;
-    use crate::cli::Args;
-    use clap::Parser;
+    use crate::OptimizationConfig as Args;
 
     fn small_args() -> Args {
-        let mut args = Args::parse_from(["autoeq"]);
-        args.num_filters = 1;
-        args.population = 6;
-        args.maxeval = 60;
-        args.seed = Some(1);
-        args.min_freq = 20.0;
-        args.max_freq = 20000.0;
-        args.min_db = -12.0;
-        args.max_db = 12.0;
-        args
+        Args {
+            num_filters: 1,
+            population: 6,
+            maxeval: 60,
+            seed: Some(1),
+            min_freq: 20.0,
+            max_freq: 20000.0,
+            min_db: -12.0,
+            max_db: 12.0,
+            ..Args::default()
+        }
     }
 
     #[test]
@@ -813,6 +814,7 @@ mod backend_tests {
         );
     }
 
+    #[cfg(feature = "backend-metaheuristics")]
     #[test]
     fn mh_backends_optimizes_scalar() {
         let configs = vec![
@@ -842,6 +844,7 @@ mod backend_tests {
         }
     }
 
+    #[cfg(feature = "backend-metaheuristics")]
     #[test]
     fn registered_rga_reports_actual_search_limit_without_claiming_convergence() {
         use super::super::backend::BackendSearchStopCause;
@@ -904,6 +907,7 @@ mod backend_tests {
         );
     }
 
+    #[cfg(feature = "backend-metaheuristics")]
     #[test]
     fn registered_rga_stage_budget_refusal_keeps_run_control_priority() {
         use super::super::optimize::{
@@ -937,6 +941,7 @@ mod backend_tests {
         assert!(root_control.snapshot().evaluations_started <= 120);
     }
 
+    #[cfg(feature = "backend-metaheuristics")]
     #[test]
     fn parallel_mh_objective_reservations_never_score_denied_attempts() {
         use super::super::mh::{CallbackState, MHObjective};
@@ -994,6 +999,7 @@ mod backend_tests {
         assert_eq!(state.best_params.len(), x.len());
     }
 
+    #[cfg(feature = "backend-metaheuristics")]
     #[test]
     fn registered_rga_completion_evidence_preserves_legacy_candidate() {
         use super::super::optimize::{
@@ -1154,6 +1160,7 @@ mod backend_tests {
         assert_eq!(completion, Some(OptimizerBackendCompletion::Converged));
     }
 
+    #[cfg(feature = "backend-metaheuristics")]
     #[test]
     fn registered_rga_callback_stop_preserves_run_control_priority() {
         use super::super::backend::BackendSearchStopCause;
@@ -1637,20 +1644,15 @@ mod backend_tests {
 #[test]
 fn portable_bound_coordinates_reach_the_owning_initial_guess() {
     use super::setup::{initial_guess, setup_bounds};
-    use crate::{OptimParams, cli::Args};
-    use clap::Parser;
+    use crate::{OptimParams, OptimizationConfig as Args};
 
-    let args = Args::parse_from([
-        "autoeq",
-        "--peq-model",
-        "pk",
-        "-n",
-        "1",
-        "--min-freq",
-        "80",
-        "--max-freq",
-        "44100",
-    ]);
+    let args = Args {
+        peq_model: autoeq_core::PeqModel::Pk,
+        num_filters: 1,
+        min_freq: 80.0,
+        max_freq: 44100.0,
+        ..Args::default()
+    };
     let params = OptimParams::from(&args);
     let (lower, upper) = setup_bounds(&params);
     // Independent 140-digit references for non-40 Hz frequency bounds.

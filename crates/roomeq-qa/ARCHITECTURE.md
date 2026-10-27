@@ -7,7 +7,8 @@ for it here.
 ## Layer
 
 QA orchestration over engine + workflow + quality + synthetic. Thin binaries
-in `src/bin/roomeq_qa_*.rs` are launchers for these runners.
+in this crate’s `src/bin/roomeq-qa-*.rs` launch these runners;
+`src/bin/roomeq-fuzzer.rs` owns the fuzzing executable.
 
 ## Key modules
 
@@ -47,12 +48,12 @@ in `src/bin/roomeq_qa_*.rs` are launchers for these runners.
 
 ```bash
 # One scenario, nightly tier, machine-readable report:
-cargo run --features qa --bin roomeq-qa-acoustic -- \
+cargo run -p roomeq-qa --bin roomeq-qa-acoustic -- \
   --tier nightly --scenario measured_stereo_ascilab1 \
   --output /tmp/qa.json
 
 # Full PR gate (fast subset); nightly runs everything:
-cargo run --features qa --bin roomeq-qa-acoustic -- --tier pr
+cargo run -p roomeq-qa --bin roomeq-qa-acoustic -- --tier pr
 ```
 
 ## Test data

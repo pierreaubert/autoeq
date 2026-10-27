@@ -1,9 +1,10 @@
 //! Contract: every manifest case has a `.wls` oracle, a checked-in
-//! golden, and a comparison test target — and the required gate really
-//! executes every case. Fails loudly while the engine step
+//! golden, and a comparison test module compiled into exactly one
+//! grouped Cargo target — and the required gate really executes
+//! every case. Fails loudly while the engine step
 //! (`just qa-wolfram-goldens`) is still pending, and fails if any
-//! manifest case lacks a test target (a missing comparison must never
-//! read as a pass).
+//! manifest case lacks a module or group target (a missing
+//! comparison must never read as a pass).
 
 use std::path::PathBuf;
 
@@ -79,6 +80,34 @@ fn manifest_cases_are_complete() {
             if runner == "python" { "py" } else { "rs" }
         ));
         assert!(test.is_file(), "{id}: missing test {}", test.display());
+        if runner == "rust" {
+            // Grouped targets (Phase 2): `test` names the case module,
+            // `target` names the one Cargo test target that compiles
+            // it. A case file no group includes would silently stop
+            // executing, so both links are checked here.
+            let target = case
+                .get("target")
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| panic!("{id}: manifest entry is missing `target`"));
+            let group_root = manifest_dir().join("tests").join(format!("{target}.rs"));
+            let group_text = std::fs::read_to_string(&group_root).unwrap_or_else(|error| {
+                panic!(
+                    "{id}: missing group target {}: {error}",
+                    group_root.display()
+                )
+            });
+            let include = format!("mod {};", case["test"]);
+            assert!(
+                group_text.match_indices(&include).count() == 1,
+                "{id}: {} must include `{include}` exactly once",
+                group_root.display()
+            );
+            let cargo_toml = std::fs::read_to_string(manifest_dir().join("Cargo.toml")).unwrap();
+            assert!(
+                cargo_toml.contains(&format!("name = \"{target}\"")),
+                "{id}: Cargo.toml must declare [[test]] target `{target}`"
+            );
+        }
         // The comparison test must go through the required gate: an
         // unavailable reference fails, it never passes silently.
         let test_text = std::fs::read_to_string(&test).unwrap();

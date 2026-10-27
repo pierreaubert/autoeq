@@ -5,7 +5,7 @@ use autoeq_qa::require_reference;
 use autoeq_qa::{QaResult, assert_case_id, emit_result, provenance};
 use num_complex::Complex64;
 
-#[path = "../../../tests/fir_tests/compute.rs"]
+#[path = "../../autoeq-fir/tests/fir_tests/compute.rs"]
 mod fir_compute;
 
 const CASE: &str = "h01_fir_bin_rounding";

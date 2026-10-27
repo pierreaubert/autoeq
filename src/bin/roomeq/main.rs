@@ -1,5 +1,0 @@
-//! Thin compatibility launcher for the crate-owned RoomEQ command.
-
-fn main() -> anyhow::Result<()> {
-    roomeq_cli::supervisor::run()
-}

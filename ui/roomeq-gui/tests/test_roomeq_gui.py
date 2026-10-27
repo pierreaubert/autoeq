@@ -50,4 +50,4 @@ class BaselineTests(unittest.TestCase):
     def test_bundled_schemas_match_checked_in_contracts(self):
         root = Path(__file__).resolve().parents[3]
         for kind in ("input", "output"):
-            self.assertEqual(json.loads((root / "ui/roomeq-gui/roomeq_gui/resources" / f"{kind}_schema.json").read_text()), json.loads((root / "src/bin/roomeq" / f"{kind}_schema.json").read_text()))
+            self.assertEqual(json.loads((root / "ui/roomeq-gui/roomeq_gui/resources" / f"{kind}_schema.json").read_text()), json.loads((root / "crates/roomeq-cli/schemas" / f"{kind}_schema.json").read_text()))

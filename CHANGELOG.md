@@ -1,5 +1,8 @@
 # Unreleased
 
+- Fail immediately with virtual-environment setup instructions when Wolfram QA
+  is launched without an activated Python environment.
+
 - Baseline spatial/routing repairs: align Kirkeby FIR references to the common
   seat grid within measured support, preserve the LFE playback reference during
   common bass matching, and score delivered routed transfers consistently across

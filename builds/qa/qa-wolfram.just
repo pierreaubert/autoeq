@@ -15,10 +15,25 @@ qa-wolfram-smoke:
 	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract
 	{{cargo}} test -p autoeq-qa --locked --release --test oracle_core -- wolfram_peq_response:: wolfram_fir_response:: wolfram_log_interp:: wolfram_erb_quadrature::
 
+# Stop before running QA when the shell is using system Python.
+[private]
+_qa-wolfram-venv:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	if [[ -z "${VIRTUAL_ENV:-}" ]] || ! python3 -c 'import sys; sys.exit(sys.prefix == sys.base_prefix)' 2>/dev/null; then
+	    echo "Wolfram QA requires an activated Python virtual environment." >&2
+	    echo "From the repository root, run:" >&2
+	    echo "  python3 -m venv .venv  # first-time setup only" >&2
+	    echo "  source .venv/bin/activate" >&2
+	    echo "  python3 -m pip install -r scripts/autoeq-qa-requirements.txt" >&2
+	    echo "Then rerun your just qa-wolfram recipe." >&2
+	    exit 1
+	fi
+
 # Full AutoEQ numerical QA. The runner checks manifest/target membership,
 # executes all 118 Rust cases plus the library tests, and records per-case evidence.
 [group('qa-wolfram')]
-qa-wolfram:
+qa-wolfram: _qa-wolfram-venv
 	python3 scripts/run_crate_test_matrix.py --qa-runner rust --release
 
 # Contract gate only: manifest <-> oracle/golden/test completeness.
@@ -30,7 +45,7 @@ qa-wolfram-contract:
 # The manifest runner executes exactly its six Python cases and verifies
 # identity, result count, tolerance kind, and expected/executed case totals.
 [group('qa-wolfram')]
-qa-wolfram-python:
+qa-wolfram-python: _qa-wolfram-venv
 	#!/usr/bin/env bash
 	set -euo pipefail
 	# Compile outside the producer's bounded request-execution window.

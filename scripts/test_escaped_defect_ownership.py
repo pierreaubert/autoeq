@@ -10,10 +10,25 @@ import unittest
 from unittest.mock import patch
 
 from scripts import escaped_defect_ownership as owner
-from scripts.escaped_defect_mutation import require_caught, require_single_mutant, require_regression_log
+from scripts.escaped_defect_mutation import require_caught, require_single_mutant, require_regression_log, prepare_scope_diff
 
 
 class OwnershipChecks(unittest.TestCase):
+    def test_scope_follows_exact_expression_after_unrelated_insertions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.rs"
+            scope = root / "declared.diff"
+            scope.write_text('--- a/source.rs\n+++ b/source.rs\n@@ -2 +2 @@\n-    if value == limit {\n+    if value != limit {\n')
+            source.write_text('// new preamble\n// more context\nfn test() {\n    if value != limit {\n}\n')
+            resolved = prepare_scope_diff(scope, source, root, "source.rs")
+            self.assertIn('@@ -4 +4 @@', resolved.read_text())
+            self.assertTrue(resolved.read_text().endswith('+    if value != limit {\n'))
+            for text in ['fn changed() {}\n', '    if value != limit {\n' * 2]:
+                source.write_text(text)
+                with self.assertRaisesRegex(ValueError, "exactly one"):
+                    prepare_scope_diff(scope, source, root, "source.rs")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)

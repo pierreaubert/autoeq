@@ -931,6 +931,19 @@ fn canonical_output_path_for_lock(output_path: &Path) -> io::Result<PathBuf> {
     Ok(canonical_output)
 }
 
+#[derive(Debug)]
+struct OutputBundleLocks(Vec<File>);
+
+impl Drop for OutputBundleLocks {
+    fn drop(&mut self) {
+        for lock in &self.0 {
+            // Closing only this descriptor can leave the lock held by a
+            // duplicate inherited during another thread's process spawn.
+            let _ = lock.unlock();
+        }
+    }
+}
+
 /// Lock all parent directories used by the requested native output paths.
 ///
 /// Lock files are persistent and must not be removed while held: unlinking a
@@ -939,7 +952,7 @@ fn canonical_output_path_for_lock(output_path: &Path) -> io::Result<PathBuf> {
 /// roots in one directory. It also makes case-insensitive basename aliases
 /// and concurrent creation of a not-yet-existing destination share a lock.
 /// The kernel releases every advisory lock if its process exits.
-fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
+fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<OutputBundleLocks> {
     let mut canonical_outputs = Vec::with_capacity(paths.len());
     let mut directories = Vec::new();
     for output_path in paths {
@@ -953,7 +966,7 @@ fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
     directories.sort();
     directories.dedup();
 
-    let mut locks = Vec::with_capacity(directories.len());
+    let mut locks = OutputBundleLocks(Vec::with_capacity(directories.len()));
     let mut lock_identities = Vec::<same_file::Handle>::with_capacity(directories.len());
     for parent in directories {
         let lock_path = parent.join(BUNDLE_DIRECTORY_LOCK_FILE_NAME);
@@ -1000,7 +1013,7 @@ fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
             )
         })?;
         lock_identities.push(identity);
-        locks.push(lock);
+        locks.0.push(lock);
     }
     Ok(locks)
 }
@@ -3768,6 +3781,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn output_lock_releases_before_a_duplicate_descriptor_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("room.json");
+        let owner = lock_output_bundle_paths(&[&path]).unwrap();
+        let inherited = owner.0[0].try_clone().unwrap();
+        assert_eq!(
+            lock_output_bundle_paths(&[&path]).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(owner);
+        let next = lock_output_bundle_paths(&[&path])
+            .expect("a descriptor inherited during spawn must not extend the owner's lock");
+        drop(inherited);
+        assert_eq!(
+            lock_output_bundle_paths(&[&path]).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock,
+            "closing the old descriptor cannot release the new owner's lock"
+        );
+        drop(next);
+    }
+
+    #[test]
     fn canonical_output_lock_serializes_relative_aliases_and_keeps_lock_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let canonical = dir.path().join("room.json");
@@ -3780,7 +3815,7 @@ mod tests {
 
         let reopened = lock_output_bundle_paths(&[&relative_alias])
             .expect("lock is reusable after the first owner exits");
-        assert_eq!(reopened.len(), 1);
+        assert_eq!(reopened.0.len(), 1);
         drop(reopened);
         assert!(
             std::fs::read_dir(dir.path())
@@ -3846,7 +3881,7 @@ mod tests {
         let lower_output = lower_parent.join("second.json");
         let both_aliases = lock_output_bundle_paths(&[&upper_output, &lower_output])
             .expect("one operation should deduplicate aliases of one directory");
-        assert_eq!(both_aliases.len(), 1);
+        assert_eq!(both_aliases.0.len(), 1);
         drop(both_aliases);
 
         let first = lock_output_bundle_paths(&[&upper_output]).expect("first alias lock");

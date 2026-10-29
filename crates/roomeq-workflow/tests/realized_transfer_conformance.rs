@@ -405,7 +405,9 @@ fn parameter_matrix_backend_complex_transfer() {
                     &input,
                     |dir| {
                         for name in irs.keys() {
-                            std::fs::copy(directory.join(name), dir.join(name)).unwrap();
+                            let destination = dir.join(name);
+                            std::fs::create_dir_all(destination.parent().unwrap()).unwrap();
+                            std::fs::copy(directory.join(name), destination).unwrap();
                         }
                     },
                 )

@@ -113,7 +113,9 @@ def magnitude_error(measured, expected, frequencies, valid):
 
 def relative_delay_samples(data: np.ndarray) -> int:
     left, right = data[:, 0], data[:, 1]
-    correlation = signal.correlate(left, right, mode="full", method="fft")
+    # Direct evaluation preserves exact ties for short integer-valued probes.
+    # SciPy still selects FFT correlation for long recording captures.
+    correlation = signal.correlate(left, right, mode="full", method="auto")
     return int(np.argmax(np.abs(correlation)) - (len(right) - 1))
 
 

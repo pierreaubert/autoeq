@@ -35,19 +35,19 @@ qa-autoeq-all: prod-autoeq \
 
 [group('qa-autoeq')]
 qa-ascilab-6b:
-	./target/release/autoeq --speaker="AsciLab F6B" --version asr --measurement CEA2034 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- --speaker="AsciLab F6B" --version asr --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-score -n 7 --min-freq=30 --max-q=6 \
 	--maxeval 100000 --seed 4 --qa 0.5
 
 [group('qa-autoeq')]
 qa-jbl-m2-flat:
-	./target/release/autoeq --speaker="JBL M2" --version eac --measurement CEA2034 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- --speaker="JBL M2" --version eac --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-flat -n 7 --min-freq=20 --max-q=6 --peq-model hp-pk \
 	--maxeval 100000 --qa 0.5
 
 [group('qa-autoeq')]
 qa-jbl-m2-score:
-	./target/release/autoeq --speaker="JBL M2" --version eac --measurement CEA2034 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- --speaker="JBL M2" --version eac --measurement CEA2034 \
 	--algo autoeq:de --loss speaker-score -n 7 --min-freq=20 --max-q=6 --peq-model hp-pk \
 	--maxeval 100000 --qa 0.5
 
@@ -56,14 +56,14 @@ qa-beyerdynamic-dt1990pro: qa-beyerdynamic-dt1990pro-flat qa-beyerdynamic-dt1990
 
 [group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-score:
-	./target/release/autoeq -n 5 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- -n 5 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv --loss headphone-score  \
 	--maxeval 100000 --qa 3.0
 
 [group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-score2:
-	./target/release/autoeq -n 7 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- -n 7 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--loss headphone-score	--max-db 6 --max-q 6 --algo autoeq:de --seed 42 --maxeval 100000 --min-freq=20 --max-freq 10000 --peq-model hp-pk-lp --min-q 0.6 --min-db 0.25 \
@@ -72,7 +72,7 @@ qa-beyerdynamic-dt1990pro-score2:
 # Strict QA requires solver convergence; MH backends report budget stops only.
 [group('qa-autoeq')]
 qa-beyerdynamic-dt1990pro-flat:
-	./target/release/autoeq -n 5 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- -n 5 \
 	--curve ./data_tests/headphones/asr/beyerdynamic_dt1990pro/Beyerdynamic\ DT1990\ Pro\ Headphone\ Frequency\ Response\ Measurement.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--loss headphone-flat  --max-db 6 --max-q 6 --maxeval 100000 --algo autoeq:de --seed 42 --min-freq=20 --max-freq 10000 --peq-model pk \
@@ -83,7 +83,7 @@ qa-edifierw830nb: qa-edifierw830nb-autoeqde qa-edifierw830nb-autoeqde-pop100 qa-
 
 [group('qa-autoeq')]
 qa-edifierw830nb-autoeqde:
-	./target/release/autoeq -n 9 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- -n 9 \
 	--curve data_tests/headphones/asr/edifierw830nb/Edifier\ W830NB.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \
@@ -94,7 +94,7 @@ qa-edifierw830nb-autoeqde:
 
 [group('qa-autoeq')]
 qa-edifierw830nb-autoeqde-pop100:
-	./target/release/autoeq -n 5 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- -n 5 \
 	--curve data_tests/headphones/asr/edifierw830nb/Edifier\ W830NB.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \
@@ -103,7 +103,7 @@ qa-edifierw830nb-autoeqde-pop100:
 	--qa 2.5
 [group('qa-autoeq')]
 qa-edifierw830nb-autoeqde-pop80:
-	./target/release/autoeq -n 5 \
+	{{cargo}} run --locked --release -p autoeq-cli --bin autoeq -- -n 5 \
 	--curve data_tests/headphones/asr/edifierw830nb/Edifier\ W830NB.csv \
 	--target ./data_tests/targets/harman-over-ear-2018.csv \
 	--min-freq 50 --max-freq 16000 --max-q 8 --max-db 8 \

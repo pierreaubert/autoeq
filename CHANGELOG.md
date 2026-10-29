@@ -1597,6 +1597,9 @@
 
 ## Package versions
 
+- Restore QA reliability after the workspace refactor: separate CamillaDSP compilation from bounded execution and include the moved physical-sub integration contract; isolate mutation builds and relocate exact scopes; release bundle locks explicitly; stage nested FIR sidecars; honor Cargo target paths and task worktrees in QA recipes.
+
+
 - Record numeric spectral headroom cut-budget margins in rejected candidate gate checks, including refusals before acoustic replay.
 
 - Preserve the native identity lane when original driver supports have no common band, keep exact spacing boundary admission despite inward numeric endpoints, and flag configured-playback changes in protected fallback classification.

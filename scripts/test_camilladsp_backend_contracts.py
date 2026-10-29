@@ -36,14 +36,22 @@ class RequiredBackendTests(unittest.TestCase):
             with patch.object(launcher, "__file__", str(root / "scripts/launcher.py")), \
                  patch.object(launcher.shutil, "which", return_value=None if missing else "/backend"), \
                  patch.object(launcher.subprocess, "run", side_effect=results), \
-                 patch.object(launcher, "run_contracts", side_effect=error,
-                              return_value=subprocess.CompletedProcess([], returncode, output)), \
+                 patch.object(launcher, "run_contracts", side_effect=[
+                     subprocess.CompletedProcess([], 0, "build completed\n"),
+                     error if error else subprocess.CompletedProcess([], returncode, output),
+                 ]) as contracts, \
                  contextlib.redirect_stdout(io.StringIO()):
                 if missing or error or returncode or output != self.success:
                     with self.assertRaises(Exception):
                         launcher.main()
                 else:
                     launcher.main()
+                    self.assertEqual(contracts.call_count, 2)
+                    build, execution = contracts.call_args_list
+                    self.assertIn("--no-run", build.args[0])
+                    self.assertEqual(build.kwargs["timeout"], 1800)
+                    self.assertNotIn("--no-run", execution.args[0])
+                    self.assertNotIn("timeout", execution.kwargs)
             record = json.loads((root / "target/qa/camilladsp-backend-contracts.json").read_text())
             if isinstance(error, subprocess.TimeoutExpired):
                 self.assertEqual((root / "target/qa/camilladsp-backend-contracts.log").read_text(),
@@ -51,7 +59,7 @@ class RequiredBackendTests(unittest.TestCase):
             self.assertEqual(record["status"], "passed" if output == self.success and not (missing or error or returncode) else "failed")
             return record
 
-    success = "".join(f"test {name} ... ok\n" for name in sorted(launcher.REQUIRED_TESTS)) + "test result: ok. 7 passed; 0 failed; 0 ignored; 100 filtered out\ntest result: ok. 1 passed; 0 failed; 0 ignored; 600 filtered out\n"
+    success = "".join(f"test {name} ... ok\n" for name in sorted(launcher.REQUIRED_TESTS)) + "test result: ok. 6 passed; 0 failed; 0 ignored; 100 filtered out\ntest result: ok. 1 passed; 0 failed; 0 ignored; 600 filtered out\ntest result: ok. 1 passed; 0 failed; 0 ignored; 50 filtered out\n"
 
     def test_success(self):
         record = self.run_launcher(self.success)
@@ -97,11 +105,32 @@ class RequiredBackendTests(unittest.TestCase):
         self.run_launcher("test result: ok. 7 passed; 0 failed; 0 ignored\n")
 
     def test_missing_physical_sub_contract(self):
-        physical = "tests::realized_transfer::tool_contract_camilladsp_multisub_coherent_peak_at_all_rates"
+        physical = "tool_contract_camilladsp_multisub_coherent_peak_at_all_rates"
         self.run_launcher(self.success.replace(f"test {physical} ... ok\n", "test unrelated ... ok\n"))
 
     def test_timeout(self):
         self.run_launcher(error=subprocess.TimeoutExpired("cargo", 180, output="partial backend output\n"))
+
+    def test_build_failure_does_not_execute_or_leave_success(self):
+        for failure in [subprocess.CompletedProcess([], 101, "compile failed\n"),
+                        subprocess.TimeoutExpired("cargo", 1800, output="partial build\n")]:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                artifact = root / "target/qa/camilladsp-backend-contracts.json"
+                artifact.parent.mkdir(parents=True)
+                artifact.write_text('{"status":"passed"}')
+                with patch.object(launcher, "__file__", str(root / "scripts/launcher.py")), \
+                     patch.object(launcher.shutil, "which", return_value="/backend"), \
+                     patch.object(launcher.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "version")), \
+                     patch.object(launcher, "run_contracts", side_effect=[failure]) as run:
+                    with self.assertRaises(Exception):
+                        launcher.main()
+                self.assertEqual(run.call_count, 1)
+                record = json.loads(artifact.read_text())
+                self.assertEqual((record["status"], record["stage"]), ("failed", "build"))
+                expected = (failure.output if isinstance(failure, subprocess.TimeoutExpired)
+                            else failure.stdout)
+                self.assertEqual(Path(record["build_log"]).read_text(), expected)
 
 
 if __name__ == "__main__":

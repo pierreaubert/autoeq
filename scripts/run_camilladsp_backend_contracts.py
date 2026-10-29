@@ -17,7 +17,7 @@ REQUIRED_TESTS = {
     "tests::conformance::tool_contract_camilladsp_pcm_matches_peaking_filter_gain",
     "tests::conformance::tool_contract_camilladsp_pcm_preserves_routed_channel_matrix",
     "tests::conformance::tool_contract_camilladsp_pcm_realizes_hierarchical_sub_controls",
-    "tests::realized_transfer::tool_contract_camilladsp_multisub_coherent_peak_at_all_rates",
+    "tool_contract_camilladsp_multisub_coherent_peak_at_all_rates",
 }
 
 
@@ -61,10 +61,20 @@ def main():
                                  check=True, timeout=10)
         record.update(binary=binary, version=version.stdout.strip())
         environment = dict(os.environ, ROOMEQ_CAMILLADSP_BIN=binary)
-        command = ["cargo", "test", "-p", "roomeq-export", "-p", "roomeq-workflow", "--lib", "tool_contract_camilladsp",
+        command = ["cargo", "test", "--profile", "qa", "--locked", "-p", "roomeq-export", "-p", "roomeq-workflow", "--lib", "--test", "realized_transfer_conformance", "tool_contract_camilladsp",
                    "--no-default-features", "--", "--include-ignored", "--nocapture"]
         log = artifact.with_suffix(".log")
         record.update(command=command, log=str(log))
+        # A cold Rust build is not backend execution. Keep the three-minute
+        # runtime bound, with a separate bounded build matching the same profile.
+        build_command = command[:command.index("--")] + ["--no-run"]
+        build_log = artifact.with_suffix(".build.log")
+        record.update(stage="build", build_command=build_command, build_log=str(build_log))
+        built = run_contracts(build_command, cwd=root, env=environment, timeout=1800)
+        build_log.write_text(built.stdout)
+        if built.returncode:
+            raise RuntimeError("backend contract build failed")
+        record["stage"] = "execution"
         completed = run_contracts(command, cwd=root, env=environment)
         log.write_text(completed.stdout)
         record.update(command=command, returncode=completed.returncode, log=str(log))
@@ -74,11 +84,11 @@ def main():
             completed.stdout,
         )
         passed = sum(int(summary[1]) for summary in summaries)
-        if (completed.returncode or len(summaries) != 2
+        if (completed.returncode or len(summaries) != 3
                 or any(status != "ok" or int(failed) or int(ignored)
                        for status, _, failed, ignored in summaries)
                 or passed < len(REQUIRED_TESTS)):
-            raise RuntimeError("backend contracts failed or both crate suites did not execute")
+            raise RuntimeError("backend contracts failed or all three contract suites did not execute")
         if "skipping optional PCM backend" in completed.stdout:
             raise RuntimeError("required backend contract was skipped")
         executed = set(re.findall(r"test (\S+) \.\.\. ok", completed.stdout))
@@ -92,7 +102,9 @@ def main():
             output = error.output or ""
             if isinstance(output, bytes):
                 output = output.decode(errors="replace")
-            artifact.with_suffix(".log").write_text(output)
+            failed_log = (Path(record["build_log"]) if record.get("stage") == "build"
+                          else artifact.with_suffix(".log"))
+            failed_log.write_text(output)
         record.update(status="failed", error=str(error) or type(error).__name__)
         raise
     finally:

@@ -198,11 +198,21 @@ qa-export-pipewire:
 	fi
 	base_image="$requested_base_image"
 	# Cargo path dependencies resolve against the pinned sibling checkouts.
-	checkout_root="$(cd .. && pwd)"
-	if [[ "$(pwd)" != "$checkout_root/autoeq" || ! -f "$checkout_root/scripts/release/sources.json" ]]; then
+	source_root="$(git rev-parse --show-toplevel)"
+	common_git_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+	checkout_root="$common_git_dir"
+	# Submodule common directories live under .git/modules; ordinary clones
+	# use .git. Find the owning pinned checkout without assuming either layout.
+	while [[ "$checkout_root" != / && ! -f "$checkout_root/scripts/release/sources.json" ]]; do
+		checkout_root="$(dirname "$checkout_root")"
+	done
+	if [[ ! -f "$checkout_root/scripts/release/sources.json" ]]; then
 		echo "PipeWire export QA requires the pinned all_of_sotf sibling checkout." >&2
 		exit 1
 	fi
+	# A task worktree can live elsewhere. Mount its actual sources and resolved
+	# math sibling over the canonical layout instead of testing the primary branch.
+	math_source="$(cd "$source_root/../math-audio" && pwd -P)"
 	toolchain="$(docker run --rm --entrypoint bash "$base_image" -c 'rustup toolchain list | sed -n "s/ (active.*//p" | head -n 1')"
 	if [[ -z "$toolchain" ]]; then
 		echo "Could not determine the active Rust toolchain in $base_image." >&2
@@ -219,6 +229,8 @@ qa-export-pipewire:
 	fi
 	docker run --rm \
 		-v "$checkout_root":/all_of_sotf \
+		-v "$source_root":/all_of_sotf/autoeq \
+		-v "$math_source":/all_of_sotf/math-audio \
 		-v autoeq-pipewire-cargo-registry:/root/.cargo/registry \
 		-v autoeq-pipewire-cargo-git:/root/.cargo/git \
 		-v autoeq-pipewire-target:/target \

@@ -8,8 +8,8 @@
     "name": "dsp_realization::tests::mixed_fir_iir_replay_matches_independent_complex_branch_sum"
   },
   "mutation": {
-    "package": "roomeq-engine",
-    "file": "crates/roomeq-engine/src/dsp_realization.rs",
+    "package": "autoeq-core",
+    "file": "crates/autoeq-core/src/serialized_chain.rs",
     "selector": "replace \\+ with \\* in mixed_band_response"
   }
 }

@@ -1044,6 +1044,22 @@ until the native loader has recovered it. New bundles carry an explicit bundle
 schema marker and fail if their integrity manifest is missing or unsupported.
 Legacy bundles keep their existing loading behavior.
 
+Native report consumers can use `autoeq_report_native::load_saved_bundle` to
+retain the exact saved graph JSON, hydrated typed graph, measurement index,
+and indexed measurement bytes in one frozen input. Unknown graph and acoustic
+sidecar fields survive `hydrated_report_json()`; existing inline measurements
+remain authoritative. `load_legacy_input` accepts raw JSON and an optional
+artifact directory, rejects manifest-stamped JSON without its saved bundle,
+and bounds staging size while rejecting symlinks and unsafe indexed paths.
+Legacy inputs remain explicitly unverified.
+
+`LoadedReportInput::prepare_dsp_replay` evaluates channel transfer magnitude
+and phase through the canonical engine on the initial measurement grid. It
+uses captured, manifest-verified mono float32 FIR resources and checks their
+sample rates. Unsupported plugins, missing measurements, unverified FIRs,
+and global routing are reported as unavailable. This channel-only electrical
+transfer does not claim routed acoustic or per-driver measurement parity.
+
 Optimization and fallback attempts use private staging directories. The selected
 attempt is published only after it succeeds. External export files are staged and
 preflighted before publication, with rollback on ordinary publication failures.

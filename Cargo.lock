@@ -443,6 +443,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "autoeq-report-native"
+version = "0.5.78"
+dependencies = [
+ "autoeq-core",
+ "hound",
+ "roomeq-engine",
+ "roomeq-model",
+ "roomeq-workflow",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "autoeq-report-wasm"
 version = "0.5.1"
 dependencies = [

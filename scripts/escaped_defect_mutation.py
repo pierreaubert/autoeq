@@ -1,6 +1,7 @@
 """Run one preregistered source mutant in cargo-mutants' isolated copy."""
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 import subprocess
@@ -58,12 +59,37 @@ def verify_execution_logs(report, directory, name):
     return hashes
 
 
+def prepare_scope_diff(scope, source, output, source_name):
+    """Rebase a registered single-line scope by its unique exact source text."""
+    lines = scope.read_text().splitlines()
+    if (len(lines) != 5 or lines[:2] != [f"--- a/{source_name}", f"+++ b/{source_name}"]
+            or not re.fullmatch(r"@@ -\d+ \+\d+ @@", lines[2])
+            or not lines[3].startswith("-") or not lines[4].startswith("+")):
+        raise ValueError("registered scope must be a single-line diff for the mutation source")
+    expected = lines[4][1:]
+    matches = [index + 1 for index, line in enumerate(source.read_text().splitlines())
+               if line == expected]
+    if len(matches) != 1:
+        raise ValueError("registered scope must match exactly one current source line")
+    # Only line placement changes. The declared expression and mutation's
+    # function selector remain intact; discovery still requires one mutant.
+    lines[2] = f"@@ -{matches[0]} +{matches[0]} @@"
+    resolved = output / "scope.diff"
+    resolved.write_text("\n".join(lines) + "\n")
+    return resolved
+
+
 def run(manifest_path):
     manifest = json.loads(Path(manifest_path).read_text())
     regression = execute_regression(manifest["regression_test"])
     parent = ROOT / "target/qa/escaped-defects"
     parent.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix=manifest["id"] + "-", dir=parent))
+    # cargo-mutants copies the workspace into its temporary directory. Keep
+    # that copy beside the original so ../math-audio and other siblings resolve.
+    # A private target also prevents mutant executables replacing normal tests.
+    environment = dict(os.environ, TMPDIR=str(ROOT.parent),
+                       CARGO_TARGET_DIR=str((output / "cargo-target").resolve()))
     mutation = manifest["mutation"]
     source = (ROOT / mutation["file"]).resolve()
     test_source = (ROOT / manifest["test_source"]).resolve()
@@ -88,13 +114,17 @@ def run(manifest_path):
         if not scope.is_relative_to(ROOT):
             raise ValueError("mutation scope must stay in the repository")
         hashes[str(scope.relative_to(ROOT))] = hashlib.sha256(scope.read_bytes()).hexdigest()
-        command.extend(["--in-diff", mutation["scope_diff"]])
+        resolved_scope = prepare_scope_diff(scope, source, output, mutation["file"])
+        hashes[str(resolved_scope.relative_to(ROOT))] = hashlib.sha256(resolved_scope.read_bytes()).hexdigest()
+        command.extend(["--in-diff", str(resolved_scope)])
     discovery = subprocess.run(command + ["--list", "--json"] + test_args, cwd=ROOT,
-                               text=True, capture_output=True, check=False)
+                               text=True, capture_output=True, check=False, env=environment)
+    (output / "discovery.json").write_text(discovery.stdout)
+    (output / "discovery.log").write_text(discovery.stderr)
     if discovery.returncode:
         raise ValueError("mutation discovery failed\n" + discovery.stderr)
     require_single_mutant(json.loads(discovery.stdout))
-    result = subprocess.run(command + test_args, cwd=ROOT, check=False)
+    result = subprocess.run(command + test_args, cwd=ROOT, check=False, env=environment)
     report = json.loads((output / "mutants.out/outcomes.json").read_text())
     require_caught(report)
     log_hashes = verify_execution_logs(report, output / "mutants.out", manifest["regression_test"]["name"])

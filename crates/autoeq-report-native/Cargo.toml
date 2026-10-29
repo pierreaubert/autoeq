@@ -1,0 +1,23 @@
+[package]
+name = "autoeq-report-native"
+version.workspace = true
+edition = "2024"
+description = "Native filesystem adapter for canonical AutoEQ report inputs"
+license = "GPL-3.0-or-later"
+
+[dependencies]
+autoeq-core.workspace = true
+hound.workspace = true
+roomeq-engine.workspace = true
+roomeq-model.workspace = true
+roomeq-workflow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+sha2.workspace = true
+
+[lints]
+workspace = true

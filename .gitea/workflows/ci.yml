@@ -154,7 +154,9 @@ jobs:
           key: ${{ runner.os }}-cargo-autoeq-numerical-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Validate the complete manifest and target membership
-        run: python3 scripts/run_crate_test_matrix.py --check-qa-manifest
+        run: |
+          cargo fetch --locked
+          python3 scripts/run_crate_test_matrix.py --check-qa-manifest
 
       - name: Run all Rust and Python manifest cases
         run: just qa-wolfram-validation
@@ -212,7 +214,9 @@ jobs:
       - name: Install exact-test discovery
         uses: taiki-e/install-action@cargo-nextest
       - name: Escaped-defect ownership and exact regressions
-        run: just qa-roomeq-escaped-defects
+        run: |
+          cargo fetch --locked
+          just qa-roomeq-escaped-defects
       - name: Pairwise parameter execution and exit contracts
         run: just qa-roomeq-parameters-pr
       - name: Upload parameter-matrix evidence
@@ -248,7 +252,7 @@ jobs:
   qa-roomeq-escaped-mutations:
     name: RoomEQ Escaped-Defect Mutations
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces
@@ -274,7 +278,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: roomeq-escaped-defect-mutations
-          path: target/qa/escaped-defects/
+          path: |
+            target/qa/escaped-defects/
+            !target/qa/escaped-defects/**/cargo-target/**
 
   qa-roomeq-camilladsp:
     name: RoomEQ Required CamillaDSP Contracts
@@ -351,8 +357,11 @@ jobs:
 
   qa-roomeq-macos:
     name: RoomEQ macOS Acoustic Baseline
-    runs-on: macos-15
+    runs-on: ${{ vars.MACOS_RUNNER_LABEL || 'macos-15' }}
     timeout-minutes: 30
+    env:
+      # Keep native runner toolchain changes local to this job.
+      RUSTUP_HOME: ${{ runner.temp }}/rustup
     steps:
       - uses: actions/checkout@v4
       - name: Check out pinned sibling workspaces

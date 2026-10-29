@@ -82,7 +82,7 @@ impl FrozenBundleResource {
     }
 }
 
-/// A loaded graph with immutable identities and convolution bytes from one verified snapshot.
+/// A loaded graph with immutable graph, resource, and measurement snapshots.
 #[derive(Debug)]
 pub struct FrozenOutputBundle {
     output: DspGraph,
@@ -91,6 +91,8 @@ pub struct FrozenOutputBundle {
     slim_graph_identity: GraphIdentity,
     verification: OutputBundleVerification,
     resources: BTreeMap<String, FrozenBundleResource>,
+    measurement_index_json: Option<Arc<[u8]>>,
+    measurement_sidecars: BTreeMap<String, Arc<[u8]>>,
 }
 
 impl FrozenOutputBundle {
@@ -127,6 +129,27 @@ impl FrozenOutputBundle {
     /// Iterate over all captured convolution resources in path order.
     pub fn resources(&self) -> impl Iterator<Item = &FrozenBundleResource> {
         self.resources.values()
+    }
+
+    /// Return the exact measurement-index bytes captured during bundle loading.
+    pub fn measurement_index_json(&self) -> Option<&[u8]> {
+        self.measurement_index_json.as_deref()
+    }
+
+    /// Return an indexed measurement sidecar captured from this bundle snapshot.
+    ///
+    /// The path is relative to the sibling asset directory. This accessor does
+    /// not reopen the bundle on disk.
+    pub fn measurement_sidecar(&self, relative_path: &str) -> Option<&[u8]> {
+        let key = relative_path.replace('\\', "/");
+        self.measurement_sidecars.get(&key).map(AsRef::as_ref)
+    }
+
+    /// Iterate over indexed measurement sidecars captured from this snapshot.
+    pub fn measurement_sidecars(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.measurement_sidecars
+            .iter()
+            .map(|(path, bytes)| (path.as_str(), bytes.as_ref()))
     }
 }
 
@@ -931,6 +954,19 @@ fn canonical_output_path_for_lock(output_path: &Path) -> io::Result<PathBuf> {
     Ok(canonical_output)
 }
 
+#[derive(Debug)]
+struct OutputBundleLocks(Vec<File>);
+
+impl Drop for OutputBundleLocks {
+    fn drop(&mut self) {
+        for lock in &self.0 {
+            // Closing only this descriptor can leave the lock held by a
+            // duplicate inherited during another thread's process spawn.
+            let _ = lock.unlock();
+        }
+    }
+}
+
 /// Lock all parent directories used by the requested native output paths.
 ///
 /// Lock files are persistent and must not be removed while held: unlinking a
@@ -939,7 +975,7 @@ fn canonical_output_path_for_lock(output_path: &Path) -> io::Result<PathBuf> {
 /// roots in one directory. It also makes case-insensitive basename aliases
 /// and concurrent creation of a not-yet-existing destination share a lock.
 /// The kernel releases every advisory lock if its process exits.
-fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
+fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<OutputBundleLocks> {
     let mut canonical_outputs = Vec::with_capacity(paths.len());
     let mut directories = Vec::new();
     for output_path in paths {
@@ -953,7 +989,7 @@ fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
     directories.sort();
     directories.dedup();
 
-    let mut locks = Vec::with_capacity(directories.len());
+    let mut locks = OutputBundleLocks(Vec::with_capacity(directories.len()));
     let mut lock_identities = Vec::<same_file::Handle>::with_capacity(directories.len());
     for parent in directories {
         let lock_path = parent.join(BUNDLE_DIRECTORY_LOCK_FILE_NAME);
@@ -1000,7 +1036,7 @@ fn lock_output_bundle_paths(paths: &[&Path]) -> io::Result<Vec<File>> {
             )
         })?;
         lock_identities.push(identity);
-        locks.push(lock);
+        locks.0.push(lock);
     }
     Ok(locks)
 }
@@ -1144,6 +1180,18 @@ fn read_bundle_member_bytes<'a>(
         }
         return Ok(Cow::Owned(bytes));
     } else {
+        if let Some(captured_files) = captured_files {
+            let key = relative
+                .to_str()
+                .ok_or_else(|| io_invalid("artifact member path is not valid UTF-8"))?
+                .replace('\\', "/");
+            if let Some(bytes) = captured_files.get(&key) {
+                if bytes.len() as u64 > maximum_bytes {
+                    return Err(io_invalid(format!("{label} exceeds its size limit")));
+                }
+                return Ok(Cow::Borrowed(bytes));
+            }
+        }
         safe_artifact_path(assets, relative)?
     };
     Ok(Cow::Owned(read_bounded_file(&path, maximum_bytes, label)?))
@@ -3028,6 +3076,10 @@ fn indexed_member_is_available(
             return Ok(captured_files.contains_key(&key));
         }
     }
+    if let Some(captured_files) = captured_files {
+        let key = relative_text.replace('\\', "/");
+        return Ok(captured_files.contains_key(&key));
+    }
     Ok(indexed_member_path(assets, relative_text, manifest, captured_files)?.is_file())
 }
 
@@ -3284,12 +3336,101 @@ fn frozen_convolution_resources(
     Ok(resources)
 }
 
+fn indexed_measurement_paths(index: &serde_json::Value) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    if let Some(channels) = index.get("channels").and_then(serde_json::Value::as_object) {
+        for entry in channels.values() {
+            if let Some(fields) = entry.as_object() {
+                paths.extend(
+                    fields
+                        .values()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                );
+            }
+        }
+    }
+    for key in ["deployed_source_curves", "deployed_source_curve_metadata"] {
+        if let Some(curves) = index.get(key).and_then(serde_json::Value::as_object) {
+            paths.extend(
+                curves
+                    .values()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            );
+        }
+    }
+    paths
+}
+
+fn capture_legacy_indexed_measurement_sidecars(
+    assets: &Path,
+    index: &serde_json::Value,
+    captured_files: &mut CapturedBundleFiles,
+) -> io::Result<()> {
+    let mut total_bytes = 0_u64;
+    for relative_text in indexed_measurement_paths(index) {
+        let relative = PathBuf::from(&relative_text);
+        autoeq_artifacts::validate_relative_artifact_path(&relative)?;
+        let path = safe_artifact_path(assets, &relative)?;
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(io_invalid(format!(
+                "indexed measurement member is not a regular file: {relative_text}"
+            )));
+        }
+        if metadata.len() > MAX_BUNDLE_MEMBER_BYTES {
+            return Err(io_invalid(
+                "indexed measurement member exceeds its size limit",
+            ));
+        }
+        total_bytes = total_bytes
+            .checked_add(metadata.len())
+            .ok_or_else(|| io_invalid("measurement sidecar size overflow"))?;
+        if total_bytes > MAX_BUNDLE_TOTAL_BYTES || captured_files.len() >= MAX_BUNDLE_MANIFEST_FILES
+        {
+            return Err(io_invalid("indexed measurement files exceed bundle limits"));
+        }
+        let bytes = read_bounded_file(&path, MAX_BUNDLE_MEMBER_BYTES, "measurement sidecar")?;
+        if bytes.len() as u64 != metadata.len() {
+            return Err(io_invalid(
+                "indexed measurement member changed while being captured",
+            ));
+        }
+        let key = relative_text.replace('\\', "/");
+        captured_files.insert(key, Arc::<[u8]>::from(bytes));
+    }
+    Ok(())
+}
+
+fn indexed_measurement_sidecars(
+    index: &serde_json::Value,
+    captured_files: &CapturedBundleFiles,
+) -> io::Result<BTreeMap<String, Arc<[u8]>>> {
+    let mut sidecars = BTreeMap::new();
+    for relative_text in indexed_measurement_paths(index) {
+        let relative = PathBuf::from(&relative_text);
+        autoeq_artifacts::validate_relative_artifact_path(&relative)?;
+        let key = relative_text.replace('\\', "/");
+        if let Some(bytes) = captured_files.get(&key) {
+            sidecars.insert(key, Arc::clone(bytes));
+        }
+    }
+    Ok(sidecars)
+}
+
 fn frozen_output_bundle(
     output: DspGraph,
     slim_graph_bytes: Vec<u8>,
     slim_graph_identity: GraphIdentity,
     verification: OutputBundleVerification,
     resources: BTreeMap<String, FrozenBundleResource>,
+    measurement_index_json: Option<Arc<[u8]>>,
+    measurement_sidecars: BTreeMap<String, Arc<[u8]>>,
 ) -> FrozenOutputBundle {
     let raw_graph_sha256 = sha256_hex(&slim_graph_bytes);
     FrozenOutputBundle {
@@ -3299,6 +3440,8 @@ fn frozen_output_bundle(
         slim_graph_identity,
         verification,
         resources,
+        measurement_index_json,
+        measurement_sidecars,
     }
 }
 
@@ -3332,10 +3475,12 @@ fn load_output_bundle_with_hook(
 ///
 /// The returned graph is hydrated for existing report consumers. Its canonical
 /// identity and resource map remain bound to the slim graph bytes before
-/// hydration. Legacy outputs load with [`OutputBundleVerification::LegacyUnverified`]
-/// and do not expose trusted convolution resources. Reads share the persistent
-/// parent-directory lock used by writers; separate bundles in one directory
-/// therefore serialize during capture and publication.
+/// hydration. The measurement index and indexed measurement sidecars are also
+/// retained from the same load snapshot. Legacy outputs load with
+/// [`OutputBundleVerification::LegacyUnverified`] and do not expose trusted
+/// convolution resources. Reads share the persistent parent-directory lock
+/// used by writers; separate bundles in one directory therefore serialize
+/// during capture and publication.
 ///
 /// # Errors
 /// Returns an error when the graph, ledger, evidence, manifest, or any listed
@@ -3378,7 +3523,7 @@ fn load_output_bundle_frozen_snapshot(
         return Err(io_invalid("native output graph failed bundle integrity validation").into());
     }
     after_manifest_check(&assets_dir)?;
-    let captured_files = match manifest.as_ref() {
+    let mut captured_files = match manifest.as_ref() {
         Some(manifest) => capture_manifested_bundle_files(&assets_dir, manifest)?,
         None => CapturedBundleFiles::new(),
     };
@@ -3435,6 +3580,8 @@ fn load_output_bundle_frozen_snapshot(
                         slim_graph_identity,
                         verification,
                         resources,
+                        None,
+                        BTreeMap::new(),
                     ));
                 }
                 Ok(_) => {
@@ -3458,6 +3605,8 @@ fn load_output_bundle_frozen_snapshot(
                     slim_graph_identity,
                     verification,
                     resources,
+                    None,
+                    BTreeMap::new(),
                 ));
             }
             Err(error) => return Err(error.into()),
@@ -3472,6 +3621,16 @@ fn load_output_bundle_frozen_snapshot(
         "measurement index",
     )?;
     let index: serde_json::Value = serde_json::from_slice(index_bytes.as_ref())?;
+    let measurement_index_json = Arc::<[u8]>::from(index_bytes.as_ref());
+    drop(index_bytes);
+    if manifest.is_none() {
+        captured_files.insert(
+            MEASUREMENTS_INDEX_FILENAME.to_owned(),
+            Arc::clone(&measurement_index_json),
+        );
+        capture_legacy_indexed_measurement_sidecars(&assets_dir, &index, &mut captured_files)?;
+    }
+    let measurement_sidecars = indexed_measurement_sidecars(&index, &captured_files)?;
     let channels = index
         .get("channels")
         .and_then(|value| value.as_object())
@@ -3760,12 +3919,36 @@ fn load_output_bundle_frozen_snapshot(
         slim_graph_identity,
         verification,
         resources,
+        Some(measurement_index_json),
+        measurement_sidecars,
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_lock_releases_before_a_duplicate_descriptor_closes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("room.json");
+        let owner = lock_output_bundle_paths(&[&path]).unwrap();
+        let inherited = owner.0[0].try_clone().unwrap();
+        assert_eq!(
+            lock_output_bundle_paths(&[&path]).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock
+        );
+        drop(owner);
+        let next = lock_output_bundle_paths(&[&path])
+            .expect("a descriptor inherited during spawn must not extend the owner's lock");
+        drop(inherited);
+        assert_eq!(
+            lock_output_bundle_paths(&[&path]).unwrap_err().kind(),
+            io::ErrorKind::WouldBlock,
+            "closing the old descriptor cannot release the new owner's lock"
+        );
+        drop(next);
+    }
 
     #[test]
     fn canonical_output_lock_serializes_relative_aliases_and_keeps_lock_file() {
@@ -3780,7 +3963,7 @@ mod tests {
 
         let reopened = lock_output_bundle_paths(&[&relative_alias])
             .expect("lock is reusable after the first owner exits");
-        assert_eq!(reopened.len(), 1);
+        assert_eq!(reopened.0.len(), 1);
         drop(reopened);
         assert!(
             std::fs::read_dir(dir.path())
@@ -3846,7 +4029,7 @@ mod tests {
         let lower_output = lower_parent.join("second.json");
         let both_aliases = lock_output_bundle_paths(&[&upper_output, &lower_output])
             .expect("one operation should deduplicate aliases of one directory");
-        assert_eq!(both_aliases.len(), 1);
+        assert_eq!(both_aliases.0.len(), 1);
         drop(both_aliases);
 
         let first = lock_output_bundle_paths(&[&upper_output]).expect("first alias lock");

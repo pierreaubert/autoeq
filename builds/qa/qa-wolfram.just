@@ -31,6 +31,12 @@ qa-wolfram-contract:
 # identity, result count, tolerance kind, and expected/executed case totals.
 [group('qa-wolfram')]
 qa-wolfram-python:
+	#!/usr/bin/env bash
+	set -euo pipefail
+	# Compile outside the producer's bounded request-execution window.
+	{{cargo}} build --locked --release -p autoeq-report-wasm --bin report-producer
+	target_dir="$({{cargo}} metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
+	export AUTOEQ_REPORT_PRODUCER="$target_dir/release/report-producer"
 	python3 scripts/run_crate_test_matrix.py --qa-runner python
 	# This helper is a negative control, not a seventh manifest case.
 	python3 crates/autoeq-qa/tests/negative_controls_tailpy.py

@@ -22,6 +22,7 @@ members = [
     "crates/roomeq-synthetic",
     "crates/roomeq-workflow",
     "crates/autoeq-qa",
+    "crates/autoeq-report-native",
     "crates/autoeq-report-wasm",
     "crates/autoeq-report-wasm-shell",
     "crates/autoeq-report-gpui",
@@ -74,6 +75,7 @@ autoeq-optim = { path = "crates/autoeq-optim", version = "0.5" }
 autoeq-optim-types = { path = "crates/autoeq-optim-types", version = "0.5" }
 autoeq-workflow = { path = "crates/autoeq-workflow", version = "0.5" }
 autoeq-cli = { path = "crates/autoeq-cli", version = "0.5" }
+autoeq-report-native = { path = "crates/autoeq-report-native", version = "0.5" }
 autoeq-report-wasm = { path = "crates/autoeq-report-wasm", version = "0.5" }
 autoeq-report-wasm-shell = { path = "crates/autoeq-report-wasm-shell", version = "0.5" }
 autoeq-report-gpui = { path = "crates/autoeq-report-gpui", version = "0.5" }

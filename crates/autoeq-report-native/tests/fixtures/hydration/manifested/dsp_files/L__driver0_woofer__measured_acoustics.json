@@ -1,0 +1,100 @@
+{
+  "sample_rate_hz": 48000.0,
+  "timing_reference_id": null,
+  "pre_ir": {
+    "time_ms": [
+      0.0,
+      0.1
+    ],
+    "amplitude": [
+      1.0,
+      0.5
+    ]
+  },
+  "early_late_curves": {
+    "method": "incoherent_band_energy",
+    "reference": "full_peak_band",
+    "smoothing": "third_octave",
+    "split_ms": 20.0,
+    "basis": "measured_room_ir",
+    "direct_reference": "broadband envelope peak",
+    "valid_band_hz": [
+      1000.0,
+      8000.0
+    ],
+    "full": {
+      "freq": [
+        1000.0,
+        2000.0
+      ],
+      "spl": [
+        0.0,
+        -3.0
+      ]
+    },
+    "early": {
+      "freq": [
+        1000.0,
+        2000.0
+      ],
+      "spl": [
+        -1.0,
+        -4.0
+      ]
+    },
+    "late": {
+      "freq": [
+        1000.0,
+        2000.0
+      ],
+      "spl": [
+        -4.0,
+        -7.0
+      ]
+    },
+    "future_curve_extension": {
+      "retain": true
+    }
+  },
+  "early_reflections": {
+    "basis": "measured_room_ir",
+    "method": "bandlimited_early_reflection_table_v1",
+    "band_hz": [
+      1000.0,
+      8000.0
+    ],
+    "threshold_dbfs": -15.0,
+    "direct_reference": "fixture direct peak",
+    "pre": [
+      {
+        "gain_dbfs": -6.0,
+        "time_ms": 2.0,
+        "distance_cm": 68.6,
+        "first_dip_hz": 250.0,
+        "ripple_db": 3.0
+      }
+    ],
+    "post": []
+  },
+  "t60_octaves": {
+    "basis": "measured_room_ir",
+    "min_r2": 0.8,
+    "bands": [
+      {
+        "centre_hz": 63.0,
+        "t60_s": 0.7,
+        "fit_range": "T20",
+        "r2": 0.95,
+        "valid": true,
+        "reason": ""
+      }
+    ]
+  },
+  "speech_transmission": null,
+  "waterfall": null,
+  "resonance_decays": null,
+  "wavelet": null,
+  "future_acoustics_extension": {
+    "retain": true
+  }
+}

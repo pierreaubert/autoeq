@@ -62,6 +62,12 @@
     "autoeq-report-gpui": [
       "autoeq-report-wasm"
     ],
+    "autoeq-report-native": [
+      "autoeq-core",
+      "roomeq-engine",
+      "roomeq-model",
+      "roomeq-workflow"
+    ],
     "autoeq-report-wasm": [
       "autoeq-core"
     ],
@@ -235,6 +241,7 @@
     "autoeq-plot": "cargo test -p autoeq-plot --locked --lib --all-features",
     "autoeq-qa": "cargo test -p autoeq-qa --locked --lib --all-features",
     "autoeq-report-gpui": "cargo test -p autoeq-report-gpui --locked --lib --all-features",
+    "autoeq-report-native": "cargo test -p autoeq-report-native --locked --lib --all-features",
     "autoeq-report-wasm": "cargo test -p autoeq-report-wasm --locked --lib --all-features",
     "autoeq-report-wasm-shell": "cargo test -p autoeq-report-wasm-shell --locked --all-features",
     "autoeq-workflow": "cargo test -p autoeq-workflow --locked --lib --all-features",
@@ -249,7 +256,7 @@
     "roomeq-synthetic": "cargo test -p roomeq-synthetic --locked --lib --all-features",
     "roomeq-workflow": "cargo test -p roomeq-workflow --locked --lib --all-features"
   },
-  "workspace_package_count": 24,
+  "workspace_package_count": 25,
   "numerical_qa": {
     "package": "autoeq-qa",
     "manifest": "crates/autoeq-qa/validation-manifest.toml",
@@ -470,6 +477,13 @@
       "largest_source_file_lines": 527,
       "source_files": 3,
       "external_test_files": 2
+    },
+    "autoeq-report-native": {
+      "source_tree_lines": 1745,
+      "external_test_tree_lines": 0,
+      "largest_source_file_lines": 714,
+      "source_files": 3,
+      "external_test_files": 0
     },
     "autoeq-report-wasm": {
       "source_tree_lines": 26140,

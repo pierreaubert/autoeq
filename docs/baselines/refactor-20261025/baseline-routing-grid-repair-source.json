@@ -1,6 +1,0 @@
-{
-  "reference": "151338b1",
-  "production_repairs": "Exact historical grid helper/optimizer call, common LFE matching offset, routed comparison gain-label handling restored; no optimizer budget or threshold changes.",
-  "negative_control": "3 executed tests fail before production repair; exit100; red log and test-only patch archived",
-  "spatial_negative_control": "Positive end-to-end part ran before repair; full historical test including unsupported-grid refusal is now restored for green validation."
-}

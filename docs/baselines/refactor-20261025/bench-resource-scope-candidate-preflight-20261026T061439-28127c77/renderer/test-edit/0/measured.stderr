@@ -1,3 +1,0 @@
-   Compiling autoeq-report-wasm v0.5.1 (/Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/source/autoeq/crates/autoeq-report-wasm)
-      Timing report saved to /Volumes/home_tmp/tmp/autoeq-build-bench-r05mca1h/targets/primed/0/test/renderer/test/cargo-timings/cargo-timing-20261026T053935436Z-a094431a4462e3fb.html
-    Finished `test` profile [optimized + debuginfo] target(s) in 1.89s

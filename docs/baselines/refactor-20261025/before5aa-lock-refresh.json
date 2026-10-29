@@ -1,9 +1,0 @@
-{
-  "external_added": [],
-  "external_removed": [],
-  "external_difference_from_current_baseline": {
-    "added": [],
-    "removed": []
-  },
-  "note": "Historical snapshot lock refreshed offline solely to use the same current sibling dependencies; this is a historical diagnostic, not acceptance baseline."
-}

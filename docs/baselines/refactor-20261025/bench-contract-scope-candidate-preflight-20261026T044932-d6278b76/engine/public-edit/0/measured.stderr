@@ -1,7 +1,0 @@
-   Compiling roomeq-engine v0.5.84 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-engine)
-   Compiling roomeq-workflow v0.5.36 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-workflow)
-   Compiling roomeq-qa v0.5.68 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-qa)
-   Compiling roomeq-cli v0.5.9 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/roomeq-cli)
-   Compiling autoeq-qa v0.5.2 (/Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/source/autoeq/crates/autoeq-qa)
-      Timing report saved to /Volumes/home_tmp/tmp/autoeq-build-bench-c1pzuk8k/targets/primed/0/test/affected/cargo-timings/cargo-timing-20261026T035805954Z-b6ba9a4ac4e1da6e.html
-    Finished `test` profile [optimized + debuginfo] target(s) in 7.71s

@@ -1,2 +1,0 @@
-ld64.lld: warning: directory not found for option -L /Applications/Xcode.app/Contents/Frameworks
-ld64.lld: warning: directory not found for option -L /opt/homebrew/Cellar/llvm/23.1.1_1/lib

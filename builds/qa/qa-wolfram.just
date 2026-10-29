@@ -32,7 +32,8 @@ _qa-wolfram-venv:
 	if [[ ! -x "$VIRTUAL_ENV/bin/python3" ]]; then
 	    echo "The active virtual environment has a missing or broken Python interpreter:" >&2
 	    echo "  $VIRTUAL_ENV/bin/python3" >&2
-	    echo "This can happen after a Homebrew Python upgrade. Repair it with:" >&2
+	    echo "brew upgrade / brew cleanup can remove the Homebrew binary targeted by the venv's Python symlink." >&2
+	    echo "Repair the symlink to the installed Python under /opt/homebrew, or refresh the venv with:" >&2
 	    echo '  python3 -m venv --upgrade "$VIRTUAL_ENV"' >&2
 	    echo '  source "$VIRTUAL_ENV/bin/activate"' >&2
 	    echo '  python3 -m pip install -r scripts/autoeq-qa-requirements.txt' >&2

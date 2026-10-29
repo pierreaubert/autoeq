@@ -137,7 +137,11 @@ jobs:
           python-version: "3.12.14"
 
       - name: Install pinned AutoEQ QA Python dependencies
-        run: python3 -m pip install --requirement scripts/autoeq-qa-requirements.txt
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python3 -m pip install --requirement scripts/autoeq-qa-requirements.txt
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
 
       - name: Install pinned Just
         run: |

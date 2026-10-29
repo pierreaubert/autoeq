@@ -1597,6 +1597,9 @@
 
 ## Package versions
 
+- Add native frozen report inputs with raw JSON preservation, indexed measurement snapshots, bounded legacy hydration, and canonical channel DSP replay from verified FIR bytes.
+
+
 - Restore QA reliability after the workspace refactor: separate CamillaDSP compilation from bounded execution and include the moved physical-sub integration contract; isolate mutation builds and relocate exact scopes; release bundle locks explicitly; stage nested FIR sidecars; honor Cargo target paths and task worktrees in QA recipes.
 
 

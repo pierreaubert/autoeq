@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "producer": "roomeq-workflow",
+  "producer_version": "0.5.35",
+  "graph_schema_version": "1",
+  "generation": "native-report-hydration-fixture",
+  "graph_sha256": "843188a74d58dc09096957c12f393e2dd633a3d132edf7a1f79a14baece52af0",
+  "files": {
+    "L__driver0_woofer__initial.csv": {
+      "size_bytes": 22,
+      "sha256": "dfb0d761949434f484a38d16a8fa549e152d9625d2ed95eee8a3e076b12cf71f"
+    },
+    "L__driver0_woofer__measured_acoustics.json": {
+      "size_bytes": 1757,
+      "sha256": "78506bef90533a3e77f26130ef5e3747006ca3779c4047e042cde7cc848b9f3d"
+    },
+    "L__initial.csv": {
+      "size_bytes": 35,
+      "sha256": "1d33b0a9fdcae95812fe463e1f9444673764070eb48d6a59037364f212c9c10e"
+    },
+    "L__pre_ir.csv": {
+      "size_bytes": 30,
+      "sha256": "7e2f19e2dbe80dbae71aa7d7541e3147cfe7a4e37d7277b8e48ca92913ce484a"
+    },
+    "measurements_index.json": {
+      "size_bytes": 575,
+      "sha256": "1feb62b522438aba6c208c6bb616e09ce69ca1f4ef826d384cacd4f79ed49e55"
+    }
+  }
+}

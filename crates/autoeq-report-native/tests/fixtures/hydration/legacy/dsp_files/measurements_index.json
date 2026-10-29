@@ -1,0 +1,29 @@
+{
+  "channels": {
+    "L": {
+      "initial_curve": "L__initial.csv",
+      "pre_ir": "L__pre_ir.csv",
+      "driver0_woofer_initial_curve": "L__driver0_woofer__initial.csv",
+      "driver0_woofer_measured_acoustics": "L__driver0_woofer__measured_acoustics.json"
+    }
+  },
+  "deployed_source_curves": {},
+  "symmetric_pairs": {
+    "L+R": {
+      "freq": [
+        100.0
+      ],
+      "sum_spl": [
+        86.0
+      ],
+      "diff_spl": [
+        null
+      ],
+      "method": "fixture"
+    }
+  },
+  "future_index_extension": {
+    "retain": true,
+    "revision": 3
+  }
+}

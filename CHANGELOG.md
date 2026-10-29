@@ -1,5 +1,8 @@
 # Unreleased
 
+- Remove Cargo lockfile enforcement from CI, QA recipes, build helpers, and
+  command-policy checks so Cargo can update stale dependency resolutions.
+
 - Fail immediately with virtual-environment setup instructions when Wolfram QA
   is launched without an activated Python environment.
 

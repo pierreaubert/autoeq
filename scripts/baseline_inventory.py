@@ -123,7 +123,7 @@ def python_tests() -> list[str]:
 
 def cargo_inventory() -> dict[str, object]:
     raw = run(
-        ["cargo", "metadata", "--locked", "--format-version", "1"]
+        ["cargo", "metadata", "--format-version", "1"]
     )
     meta = json.loads(raw)
     member_ids = set(meta["workspace_members"])

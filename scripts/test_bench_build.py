@@ -181,7 +181,7 @@ class MeasurementTests(unittest.TestCase):
     def test_scope_and_profile_are_explicit(self):
         command = cargo_cmd("affected-edit", ["autoeq-core", "autoeq-cli"], "qa", Path("/tmp/target"))
         self.assertIn("--all-features", command)
-        self.assertIn("--locked", command)
+        self.assertNotIn("--locked", command)
         self.assertIn("--offline", command)
         self.assertEqual(command[command.index("--profile") + 1], "qa")
         self.assertEqual(command.count("-p"), 2)

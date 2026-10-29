@@ -112,19 +112,19 @@ check:
 # prepare these executables; test lanes do not need an unconditional prebuild.
 [group('test')]
 build-test-bins profile="qa":
-	{{cargo}} build -p autoeq-cli -p roomeq-cli --locked --profile {{profile}} --bin autoeq --bin roomeq
+	{{cargo}} build -p autoeq-cli -p roomeq-cli --profile {{profile}} --bin autoeq --bin roomeq
 
 # Fast library lane: the default-member libraries and their own
 # integration tests, no binary prebuild, fail at first failure.
 [group('test')]
 test:
-	{{cargo}} nextest run --locked --cargo-profile test --profile fast {{lib_packages}} --lib --tests --no-tests fail
+	{{cargo}} nextest run --cargo-profile test --profile fast {{lib_packages}} --lib --tests --no-tests fail
 
 # Focused feedback for one package (library plus its owning
 # integration targets). Extra args pass through to nextest.
 [group('test')]
 test-crate package *args:
-	{{cargo}} nextest run --locked --cargo-profile test --profile fast -p {{package}} --lib --tests --no-tests fail {{args}}
+	{{cargo}} nextest run --cargo-profile test --profile fast -p {{package}} --lib --tests --no-tests fail {{args}}
 
 # Changed packages (vs base) plus reverse dependencies; shared-config
 # changes widen to the whole library set. See scripts/changed_packages.py.
@@ -138,13 +138,13 @@ test-pr base="main":
 		exit 0
 	fi
 	echo "test-pr: $packages"
-	{{cargo}} nextest run --locked --cargo-profile test --profile fast $packages --lib --tests --no-tests fail
+	{{cargo}} nextest run --cargo-profile test --profile fast $packages --lib --tests --no-tests fail
 
 # Real executable tests: the CLI-owned integration targets that spawn the
 # CLI binaries, built and run with the shared `qa` artifact set.
 [group('test')]
 test-cli:
-	python3 scripts/run_with_report_producer.py --profile qa --cargo "{{cargo}}" -- {{cargo}} nextest run --locked --cargo-profile qa --profile qa -p autoeq-cli -p roomeq-cli --test autoeq_golden_tests --test autoeq_integration_test --test broadband_matching_test --test multi_measurement_test --test roomeq_integration_test --test roomeq_capture_verification --test product_renderer_capabilities --no-tests fail
+	python3 scripts/run_with_report_producer.py --profile qa --cargo "{{cargo}}" -- {{cargo}} nextest run --cargo-profile qa --profile qa -p autoeq-cli -p roomeq-cli --test autoeq_golden_tests --test autoeq_integration_test --test broadband_matching_test --test multi_measurement_test --test roomeq_integration_test --test roomeq_capture_verification --test product_renderer_capabilities --no-tests fail
 
 # Each optimizer internally forks rayon evaluators over all
 # cores, so the effective thread count is num_cpus × num_cpus. On small-
@@ -162,22 +162,22 @@ test-autoeq threads="2":
 # configuration instead of a release prebuild plus a second test build.
 [group('test')]
 ntest:
-	python3 scripts/run_with_report_producer.py --profile qa --cargo "{{cargo}}" -- {{cargo}} nextest run --locked --cargo-profile qa --profile full --workspace --lib --tests --benches --all-features
+	python3 scripts/run_with_report_producer.py --profile qa --cargo "{{cargo}}" -- {{cargo}} nextest run --cargo-profile qa --profile full --workspace --lib --tests --benches --all-features
 
 # Examples are compiled explicitly instead of linked as empty test harnesses.
 [group('test')]
 check-examples:
-	{{cargo}} check --locked --workspace --examples --all-features
+	{{cargo}} check --workspace --examples --all-features
 
 # Criterion's shipped bench profile is checked independently of its QA-mode
 # correctness cases, which remain part of `ntest`.
 [group('test')]
 check-benches:
-	{{cargo}} bench --locked --workspace --all-features --no-run
+	{{cargo}} bench --workspace --all-features --no-run
 
 [group('test')]
 test-docs:
-	{{cargo}} test --locked --workspace --all-features --doc
+	{{cargo}} test --workspace --all-features --doc
 
 # WP0 crate-partition gates. Keep the fast checker tests and graph/ownership
 # report independently runnable; the umbrella also regenerates both schemas.

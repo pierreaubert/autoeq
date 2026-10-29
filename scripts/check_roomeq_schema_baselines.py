@@ -31,7 +31,6 @@ def generate_schema(kind: str) -> object:
             environment.get("CARGO", "cargo"),
             "run",
             "--quiet",
-            "--locked",
             "-p",
             "roomeq-cli",
             "--bin",

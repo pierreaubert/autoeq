@@ -94,7 +94,6 @@ def cargo_metadata() -> dict[str, Any]:
         "--format-version",
         "1",
         "--no-deps",
-        "--locked",
     ]
     completed = subprocess.run(
         command,
@@ -147,8 +146,6 @@ def validate_package_matrix(
                 f"focused test command for {package_name} must start with "
                 + " ".join(expected)
             )
-        if "--locked" not in arguments:
-            errors.append(f"focused test command for {package_name} must use --locked")
         package = packages.get(package_name)
         if package is None:
             continue
@@ -274,7 +271,6 @@ def full_cargo_metadata() -> dict[str, Any]:
         "metadata",
         "--format-version",
         "1",
-        "--locked",
         "--offline",
     ]
     completed = subprocess.run(
@@ -1169,7 +1165,6 @@ def run_rust_cases(
         "test",
         "-p",
         qa["package"],
-        "--locked",
         "--no-fail-fast",
         "--lib",
     ]

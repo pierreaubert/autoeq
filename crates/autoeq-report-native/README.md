@@ -23,6 +23,6 @@ Legacy staging rejects symlinks, unsafe indexed paths, oversized members,
 oversized trees, and detected changes during copying. Legacy data is never
 promoted to manifest-verified evidence.
 
-Run `cargo test -p autoeq-report-native --locked --lib --all-features` for
+Run `cargo test -p autoeq-report-native --lib --all-features` for
 hydration, integrity, snapshot, staging-limit, and canonical replay tests.
 

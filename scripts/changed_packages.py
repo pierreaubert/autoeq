@@ -61,7 +61,7 @@ def changed_paths(base: str) -> list[str]:
 
 def workspace_model() -> tuple[dict[str, Path], dict[str, set[str]], list[str]]:
     meta = json.loads(
-        run(["cargo", "metadata", "--locked", "--format-version", "1"])
+        run(["cargo", "metadata", "--format-version", "1"])
     )
     member_ids = set(meta["workspace_members"])
     id_to_name = {p["id"]: p["name"] for p in meta["packages"]}

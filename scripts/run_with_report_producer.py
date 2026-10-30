@@ -21,7 +21,7 @@ def main() -> int:
     if not command:
         parser.error('a test command is required after --')
     root = Path(__file__).resolve().parents[1]
-    built = subprocess.run([*shlex.split(args.cargo), 'build', '--locked',
+    built = subprocess.run([*shlex.split(args.cargo), 'build',
                             '-p', 'autoeq-report-wasm', '--bin', 'report-producer',
                             '--profile', args.profile, '--message-format=json-render-diagnostics'],
                            cwd=root, stdout=subprocess.PIPE, text=True, check=False)

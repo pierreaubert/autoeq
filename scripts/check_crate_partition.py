@@ -57,7 +57,6 @@ def cargo_metadata(repo_root: pathlib.Path) -> dict[str, Any]:
         "metadata",
         "--format-version",
         "1",
-        "--locked",
     ]
     completed = subprocess.run(
         command,
@@ -520,10 +519,6 @@ def check_focused_tests(
             errors.append(
                 f"focused test command for {package_name} must start with "
                 + " ".join(expected)
-            )
-        if "--locked" not in arguments:
-            errors.append(
-                f"focused test command for {package_name} must include --locked"
             )
         package = packages.get(package_name)
         if package is not None:

@@ -316,7 +316,7 @@ class CargoMatrixTests(unittest.TestCase):
 
 
 class ProvenanceTests(unittest.TestCase):
-    def test_full_metadata_uses_locked_offline_resolution(self):
+    def test_full_metadata_uses_offline_resolution(self):
         response = mock.Mock(
             returncode=0,
             stdout='{"packages": [], "workspace_members": []}',
@@ -327,9 +327,10 @@ class ProvenanceTests(unittest.TestCase):
 
         command = run.call_args.args[0]
         self.assertEqual(
-            command[1:5], ["metadata", "--format-version", "1", "--locked"]
+            command[1:4], ["metadata", "--format-version", "1"]
         )
         self.assertIn("--offline", command)
+        self.assertNotIn("--locked", command)
         self.assertNotIn("--no-deps", command)
 
     def test_resolved_local_packages_include_transitive_path_sources_only(self):

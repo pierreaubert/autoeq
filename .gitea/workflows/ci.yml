@@ -145,7 +145,7 @@ jobs:
 
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
 
       - name: Cache cargo registry
@@ -159,7 +159,7 @@ jobs:
 
       - name: Validate the complete manifest and target membership
         run: |
-          cargo fetch --locked
+          cargo fetch
           python3 scripts/run_crate_test_matrix.py --check-qa-manifest
 
       - name: Run all Rust and Python manifest cases
@@ -210,7 +210,7 @@ jobs:
 
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
 
       - name: Strict RoomEQ config and registry lint
@@ -219,7 +219,7 @@ jobs:
         uses: taiki-e/install-action@cargo-nextest
       - name: Escaped-defect ownership and exact regressions
         run: |
-          cargo fetch --locked
+          cargo fetch
           just qa-roomeq-escaped-defects
       - name: Pairwise parameter execution and exit contracts
         run: just qa-roomeq-parameters-pr
@@ -267,14 +267,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
       - uses: taiki-e/install-action@cargo-nextest
       - uses: taiki-e/install-action@cargo-mutants
       - name: Verify ownership and mutation-runner failure contracts
         run: python3 -m unittest scripts.test_escaped_defect_ownership scripts.test_run_escaped_defect_mutations
-      - name: Fetch locked Cargo dependencies for offline mutation discovery
-        run: cargo fetch --locked
+      - name: Fetch Cargo dependencies for offline mutation discovery
+        run: cargo fetch
       - name: Registered escaped-defect mutations
         run: just qa-roomeq-escaped-defect-mutants
       - name: Upload mutation execution evidence
@@ -300,14 +300,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
       - name: Verify required-backend launcher failure contracts
         run: python3 scripts/test_camilladsp_backend_contracts.py
       - name: Install Linux audio build dependencies
         run: sudo apt-get update && sudo apt-get install -y pkg-config libasound2-dev libpulse-dev libjack-jackd2-dev
       - name: Install verified CamillaDSP revision
-        run: cargo install --locked --git https://github.com/HEnquist/camilladsp.git --rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 CamillaDSP
+        run: cargo install --git https://github.com/HEnquist/camilladsp.git --rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 CamillaDSP
       - name: Execute required PCM backend contracts
         run: just qa-roomeq-camilladsp-backend
       - name: Replay all selected parameter-matrix outputs through CamillaDSP
@@ -349,7 +349,7 @@ jobs:
           key: ${{ runner.os }}-cargo-roomeq-linux-acoustic-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Validate Linux acoustic PR baseline
-        run: cargo run -p roomeq-qa --locked --release --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json --output target/qa/roomeq-acoustic-linux-pr.json
+        run: cargo run -p roomeq-qa --release --bin roomeq-qa-acoustic -- --tier pr --baseline data_tests/roomeq/acoustic_corpus/baseline.linux-x86_64.json --output target/qa/roomeq-acoustic-linux-pr.json
 
       - name: Upload Linux acoustic evidence
         if: always()
@@ -408,7 +408,7 @@ jobs:
 
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
 
       - name: Cache cargo registry

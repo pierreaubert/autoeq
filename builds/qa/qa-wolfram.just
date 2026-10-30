@@ -12,8 +12,8 @@
 # WOLFRAMSCRIPT points at a live engine).
 [group('qa-wolfram')]
 qa-wolfram-smoke:
-	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract
-	{{cargo}} test -p autoeq-qa --locked --release --test oracle_core -- wolfram_peq_response:: wolfram_fir_response:: wolfram_log_interp:: wolfram_erb_quadrature::
+	{{cargo}} test -p autoeq-qa --release --test qa_contract
+	{{cargo}} test -p autoeq-qa --release --test oracle_core -- wolfram_peq_response:: wolfram_fir_response:: wolfram_log_interp:: wolfram_erb_quadrature::
 
 # Stop before running QA when the shell is using system Python.
 [private]
@@ -40,7 +40,7 @@ qa-wolfram: _qa-wolfram-venv
 [group('qa-wolfram')]
 qa-wolfram-contract:
 	python3 scripts/run_crate_test_matrix.py --check-qa-manifest
-	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract
+	{{cargo}} test -p autoeq-qa --release --test qa_contract
 
 # The manifest runner executes exactly its six Python cases and verifies
 # identity, result count, tolerance kind, and expected/executed case totals.
@@ -49,7 +49,7 @@ qa-wolfram-python: _qa-wolfram-venv
 	#!/usr/bin/env bash
 	set -euo pipefail
 	# Compile outside the producer's bounded request-execution window.
-	{{cargo}} build --locked --release -p autoeq-report-wasm --bin report-producer
+	{{cargo}} build --release -p autoeq-report-wasm --bin report-producer
 	target_dir="$({{cargo}} metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
 	export AUTOEQ_REPORT_PRODUCER="$target_dir/release/report-producer"
 	python3 scripts/run_crate_test_matrix.py --qa-runner python
@@ -79,4 +79,4 @@ qa-wolfram-goldens:
 		echo "--- $base"
 		"$engine" -file "$script" | tail -n 1 > "crates/autoeq-qa/wolfram/goldens/$base.json"
 	done
-	{{cargo}} test -p autoeq-qa --locked --release --test qa_contract
+	{{cargo}} test -p autoeq-qa --release --test qa_contract

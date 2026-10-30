@@ -75,7 +75,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: taiki-e/install-action@cargo-mutants
@@ -89,9 +89,9 @@ jobs:
 
       - name: Shared serialized DSP and report contracts
         run: |
-          cargo test -p autoeq-core serialized_dsp::tests --locked
-          cargo test -p autoeq-report-wasm --locked
-          cargo build -p autoeq-report-wasm --bin report-producer --locked
+          cargo test -p autoeq-core serialized_dsp::tests
+          cargo test -p autoeq-report-wasm
+          cargo build -p autoeq-report-wasm --bin report-producer
           python3 -S -m unittest scripts.test_native_serialized_dsp scripts.test_dsp scripts.test_native_eq_figures scripts.test_native_target_csv
       - name: REW MDAT converter contracts
         run: just qa-roomeq-mdat

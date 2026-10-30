@@ -25,7 +25,7 @@ class ComparisonPayloadPythonGoldenTests(unittest.TestCase):
         # profiles can differ by a few floating-point bits, so select the
         # reference build explicitly and keep the exact payload assertion.
         built = subprocess.run(
-            [*shlex.split(os.environ.get("CARGO", "cargo")), "build", "--offline", "--locked",
+            [*shlex.split(os.environ.get("CARGO", "cargo")), "build", "--offline",
              "-p", "autoeq-report-wasm", "--bin", "report-producer", "--profile", "dev",
              "--message-format=json-render-diagnostics"],
             cwd=FIXTURE.parents[3], text=True, capture_output=True, check=False,

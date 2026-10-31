@@ -20,13 +20,28 @@ qa-wolfram-smoke:
 _qa-wolfram-venv:
 	#!/usr/bin/env bash
 	set -euo pipefail
-	if [[ -z "${VIRTUAL_ENV:-}" ]] || ! python3 -c 'import sys; sys.exit(sys.prefix == sys.base_prefix)' 2>/dev/null; then
+	if [[ -z "${VIRTUAL_ENV:-}" ]]; then
 	    echo "Wolfram QA requires an activated Python virtual environment." >&2
 	    echo "From the repository root, run:" >&2
 	    echo "  python3 -m venv .venv  # first-time setup only" >&2
 	    echo "  source .venv/bin/activate" >&2
 	    echo "  python3 -m pip install -r scripts/autoeq-qa-requirements.txt" >&2
 	    echo "Then rerun your just qa-wolfram recipe." >&2
+	    exit 1
+	fi
+	if [[ ! -x "$VIRTUAL_ENV/bin/python3" ]]; then
+	    echo "The active virtual environment has a missing or broken Python interpreter:" >&2
+	    echo "  $VIRTUAL_ENV/bin/python3" >&2
+	    echo "brew upgrade / brew cleanup can remove the Homebrew binary targeted by the venv's Python symlink." >&2
+	    echo "Repair the symlink to the installed Python under /opt/homebrew, or refresh the venv with:" >&2
+	    echo '  python3 -m venv --upgrade "$VIRTUAL_ENV"' >&2
+	    echo '  source "$VIRTUAL_ENV/bin/activate"' >&2
+	    echo '  python3 -m pip install -r scripts/autoeq-qa-requirements.txt' >&2
+	    exit 1
+	fi
+	if ! python3 -c 'import sys; sys.exit(sys.prefix == sys.base_prefix)' 2>/dev/null; then
+	    echo "VIRTUAL_ENV is set, but python3 is not using a working virtual environment." >&2
+	    echo 'Reactivate it: source "$VIRTUAL_ENV/bin/activate"' >&2
 	    exit 1
 	fi
 

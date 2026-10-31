@@ -86,7 +86,7 @@ def main() -> int:
         parser.error('run through scripts/run_with_report_producer.py --profile release')
     cargo = shlex.split(args.cargo)
     root = args.source_root.resolve()
-    metadata = json.loads(subprocess.check_output([*cargo, 'metadata', '--no-deps', '--locked', '--offline', '--format-version', '1'], cwd=root))
+    metadata = json.loads(subprocess.check_output([*cargo, 'metadata', '--no-deps', '--offline', '--format-version', '1'], cwd=root))
     names = {package['name'] for package in metadata['packages'] if package['id'] in metadata['workspace_members']}
     packages = tuple(package for package in PACKAGES if package in names)
     expected = ROOM_PACKAGES[:-1] if 'autoeq' in names else PACKAGES

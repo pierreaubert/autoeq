@@ -108,7 +108,7 @@ jobs:
             cargo --version
             python3 --version
           } | tee "$EVIDENCE_ROOT/toolchain.txt"
-          if timeout --signal=TERM --kill-after=30s 8m cargo metadata --locked --format-version 1 > "$EVIDENCE_ROOT/cargo-metadata.json" 2> "$EVIDENCE_ROOT/cargo-metadata.stderr"; then
+          if timeout --signal=TERM --kill-after=30s 8m cargo metadata --format-version 1 > "$EVIDENCE_ROOT/cargo-metadata.json" 2> "$EVIDENCE_ROOT/cargo-metadata.stderr"; then
             echo "cargo_metadata_exit_code=0" >> "$EVIDENCE_ROOT/toolchain.txt"
           else
             status=$?
@@ -121,7 +121,7 @@ jobs:
         run: |
           set -o pipefail
           rm -f target/release/optimizer-benchmark
-          timeout --signal=TERM --kill-after=30s 55m cargo build --locked --release -p autoeq-qa --bin optimizer-benchmark 2>&1 | tee "$EVIDENCE_ROOT/build.log"
+          timeout --signal=TERM --kill-after=30s 55m cargo build --release -p autoeq-qa --bin optimizer-benchmark 2>&1 | tee "$EVIDENCE_ROOT/build.log"
           test -x target/release/optimizer-benchmark
           tar -C target/release -cf "$EVIDENCE_ROOT/optimizer-benchmark.tar" optimizer-benchmark
           sha256sum target/release/optimizer-benchmark | tee "$EVIDENCE_ROOT/optimizer-benchmark.sha256"

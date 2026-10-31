@@ -91,7 +91,7 @@ def run(output, cases):
                 original = source.read_text()
                 if original.count(before) != 1:
                     raise ValueError(f"{case}: mutation must match exactly one source site")
-                command = ["cargo", "test", "--release", "--offline", "--locked", "-p", package,
+                command = ["cargo", "test", "--release", "--offline", "-p", package,
                            "--lib", name, "--", "--exact", "--nocapture"]
                 baseline = subprocess.run(command, cwd=snapshot, capture_output=True, text=True,
                                           check=False, timeout=900, env=environment)

@@ -41,7 +41,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Install pinned Just
         run: |
-          cargo install --locked --version 1.58.0 just
+          cargo install --version 1.58.0 just
           just --version
       - uses: taiki-e/install-action@cargo-llvm-cov
       - uses: taiki-e/install-action@cargo-mutants

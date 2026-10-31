@@ -186,7 +186,7 @@ def run_execution(root: Path, target: Path, profile_name: str, env: dict, logs: 
                   toolchain: Toolchain, repetition: int) -> dict:
     # Python report adapters need a normal producer executable, not its test harness.
     # Prepare it explicitly; execution must never fall back to a nested Cargo run.
-    producer = timed([str(toolchain.cargo), "build", "--offline", "--locked",
+    producer = timed([str(toolchain.cargo), "build", "--offline",
                       "-p", "autoeq-report-wasm", "--bin", "report-producer",
                       "--profile", profile_name, "--target-dir", str(target),
                       "--message-format=json-render-diagnostics"], root, env, logs / "prepare-report-producer")
@@ -207,7 +207,7 @@ def run_execution(root: Path, target: Path, profile_name: str, env: dict, logs: 
         if required not in helpers or not Path(helpers[required]).is_file():
             raise RuntimeError(f"test compilation did not prepare required CLI artifact: {required}")
     metadata_env = dict(env, CARGO_TARGET_DIR=str(target))
-    cargo_metadata = subprocess.run([str(toolchain.cargo), "metadata", "--locked", "--offline", "--all-features", "--format-version", "1"], cwd=root, env=metadata_env, check=True, capture_output=True, text=True).stdout
+    cargo_metadata = subprocess.run([str(toolchain.cargo), "metadata", "--offline", "--all-features", "--format-version", "1"], cwd=root, env=metadata_env, check=True, capture_output=True, text=True).stdout
     cargo_metadata_path = logs / "cargo-metadata.json"
     cargo_metadata_path.write_text(cargo_metadata)
     reuse = ["--binaries-metadata", str(binary_metadata), "--cargo-metadata", str(cargo_metadata_path)]
@@ -243,14 +243,14 @@ def product_command(scenario: str, packages: dict, cargo: str, *, root: Path | N
                 "--producer-record", str(producer_record), "--", "just", "ntest"]
     if scenario == "product-cli":
         selected = ["autoeq-cli", "roomeq-cli", "autoeq-measurements"] if "autoeq-cli" in packages and "autoeq" not in packages else ["autoeq"]
-        command = [cargo, "build", "--offline", "--locked", "--release", "--bins", "--timings", "--message-format=json-render-diagnostics"]
+        command = [cargo, "build", "--offline", "--release", "--bins", "--timings", "--message-format=json-render-diagnostics"]
         for name in selected:
             command += ["-p", name]
         if selected == ["autoeq"]:
             command += ["--features", "cli"]
         return command
     if scenario == "report-native":
-        return [cargo, "build", "--offline", "--locked", "--release", "-p", "autoeq-report-wasm", "--bin", "report-producer", "--timings", "--message-format=json-render-diagnostics"]
+        return [cargo, "build", "--offline", "--release", "-p", "autoeq-report-wasm", "--bin", "report-producer", "--timings", "--message-format=json-render-diagnostics"]
     return ["just", "report-dist-gpui" if scenario == "report-gpui" else "report-dist"]
 
 

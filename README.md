@@ -183,8 +183,8 @@ From a source checkout, install the shipping commands with the locked dependenci
 ```bash
 just report-dist
 just report-dist-gpui
-cargo install --path crates/autoeq-cli --locked --bin autoeq --bin autoeq-download-speakers
-cargo install --path crates/roomeq-cli --locked --bin roomeq --bin convert-recording
+cargo install --path crates/autoeq-cli --bin autoeq --bin autoeq-download-speakers
+cargo install --path crates/roomeq-cli --bin roomeq --bin convert-recording
 ```
 
 Terminal and report-shell packages use `publish = false`; install the commands
@@ -312,7 +312,7 @@ On a POSIX host, build the CLI and run the device-free process contracts with a
 new evidence directory:
 
 ```bash
-cargo build -p autoeq-cli --locked --bin autoeq
+cargo build -p autoeq-cli --bin autoeq
 python3 scripts/run_autoeq_exact_resume_process_contracts.py \
   --binary target/debug/autoeq --output target/qa/exact-process-new
 ```

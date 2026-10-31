@@ -366,10 +366,10 @@ pub(super) mod finalization_diagnostic {
 
     fn resolved_cargo_metadata(root: &Path) -> Result<Vec<u8>> {
         let output = Command::new("cargo")
-            .args(["metadata", "--format-version", "1", "--locked", "--offline"])
+            .args(["metadata", "--format-version", "1", "--offline"])
             .current_dir(root)
             .output()
-            .context("run locked offline cargo metadata for diagnostic provenance")?;
+            .context("run offline cargo metadata for diagnostic provenance")?;
         ensure!(
             output.status.success(),
             "cargo metadata failed: {}",

@@ -23,7 +23,7 @@ class NativeLanePrerequisiteTests(unittest.TestCase):
 args = sys.argv[1:]
 assert pathlib.Path.cwd() == pathlib.Path(os.environ['EXPECTED_SOURCE'])
 assert args[:1] == ['build']
-assert '--offline' in args and '--locked' in args
+assert '--offline' in args and '--locked' not in args
 profile = args[args.index('--profile') + 1]
 target = pathlib.Path(args[args.index('--target-dir') + 1])
 if os.environ.get('FAIL_BUILD'):

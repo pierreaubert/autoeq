@@ -41,14 +41,14 @@ def build_qa_binary():
         return executable
     cargo = shlex.split(os.environ.get("CARGO", "cargo"))
     metadata = json.loads(subprocess.check_output(
-        [*cargo, "metadata", "--offline", "--locked", "--no-deps", "--format-version", "1"], cwd=ROOT))
+        [*cargo, "metadata", "--offline", "--no-deps", "--format-version", "1"], cwd=ROOT))
     owners = [(package, target) for package in metadata["packages"]
               if package["id"] in metadata["workspace_members"] for target in package["targets"]
               if target["name"] == "roomeq-qa-synthetic" and "bin" in target["kind"]]
     if len(owners) != 1:
         raise RuntimeError("Synthetic QA target must have exactly one Cargo owner")
     package, target = owners[0]
-    command = [*cargo, "build", "--offline", "--locked", "--release", "-p", package["name"],
+    command = [*cargo, "build", "--offline", "--release", "-p", package["name"],
                "--bin", target["name"], "--message-format=json-render-diagnostics"]
     required = target.get("required-features", [])
     if required:

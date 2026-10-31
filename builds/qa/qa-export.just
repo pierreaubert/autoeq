@@ -67,7 +67,7 @@ install-export-test-systems:
 	if command -v cargo >/dev/null 2>&1; then
 		echo "Installing CamillaDSP from its official repository..."
 		cargo install --git https://github.com/HEnquist/camilladsp.git \
-			--rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 --locked || {
+			--rev 05e9cfcdf43c0dfe078ed3feb8af4c8bd701fd74 || {
 			echo "cargo install camilladsp failed; install CamillaDSP manually and set ROOMEQ_CAMILLADSP_VALIDATE_CMD."
 		}
 	else

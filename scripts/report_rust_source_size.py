@@ -140,7 +140,7 @@ def inspect(path: Path, crate_root: bool = False) -> dict:
 
 def report(root: Path) -> dict:
     metadata = json.loads(subprocess.check_output(
-        ["cargo", "metadata", "--offline", "--locked", "--no-deps", "--format-version", "1"], cwd=root))
+        ["cargo", "metadata", "--offline", "--no-deps", "--format-version", "1"], cwd=root))
     packages = [p for p in metadata["packages"] if p["id"] in metadata["workspace_members"]]
     files, owners, targets = {}, {}, []
     for package in packages:

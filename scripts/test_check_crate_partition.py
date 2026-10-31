@@ -425,7 +425,7 @@ class FocusedTestMatrixTests(unittest.TestCase):
                 package_data,
                 {
                     "focused_tests": {
-                        "core": "cargo test -p core --locked --features plotly"
+                        "core": "cargo test -p core --features plotly"
                     }
                 },
             ),
@@ -443,7 +443,7 @@ class FocusedTestMatrixTests(unittest.TestCase):
 
         errors = checker.check_focused_tests(
             package_data,
-            {"focused_tests": {"gpui": "cargo test -p gpui --locked --lib"}},
+            {"focused_tests": {"gpui": "cargo test -p gpui --lib"}},
         )
 
         self.assertEqual(errors, [])

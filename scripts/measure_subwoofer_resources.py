@@ -146,7 +146,7 @@ def main():
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(build_report, indent=2) + "\n")
         try:
-            build = subprocess.run(["cargo", "build", "--release", "--offline", "--locked",
+            build = subprocess.run(["cargo", "build", "--release", "--offline",
                                     "-p", "roomeq-workflow", "--example", "subwoofer_resources",
                                     "--message-format=json"], cwd=ROOT, capture_output=True, text=True, check=True)
             artifacts = [json.loads(line) for line in build.stdout.splitlines()]

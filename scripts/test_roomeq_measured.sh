@@ -52,7 +52,7 @@ for scenario in "${scenarios[@]}"; do
     done
 done
 
-$CARGO build --release --locked -p roomeq-cli --bin roomeq
+$CARGO build --release -p roomeq-cli --bin roomeq
 # Freeze the executable for this run: a concurrent rebuild must not change
 # optimization behavior halfway through the measured matrix.
 BUILD_BIN=${CARGO_TARGET_DIR:-./target}/release/roomeq
@@ -65,7 +65,7 @@ chmod a-w "$BIN"
 # Reporting must not launch Cargo inside its 120-second render timeout or
 # change implementations when another task rebuilds the shared target tree.
 if [[ -z ${AUTOEQ_REPORT_PRODUCER:-} ]]; then
-    $CARGO build --release --locked -p autoeq-report-wasm --bin report-producer
+    $CARGO build --release -p autoeq-report-wasm --bin report-producer
     BUILD_REPORT_BIN=${CARGO_TARGET_DIR:-./target}/release/report-producer
 else
     BUILD_REPORT_BIN=$AUTOEQ_REPORT_PRODUCER

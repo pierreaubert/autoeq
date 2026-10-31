@@ -11,5 +11,5 @@ the GPUI view for browser environments that support the required WebGPU path.
 Run the host-side model tests with:
 
 ```bash
-cargo test -p autoeq-report-gpui --locked --lib
+cargo test -p autoeq-report-gpui --lib
 ```

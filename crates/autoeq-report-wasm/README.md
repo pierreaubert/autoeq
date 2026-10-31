@@ -14,5 +14,5 @@ The payload contract and examples are documented in
 [`SCHEMA.md`](SCHEMA.md). Run its library tests with:
 
 ```bash
-cargo test -p autoeq-report-wasm --locked --lib
+cargo test -p autoeq-report-wasm --lib
 ```

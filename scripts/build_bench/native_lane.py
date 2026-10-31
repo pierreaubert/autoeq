@@ -38,7 +38,7 @@ def main() -> int:
     record_path.parent.mkdir(parents=True, exist_ok=True)
     stdout = record_path.with_suffix('.build.stdout')
     stderr = record_path.with_suffix('.build.stderr')
-    build_command = [args.cargo, 'build', '--offline', '--locked',
+    build_command = [args.cargo, 'build', '--offline',
                      '-p', 'autoeq-report-wasm', '--bin', 'report-producer',
                      '--profile', args.profile, '--target-dir', str(target),
                      '--timings', '--message-format=json-render-diagnostics']

@@ -74,11 +74,11 @@ def cargo_cmd(scenario: str, package: str | list[str], profile: str, target: Pat
         command = [cargo, "test", "--lib", "--tests", "--all-features", "--no-run"]
     else:
         raise ValueError(f"unknown library scenario: {scenario}")
-    command += ["--offline", "--locked", "--profile", profile, "--target-dir", str(target), "--timings", "--message-format=json-render-diagnostics"]
+    command += ["--offline", "--profile", profile, "--target-dir", str(target), "--timings", "--message-format=json-render-diagnostics"]
     for name in package_names:
         command += ["-p", name]
     return command
 
 
 def native_listing(cargo: str, target: Path, profile: str) -> list[str]:
-    return [cargo, "nextest", "list", "--locked", "--offline", "--workspace", "--lib", "--tests", "--benches", "--all-features", "--cargo-profile", profile, "--target-dir", str(target), "--list-type", "binaries-only", "--message-format", "json"]
+    return [cargo, "nextest", "list", "--offline", "--workspace", "--lib", "--tests", "--benches", "--all-features", "--cargo-profile", profile, "--target-dir", str(target), "--list-type", "binaries-only", "--message-format", "json"]

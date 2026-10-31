@@ -183,7 +183,7 @@ class Storage:
 
 
 def metadata(root: Path, toolchain: Toolchain) -> dict:
-    return json.loads(subprocess.run([str(toolchain.cargo), "metadata", "--offline", "--locked", "--format-version", "1"], cwd=root, env=toolchain.environment(), check=True, capture_output=True, text=True).stdout)
+    return json.loads(subprocess.run([str(toolchain.cargo), "metadata", "--offline", "--format-version", "1"], cwd=root, env=toolchain.environment(), check=True, capture_output=True, text=True).stdout)
 
 
 def dependency_roots(source: Path, toolchain: Toolchain) -> set[Path]:

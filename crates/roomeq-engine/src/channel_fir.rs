@@ -234,7 +234,7 @@ pub fn process_fir_channel(request: FirChannelRequest<'_>) -> Result<ChannelProc
     }
 }
 
-fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
+fn process_phase_linear(mut request: FirChannelRequest<'_>) -> Result<ChannelProcessingResult> {
     info!("  Generating FIR filter...");
     let usable_curve = request
         .prepared
@@ -254,13 +254,40 @@ fn process_phase_linear(request: FirChannelRequest<'_>) -> Result<ChannelProcess
     .map_err(|error| AutoeqError::OptimizationFailed {
         message: format!("FIR generation failed: {error}"),
     })?;
+    let mut evidence = request.preprocessed.optimizer_evidence.clone();
+    let progress = progress::FirProgress::new(request.callback.take());
+    // A representative can hide opposing seat responses. Honor the declared
+    // spatial objective using the same finite-tap searches as hybrid FIR,
+    // with no preceding IIR response in this mode.
+    let coefficients = if request.optimizer.multi_measurement.is_some()
+        && request
+            .optimizer
+            .fir
+            .as_ref()
+            .is_some_and(|fir| fir.phase.eq_ignore_ascii_case("linear"))
+    {
+        let (taps, run) =
+            spatial_linear::optimize(&request, &input_curve, &[], coefficients, &progress)?;
+        evidence.push(run);
+        taps
+    } else if request.optimizer.multi_measurement.is_some()
+        && request.optimizer.fir.as_ref().is_some_and(|fir| {
+            fir.phase.eq_ignore_ascii_case("minimum") || fir.phase.eq_ignore_ascii_case("kirkeby")
+        })
+    {
+        let (taps, run) = spatial_realized::optimize(&request, &input_curve, &[], &progress)?;
+        evidence.push(run);
+        taps
+    } else {
+        coefficients
+    };
     assemble::assemble_fir_result(
         &request,
         FirOptimizerOutput::PhaseLinear {
             coefficients,
             sidecar_reference: request.sidecar_reference.clone(),
         },
-        request.preprocessed.optimizer_evidence.clone(),
+        evidence,
         Some(&design_target),
         Vec::new(),
         None,

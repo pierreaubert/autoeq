@@ -1133,8 +1133,7 @@ fn select_inner(
     }
     if result.metadata.correction_acceptance.is_none() {
         if super::validation_scorecard::needs_native_routed_acceptance(result) {
-            refresh_configured_native_acceptance(result, config, fs, dir)?;
-            super::validation_scorecard::defer_native_routed_acceptance(result);
+            initialize_pending_native_acceptance(result, config, fs, dir)?;
         } else {
             super::validation_scorecard::attach_validation_scorecard(
                 result,
@@ -3838,6 +3837,61 @@ fn configured_acceptance_graph(value: &RoomOptimizationResult) -> serde_json::Va
     .expect("serializable deployed graph")
 }
 
+/// Initialize refinement evidence without changing or accepting the candidate graph.
+pub(super) fn initialize_pending_native_acceptance(
+    result: &mut RoomOptimizationResult,
+    config: &RoomConfig,
+    fs: f64,
+    dir: &Path,
+) -> Result<()> {
+    let (quality, realization, policy) = room_optimization_result::runtime_acceptance_evidence(
+        result,
+        fs,
+        config.optimizer.smooth_n,
+        (config.optimizer.min_freq, config.optimizer.max_freq),
+        dir,
+        config.optimizer.processing_mode.clone(),
+        group_delay_budget_ms(config),
+    )
+    .ok_or_else(|| failed("initial native acceptance evidence unavailable"))?;
+    let training = &quality.training;
+    let metrics = roomeq_model::CorrectionMetricSummary {
+        auditory_frequency_measure: autoeq_core::AUDITORY_FREQUENCY_MEASURE_VERSION.into(),
+        pre_target_weighted_rms_db: training.pre_weighted_rms_median_db,
+        post_target_weighted_rms_db: training.post_weighted_rms_median_db,
+        improvement_db: training.improvement_median_db,
+        improvement_ratio: if training.pre_weighted_rms_median_db.abs() > 1e-9 {
+            training.improvement_median_db / training.pre_weighted_rms_median_db.abs()
+        } else {
+            0.0
+        },
+        post_p95_abs_residual_db: training.post_p95_abs_residual_db,
+        post_worst_abs_residual_db: training.post_worst_abs_residual_db,
+        correction_rms_db: quality.correction_rms_db,
+        max_abs_correction_db: quality.max_boost_db.abs().max(quality.max_cut_db.abs()),
+    };
+    // The raw candidate may still need rollback or strength refinement. Only
+    // final native seat replay may certify it; its immutable-graph guard must
+    // not prevent refinement from starting.
+    result.metadata.correction_acceptance = Some(roomeq_model::CorrectionAcceptanceReport {
+        policy: roomeq_model::CorrectionAcceptancePolicy::RuntimeSafety,
+        runtime_policy: Some(policy),
+        decision: roomeq_model::CorrectionDecision::Rejected,
+        accepted: false,
+        outcome: roomeq_model::RoomEqOutcome::InsufficientEvidence,
+        metrics,
+        violations: Vec::new(),
+        realized_processing: None,
+        processing_fallback: None,
+        observations: Vec::new(),
+        reverted_stages: Vec::new(),
+        acoustic_quality: None,
+        realization_quality: Some(realization),
+    });
+    super::validation_scorecard::defer_native_routed_acceptance(result);
+    Ok(())
+}
+
 pub(super) fn refresh_configured_native_acceptance(
     result: &mut RoomOptimizationResult,
     config: &RoomConfig,
@@ -4279,6 +4333,9 @@ fn scale_correction(
                     filter.db_gain * strength,
                 );
             }
+            channel.biquads.retain(|filter| {
+                !negligible_correction_gain(filter.filter_type.long_name(), filter.db_gain)
+            });
             // Selected artifacts own their coefficients; old retained taps must
             // never shadow the newly written trial sidecar.
             let firs: Vec<_> = chain
@@ -4312,6 +4369,25 @@ fn scale_correction(
     Ok(())
 }
 
+// Match the single-channel optimizer's pruning floor after strength scaling.
+// Pruning happens before candidate replay, so all quality and safety gates
+// assess the exact reduced graph that can be selected for publication.
+fn negligible_correction_gain(filter_type: &str, gain: f64) -> bool {
+    const MIN_CORRECTION_GAIN_DB: f64 = 0.05;
+    gain.is_finite()
+        && gain.abs() < MIN_CORRECTION_GAIN_DB
+        && [
+            "peak",
+            "lowshelf",
+            "highshelf",
+            "peakmatched",
+            "lowshelforf",
+            "highshelforf",
+        ]
+        .iter()
+        .any(|kind| filter_type.eq_ignore_ascii_case(kind))
+}
+
 fn scale_plugin(
     plugin: &mut PluginConfigWrapper,
     strength: f64,
@@ -4326,7 +4402,7 @@ fn scale_plugin(
             .get_mut("filters")
             .and_then(|v| v.as_array_mut())
             .ok_or_else(|| failed("malformed correction EQ filters"))?;
-        for filter in filters {
+        for filter in filters.iter_mut() {
             if filter.get("topology").and_then(serde_json::Value::as_str) == Some("kautz_filter") {
                 kautz::scale_weights(filter, strength)?;
                 continue;
@@ -4338,6 +4414,14 @@ fn scale_plugin(
                 filter["db_gain"] = serde_json::json!(gain * strength);
             }
         }
+        filters.retain(|filter| {
+            filter.get("topology").and_then(serde_json::Value::as_str) == Some("kautz_filter")
+                || !filter
+                    .get("filter_type")
+                    .and_then(serde_json::Value::as_str)
+                    .zip(filter.get("db_gain").and_then(serde_json::Value::as_f64))
+                    .is_some_and(|(kind, gain)| negligible_correction_gain(kind, gain))
+        });
     } else if plugin.plugin_type == "gain"
         && plugin.parameters["label"] == "automatic_input_level_alignment"
         && plugin.parameters["room_eq_correction_gain"] == true
@@ -5453,7 +5537,7 @@ mod tests {
         use math_audio_iir_fir::{Biquad, BiquadFilterType};
         for fs in [44_100.0, 48_000.0, 96_000.0] {
             for is_sub in [false, true] {
-                for strength in [0.0, 0.5, 1.0] {
+                for strength in [0.0, 0.25, 0.5, 1.0] {
                     let (mut result, _) = fixture();
                     let filter = Biquad::new(BiquadFilterType::Peak, 60.0, fs, 3.0, -0.1);
                     result.channels.get_mut("L").unwrap().plugins =
@@ -5483,6 +5567,16 @@ mod tests {
                         &store,
                     )
                     .unwrap();
+                    if strength < 0.5 {
+                        assert!(result.channel_results["L"].biquads.is_empty());
+                        assert!(
+                            result.channels["L"].plugins[0].parameters["filters"]
+                                .as_array()
+                                .unwrap()
+                                .is_empty()
+                        );
+                        continue;
+                    }
                     let retained = &result.channel_results["L"].biquads[0];
                     assert_eq!(
                         roomeq_engine::output::biquad_to_json(retained),
@@ -5499,6 +5593,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn correction_strength_prunes_gain_filters_but_preserves_structural_filters() {
+        use math_audio_iir_fir::{Biquad, BiquadFilterType};
+        let filters: Vec<_> = [
+            BiquadFilterType::Peak,
+            BiquadFilterType::Lowshelf,
+            BiquadFilterType::Highshelf,
+            BiquadFilterType::PeakMatched,
+            BiquadFilterType::LowshelfOrf,
+            BiquadFilterType::HighshelfOrf,
+            BiquadFilterType::Lowpass,
+            BiquadFilterType::Highpass,
+            BiquadFilterType::AllPass,
+            BiquadFilterType::Notch,
+        ]
+        .into_iter()
+        .map(|kind| Biquad::new(kind, 100.0, 48_000.0, 1.0, -0.1))
+        .collect();
+        let (mut result, _) = fixture();
+        result.channels.get_mut("L").unwrap().plugins =
+            vec![roomeq_engine::output::create_eq_plugin(&filters)];
+        result.channel_results.get_mut("L").unwrap().biquads = filters;
+        let dir = tempfile::tempdir().unwrap();
+        let store = autoeq_artifacts::MemoryArtifactStore::new();
+        scale_correction(
+            &mut result,
+            (0.25, 0.25),
+            &Default::default(),
+            48_000.0,
+            dir.path(),
+            &ProcessingMode::LowLatency,
+            &store,
+        )
+        .unwrap();
+        let retained = &result.channel_results["L"].biquads;
+        assert_eq!(retained.len(), 4);
+        let serialized: Vec<_> = retained
+            .iter()
+            .map(roomeq_engine::output::biquad_to_json)
+            .collect();
+        assert_eq!(
+            serde_json::json!(serialized),
+            result.channels["L"].plugins[0].parameters["filters"]
+        );
+        assert_eq!(retained[0].filter_type, BiquadFilterType::Lowpass);
+        assert_eq!(retained[1].filter_type, BiquadFilterType::Highpass);
+        assert_eq!(retained[2].filter_type, BiquadFilterType::AllPass);
+        assert_eq!(retained[3].filter_type, BiquadFilterType::Notch);
     }
 
     #[test]
@@ -5745,6 +5889,25 @@ mod tests {
             SpeakerConfig::Single(MeasurementSource::InMemory(curve)),
         );
         (result, config)
+    }
+
+    #[test]
+    fn pending_native_acceptance_requires_measured_channels() {
+        let (mut result, config) = fixture();
+        result.channel_results.clear();
+        result.metadata.correction_acceptance = None;
+        let before = configured_acceptance_graph(&result);
+        let dir = tempfile::tempdir().unwrap();
+        let error =
+            initialize_pending_native_acceptance(&mut result, &config, 48_000.0, dir.path())
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("initial native acceptance evidence unavailable")
+        );
+        assert!(result.metadata.correction_acceptance.is_none());
+        assert_eq!(configured_acceptance_graph(&result), before);
     }
 
     #[test]

@@ -537,12 +537,11 @@ pub fn rule_multi_seat(ctx: &mut ValidationContext<'_>) {
         if multi_seat.optimize_polarity
             || multi_seat.allpass_filters_per_sub > 0
             || multi_seat.continuous_area.is_some()
-            || multi_seat.seat_identity.is_some()
             || multi_seat.search.is_some()
         {
             ctx.add_warning(
                 "multi_seat is disabled; optimize_polarity, allpass_filters_per_sub, \
-                 continuous_area, seat_identity, and search are set but inactive",
+                 continuous_area, or search are set but inactive",
             );
         }
         return;

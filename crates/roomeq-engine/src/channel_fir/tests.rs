@@ -471,6 +471,86 @@ fn hybrid_narrow_band_preserves_fixed_target_in_direct_dtft() {
 }
 
 #[test]
+fn phase_linear_respects_configured_seat_weights() {
+    use roomeq_model::{MultiMeasurementConfig, MultiMeasurementStrategy};
+
+    let frequency = Array1::logspace(10.0, f64::log10(20.0), f64::log10(20_000.0), 192);
+    let representative = Curve {
+        freq: frequency.clone(),
+        spl: Array1::from_elem(frequency.len(), 80.0),
+        ..Curve::default()
+    };
+    // Equal and opposite broad peaks cancel in the representative. A caller
+    // choosing either seat must still receive its corresponding correction.
+    let seats = [1.0, -1.0]
+        .map(|sign| Curve {
+            freq: frequency.clone(),
+            spl: frequency.mapv(|f| 80.0 + sign * 6.0 * (-(f / 1_000.0).ln().powi(2) / 0.25).exp()),
+            ..Curve::default()
+        })
+        .to_vec();
+    let prepared = PreparedChannelInput::new(
+        PreparedChannelMeasurements::new(representative.clone(), seats, true),
+        None,
+        PreparedCea2034::default(),
+        EqResources::default(),
+    );
+    let features = preprocessed(&representative);
+    let resources = EqResources::default();
+    for phase in ["linear", "minimum", "kirkeby"] {
+        let mut responses = Vec::new();
+        for weights in [vec![1.0, 0.0], vec![0.0, 1.0]] {
+            let mut room = config();
+            room.optimizer.algorithm = "autoeq:cobyla".into();
+            room.optimizer.max_iter = 60;
+            room.optimizer.seed = Some(7);
+            room.optimizer.max_freq = 5_000.0;
+            // Leave headroom for the 6 dB fixture dip; this test isolates
+            // seat selection from the separately tested emission ceiling.
+            room.optimizer.max_db = 12.0;
+            room.optimizer.multi_measurement = Some(MultiMeasurementConfig {
+                strategy: MultiMeasurementStrategy::WeightedSum,
+                weights: Some(weights),
+                ..Default::default()
+            });
+            let fir = room.optimizer.fir.as_mut().unwrap();
+            fir.taps = 1_024;
+            fir.phase = phase.into();
+            let target = build_target_context("left", &room, &representative, None);
+            let result = process_fir_channel(FirChannelRequest {
+                mode: FirChannelMode::PhaseLinear,
+                channel_name: "left",
+                prepared: &prepared,
+                room_config: &room,
+                sample_rate: 48_000.0,
+                target: &target,
+                preprocessed: &features,
+                optimizer: &room.optimizer,
+                eq_resources: &resources,
+                sidecar_reference: reference("weighted-seat.wav"),
+                callback: None,
+            })
+            .unwrap();
+            assert!(result.filters.is_empty(), "pure FIR must not emit IIR EQ");
+            let taps = result.fir_coeffs.unwrap();
+            assert_eq!(taps.len(), 1_024);
+            let (real, imaginary) =
+                taps.iter()
+                    .enumerate()
+                    .fold((0.0, 0.0), |(real, imaginary), (index, tap)| {
+                        let angle = -std::f64::consts::TAU * 1_000.0 * index as f64 / 48_000.0;
+                        (real + tap * angle.cos(), imaginary + tap * angle.sin())
+                    });
+            responses.push(20.0 * real.hypot(imaginary).log10());
+        }
+        assert!(
+            responses[0] < -1.0 && responses[1] > 1.0,
+            "{phase}: opposite seat weights must cut the peak and boost the dip: {responses:?}"
+        );
+    }
+}
+
+#[test]
 fn phase_linear_returns_required_sidecar_and_in_memory_coefficients() {
     let curve = curve(false);
     let prepared = prepared(curve.clone());

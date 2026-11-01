@@ -43,6 +43,26 @@ fn joint_cinema_replays_unequal_arrivals_at_the_nonzero_primary_seat() {
     // Exact alignment of flat arrays is covered by the engine's permutation
     // oracle; a resonant room instead trades target error and output efficiency.
     assert_delivered_with_arrivals(&result, fs, arrivals_ms, 200);
+    for name in ["L", "R"] {
+        let channel = &result.channel_results[name];
+        let receipt = channel
+            .measurement_conditioning
+            .as_ref()
+            .expect("routed main must retain its actual preparation receipt");
+        assert_eq!(
+            receipt.representative_identity,
+            channel.initial_curve.content_hash().unwrap()
+        );
+        let conditioning = result
+            .metadata
+            .stage_outcomes
+            .iter()
+            .find(|stage| stage.stage == "measurement_input_conditioning")
+            .unwrap();
+        assert!(conditioning.checks.iter().any(|check| {
+            check.id == format!("measurement-conditioning:{name}") && check.passed
+        }));
+    }
 }
 
 #[test]

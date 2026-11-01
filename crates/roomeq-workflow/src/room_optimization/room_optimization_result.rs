@@ -1027,7 +1027,7 @@ pub(super) fn refresh_optimizer_evidence(
     has_selected_output.then_some(confidence)
 }
 
-fn runtime_acceptance_evidence(
+pub(super) fn runtime_acceptance_evidence(
     result: &RoomOptimizationResult,
     sample_rate: f64,
     smoothing_n: usize,

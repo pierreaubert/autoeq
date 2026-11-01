@@ -1,5 +1,36 @@
 # Unreleased
 
+- Keep conditioned measurement positions and their representative on a shared
+  frequency grid while retaining each position's narrow peaks and nulls. Record
+  the alignment in source-conditioning receipts for spatial-analysis inputs.
+
+- Honor configured multi-measurement objectives in pure FIR processing,
+  including seat weights, using the existing
+  spatial designers without adding IIR filters.
+
+- Retain source-conditioning receipts when selecting the primary seat and
+  resampling routed main responses onto the bass-management grid.
+
+- Restore configured excursion protection on routed single-speaker outputs
+  when constructing the uncorrected fallback reference.
+
+- Reconstruct routed main responses from canonical gain, polarity, crossover,
+  and delay controls, including configured fallbacks without compatibility plugins.
+
+- Score implicit flat crossover targets against the main-band level reference,
+  matching explicit flat targets so broad bass attenuation remains visible.
+
+- Preserve shared crossover delay and polarity alongside gain when constructing
+  physical subwoofer routes, including existing per-driver alignment controls.
+
+- Initialize routed correction refinement with pending evidence so raw candidates
+  can be refined before final graph validation. Final acceptance still refuses
+  corrections that require safety rollback.
+
+- Assess FIR temporal evidence per channel so IIR-only channels do not mark
+  a mixed FIR/IIR correction as missing measurements. FIR channels still require
+  measured pre-ringing and timing evidence.
+
 - Remove Cargo lockfile enforcement from CI, QA recipes, build helpers, and
   command-policy checks so Cargo can update stale dependency resolutions.
 

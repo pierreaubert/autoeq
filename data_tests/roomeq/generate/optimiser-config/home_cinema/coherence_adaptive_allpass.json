@@ -18,10 +18,15 @@
       "outputs": [
         {
           "id": "Sub1",
-          "speaker": "lfe"
+          "speaker": "lfe_1"
+        },
+        {
+          "id": "Sub2",
+          "speaker": "lfe_2"
         }
       ],
       "crossover": [
+        "first",
         "first"
       ]
     },
@@ -49,6 +54,12 @@
     "multi_measurement": {
       "strategy": "variance_penalized",
       "variance_lambda": 1.0
+    },
+    "multi_seat": {
+      "enabled": false,
+      "seat_identity": {
+        "ids": ["lp0", "lp1", "lp2", "lp3", "lp4"]
+      }
     },
     "group_delay": {
       "enabled": true,

@@ -394,24 +394,23 @@ fn restore_configured_driver_crossovers(
     Ok(())
 }
 
-/// Freeze direct-channel protection from declared, snapshotted source data.
+/// Freeze protection from declared, snapshotted source data.
 fn restore_configured_excursion(
     reference: &mut RoomOptimizationResult,
     config: &RoomConfig,
     fs: f64,
 ) -> Result<BTreeMap<String, Vec<math_audio_iir_fir::Biquad>>> {
     let mut conditioning = BTreeMap::new();
-    // Routed and driver topologies have their own structural support contracts.
-    if reference
+    let routed = reference
         .metadata
         .bass_management
         .as_ref()
-        .is_some_and(|bass| bass.routing_graph.is_some())
-        || !config
-            .optimizer
-            .excursion_protection
-            .as_ref()
-            .is_some_and(|protection| protection.enabled)
+        .is_some_and(|bass| bass.routing_graph.is_some());
+    if !config
+        .optimizer
+        .excursion_protection
+        .as_ref()
+        .is_some_and(|protection| protection.enabled)
     {
         return Ok(conditioning);
     }
@@ -420,6 +419,17 @@ fn restore_configured_excursion(
             .system
             .as_ref()
             .and_then(|system| system.speakers.get(input))
+            .or_else(|| {
+                config
+                    .system
+                    .as_ref()?
+                    .subwoofers
+                    .as_ref()?
+                    .outputs
+                    .iter()
+                    .find(|output| output.id == *input)
+                    .map(|output| &output.speaker)
+            })
             .map_or(input.as_str(), String::as_str);
         let Some(SpeakerConfig::Single(source)) = config.speakers.get(key) else {
             continue;
@@ -432,13 +442,18 @@ fn restore_configured_excursion(
             fs,
         );
         if !filters.is_empty() {
-            chain
-                .plugins
-                .push(roomeq_engine::output::create_labeled_eq_plugin(
-                    &filters,
-                    "excursion_protection",
-                ));
-            conditioning.insert(input.clone(), filters);
+            let mut plugin =
+                roomeq_engine::output::create_labeled_eq_plugin(&filters, "excursion_protection");
+            if routed {
+                // Protect the physical output after bass routing; do not
+                // filter redirected bass with the main speaker's protection.
+                plugin = roomeq_engine::topology::mark_plugin_stage(plugin, "post_route");
+            } else {
+                // Only direct inputs have a target conditioned by one filter
+                // stack. Routed targets use the complete reference replay.
+                conditioning.insert(input.clone(), filters);
+            }
+            chain.plugins.push(plugin);
         }
     }
     Ok(conditioning)

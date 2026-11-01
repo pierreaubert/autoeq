@@ -66,6 +66,8 @@ class RequiredBackendTests(unittest.TestCase):
         self.assertEqual(record["tests_passed"], 8)
         self.assertIn("roomeq-workflow", record["command"])
         self.assertIn("--include-ignored", record["command"])
+        self.assertNotIn("--nocapture", record["command"])
+        self.assertIn("--show-output", record["command"])
 
     def test_missing_workflow_owner(self):
         owner = "room_optimization::gd::tests::tool_contract_camilladsp_fractional_gd_matches_exported_response"

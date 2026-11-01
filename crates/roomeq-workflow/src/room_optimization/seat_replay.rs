@@ -3244,7 +3244,32 @@ mod tests {
                 -6.0,
             )]),
         );
-        super::super::validation_scorecard::defer_native_routed_acceptance(&mut damaged);
+        damaged.metadata.correction_acceptance = None;
+        let graph_before = serde_json::to_value(&damaged.channels).unwrap();
+        super::super::finalization::initialize_pending_native_acceptance(
+            &mut damaged,
+            &config,
+            48_000.0,
+            Path::new("."),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&damaged.channels).unwrap(),
+            graph_before
+        );
+        let pending = damaged.metadata.correction_acceptance.as_ref().unwrap();
+        assert!(!pending.accepted);
+        assert_eq!(
+            pending.outcome,
+            roomeq_model::RoomEqOutcome::InsufficientEvidence
+        );
+        assert!(pending.runtime_policy.is_some());
+        assert!(
+            pending
+                .observations
+                .iter()
+                .any(|value| value == "native_routed_acceptance_pending")
+        );
         let error = validate_candidate_final_seats(
             &mut damaged,
             &baseline,

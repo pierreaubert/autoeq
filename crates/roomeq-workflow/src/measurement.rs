@@ -496,6 +496,138 @@ pub(crate) struct ConditionedSource {
     pub native_identities: Vec<String>,
 }
 
+fn align_conditioned_positions(source: &mut ConditionedSource) -> Result<()> {
+    let reference = &source.representative.freq;
+    if source
+        .individual
+        .iter()
+        .all(|curve| curve.freq == *reference)
+    {
+        return Ok(());
+    }
+    // Loading already intersects measured support. Conditioning may insert
+    // different extrema, but must not extend or truncate that support per seat.
+    let mut frequencies = reference.to_vec();
+    for curve in &source.individual {
+        anyhow::ensure!(
+            curve.freq.first() == reference.first() && curve.freq.last() == reference.last(),
+            "conditioned position curves have different measured support"
+        );
+        frequencies.extend(curve.freq.iter().copied());
+    }
+    frequencies.sort_by(f64::total_cmp);
+    frequencies.dedup();
+    let grid = Array1::from_vec(frequencies);
+    let mut align = |curve: &mut Curve, source_index: Option<usize>| -> Result<()> {
+        if curve.freq == grid {
+            return Ok(());
+        }
+        let aligned = interpolate_log_space(&grid, curve);
+        source.conditioning.push(autoeq_measurements::LedgerEntry {
+            operation: "roomeq_position_grid_alignment".into(),
+            version: 1,
+            parameters: serde_json::from_value(serde_json::json!({
+                "source_index": source_index,
+                "role": if source_index.is_some() { "individual" } else { "representative" },
+                "input_bins": curve.freq.len(),
+                "output_frequencies_hz": grid.to_vec(),
+                "implementation": "interpolate_log_space/v1",
+                "grid_policy": "union_of_conditioned_samples",
+                "acquisition_validated": false
+            }))?,
+            input_hashes: vec![curve.content_hash()?],
+            output_hash: aligned.content_hash()?,
+            lossy: true,
+            executed_at: None,
+            tool: None,
+            determinism: Some(autoeq_measurements::Determinism::PlatformSensitive),
+        });
+        *curve = aligned;
+        Ok(())
+    };
+    align(&mut source.representative, None)?;
+    for (index, curve) in source.individual.iter_mut().enumerate() {
+        align(curve, Some(index))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn load_primary_source_with_conditioning(
+    source: &MeasurementSource,
+    primary_seat: usize,
+    frequency_samples: usize,
+) -> Result<roomeq_engine::PreparedChannelMeasurements> {
+    // Keep the routing loader's refusal of disjoint support.
+    require_contiguous_source_support(source)?;
+    let mut loaded = load_source_with_conditioning(source, frequency_samples)?;
+    let index = if loaded.individual.len() == 1 {
+        0
+    } else {
+        primary_seat
+    };
+    let selected = loaded
+        .individual
+        .get(index)
+        .cloned()
+        .with_context(|| format!("primary seat {primary_seat} is unavailable"))?;
+    let identity = selected.content_hash()?;
+    loaded.conditioning.push(autoeq_measurements::LedgerEntry {
+        operation: "source_primary_seat_selection".into(),
+        version: 1,
+        parameters: serde_json::from_value(serde_json::json!({
+            "source_index": index,
+            "requested_primary_seat": primary_seat,
+            "acquisition_validated": false
+        }))?,
+        input_hashes: vec![identity.clone()],
+        output_hash: identity,
+        lossy: false,
+        executed_at: None,
+        tool: None,
+        determinism: Some(autoeq_measurements::Determinism::PlatformSensitive),
+    });
+    Ok(roomeq_engine::PreparedChannelMeasurements::new(
+        selected,
+        loaded.individual,
+        matches!(
+            source,
+            MeasurementSource::Multiple(_) | MeasurementSource::InMemoryMultiple(_)
+        ),
+    )
+    .with_conditioning(loaded.conditioning)
+    .with_native_identities(loaded.native_identities))
+}
+
+pub(crate) fn resample_primary_with_conditioning(
+    curve: &Curve,
+    grid: &Array1<f64>,
+    receipt: &mut roomeq_engine::channel_measurements::MeasurementConditioningReceipt,
+) -> Result<Curve> {
+    let expanded = autoeq_core::interpolate_log_space(grid, curve);
+    let input_hash = curve.content_hash()?;
+    let output_hash = expanded.content_hash()?;
+    if input_hash != output_hash {
+        receipt.entries.push(autoeq_measurements::LedgerEntry {
+            operation: "bass_management_grid_resampling".into(),
+            version: 1,
+            parameters: serde_json::from_value(serde_json::json!({
+                "input_bins": curve.freq.len(),
+                "output_frequencies_hz": grid.to_vec(),
+                "implementation": "interpolate_log_space/v1",
+                "acquisition_validated": false
+            }))?,
+            input_hashes: vec![input_hash],
+            output_hash: output_hash.clone(),
+            lossy: true,
+            executed_at: None,
+            tool: None,
+            determinism: Some(autoeq_measurements::Determinism::PlatformSensitive),
+        });
+    }
+    receipt.representative_identity = output_hash;
+    Ok(expanded)
+}
+
 pub(crate) fn load_source_with_conditioning(
     source: &MeasurementSource,
     frequency_samples: usize,
@@ -563,12 +695,17 @@ pub(crate) fn load_source_with_conditioning(
         .enumerate()
         .map(|(index, curve)| condition(curve, Some(index)))
         .collect::<Result<_>>()?;
-    Ok(ConditionedSource {
+    let mut conditioned = ConditionedSource {
         representative,
         individual,
         conditioning,
         native_identities: loaded.native_identities,
-    })
+    };
+    // Per-position peak preservation can break the common input grid. Its
+    // sorted union retains every conditioned extremum without extrapolation.
+    // Declared gaps remain display-only and are selected out by engine callers.
+    align_conditioned_positions(&mut conditioned)?;
+    Ok(conditioned)
 }
 
 /// Load and combine a RoomEQ measurement source.

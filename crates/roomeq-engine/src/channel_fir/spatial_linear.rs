@@ -41,7 +41,7 @@ pub(super) fn optimize(
             Some(request.eq_resources),
             request.sample_rate,
         )
-        .map_err(|error| fail(format!("Hybrid FIR objective preparation: {error}")))?;
+        .map_err(|error| fail(format!("Spatial FIR objective preparation: {error}")))?;
     let bank = &objective.multi_objective.as_ref().unwrap().objectives;
     let iir: Vec<_> = bank
         .iter()
@@ -73,7 +73,7 @@ pub(super) fn optimize(
                 &target,
                 request.sample_rate,
             )
-            .map_err(|error| fail(format!("Hybrid FIR seat design: {error}")))?,
+            .map_err(|error| fail(format!("Spatial FIR seat design: {error}")))?,
         );
     }
     let neutral = Curve {
@@ -88,7 +88,7 @@ pub(super) fn optimize(
             &neutral,
             request.sample_rate,
         )
-        .map_err(|error| fail(format!("Hybrid FIR neutral design: {error}")))?,
+        .map_err(|error| fail(format!("Spatial FIR neutral design: {error}")))?,
     );
     let taps = candidates[0].len();
     if candidates
@@ -96,7 +96,7 @@ pub(super) fn optimize(
         .any(|candidate| candidate.len() != taps || candidate.iter().any(|v| !v.is_finite()))
     {
         return Err(fail(
-            "Hybrid FIR bank has inconsistent or invalid coefficients".into(),
+            "Spatial FIR bank has inconsistent or invalid coefficients".into(),
         ));
     }
     // Exact finite-record DTFT: H(f) = sum_n h[n] exp(-j 2 pi f n / fs).
@@ -184,7 +184,7 @@ pub(super) fn optimize(
     };
     let result = progress
         .optimize(&vec![(0.0, 1.0); count], &best, &config, evaluate)
-        .map_err(|error| fail(format!("Hybrid FIR basis optimizer: {error}")))?;
+        .map_err(|error| fail(format!("Spatial FIR basis optimizer: {error}")))?;
     let returned_loss = evaluate(&result.x);
     let mut selected_search = returned_loss.is_finite() && returned_loss < best_loss;
     if selected_search {
@@ -193,7 +193,7 @@ pub(super) fn optimize(
     }
     if !best_loss.is_finite() {
         return Err(fail(
-            "Hybrid FIR has no finite shared-objective candidate".into(),
+            "Spatial FIR has no finite shared-objective candidate".into(),
         ));
     }
     let sum: f64 = best.iter().sum();
@@ -213,7 +213,7 @@ pub(super) fn optimize(
     let neutral_taps = candidates[count - 1].clone();
     let mut ceiling_note: Option<String> = None;
     let coefficients = match super::enforce_realized_fir_ceiling(
-        "hybrid-linear-fir",
+        "spatial-linear-fir",
         coefficients,
         neutral_taps,
         &grids,
@@ -227,7 +227,7 @@ pub(super) fn optimize(
                 best_loss = evaluate(&neutral_weights);
                 if !best_loss.is_finite() {
                     return Err(fail(
-                        "Hybrid FIR neutral fallback has no finite objective".into(),
+                        "Spatial FIR neutral fallback has no finite objective".into(),
                     ));
                 }
                 best = neutral_weights;
@@ -239,7 +239,7 @@ pub(super) fn optimize(
         Err(error) => return Err(error),
     };
     let status = format!(
-        "{}hybrid linear FIR convex-bank search; {} candidates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; configured_iteration_or_evaluation_budget={}; {}{}",
+        "{}spatial linear FIR convex-bank search; {} candidates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; configured_iteration_or_evaluation_budget={}; {}{}",
         if result.success {
             ""
         } else {

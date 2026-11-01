@@ -63,11 +63,12 @@ pub fn derive_temporal_quality_evidence(
     post: &[Curve],
     sample_rate: f64,
 ) -> TemporalQualityEvidence {
-    let has_fir = channels.iter().any(|channel| {
+    let channel_has_fir = |channel: &TemporalChannelEvidence| {
         channel.pre_ringing_audible_db.is_some()
             || channel.main_time_ms.is_some()
             || channel.fir_taps.is_some()
-    });
+    };
+    let has_fir = channels.iter().any(channel_has_fir);
     let pre_ringing_audible_db = channels
         .iter()
         .filter_map(|channel| channel.pre_ringing_audible_db)
@@ -99,10 +100,12 @@ pub fn derive_temporal_quality_evidence(
                 })
             })
         });
-    let temporal_evidence_available = !has_fir
-        || channels.iter().all(|channel| {
-            channel.pre_ringing_audible_db.is_some() && channel.main_time_ms.is_some()
-        });
+    // IIR-only channels do not need FIR measurements merely because another
+    // channel uses FIR. Every channel with FIR evidence still needs both facts.
+    let temporal_evidence_available = channels.iter().all(|channel| {
+        !channel_has_fir(channel)
+            || (channel.pre_ringing_audible_db.is_some() && channel.main_time_ms.is_some())
+    });
     TemporalQualityEvidence {
         pre_ringing_audible_db,
         latency_ms: Some(latency_ms),
@@ -1854,6 +1857,62 @@ mod tests {
         assert_eq!(evidence.pre_ringing_audible_db, Some(-30.0));
         assert_eq!(evidence.latency_ms, Some(5.0));
         assert_eq!(evidence.available_headroom_db, Some(-3.0));
+    }
+
+    #[test]
+    fn temporal_evidence_accepts_measured_fir_alongside_iir() {
+        let curve = curve(&[20.0, 100.0, 1_000.0], &[0.0; 3]);
+        let measured = TemporalChannelEvidence {
+            pre_ringing_audible_db: Some(-42.0),
+            main_time_ms: Some(2.0),
+            fir_taps: Some(481),
+        };
+        for channels in [
+            [measured, TemporalChannelEvidence::default()],
+            [TemporalChannelEvidence::default(), measured],
+        ] {
+            let evidence = derive_temporal_quality_evidence(
+                &channels,
+                std::slice::from_ref(&curve),
+                std::slice::from_ref(&curve),
+                48_000.0,
+            );
+            assert!(evidence.temporal_evidence_available);
+            assert_eq!(evidence.pre_ringing_audible_db, Some(-42.0));
+            assert_eq!(evidence.latency_ms, Some(5.0));
+        }
+    }
+
+    #[test]
+    fn temporal_evidence_rejects_incomplete_fir_beside_measured_fir() {
+        let curve = curve(&[20.0, 100.0, 1_000.0], &[0.0; 3]);
+        let measured = TemporalChannelEvidence {
+            pre_ringing_audible_db: Some(-42.0),
+            main_time_ms: Some(2.0),
+            fir_taps: Some(481),
+        };
+        for incomplete in [
+            TemporalChannelEvidence {
+                fir_taps: Some(481),
+                ..Default::default()
+            },
+            TemporalChannelEvidence {
+                pre_ringing_audible_db: Some(-42.0),
+                ..Default::default()
+            },
+            TemporalChannelEvidence {
+                main_time_ms: Some(2.0),
+                ..Default::default()
+            },
+        ] {
+            let evidence = derive_temporal_quality_evidence(
+                &[measured, incomplete, TemporalChannelEvidence::default()],
+                std::slice::from_ref(&curve),
+                std::slice::from_ref(&curve),
+                48_000.0,
+            );
+            assert!(!evidence.temporal_evidence_available);
+        }
     }
 
     #[test]

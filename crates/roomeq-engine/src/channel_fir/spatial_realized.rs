@@ -279,7 +279,7 @@ pub(super) fn optimize(
         .ok_or_else(|| fail("Minimum-phase FIR neutral fallback is invalid".into()))?;
     let mut ceiling_note: Option<String> = None;
     let coefficients = match super::enforce_realized_fir_ceiling(
-        "hybrid-realized-fir",
+        "spatial-realized-fir",
         coefficients,
         neutral_taps,
         std::slice::from_ref(grid),
@@ -303,7 +303,7 @@ pub(super) fn optimize(
         Err(error) => return Err(error),
     };
     let status = format!(
-        "{}hybrid {} realized dB-basis search; {} templates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; {}{}",
+        "{}spatial {} realized dB-basis search; {} templates; {} taps; selected={}; backend_objective={}; recomputed_backend_objective={}; {}{}",
         if result.success {
             ""
         } else {

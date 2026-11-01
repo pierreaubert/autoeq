@@ -373,9 +373,57 @@ fn preprocess_multisub_advanced(
             processing: Some(SubDriverProcessing { plugins, curve }),
         });
     }
+    let shared_eq_seats = if let Some(seats) = prepared.seat_measurements.as_ref()
+        && prepared.reference_scope.is_some()
+        && seats.iter().flatten().all(|curve| curve.phase.is_some())
+    {
+        if chains.len() != seats.len() {
+            return Err(AutoeqError::InvalidConfiguration {
+                message: "Multi-sub driver chains do not match measured physical branches".into(),
+            });
+        }
+        let seat_count = seats.first().map_or(0, Vec::len);
+        let mut rendered = Vec::with_capacity(seat_count);
+        for seat_index in 0..seat_count {
+            let mut branches = Vec::with_capacity(chains.len());
+            for (driver_chain, measurements) in chains.iter().zip(seats) {
+                let measurement = measurements.get(seat_index).ok_or_else(|| {
+                    AutoeqError::InvalidMeasurement {
+                        message: format!("Multi-sub branch is missing seat {seat_index}"),
+                    }
+                })?;
+                let mut filter_chain = chain.clone();
+                filter_chain.drivers = None;
+                filter_chain.plugins = driver_chain.plugins.clone();
+                filter_chain.plugins.extend(chain.plugins.iter().cloned());
+                branches.push(crate::ctc::apply_channel_dsp_chain_to_curve(
+                    &filter_chain,
+                    measurement,
+                    sample_rate,
+                )?);
+            }
+            rendered.push(
+                roomeq_engine::dba::sum_array_response(&branches).map_err(|error| {
+                    AutoeqError::InvalidMeasurement {
+                        message: format!(
+                            "Could not render processed subwoofer seat {seat_index}: {error}"
+                        ),
+                    }
+                })?,
+            );
+        }
+        Some(rendered)
+    } else {
+        None
+    };
+    let combined = shared_eq_seats
+        .as_ref()
+        .and_then(|seats| seats.get(primary))
+        .cloned()
+        .unwrap_or(combined);
     Ok(SubPreprocessResult {
         combined_curve: combined,
-        shared_eq_seats: None,
+        shared_eq_seats,
         drivers: Some(drivers),
         common_eq_complete: true,
         joint_sub: chain.joint_sub.clone(),
@@ -772,6 +820,126 @@ mod tests {
             max_freq: 200.0,
             seed: Some(1),
             ..Default::default()
+        }
+    }
+
+    #[test]
+    fn advanced_mso_does_not_invent_coherent_seats_without_phase_or_timing() {
+        for missing_phase in [false, true] {
+            let source = MeasurementSource::Multiple(autoeq_core::MeasurementMultiple {
+                measurements: (0..2)
+                    .map(|index| autoeq_core::MeasurementRef::Loaded {
+                        original: Box::new(autoeq_core::MeasurementRef::Named {
+                            path: format!("synthetic-seat-{index}.csv").into(),
+                            name: Some(format!("seat-{index}")),
+                        }),
+                        loaded_response: Box::new(make_curve(
+                            16,
+                            80.0 + f64::from(index) * 10.0,
+                            (!missing_phase).then_some(37.0),
+                        )),
+                    })
+                    .collect(),
+                speaker_name: None,
+                provenance: autoeq_core::MeasurementProvenance {
+                    capture_kind: autoeq_core::ProvenanceCaptureKind::StationaryIr,
+                    timing_reference_id: missing_phase.then(|| "synthetic-common-reference".into()),
+                    ..Default::default()
+                },
+                estimated_position: None,
+            });
+            let group = MultiSubGroup {
+                name: "subs".into(),
+                speaker_name: None,
+                subwoofers: vec![source.clone(), source],
+                allpass_optimization: false,
+                joint_optimization: false,
+            };
+            let mut optimizer = tiny_optimizer();
+            optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+                enabled: true,
+                per_sub_peq: false,
+                global_eq: false,
+                ..Default::default()
+            });
+            let error =
+                preprocess_multisub_mso_with_frequency_samples(&group, &optimizer, 48_000.0, 16)
+                    .err()
+                    .expect("MSO must reject missing phase or shared timing evidence");
+            assert!(
+                error.to_string().contains(
+                    "requires a shared timing reference within every seat and phase on every input"
+                ),
+                "unexpected refusal; missing_phase={missing_phase}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn advanced_mso_preserves_processed_seat_responses() {
+        // Synthetic positive control with a declared common reference and
+        // matching seat labels; plain in-memory phase arrays stay gain-only.
+        let source = MeasurementSource::Multiple(autoeq_core::MeasurementMultiple {
+            measurements: [("seat-0", 80.0, 37.0), ("seat-1", 90.0, -89.0)]
+                .into_iter()
+                .map(|(seat, level, phase)| autoeq_core::MeasurementRef::Loaded {
+                    original: Box::new(autoeq_core::MeasurementRef::Named {
+                        path: format!("synthetic-{seat}.csv").into(),
+                        name: Some(seat.into()),
+                    }),
+                    loaded_response: Box::new(make_curve(16, level, Some(phase))),
+                })
+                .collect(),
+            speaker_name: None,
+            provenance: autoeq_core::MeasurementProvenance {
+                capture_kind: autoeq_core::ProvenanceCaptureKind::StationaryIr,
+                timing_reference_id: Some("synthetic-common-reference".into()),
+                ..Default::default()
+            },
+            estimated_position: None,
+        });
+        let group = MultiSubGroup {
+            name: "subs".into(),
+            speaker_name: None,
+            subwoofers: vec![source.clone(), source],
+            allpass_optimization: false,
+            joint_optimization: false,
+        };
+        let mut optimizer = tiny_optimizer();
+        optimizer.multi_seat = Some(roomeq_model::MultiSeatConfig {
+            enabled: true,
+            primary_seat: 1,
+            per_sub_peq: false,
+            global_eq: false,
+            ..Default::default()
+        });
+        let result =
+            preprocess_multisub_mso_with_frequency_samples(&group, &optimizer, 48_000.0, 16)
+                .unwrap();
+        let seats = result
+            .shared_eq_seats
+            .as_ref()
+            .expect("advanced MSO lost measured seats");
+        assert_eq!(seats.len(), 2);
+        for (first, second) in seats[0].spl.iter().zip(&seats[1].spl) {
+            assert!((second - first - 10.0).abs() < 1e-6);
+        }
+        let routing = interpolate_log_space(&seats[1].freq, &result.combined_curve);
+        for (actual, expected) in routing.spl.iter().zip(&seats[1].spl) {
+            assert!(
+                (actual - expected).abs() < 1e-6,
+                "routing must use the selected physical seat"
+            );
+        }
+        for (actual, expected) in routing
+            .phase
+            .as_ref()
+            .unwrap()
+            .iter()
+            .zip(seats[1].phase.as_ref().unwrap())
+        {
+            let difference = (actual - expected).to_radians();
+            assert!(difference.sin().abs() < 1e-6 && difference.cos() > 0.0);
         }
     }
 

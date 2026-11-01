@@ -18,10 +18,15 @@
       "outputs": [
         {
           "id": "Sub1",
-          "speaker": "lfe"
+          "speaker": "lfe_1"
+        },
+        {
+          "id": "Sub2",
+          "speaker": "lfe_2"
         }
       ],
       "crossover": [
+        "first",
         "first"
       ]
     },
@@ -52,6 +57,9 @@
     },
     "multi_seat": {
       "enabled": true,
+      "seat_identity": {
+        "ids": ["lp0", "lp1", "lp2", "lp3", "lp4"]
+      },
       "strategy": "minimize_variance",
       "primary_seat": 0,
       "max_deviation_db": 18.0,

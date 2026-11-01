@@ -224,7 +224,7 @@ fn roon_export_builds_deterministic_routed_convolver_archive() {
     let archive_member = first.member(Path::new("room_eq_convolution.zip")).unwrap();
     let mut archive = zip::ZipArchive::new(Cursor::new(&archive_member.bytes)).unwrap();
     let names: Vec<_> = (0..archive.len())
-        .map(|index| archive.by_index(index).unwrap().name().to_string())
+        .map(|index| archive.by_index(index).unwrap().name().unwrap().into_owned())
         .collect();
     assert_eq!(
         names,

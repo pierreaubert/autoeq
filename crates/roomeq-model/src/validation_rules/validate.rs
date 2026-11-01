@@ -2824,6 +2824,25 @@ mod room_config_validation_tests {
             result.warnings
         );
 
+        // Seat identity also joins routed measurements outside the MSO search.
+        config.optimizer.multi_seat = Some(MultiSeatConfig {
+            enabled: false,
+            seat_identity: Some(crate::config::SeatIdentityMap {
+                ids: vec!["lp0".to_string()],
+            }),
+            ..Default::default()
+        });
+        let result = validate_room_config(&config);
+        assert!(result.errors.is_empty(), "got {:?}", result.errors);
+        assert!(
+            !result
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("multi_seat is disabled")),
+            "seat identity remains active for routed measurements: {:?}",
+            result.warnings
+        );
+
         // continuous_area set under a non-continuous strategy warns
         let mut config = default_room();
         config.speakers.insert(

@@ -77,6 +77,18 @@ fn apply_reconstruction_chain<P: roomeq_engine::dsp_realization::ConvolutionIrPr
 
 pub(super) struct HomeCinemaExecutor;
 
+fn with_sub_crossover_alignment(
+    mut outputs: Vec<BassManagementSubOutputReport>,
+    delay_ms: f64,
+    inverted: bool,
+) -> Vec<BassManagementSubOutputReport> {
+    for output in &mut outputs {
+        output.delay_ms += delay_ms;
+        output.polarity_inverted ^= inverted;
+    }
+    outputs
+}
+
 /// Residual crossover underfill the explicit dip filler aims for. This is
 /// the accepted quality bar (`MAX_ACCEPTED_CROSSOVER_UNDERFILL_DB`): closing
 /// a dip further spends electrical boost the final graph cannot carry,
@@ -1367,15 +1379,39 @@ fn reconstruct_deployed_source_curves_impl_with_provider<
                 // output-owned: realize the direct high-pass branch first,
                 // then apply only its output stage before summing redirected
                 // bass below.
+                let main_route = graph.routes.iter().find(|route| {
+                    route.source_channel == role
+                        && route.destination == role
+                        && route.route_kind == "main_highpass_to_self"
+                });
                 let mut main_route_chain = chain.clone();
                 main_route_chain.plugins.retain(|plugin| {
                     is_source_pre_route_plugin(plugin)
-                        || plugin
+                        || (main_route.is_none() && plugin
                             .parameters
                             .get("room_eq_stage")
                             .and_then(serde_json::Value::as_str)
-                            == Some("route_owned")
+                            == Some("route_owned"))
                 });
+                if let Some(route) = main_route {
+                    // The graph owns these controls. Compatibility plugins may
+                    // be absent after configured restoration or carry stale
+                    // values; never cascade them with the canonical transfer.
+                    main_route_chain.plugins.push(output::create_gain_plugin_with_invert(
+                        route.gain_db,
+                        route.polarity_inverted,
+                    ));
+                    if let Some(frequency) = route.high_pass_hz.or(route.low_pass_hz) {
+                        main_route_chain.plugins.push(output::create_crossover_plugin(
+                            &route.crossover_type,
+                            frequency,
+                            if route.high_pass_hz.is_some() { "high" } else { "low" },
+                        ));
+                    }
+                    if route.delay_ms.abs() > 0.001 {
+                        main_route_chain.plugins.push(output::create_delay_plugin(route.delay_ms));
+                    }
+                }
                 let direct_main = apply_reconstruction_chain(
                     &main_route_chain,
                     &initial,
@@ -3348,6 +3384,7 @@ fn optimize_home_cinema_with_sub(
         })
         .collect::<Result<_>>()?;
     let mut pre_eq_initial_curves: HashMap<String, Curve> = HashMap::new();
+    let mut main_conditioning = HashMap::new();
     let mut optimizer_evidence_by_channel: HashMap<String, Vec<OptimizerRunEvidence>> =
         HashMap::new();
     let mut multi_seat_rejections: HashMap<String, Vec<String>> = HashMap::new();
@@ -3478,15 +3515,16 @@ fn optimize_home_cinema_with_sub(
             .as_ref()
             .map(|seat| seat.primary_seat)
             .unwrap_or(0);
-        let mut primary = crate::multisub::load_primary_measurements_with_frequency_samples(
-            std::slice::from_ref(source),
+        let primary = crate::measurement::load_primary_source_with_conditioning(
+            source,
             primary_seat,
             assembly.frequency_samples,
         )
         .map_err(|error| AutoeqError::InvalidMeasurement {
             message: error.to_string(),
         })?;
-        pre_eq_initial_curves.insert(role.clone(), primary.remove(0));
+        main_conditioning.insert(role.clone(), primary.conditioning_receipt()?);
+        pre_eq_initial_curves.insert(role.clone(), primary.representative().clone());
         optimizer_evidence_by_channel.insert(role.clone(), ch_result.optimizer_evidence);
     }
 
@@ -3552,7 +3590,16 @@ fn optimize_home_cinema_with_sub(
         let initial = &pre_eq_initial_curves[role];
         let grid =
             roomeq_engine::topology::bass_management_measurement_grid(initial, &bass_samples);
-        let expanded = autoeq_core::interpolate_log_space(&grid, initial);
+        let expanded = crate::measurement::resample_primary_with_conditioning(
+            initial,
+            &grid,
+            main_conditioning
+                .get_mut(role)
+                .expect("main preparation recorded above"),
+        )
+        .map_err(|error| AutoeqError::InvalidMeasurement {
+            message: error.to_string(),
+        })?;
         pre_eq_initial_curves.insert(role.clone(), expanded);
         if let Some(aligned) = aligned_curves.get_mut(role) {
             *aligned = autoeq_core::interpolate_log_space(&grid, aligned);
@@ -3909,6 +3956,11 @@ fn optimize_home_cinema_with_sub(
         apply_delay_and_polarity_to_curve(&c, delay, invert)
     };
 
+    // Keep the shared crossover selection intact when moving to per-source
+    // routing. Its gain, delay and polarity describe one acoustic candidate.
+    for group in group_results_by_id.values_mut() {
+        group.main_delay_ms += main_delay_post;
+    }
     let mut main_post_curves = HashMap::new();
     for role in main_roles {
         let group_id =
@@ -3932,11 +3984,15 @@ fn optimize_home_cinema_with_sub(
         );
         main_post_curves.insert(role.clone(), post);
     }
-    let preliminary_sub_output_results = bass_management_sub_output_results(
-        &sub_role,
-        sub_preprocess.drivers.as_deref(),
-        sub_gain_post,
-        &sub_sys.config,
+    let preliminary_sub_output_results = with_sub_crossover_alignment(
+        bass_management_sub_output_results(
+            &sub_role,
+            sub_preprocess.drivers.as_deref(),
+            sub_gain_post,
+            &sub_sys.config,
+        ),
+        sub_delay_post,
+        sub_inverted,
     );
     let preliminary_bass_management_optimization = joint_bass_management_report_from_parts(
         &group_results_by_id.values().cloned().collect::<Vec<_>>(),
@@ -4016,11 +4072,15 @@ fn optimize_home_cinema_with_sub(
     if optimization_advisories.is_empty() {
         optimization_advisories.push("ok".to_string());
     }
-    let mut sub_output_results = bass_management_sub_output_results(
-        &sub_role,
-        sub_preprocess.drivers.as_deref(),
-        sub_gain_post,
-        &sub_sys.config,
+    let mut sub_output_results = with_sub_crossover_alignment(
+        bass_management_sub_output_results(
+            &sub_role,
+            sub_preprocess.drivers.as_deref(),
+            sub_gain_post,
+            &sub_sys.config,
+        ),
+        sub_delay_post,
+        sub_inverted,
     );
     if limit_bass_management_sub_output_gains(&mut sub_output_results, bass_management.as_ref()) {
         sub_gain_limited = true;
@@ -5841,7 +5901,7 @@ fn optimize_home_cinema_with_sub(
         channel_results.insert(
             role.clone(),
             ChannelOptimizationResult {
-                measurement_conditioning: None,
+                measurement_conditioning: main_conditioning.remove(role),
                 name: role.clone(),
                 pre_score,
                 post_score,
@@ -6758,6 +6818,83 @@ mod post_dsp_level_tests {
                 (cut_db > 0.0).then(|| (output.clone(), cut_db))
             })
             .collect()
+    }
+
+    #[test]
+    fn deployed_main_uses_canonical_route_without_compatibility_plugins() {
+        let initial = curve(60.0);
+        let mut direct = low_route("L", 0);
+        direct.destination = "L".into();
+        direct.destination_index = 0;
+        direct.pre_chain_channel = Some("L".into());
+        direct.post_chain_channel = Some("L".into());
+        direct.route_kind = "main_highpass_to_self".into();
+        direct.high_pass_hz = Some(80.0);
+        direct.low_pass_hz = None;
+        direct.gain_db = -3.0;
+        direct.gain_linear = 10.0_f64.powf(-3.0 / 20.0);
+        direct.matrix_gain = direct.gain_linear;
+        direct.delay_ms = 0.65;
+        direct.polarity_inverted = true;
+        let graph = BassManagementRoutingGraph {
+            physical_sub_output: "LFE".into(),
+            physical_sub_outputs: vec!["LFE".into()],
+            stereo_routing: None,
+            input_channels: vec!["L".into()],
+            output_channels: vec!["L".into(), "LFE".into()],
+            routes: vec![direct, low_route("L", 0)],
+            matrix: None,
+            input_trim_db: HashMap::new(),
+            post_dsp_main_alignment_band_hz: None,
+            advisories: Vec::new(),
+        };
+        let mut main = chain("L", initial.clone(), None);
+        main.plugins = vec![
+            mark_plugin_stage(output::create_gain_plugin(1.0), "pre_route"),
+            mark_plugin_stage(output::create_gain_plugin(2.0), "post_route"),
+        ];
+        let sub = curve(40.0);
+        let mut expected_main =
+            super::apply_crossover_response_to_curve(&initial, "LR24", 80.0, 48_000.0, false);
+        // Input + output gain cancels the main route's -3 dB gain.
+        expected_main = super::apply_delay_and_polarity_to_curve(&expected_main, 0.65, true);
+        let mut expected_sub =
+            super::apply_crossover_response_to_curve(&sub, "LR24", 80.0, 48_000.0, true);
+        expected_sub.spl += 1.0;
+        let expected = super::complex_sum_mains(&[&expected_main, &expected_sub]);
+        for compatibility_plugins in [false, true] {
+            let mut main = main.clone();
+            if compatibility_plugins {
+                // Stale mirrors must not override or duplicate canonical controls.
+                main.plugins.extend([
+                    mark_route_owned_plugin(output::create_gain_plugin(12.0)),
+                    mark_route_owned_plugin(output::create_delay_plugin(4.0)),
+                    mark_route_owned_plugin(output::create_crossover_plugin("LR24", 120.0, "high")),
+                ]);
+            }
+            let channels = HashMap::from([
+                ("L".into(), main),
+                ("LFE".into(), chain("LFE", sub.clone(), None)),
+            ]);
+            let actual = super::reconstruct_deployed_source_curves_unenforced(
+                &channels,
+                &HashMap::new(),
+                &graph,
+                None,
+                48_000.0,
+                std::path::Path::new("."),
+            )
+            .unwrap();
+            for index in 0..initial.freq.len() {
+                assert!((actual["L"].spl[index] - expected.spl[index]).abs() < 1e-8);
+                let phase_error = (actual["L"].phase.as_ref().unwrap()[index]
+                    - expected.phase.as_ref().unwrap()[index]
+                    + 180.0)
+                    .rem_euclid(360.0)
+                    - 180.0;
+                assert!(phase_error.abs() < 1e-8);
+            }
+        }
     }
 
     #[test]
@@ -10035,6 +10172,45 @@ mod tests {
             strategy_source: "mso".to_string(),
             headroom_contribution_db: 0.0,
             selected_low_pass_hz: low_pass_hz,
+        }
+    }
+
+    #[test]
+    fn shared_sub_alignment_reaches_routes_with_existing_driver_controls() {
+        let config = per_sub_test_config();
+        let mut front = sub_output("subs_1", Some(80.0));
+        front.gain_db = -6.0;
+        front.delay_ms = 1.0;
+        let mut rear = sub_output("subs_2", Some(95.0));
+        rear.gain_db = -9.0;
+        rear.delay_ms = 3.0;
+        rear.polarity_inverted = true;
+        let outputs = super::with_sub_crossover_alignment(vec![front, rear], 8.5, true);
+        let report = roomeq_engine::bass_management::joint_bass_management_report_from_parts(
+            &[],
+            &[],
+            &outputs,
+        );
+        let graph =
+            roomeq_engine::home_cinema::bass_management_routing_graph(&config, Some(&report))
+                .unwrap();
+        for (name, delay, inverted, gain) in
+            [("subs_1", 9.5, true, -6.0), ("subs_2", 11.5, false, -9.0)]
+        {
+            let routes: Vec<_> = graph
+                .routes
+                .iter()
+                .filter(|route| {
+                    route.destination == name
+                        && route.route_kind == "redirected_bass_lowpass_to_sub"
+                })
+                .collect();
+            assert!(!routes.is_empty());
+            for route in routes {
+                assert_eq!(route.delay_ms, delay);
+                assert_eq!(route.polarity_inverted, inverted);
+                assert_eq!(route.gain_db, gain);
+            }
         }
     }
 

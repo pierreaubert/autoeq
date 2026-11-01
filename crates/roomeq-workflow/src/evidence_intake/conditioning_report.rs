@@ -85,7 +85,33 @@ fn prepared_identity_issues(
                         false
                     }
                 }
-                "roomeq_dense_grid_conditioning" => {
+                "source_primary_seat_selection" => {
+                    if let Some(selected) = source_index.and_then(|index| individual.get(index)) {
+                        if entry.input_hashes.as_slice() == std::slice::from_ref(selected)
+                            && entry.output_hash == *selected
+                        {
+                            representative = Some(selected.clone());
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                "bass_management_grid_resampling" => {
+                    if let Some(target) = representative.as_mut() {
+                        if entry.input_hashes.as_slice() == std::slice::from_ref(&*target) {
+                            target.clone_from(&entry.output_hash);
+                            true
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    }
+                }
+                "roomeq_dense_grid_conditioning" | "roomeq_position_grid_alignment" => {
                     let target = match entry
                         .parameters
                         .get("role")
@@ -319,6 +345,108 @@ pub(crate) fn attach_optimizer_conditioning(
 #[cfg(test)]
 mod attribution_tests {
     use super::prepared_identity_issues;
+
+    #[test]
+    fn primary_seat_receipt_preserves_routing_response_and_rejects_swapped_sources() {
+        let curves = [0.0, 1.0].map(|offset| {
+            let freq = ndarray::Array1::from_iter((1..=1000).map(|i| i as f64 * 10.0 + offset));
+            autoeq_core::Curve {
+                spl: freq.mapv(|f| 80.0 + offset + (f / 100.0).sin()),
+                phase: Some(freq.mapv(|f| -f / 10.0 + offset)),
+                freq,
+                ..Default::default()
+            }
+        });
+        let source = autoeq_core::MeasurementSource::InMemoryMultiple(curves.into());
+        let original = crate::multisub::load_primary_measurements_with_frequency_samples(
+            std::slice::from_ref(&source),
+            1,
+            64,
+        )
+        .unwrap()
+        .remove(0);
+        let prepared =
+            crate::measurement::load_primary_source_with_conditioning(&source, 1, 64).unwrap();
+        assert_eq!(
+            original.content_hash().unwrap(),
+            prepared.representative().content_hash().unwrap()
+        );
+        let mut receipt = prepared.conditioning_receipt().unwrap();
+        assert!(prepared_identity_issues(&receipt).is_empty());
+        let grid = ndarray::Array1::linspace(20.0, 9900.0, 123);
+        let expected = autoeq_core::interpolate_log_space(&grid, &original);
+        let actual = crate::measurement::resample_primary_with_conditioning(
+            prepared.representative(),
+            &grid,
+            &mut receipt,
+        )
+        .unwrap();
+        assert_eq!(
+            actual.content_hash().unwrap(),
+            expected.content_hash().unwrap()
+        );
+        assert_eq!(
+            receipt.representative_identity,
+            actual.content_hash().unwrap()
+        );
+        assert!(prepared_identity_issues(&receipt).is_empty());
+
+        let mut wrong_seat = receipt.clone();
+        let selection = wrong_seat
+            .entries
+            .iter_mut()
+            .find(|entry| entry.operation == "source_primary_seat_selection")
+            .unwrap();
+        selection
+            .parameters
+            .insert("source_index".into(), serde_json::json!(0));
+        assert!(!prepared_identity_issues(&wrong_seat).is_empty());
+
+        let wrong_input = receipt.individual_identities[0].clone();
+        let resampling = receipt
+            .entries
+            .iter_mut()
+            .find(|entry| entry.operation == "bass_management_grid_resampling")
+            .unwrap();
+        resampling.input_hashes = vec![wrong_input];
+        assert!(!prepared_identity_issues(&receipt).is_empty());
+    }
+
+    #[test]
+    fn aligned_positions_preserve_attribution_and_reject_swapped_seats() {
+        let curves = [200_usize, 201]
+            .into_iter()
+            .map(|peak_index| {
+                let mut spl = ndarray::Array1::from_elem(1000, 80.0);
+                spl[peak_index] = 90.0;
+                autoeq_core::Curve {
+                    freq: ndarray::Array1::from_iter((1..=1000).map(|i| f64::from(i) * 10.0)),
+                    spl,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let prepared =
+            crate::channel_measurements::prepare_channel_measurements_with_frequency_samples(
+                &autoeq_core::MeasurementSource::InMemoryMultiple(curves),
+                128,
+            )
+            .unwrap();
+        let mut receipt = prepared.conditioning_receipt().unwrap();
+        assert!(prepared_identity_issues(&receipt).is_empty());
+        let alignment = receipt
+            .entries
+            .iter_mut()
+            .find(|entry| {
+                entry.operation == "roomeq_position_grid_alignment"
+                    && entry.parameters["source_index"] == 0
+            })
+            .expect("distinct extrema require a recorded position alignment");
+        alignment
+            .parameters
+            .insert("source_index".into(), serde_json::json!(1));
+        assert!(!prepared_identity_issues(&receipt).is_empty());
+    }
 
     #[test]
     fn dense_preparation_preserves_final_source_positions() {

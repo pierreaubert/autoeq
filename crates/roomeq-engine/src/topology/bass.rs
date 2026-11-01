@@ -88,19 +88,19 @@ pub fn bass_management_objective(curve: Option<&Curve>, xover_freq: f64) -> Opti
 /// Score the routed response against the configured target shape around the
 /// crossover. A target-independent flatness score biases redirected bass low
 /// whenever the requested house curve rises toward low frequencies.
+/// An omitted target means flat, with the same main-band level reference.
 pub fn bass_management_objective_with_target(
     curve: Option<&Curve>,
     target: Option<&Curve>,
     xover_freq: f64,
 ) -> Option<f64> {
-    let Some(target) = target else {
-        return bass_management_objective(curve, xover_freq);
-    };
     let curve = curve?;
-    let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
     let mut error = curve.clone();
-    for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
-        *level -= *target_level;
+    if let Some(target) = target {
+        let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
+        for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
+            *level -= *target_level;
+        }
     }
     error.phase = None;
     let mut min_freq = xover_freq / 2.0;
@@ -159,17 +159,19 @@ pub fn bass_management_objective_with_target(
 
 /// Return the deepest target-relative dip across one octave centered on the
 /// crossover, normalized to the corrected main-only band above that region.
+/// An omitted target means flat.
 pub fn bass_management_max_underfill_db_with_target(
     curve: Option<&Curve>,
     target: Option<&Curve>,
     xover_freq: f64,
 ) -> Option<f64> {
     let curve = curve?;
-    let target = target?;
-    let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
     let mut error = curve.clone();
-    for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
-        *level -= *target_level;
+    if let Some(target) = target {
+        let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
+        for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
+            *level -= *target_level;
+        }
     }
 
     let mut min_freq = xover_freq / 2.0;
@@ -221,17 +223,19 @@ pub fn bass_management_max_underfill_db_with_target(
 ///
 /// The level reference is the corrected main-only band above the crossover,
 /// matching [`bass_management_max_underfill_db_with_target`].
+/// An omitted target means flat.
 pub fn bass_management_worst_underfill_with_target(
     curve: Option<&Curve>,
     target: Option<&Curve>,
     xover_freq: f64,
 ) -> Option<(f64, f64)> {
     let curve = curve?;
-    let target = target?;
-    let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
     let mut error = curve.clone();
-    for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
-        *level -= *target_level;
+    if let Some(target) = target {
+        let target = autoeq_core::curve_transforms::interpolate_log_space(&curve.freq, target);
+        for (level, target_level) in error.spl.iter_mut().zip(target.spl.iter()) {
+            *level -= *target_level;
+        }
     }
 
     let mut min_freq = xover_freq / 2.0;
@@ -426,6 +430,32 @@ mod tests {
             freq,
             ..Curve::default()
         }
+    }
+
+    #[test]
+    fn implicit_flat_target_preserves_crossover_level_reference() {
+        let target = curve_with_levels(|_| 0.0);
+        let underfilled = curve_with_levels(|frequency| if frequency < 160.0 { -6.0 } else { 0.0 });
+        let explicit =
+            bass_management_objective_with_target(Some(&underfilled), Some(&target), 80.0)
+                .expect("finite explicit flat-target score");
+        let implicit = bass_management_objective_with_target(Some(&underfilled), None, 80.0)
+            .expect("finite implicit flat-target score");
+        assert!(explicit > 6.0, "broad bass loss must remain visible");
+        assert!((implicit - explicit).abs() < 1e-9);
+        assert_eq!(
+            bass_management_max_underfill_db_with_target(Some(&underfilled), None, 80.0),
+            Some(6.0)
+        );
+        let (frequency, depth) =
+            bass_management_worst_underfill_with_target(Some(&underfilled), None, 80.0)
+                .expect("measured crossover underfill");
+        assert!((40.0..160.0).contains(&frequency));
+        assert_eq!(depth, 6.0);
+        assert_eq!(
+            bass_management_objective_with_target(Some(&target), None, 80.0),
+            Some(0.0)
+        );
     }
 
     #[test]

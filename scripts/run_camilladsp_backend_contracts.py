@@ -62,7 +62,7 @@ def main():
         record.update(binary=binary, version=version.stdout.strip())
         environment = dict(os.environ, ROOMEQ_CAMILLADSP_BIN=binary)
         command = ["cargo", "test", "--profile", "qa", "-p", "roomeq-export", "-p", "roomeq-workflow", "--lib", "--test", "realized_transfer_conformance", "tool_contract_camilladsp",
-                   "--no-default-features", "--", "--include-ignored", "--nocapture"]
+                   "--no-default-features", "--", "--include-ignored", "--show-output"]
         log = artifact.with_suffix(".log")
         record.update(command=command, log=str(log))
         # A cold Rust build is not backend execution. Keep the three-minute

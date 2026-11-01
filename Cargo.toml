@@ -127,11 +127,11 @@ proptest = { version = "1.9", default-features = false, features = ["std"] }
 serial_test = "4"
 wide = "0.6.1"
 
-# Shared report primitives from the sibling math-audio workspace.
-math-iir-fir = { version = "0.5", path = "../math-audio/crates/math-iir-fir" }
-math-dsp = { version = "0.5", path = "../math-audio/crates/math-dsp" }
-math-optimisation = { version = "0.5", path = "../math-audio/crates/math-optimisation" }
-math-rir = { version = "0.5.12", path = "../math-audio/crates/math-rir" }
+# Shared primitives from the math-audio repository.
+math-iir-fir = { version = "0.5", git = "https://github.com/pierreaubert/math-audio" }
+math-dsp = { version = "0.5", git = "https://github.com/pierreaubert/math-audio" }
+math-optimisation = { version = "0.5", git = "https://github.com/pierreaubert/math-audio" }
+math-rir = { version = "0.5.12", git = "https://github.com/pierreaubert/math-audio" }
 sofa-reader = { version = "0.2", git = "https://github.com/pierreaubert/sofa-reader" }
 
 # Core numerical computing

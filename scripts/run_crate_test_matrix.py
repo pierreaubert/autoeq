@@ -271,7 +271,6 @@ def full_cargo_metadata() -> dict[str, Any]:
         "metadata",
         "--format-version",
         "1",
-        "--offline",
     ]
     completed = subprocess.run(
         command,

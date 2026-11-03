@@ -822,6 +822,8 @@ pub struct BassManagementSubOutputReport {
     pub gain_db: f64,
     pub delay_ms: f64,
     pub polarity_inverted: bool,
+    /// Processing strategy or configured DBA array position for this output.
+    /// Front/rear identity is retained when fallback resets the driver controls.
     pub strategy_source: String,
     pub headroom_contribution_db: f64,
     /// Low-pass selected for this physical sub output by the per-sub splice

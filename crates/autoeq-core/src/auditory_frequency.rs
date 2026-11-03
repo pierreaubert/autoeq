@@ -28,15 +28,37 @@ pub fn try_erb_rate_cell_widths(frequencies: &Array1<f64>) -> Option<Array1<f64>
         return None;
     }
 
+    if frequencies
+        .iter()
+        .zip(frequencies.iter().skip(1))
+        .any(|(low, high)| high <= low)
+    {
+        return None;
+    }
     let rates: Vec<f64> = frequencies
         .iter()
         .map(|frequency| erb_rate(*frequency))
         .collect();
+    let cell_width = |low: usize, high: usize| {
+        let interval = rates[high] - rates[low];
+        // Keep ordinary-grid arithmetic unchanged. Only rounded-equal ERB
+        // coordinates need log1p of the relative frequency increment to avoid
+        // a zero-width cell and uniform fallback on a valid measured grid.
+        let interval = if interval == 0.0 {
+            21.4 / std::f64::consts::LN_10
+                * (0.00437 * (frequencies[high] - frequencies[low])
+                    / (1.0 + 0.00437 * frequencies[low]))
+                    .ln_1p()
+        } else {
+            interval
+        };
+        0.5 * interval
+    };
     let mut weights = Array1::zeros(count);
-    weights[0] = 0.5 * (rates[1] - rates[0]);
-    weights[count - 1] = 0.5 * (rates[count - 1] - rates[count - 2]);
+    weights[0] = cell_width(0, 1);
+    weights[count - 1] = cell_width(count - 2, count - 1);
     for index in 1..count - 1 {
-        weights[index] = 0.5 * (rates[index + 1] - rates[index - 1]);
+        weights[index] = cell_width(index - 1, index + 1);
     }
 
     if weights
@@ -97,6 +119,20 @@ mod tests {
     use super::*;
 
     #[test]
+    fn adjacent_float_frequencies_retain_erb_quadrature() {
+        let base = Array1::from(vec![20.0, 100.0, 1000.0, 20_000.0]);
+        let adjacent = Array1::from(vec![20.0, 20.0_f64.next_up(), 100.0, 1000.0, 20_000.0]);
+        let expected = erb_rate_weighted_rms(&base, &[6.0, 0.0, 2.0, -1.0]).unwrap();
+        let weights = try_erb_rate_cell_widths(&adjacent)
+            .expect("distinct measured frequencies need positive ERB cells");
+        assert!(weights.iter().all(|weight| *weight > 0.0));
+        let actual = erb_rate_weighted_rms(&adjacent, &[6.0, 6.0, 0.0, 2.0, -1.0]).unwrap();
+        assert!((actual - expected).abs() < 1e-12, "{actual} vs {expected}");
+        let expected_span = erb_rate(20_000.0) - erb_rate(20.0);
+        assert!((weights.sum() - expected_span).abs() < 1e-12);
+    }
+
+    #[test]
     fn constant_error_is_grid_invariant() {
         for frequencies in [
             Array1::linspace(20.0, 20_000.0, 100),
@@ -119,9 +155,10 @@ mod tests {
         assert!(erb_rate_weighted_rms(&nan_axis, &[1.0, 1.0, 1.0]).is_none());
 
         let invalid_axes = vec![
-            Array1::from(vec![100.0, 50.0, 1000.0]),  // unsorted
-            Array1::from(vec![1000.0, 100.0, 10.0]),  // descending
-            Array1::from(vec![100.0, 100.0, 1000.0]), // duplicated -> zero cell
+            Array1::from(vec![20.0, 100.0, 90.0, 1000.0]), // interior inversion
+            Array1::from(vec![100.0, 50.0, 1000.0]),       // unsorted
+            Array1::from(vec![1000.0, 100.0, 10.0]),       // descending
+            Array1::from(vec![100.0, 100.0, 1000.0]),      // duplicated -> zero cell
             Array1::from(vec![100.0, f64::INFINITY, 1000.0]),
             Array1::from(vec![100.0, -50.0, 1000.0]),
             Array1::from(vec![0.0, 100.0, 1000.0]),

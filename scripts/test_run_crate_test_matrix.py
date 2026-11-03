@@ -329,7 +329,7 @@ class ProvenanceTests(unittest.TestCase):
         self.assertEqual(
             command[1:4], ["metadata", "--format-version", "1"]
         )
-        self.assertIn("--offline", command)
+        self.assertNotIn("--offline", command)
         self.assertNotIn("--locked", command)
         self.assertNotIn("--no-deps", command)
 

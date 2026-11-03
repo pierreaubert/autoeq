@@ -543,6 +543,32 @@ pub fn bass_management_groups(
         .collect()
 }
 
+fn configured_dba_output_strategy(config: &RoomConfig, output_role: &str) -> Option<&'static str> {
+    let subwoofers = config.system.as_ref()?.subwoofers.as_ref()?;
+    if !matches!(subwoofers.config, SubwooferStrategy::Dba) {
+        return None;
+    }
+    let output = subwoofers
+        .outputs
+        .iter()
+        .find(|output| output.id == output_role)?;
+    let roomeq_model::SpeakerConfig::Dba(array) = config.speakers.get(&output.speaker)? else {
+        return None;
+    };
+    let driver_index = subwoofers
+        .outputs
+        .iter()
+        .filter(|candidate| candidate.speaker == output.speaker)
+        .position(|candidate| candidate.id == output_role)?;
+    if driver_index < array.front.len() {
+        Some("dba_front")
+    } else if driver_index < array.front.len() + array.rear.len() {
+        Some("dba_rear")
+    } else {
+        None
+    }
+}
+
 pub fn bass_management_sub_outputs(
     config: &RoomConfig,
     optimization: Option<&BassManagementOptimizationReport>,
@@ -590,13 +616,15 @@ pub fn bass_management_sub_outputs(
     outputs
         .into_iter()
         .map(|output_role| BassManagementSubOutputReport {
+            strategy_source: configured_dba_output_strategy(config, &output_role)
+                .unwrap_or(strategy)
+                .to_string(),
             output_role,
             gain_db: optimization.map(|o| o.applied_sub_gain_db).unwrap_or(0.0),
             delay_ms: optimization.map(|o| o.sub_delay_ms).unwrap_or(0.0),
             polarity_inverted: optimization
                 .map(|o| o.sub_polarity_inverted)
                 .unwrap_or(false),
-            strategy_source: strategy.to_string(),
             headroom_contribution_db: optimization
                 .and_then(|o| o.estimated_bass_bus_peak_gain_db)
                 .unwrap_or(0.0),
@@ -885,6 +913,48 @@ mod tests {
                 },
             )])),
             ..RoomConfig::default()
+        }
+    }
+
+    #[test]
+    fn dba_fallback_retains_array_roles_without_inventing_controls() {
+        let mut config = routed_home_cinema_config();
+        let source = roomeq_model::MeasurementSource::InMemory(roomeq_model::Curve {
+            freq: ndarray::array![20.0, 80.0, 200.0],
+            spl: ndarray::array![80.0, 80.0, 80.0],
+            phase: Some(ndarray::array![0.0, 0.0, 0.0]),
+            ..Default::default()
+        });
+        config.speakers.insert(
+            "array".into(),
+            roomeq_model::SpeakerConfig::Dba(roomeq_model::DBAConfig {
+                name: "array".into(),
+                speaker_name: None,
+                front: vec![source.clone(); 2],
+                rear: vec![source; 2],
+            }),
+        );
+        let subwoofers = config.system.as_mut().unwrap().subwoofers.as_mut().unwrap();
+        subwoofers.config = SubwooferStrategy::Dba;
+        subwoofers.outputs = ["Sub1", "Sub10", "Sub2", "Sub3"]
+            .into_iter()
+            .map(|id| roomeq_model::SubwooferOutput {
+                id: id.into(),
+                speaker: "array".into(),
+            })
+            .collect();
+        let report = bass_management_report(&config, None, false).unwrap();
+        assert_eq!(report.sub_outputs.len(), 4);
+        for output in report.sub_outputs {
+            let expected = match output.output_role.as_str() {
+                "Sub1" | "Sub10" => "dba_front",
+                "Sub2" | "Sub3" => "dba_rear",
+                other => panic!("unexpected physical output {other}"),
+            };
+            assert_eq!(output.strategy_source, expected, "{}", output.output_role);
+            assert_eq!(output.gain_db, 0.0);
+            assert_eq!(output.delay_ms, 0.0);
+            assert!(!output.polarity_inverted);
         }
     }
 

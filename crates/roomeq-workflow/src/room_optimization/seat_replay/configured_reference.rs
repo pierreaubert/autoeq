@@ -941,16 +941,11 @@ impl<'a> ConfiguredComparison<'a> {
                 // the unshifted candidate. Safety attenuation the source
                 // graph already carries is excluded from the match: it is
                 // delivered protection, and matching it away would credit
-                // the candidate with level it does not deliver. The match
-                // only applies beyond the level-alignment trim cap (see
-                // below). The applied shift is recorded in the residual's
+                // the candidate with level it does not deliver. The applied
+                // shift is recorded in the residual's
                 // post-reference gain below, so a pure broadband change
                 // still registers as a playback change.
                 let mut level_match_db = 0.0_f64;
-                // Broadband level is only relative for subwoofer/LFE
-                // inputs, whose delivered level is set by bass
-                // management; mains targets are level-absolute, so a
-                // mains candidate's common shift stays judged.
                 if baseline.normalize_level {
                     let aligned_post =
                         autoeq_core::interpolate_log_space(&baseline.pre.curve.freq, &post.curve);
@@ -977,19 +972,6 @@ impl<'a> ConfiguredComparison<'a> {
                             .copied()
                             .unwrap_or(0.0);
                         let shift = sum / count as f64 + source_safety;
-                        // A broadband shift within the final level-
-                        // alignment trim cap is a deliverable level
-                        // difference and stays judged as target error.
-                        // A larger shift marks a relative-level plane
-                        // (a bass-managed LFE whose absolute level is
-                        // set by routing, or a deliberate drive-cut
-                        // trial), so only there is the candidate
-                        // matched to the baseline and ranked on shape.
-                        let shift = if shift.abs() > super::super::FINAL_CHANNEL_LEVEL_MAX_TRIM_DB {
-                            shift
-                        } else {
-                            0.0
-                        };
                         if shift.is_finite() && shift.abs() > 1e-9 {
                             post.curve.spl.mapv_inplace(|level| level + shift);
                             level_match_db = shift;
@@ -1621,6 +1603,58 @@ mod tests {
             scores.iter().all(|score| (score - scores[0]).abs() < 1e-10),
             "{scores:?}"
         );
+
+        // A relative-level target must not change its shape score at the
+        // independent final-alignment trim limit. Pure gain still records a
+        // playback change and cannot supply primary acoustic improvement.
+        assert!(
+            frozen
+                .prepare_baseline("training", "L", 0)
+                .unwrap()
+                .normalize_level
+        );
+        for attenuation in [1.999, 2.001] {
+            let mut candidate = frozen.reference.as_ref().unwrap().clone();
+            candidate.metadata.correction_acceptance =
+                result.metadata.correction_acceptance.clone();
+            let mut gain = roomeq_engine::output::create_gain_plugin(-attenuation);
+            gain.parameters["room_eq_stage"] = serde_json::json!("pre_route");
+            candidate
+                .channels
+                .get_mut("L")
+                .unwrap()
+                .plugins
+                .insert(0, gain);
+            frozen.attach(&mut candidate);
+            let report = candidate.metadata.correction_acceptance.as_ref().unwrap();
+            let comparison = report
+                .acoustic_quality
+                .as_ref()
+                .unwrap()
+                .training
+                .configured_baseline
+                .as_ref()
+                .unwrap();
+            assert!(
+                comparison.unavailable.is_empty(),
+                "{:?}",
+                comparison.unavailable
+            );
+            let left = comparison
+                .residuals
+                .iter()
+                .find(|row| row.score.logical_input.as_deref() == Some("L"))
+                .unwrap();
+            assert!(left.score.improvement_db.unwrap().abs() < 1e-8, "{left:?}");
+            assert!((left.score.post_reference_gain_db - attenuation).abs() < 1e-8);
+            assert!(
+                configured_selection_metrics(report)
+                    .unwrap()
+                    .training_improvement_db
+                    .abs()
+                    < 1e-8
+            );
+        }
     }
 
     #[test]

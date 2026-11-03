@@ -146,7 +146,7 @@ class Toolchain:
     def environment(self) -> dict[str, str]:
         self.verify()
         env = dict(os.environ)
-        env.update(CARGO=str(self.cargo), RUSTC=str(self.rustc), RUSTDOC=str(self.rustdoc), CARGO_NET_OFFLINE="true", PYTHONDONTWRITEBYTECODE="1")
+        env.update(CARGO=str(self.cargo), RUSTC=str(self.rustc), RUSTDOC=str(self.rustdoc), PYTHONDONTWRITEBYTECODE="1")
         env.pop("CARGO_TARGET_DIR", None)
         return env
 
@@ -183,7 +183,7 @@ class Storage:
 
 
 def metadata(root: Path, toolchain: Toolchain) -> dict:
-    return json.loads(subprocess.run([str(toolchain.cargo), "metadata", "--offline", "--format-version", "1"], cwd=root, env=toolchain.environment(), check=True, capture_output=True, text=True).stdout)
+    return json.loads(subprocess.run([str(toolchain.cargo), "metadata", "--format-version", "1"], cwd=root, env=toolchain.environment(), check=True, capture_output=True, text=True).stdout)
 
 
 def dependency_roots(source: Path, toolchain: Toolchain) -> set[Path]:

@@ -182,7 +182,7 @@ class MeasurementTests(unittest.TestCase):
         command = cargo_cmd("affected-edit", ["autoeq-core", "autoeq-cli"], "qa", Path("/tmp/target"))
         self.assertIn("--all-features", command)
         self.assertNotIn("--locked", command)
-        self.assertIn("--offline", command)
+        self.assertNotIn("--offline", command)
         self.assertEqual(command[command.index("--profile") + 1], "qa")
         self.assertEqual(command.count("-p"), 2)
         self.assertIn("--all-features", cargo_cmd("test-edit", "autoeq-optim", "test", Path("/tmp/target")))

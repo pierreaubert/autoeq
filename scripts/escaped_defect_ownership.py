@@ -17,7 +17,7 @@ def command_json(command):
 
 
 def discover_tests(packages):
-    command = ["cargo", "nextest", "list", "--offline", "--lib", "--message-format", "json"]
+    command = ["cargo", "nextest", "list", "--lib", "--message-format", "json"]
     for package in sorted(packages):
         command.extend(["-p", package])
     tests = set()
@@ -37,7 +37,7 @@ def execute_regression(identity):
     key = tuple(identity[k] for k in ("package", "target", "name"))
     if key not in discover_tests({identity["package"]}):
         raise ValueError(f"unresolved executable regression: {identity}")
-    command = ["cargo", "test", "--offline", "-p", identity["package"], "--lib",
+    command = ["cargo", "test", "-p", identity["package"], "--lib",
                identity["name"], "--", "--exact", "--format", "terse"]
     result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
     summary = re.search(r"test result: ok\. (\d+) passed; (\d+) failed; (\d+) ignored;", result.stdout)

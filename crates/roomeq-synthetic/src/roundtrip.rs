@@ -153,20 +153,17 @@ pub fn band_rms(curve: &Curve, band_hz: (f64, f64)) -> f64 {
     (sum / count as f64).sqrt()
 }
 
-/// Attach linear delay phase (degrees) to a magnitude-only curve.
+/// Add propagation-delay phase while preserving the existing filter response.
 pub fn with_delay_phase(curve: &Curve, delay_ms: f64) -> Curve {
     let delay_s = delay_ms / 1000.0;
-    let phase: Vec<f64> = curve
-        .freq
-        .iter()
-        .map(|frequency| -360.0 * frequency * delay_s)
-        .collect();
-    Curve {
-        freq: curve.freq.clone(),
-        spl: curve.spl.clone(),
-        phase: Some(ndarray::Array1::from(phase)),
-        ..Default::default()
+    let mut delayed = curve.clone();
+    let phase = delayed
+        .phase
+        .get_or_insert_with(|| ndarray::Array1::zeros(curve.freq.len()));
+    for (value, frequency) in phase.iter_mut().zip(curve.freq.iter()) {
+        *value -= 360.0 * frequency * delay_s;
     }
+    delayed
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -216,7 +213,10 @@ fn with_deployed_flat(mut channel: RoundtripChannel) -> RoundtripChannel {
 
 /// Full-range flat ideal shared by main channels (20 Hz - 20 kHz, 120 points).
 pub fn full_range_ideal() -> Curve {
-    generate_flat_curve(20.0, 20_000.0, 120)
+    let mut flat = generate_flat_curve(20.0, 20_000.0, 120);
+    // This analytic ideal has known zero phase; measured magnitude-only curves do not.
+    flat.phase = Some(ndarray::Array1::zeros(flat.freq.len()));
+    flat
 }
 
 /// Bass-managed main ideal: flat through the 80 Hz crossover, rolling off
@@ -229,7 +229,7 @@ pub fn full_range_ideal() -> Curve {
 /// route delay aligns the whole overlap. Built with a true high-pass so
 /// magnitude and phase stay minimum-phase consistent for the coherent splice.
 pub fn crossed_main_ideal() -> Curve {
-    let flat = generate_flat_curve(20.0, 20_000.0, 120);
+    let flat = full_range_ideal();
     let highpass = Biquad::new(
         BiquadFilterType::HighpassVariableQ,
         45.0,
@@ -251,7 +251,7 @@ pub fn crossed_main_ideal() -> Curve {
 /// evidence gate rightly refuses. Built with a true low-pass so magnitude
 /// and phase stay minimum-phase consistent for the coherent splice.
 pub fn sub_ideal() -> Curve {
-    let flat = generate_flat_curve(20.0, 20_000.0, 120);
+    let flat = full_range_ideal();
     let lowpass = Biquad::new(
         BiquadFilterType::Lowpass,
         200.0,
@@ -563,6 +563,29 @@ pub fn roundtrip_conflicting_seats(base: &Curve, seed_offset: u64) -> (Curve, Ve
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn propagation_delay_preserves_existing_filter_phase() {
+        for ideal in [crossed_main_ideal(), sub_ideal()] {
+            for delay_ms in [0.0, 1.25] {
+                let delayed = with_delay_phase(&ideal, delay_ms);
+                assert_eq!(delayed.freq, ideal.freq);
+                assert_eq!(delayed.spl, ideal.spl);
+                for ((frequency, original), actual) in ideal
+                    .freq
+                    .iter()
+                    .zip(ideal.phase.as_ref().unwrap())
+                    .zip(delayed.phase.as_ref().unwrap())
+                {
+                    let expected = original - 360.0 * frequency * delay_ms / 1000.0;
+                    assert!(
+                        (actual - expected).abs() < 1e-9,
+                        "{frequency} Hz: phase {actual}, expected {expected}"
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn deformations_stay_invertible_and_small() {

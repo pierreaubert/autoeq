@@ -102,7 +102,7 @@ def run(manifest_path):
         "--package", mutation["package"], "--test-package", manifest["regression_test"]["package"],
         "--file", mutation["file"], "--re", mutation["selector"],
         "--baseline", "run", "--timeout", "120", "--build-timeout", "600",
-        "--cargo-arg=--offline", "--cargo-arg=--lib", "--cargo-arg=--package=" + manifest["regression_test"]["package"],
+        "--cargo-arg=--lib", "--cargo-arg=--package=" + manifest["regression_test"]["package"],
         "-o", str(output),
     ]
     # cargo-mutants 25.x forwards arguments following `--` to `cargo test`.

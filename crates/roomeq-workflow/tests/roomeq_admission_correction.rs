@@ -1207,7 +1207,12 @@ fn assert_python_report(output: &roomeq_model::DspChainOutput, script: &str) {
     use std::process::{Command, Stdio};
     let root = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."));
     let python = std::env::var_os("ROOMEQ_REPORT_PYTHON").unwrap_or_else(|| {
-        for candidate in ["venv/bin/python", ".venv/bin/python"] {
+        for candidate in [
+            "venv/bin/python",
+            ".venv/bin/python",
+            "venv/Scripts/python.exe",
+            ".venv/Scripts/python.exe",
+        ] {
             let path = root.join(candidate);
             if path.is_file() {
                 return path.into_os_string();
@@ -1219,6 +1224,9 @@ fn assert_python_report(output: &roomeq_model::DspChainOutput, script: &str) {
         .arg("-c")
         .arg(script)
         .env("PYTHONDONTWRITEBYTECODE", "1")
+        // Payload JSON is UTF-8; Windows Python otherwise decodes stdin
+        // and files with the locale codepage, corrupting non-ASCII text.
+        .env("PYTHONUTF8", "1")
         .env("ROOMEQ_TEST_TMP_ROOT", test_temp_root())
         .current_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../.."))
         .stdin(Stdio::piped())

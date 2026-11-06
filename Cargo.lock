@@ -2323,6 +2323,7 @@ version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "14a5f01b87b92705d07b433c06f96cbc764637d81a0bffb5734ce17cf0f9a2b3"
 dependencies = [
+ "cc",
  "pkg-config",
  "vcpkg",
 ]
@@ -3783,6 +3784,7 @@ dependencies = [
  "roomeq-model",
  "roomeq-quality",
  "roomeq-synthetic",
+ "rusqlite",
  "rustfft",
  "same-file",
  "schemars",

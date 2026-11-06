@@ -37,6 +37,9 @@ serde_ignored = { workspace = true }
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 sha2 = { workspace = true }
 sofa-reader = { workspace = true }
+# Direct dep so feature unification activates `bundled` for the rusqlite
+# that sofa-reader depends on (no system sqlite3.lib on Windows).
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 tempfile = { workspace = true }
 tokio = { workspace = true }
 

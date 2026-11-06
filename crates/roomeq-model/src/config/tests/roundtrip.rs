@@ -626,17 +626,19 @@ fn room_config_roundtrip_and_resolve_paths() {
     // variant after deserialization (the untagged enum serializes strings as
     // Predefined, so we set it explicitly here).
     back.target_curve = Some(TargetCurveConfig::Path("target.csv".into()));
-    back.resolve_paths(PathBuf::from("/base").as_path());
+    // "/base" is root-relative, not absolute, on Windows.
+    let base = PathBuf::from(if cfg!(windows) { "C:\\base" } else { "/base" });
+    back.resolve_paths(base.as_path());
     match &back.target_curve {
         Some(TargetCurveConfig::Path(p)) => {
-            assert_eq!(p, &PathBuf::from("/base/target.csv"))
+            assert_eq!(p, &base.join("target.csv"))
         }
         other => panic!("expected path target curve, got {:?}", other),
     }
     match &back.speakers["L"] {
         SpeakerConfig::Single(s) => match s {
             MeasurementSource::Single(ms) => match &ms.measurement {
-                MeasurementRef::Path(p) => assert_eq!(p, &PathBuf::from("/base/L.csv")),
+                MeasurementRef::Path(p) => assert_eq!(p, &base.join("L.csv")),
                 other => panic!("expected path, got {:?}", other),
             },
             other => panic!("expected single source, got {:?}", other),
@@ -645,10 +647,15 @@ fn room_config_roundtrip_and_resolve_paths() {
     }
 
     // Absolute target path must remain unchanged.
-    cfg.target_curve = Some(TargetCurveConfig::Path("/abs/target.csv".into()));
-    cfg.resolve_paths(PathBuf::from("/base").as_path());
+    let abs_target = PathBuf::from(if cfg!(windows) {
+        "C:\\abs\\target.csv"
+    } else {
+        "/abs/target.csv"
+    });
+    cfg.target_curve = Some(TargetCurveConfig::Path(abs_target.clone()));
+    cfg.resolve_paths(base.as_path());
     match &cfg.target_curve {
-        Some(TargetCurveConfig::Path(p)) => assert_eq!(p, &PathBuf::from("/abs/target.csv")),
+        Some(TargetCurveConfig::Path(p)) => assert_eq!(p, &abs_target),
         other => panic!("expected path target curve, got {:?}", other),
     }
 }

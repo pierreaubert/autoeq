@@ -35,13 +35,14 @@ impl InlineMeasurement {
         if let Some(csv_path) = &self.csv_path {
             let path = PathBuf::from(csv_path);
             if path.is_relative() {
-                self.csv_path = Some(base_dir.join(path).to_string_lossy().into_owned());
+                // Serialized config paths stay portable: always `/` separators.
+                self.csv_path = Some(base_dir.join(path).to_string_lossy().replace('\\', "/"));
             }
         }
         if let Some(wav_path) = &self.wav_path {
             let path = PathBuf::from(wav_path);
             if path.is_relative() {
-                self.wav_path = Some(base_dir.join(path).to_string_lossy().into_owned());
+                self.wav_path = Some(base_dir.join(path).to_string_lossy().replace('\\', "/"));
             }
         }
     }

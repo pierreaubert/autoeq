@@ -1133,6 +1133,18 @@ fn read_bounded_file(path: &Path, maximum_bytes: u64, label: &str) -> io::Result
     Ok(bytes)
 }
 
+/// Convert a possibly native relative member path to the portable `/`
+/// form used in manifests, validating it as an artifact member.
+fn portable_relative_path(relative: &Path) -> io::Result<PathBuf> {
+    let text = relative
+        .to_str()
+        .ok_or_else(|| io_invalid("artifact member path is not valid UTF-8"))?
+        .replace('\\', "/");
+    let portable = PathBuf::from(&text);
+    autoeq_artifacts::validate_relative_artifact_path(&portable)?;
+    Ok(portable)
+}
+
 fn read_bundle_member_bytes<'a>(
     assets: &Path,
     relative: &Path,
@@ -1141,7 +1153,10 @@ fn read_bundle_member_bytes<'a>(
     maximum_bytes: u64,
     label: &str,
 ) -> io::Result<Cow<'a, [u8]>> {
-    autoeq_artifacts::validate_relative_artifact_path(relative)?;
+    // Callers may hand us a native relative path (e.g. from `strip_prefix`);
+    // artifact members are stored and validated in portable `/` form.
+    let portable = portable_relative_path(relative)?;
+    let relative = &portable;
     let path = if let Some(manifest) = manifest {
         let key = relative
             .to_str()
@@ -1257,6 +1272,12 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Sync a regular file by path. FlushFileBuffers on Windows requires a
+/// write-capable handle, so a read-only File::open cannot be reused here.
+fn sync_file(path: &Path) -> io::Result<()> {
+    OpenOptions::new().read(true).write(true).open(path)?.sync_all()
+}
+
 fn sync_tree(path: &Path) -> io::Result<()> {
     for entry in std::fs::read_dir(path)? {
         let entry = entry?;
@@ -1270,7 +1291,7 @@ fn sync_tree(path: &Path) -> io::Result<()> {
         if file_type.is_dir() {
             sync_tree(&entry.path())?;
         } else if file_type.is_file() {
-            std::fs::File::open(entry.path())?.sync_all()?;
+            sync_file(&entry.path())?;
         } else {
             return Err(io_invalid(format!(
                 "artifact bundle contains a non-file entry: {}",
@@ -1845,7 +1866,6 @@ fn collect_bundle_files(
                 .strip_prefix(root)
                 .map_err(|error| io_invalid(error.to_string()))?
                 .to_path_buf();
-            autoeq_artifacts::validate_relative_artifact_path(&relative)?;
             if relative == Path::new(ARTIFACT_BUNDLE_MANIFEST_FILENAME)
                 || relative == Path::new(RUN_MANIFEST_FILENAME)
                 || relative == Path::new(RUN_LOG_FILENAME)
@@ -1857,6 +1877,7 @@ fn collect_bundle_files(
                 .to_str()
                 .ok_or_else(|| io_invalid("artifact member path is not valid UTF-8"))?
                 .replace('\\', "/");
+            autoeq_artifacts::validate_relative_artifact_path(Path::new(&name))?;
             files.insert(name, BundleFileRecord { size_bytes, sha256 });
         } else {
             return Err(io_invalid(format!(
@@ -2738,7 +2759,6 @@ fn save_output_bundle_using_hooks_and_assets(
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error.into()),
     };
-
     let staging = ArtifactBundleStaging::new(parent)?;
     let transaction_root = staging.root().to_path_buf();
     let stage_assets = transaction_root.join("next_assets");
@@ -2854,7 +2874,7 @@ fn publish_prepared_bundle(
     if let Some(bytes) = old_output.as_deref() {
         let backup = transaction_root.join("previous_output.json");
         std::fs::write(&backup, bytes)?;
-        std::fs::File::open(backup)?.sync_all()?;
+        sync_file(&backup)?;
         #[cfg(test)]
         pause_after_test_publication_phase("previous_output_backup_synced");
     }
@@ -2900,17 +2920,17 @@ fn publish_prepared_bundle(
 
     let transaction = (|| -> io::Result<()> {
         if had_assets {
-            (hooks.rename)(&assets, &kept_transaction_root.join("previous_assets"))?;
+(hooks.rename)(&assets, &kept_transaction_root.join("previous_assets"))?;
             #[cfg(test)]
             pause_after_test_publication_phase("previous_assets_renamed");
         }
-        (hooks.rename)(stage_assets, &assets)?;
+(hooks.rename)(stage_assets, &assets)?;
         #[cfg(test)]
         pause_after_test_publication_phase("candidate_assets_installed");
         (hooks.sync_parent)(parent)?;
         #[cfg(test)]
         pause_after_test_publication_phase("assets_parent_synced");
-        (hooks.write_root)(output_path, output_bytes)?;
+(hooks.write_root)(output_path, output_bytes)?;
         #[cfg(test)]
         pause_after_test_publication_phase("root_written");
         (hooks.sync_parent)(parent)?;
@@ -2919,7 +2939,7 @@ fn publish_prepared_bundle(
         Ok(())
     })();
     if let Err(error) = transaction {
-        recover_pending_bundle(output_path)?;
+    recover_pending_bundle(output_path)?;
         let committed = std::fs::read(output_path)
             .ok()
             .is_some_and(|bytes| sha256_hex(&bytes) == journal.new_output_sha256)

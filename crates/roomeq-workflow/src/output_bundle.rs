@@ -1275,7 +1275,11 @@ fn sync_directory(_path: &Path) -> io::Result<()> {
 /// Sync a regular file by path. FlushFileBuffers on Windows requires a
 /// write-capable handle, so a read-only File::open cannot be reused here.
 fn sync_file(path: &Path) -> io::Result<()> {
-    OpenOptions::new().read(true).write(true).open(path)?.sync_all()
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)?
+        .sync_all()
 }
 
 fn sync_tree(path: &Path) -> io::Result<()> {
@@ -2920,17 +2924,17 @@ fn publish_prepared_bundle(
 
     let transaction = (|| -> io::Result<()> {
         if had_assets {
-(hooks.rename)(&assets, &kept_transaction_root.join("previous_assets"))?;
+            (hooks.rename)(&assets, &kept_transaction_root.join("previous_assets"))?;
             #[cfg(test)]
             pause_after_test_publication_phase("previous_assets_renamed");
         }
-(hooks.rename)(stage_assets, &assets)?;
+        (hooks.rename)(stage_assets, &assets)?;
         #[cfg(test)]
         pause_after_test_publication_phase("candidate_assets_installed");
         (hooks.sync_parent)(parent)?;
         #[cfg(test)]
         pause_after_test_publication_phase("assets_parent_synced");
-(hooks.write_root)(output_path, output_bytes)?;
+        (hooks.write_root)(output_path, output_bytes)?;
         #[cfg(test)]
         pause_after_test_publication_phase("root_written");
         (hooks.sync_parent)(parent)?;
@@ -2939,7 +2943,7 @@ fn publish_prepared_bundle(
         Ok(())
     })();
     if let Err(error) = transaction {
-    recover_pending_bundle(output_path)?;
+        recover_pending_bundle(output_path)?;
         let committed = std::fs::read(output_path)
             .ok()
             .is_some_and(|bytes| sha256_hex(&bytes) == journal.new_output_sha256)

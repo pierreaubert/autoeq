@@ -221,10 +221,7 @@ pub fn lfx(freq: &Array1<f64>, lw: &Array1<f64>, sp: &Array1<f64>) -> f64 {
 pub fn sm(freq: &Array1<f64>, spl: &Array1<f64>) -> f64 {
     // Inclusive [100, 16000] Hz band, as in spinorama's score filter.
     let f_min = freq.iter().position(|&f| f >= 100.0).unwrap_or(freq.len());
-    let f_max = freq
-        .iter()
-        .position(|&f| f > 16000.0)
-        .unwrap_or(freq.len());
+    let f_max = freq.iter().position(|&f| f > 16000.0).unwrap_or(freq.len());
     if f_min >= f_max {
         return f64::NAN;
     }
@@ -283,9 +280,8 @@ mod tests {
         // Same synthetic curve as the Python reference
         // (spinorama.compute.smoothness): 64 log-spaced points,
         // expected smoothness 0.9371650338627349.
-        let freq: Array1<f64> = Array1::from_iter(
-            (0..64).map(|i| 100.0 * (160.0_f64).powf(f64::from(i) / 63.0)),
-        );
+        let freq: Array1<f64> =
+            Array1::from_iter((0..64).map(|i| 100.0 * (160.0_f64).powf(f64::from(i) / 63.0)));
         let spl: Array1<f64> = freq.mapv(|f| {
             -0.8 * (f / 1000.0).log10()
                 + 0.6 * (2.0 * std::f64::consts::PI * (f / 100.0).log10() / 1.5).sin()
@@ -300,8 +296,7 @@ mod tests {
 
     #[test]
     fn sm_is_one_for_a_perfect_line() {
-        let freq: Array1<f64> =
-            Array1::from_iter((0..32).map(|i| 100.0 * 2.0_f64.powi(i)));
+        let freq: Array1<f64> = Array1::from_iter((0..32).map(|i| 100.0 * 2.0_f64.powi(i)));
         let spl: Array1<f64> = freq.mapv(|f| -3.0 * (f / 1000.0).log10() + 85.0);
         assert!((sm(&freq, &spl) - 1.0).abs() < 1e-9);
     }

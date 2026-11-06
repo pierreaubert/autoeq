@@ -67,38 +67,6 @@ pub(super) fn mad(spl: &Array1<f64>, imin: usize, imax: usize) -> f64 {
     diffs.mean().unwrap_or(0.0)
 }
 
-/// Compute the coefficient of determination (R-squared) between two arrays
-///
-/// # Arguments
-/// * `x` - First array of values
-/// * `y` - Second array of values
-///
-/// # Returns
-/// * R-squared value (Pearson correlation coefficient squared)
-fn r_squared(x: &Array1<f64>, y: &Array1<f64>) -> f64 {
-    // Vectorized Pearson correlation squared
-    let n = x.len() as f64;
-    if n == 0.0 {
-        return f64::NAN;
-    }
-    let mx = x.mean().unwrap_or(0.0);
-    let my = y.mean().unwrap_or(0.0);
-
-    // Vectorized computation of deviations
-    let dx = x.mapv(|v| v - mx);
-    let dy = y.mapv(|v| v - my);
-
-    let num = (&dx * &dy).sum();
-    let sxx = (&dx * &dx).sum();
-    let syy = (&dy * &dy).sum();
-
-    if sxx == 0.0 || syy == 0.0 {
-        return f64::NAN;
-    }
-    let r = num / (sxx.sqrt() * syy.sqrt());
-    r * r
-}
-
 /// Generate octave band frequencies
 ///
 /// # Arguments
@@ -251,10 +219,11 @@ pub fn lfx(freq: &Array1<f64>, lw: &Array1<f64>, sp: &Array1<f64>) -> f64 {
 /// # Returns
 /// * SM value as f64 (R-squared value)
 pub fn sm(freq: &Array1<f64>, spl: &Array1<f64>) -> f64 {
-    let f_min = freq.iter().position(|&f| f > 100.0).unwrap_or(freq.len());
+    // Inclusive [100, 16000] Hz band, as in spinorama's score filter.
+    let f_min = freq.iter().position(|&f| f >= 100.0).unwrap_or(freq.len());
     let f_max = freq
         .iter()
-        .position(|&f| f >= 16000.0)
+        .position(|&f| f > 16000.0)
         .unwrap_or(freq.len());
     if f_min >= f_max {
         return f64::NAN;
@@ -265,5 +234,75 @@ pub fn sm(freq: &Array1<f64>, spl: &Array1<f64>) -> f64 {
     let y: Array1<f64> = spl
         .slice_axis(Axis(0), Slice::from(f_min..f_max))
         .to_owned();
-    r_squared(&x, &y)
+    normalized_smoothness(&x, &y)
+}
+
+/// Smoothness (SM) as in spinorama's `compute_smoothness_regression`:
+/// normalize the response to the VituixCAD reference slope of -1
+/// against ln(f) (i.e. `-ln(10)` dB per decade on a log10 axis), then
+/// take the R² of the regression of the normalized response, clamped
+/// to `[0, 1]`. Plain Pearson R² of the raw response is *not*
+/// equivalent: the shear changes the correlation.
+fn normalized_smoothness(x: &Array1<f64>, y: &Array1<f64>) -> f64 {
+    let mx = x.mean().unwrap_or(0.0);
+    let my = y.mean().unwrap_or(0.0);
+    let dx = x.mapv(|v| v - mx);
+    let dy = y.mapv(|v| v - my);
+    let ss_xx = (&dx * &dx).sum();
+    let ss_yy = (&dy * &dy).sum();
+    if ss_xx == 0.0 || ss_yy == 0.0 {
+        // Degenerate case: perfectly flat or single-point response.
+        return 1.0;
+    }
+    let slope = (&dx * &dy).sum() / ss_xx;
+    // Reference slope of -1 against ln(f) is -ln(10) per decade.
+    let reference = -std::f64::consts::LN_10;
+    let normalized = y + &x.mapv(|v| v * (reference - slope));
+    let ny_mean = normalized.mean().unwrap_or(0.0);
+    let dn = &normalized - ny_mean;
+    let nss_yy = (&dn * &dn).sum();
+    if nss_yy == 0.0 {
+        return 1.0;
+    }
+    let n_slope = (&dx * &dn).sum() / ss_xx;
+    let n_intercept = ny_mean - n_slope * mx;
+    let ss_res = normalized
+        .iter()
+        .zip(x.iter())
+        .map(|(yv, xv)| (yv - (n_intercept + n_slope * xv)).powi(2))
+        .sum::<f64>();
+    (1.0 - ss_res / nss_yy).clamp(0.0, 1.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sm_matches_spinorama_normalized_smoothness() {
+        // Same synthetic curve as the Python reference
+        // (spinorama.compute.smoothness): 64 log-spaced points,
+        // expected smoothness 0.9371650338627349.
+        let freq: Array1<f64> = Array1::from_iter(
+            (0..64).map(|i| 100.0 * (160.0_f64).powf(f64::from(i) / 63.0)),
+        );
+        let spl: Array1<f64> = freq.mapv(|f| {
+            -0.8 * (f / 1000.0).log10()
+                + 0.6 * (2.0 * std::f64::consts::PI * (f / 100.0).log10() / 1.5).sin()
+                - 0.02 * (f / 1000.0)
+        });
+        let value = sm(&freq, &spl);
+        assert!(
+            (value - 0.937_165_033_862_734_9).abs() < 1e-9,
+            "normalized smoothness {value} differs from Python reference"
+        );
+    }
+
+    #[test]
+    fn sm_is_one_for_a_perfect_line() {
+        let freq: Array1<f64> =
+            Array1::from_iter((0..32).map(|i| 100.0 * 2.0_f64.powi(i)));
+        let spl: Array1<f64> = freq.mapv(|f| -3.0 * (f / 1000.0).log10() + 85.0);
+        assert!((sm(&freq, &spl) - 1.0).abs() < 1e-9);
+    }
 }

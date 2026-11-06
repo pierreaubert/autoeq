@@ -279,7 +279,7 @@ dependencies = [
 
 [[package]]
 name = "autoeq-measurements"
-version = "0.5.4"
+version = "0.5.5"
 dependencies = [
  "async-trait",
  "autoeq-core",

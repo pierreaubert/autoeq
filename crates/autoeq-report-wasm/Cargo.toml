@@ -37,4 +37,4 @@ csv = { workspace = true }
 # stack (gpui, smol, fontdue, image) stays out of the native
 # renderer. Do not re-add the "gpui" feature here; GPUI rendering
 # lives in autoeq-report-gpui.
-d3rs = { package = "gpui-d3rs", version = "0.10", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false }
+d3rs = { package = "gpui-d3rs", version = "0.11", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false }

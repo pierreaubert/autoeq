@@ -12,12 +12,13 @@
 
 // Rust guideline compliant 2026-02-21
 
+use std::fmt::Write as _;
+
 use serde_json::Value;
 
-use crate::report_helpers::{channel_sort_key, escape_html, python_string};
+use crate::report_table::{ReportTable, ReportTableGroup};
 
-const SECTION_START: &str =
-    "        <div class=\"plot-container\">\n            <h2>Crossover Configuration</h2>\n";
+use crate::report_helpers::{channel_sort_key, escape_html, python_string};
 
 /// Renders deployed crossover plugins and routing-graph cutoff rows.
 ///
@@ -42,14 +43,16 @@ const SECTION_START: &str =
 ///
 /// This function does not panic for JSON input values.
 pub fn crossover_config_html(data: &Value) -> String {
-    let Some(channels) = data.get("channels").and_then(Value::as_object) else {
-        return String::new();
-    };
+    crossover_tables(data).map_or_else(String::new, |group| render_crossover_tables(&group))
+}
+
+pub(crate) fn crossover_tables(data: &Value) -> Option<ReportTableGroup> {
+    let channels = data.get("channels").and_then(Value::as_object)?;
 
     let mut channel_names: Vec<&str> = channels.keys().map(String::as_str).collect();
     channel_names.sort_by(|left, right| channel_sort_key(left).cmp(&channel_sort_key(right)));
 
-    let mut plugin_rows = String::new();
+    let mut plugin_rows = Vec::new();
     for channel_name in channel_names {
         let Some(channel) = channels.get(channel_name).and_then(Value::as_object) else {
             continue;
@@ -106,19 +109,18 @@ pub fn crossover_config_html(data: &Value) -> String {
                     .filter(|value| !value.is_null())
                     .map(python_string)
                     .unwrap_or_else(|| "-".to_string());
-                plugin_rows.push_str(&format!(
-                    "                    <tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-                    escape_html(&owner),
-                    escape_html(&type_text),
-                    escape_html(&output_text),
+                plugin_rows.push(vec![
+                    owner.clone(),
+                    type_text,
+                    output_text,
                     frequency_text,
-                    escape_html(&stage_text),
-                ));
+                    stage_text,
+                ]);
             }
         }
     }
 
-    let mut route_rows = String::new();
+    let mut route_rows = Vec::new();
     let bass_management = data
         .get("metadata")
         .and_then(|metadata| metadata.get("bass_management"));
@@ -151,42 +153,66 @@ pub fn crossover_config_html(data: &Value) -> String {
             .filter(|value| !value.is_null())
             .map(python_string)
             .unwrap_or_else(|| "-".to_string());
-        route_rows.push_str(&format!(
-            "                    <tr><td>{} → {}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-            escape_html(&source),
-            escape_html(&destination),
-            escape_html(&kind),
-            escape_html(&crossover_type),
+        route_rows.push(vec![
+            format!("{source} → {destination}"),
+            kind,
+            crossover_type,
             format_frequency(low),
             format_frequency(high),
-        ));
+        ]);
     }
 
-    if plugin_rows.is_empty() && route_rows.is_empty() {
-        return String::new();
-    }
-
-    let mut html = String::from(SECTION_START);
+    let mut tables = Vec::new();
     if !plugin_rows.is_empty() {
-        html.push_str(concat!(
-            "            <h3>Deployed Crossover DSP</h3>\n",
-            "            <table class=\"bm-table\">\n",
-            "                <thead><tr><th>Owner</th><th>Type</th><th>Output</th>",
-            "<th>Frequency</th><th>Stage</th></tr></thead>\n",
-            "                <tbody>\n"
-        ));
-        html.push_str(&plugin_rows);
-        html.push_str("                </tbody>\n            </table>\n");
+        tables.push(ReportTable {
+            title: "Deployed Crossover DSP".into(),
+            note: String::new(),
+            columns: ["Owner", "Type", "Output", "Frequency", "Stage"]
+                .map(String::from)
+                .into(),
+            rows: plugin_rows,
+        });
     }
     if !route_rows.is_empty() {
-        html.push_str(concat!(
-            "            <h3>Routing-Graph Crossovers</h3>\n",
-            "            <table class=\"bm-table\">\n",
-            "                <thead><tr><th>Route</th><th>Kind</th><th>Type</th>",
-            "<th>Low-pass</th><th>High-pass</th></tr></thead>\n",
-            "                <tbody>\n"
-        ));
-        html.push_str(&route_rows);
+        tables.push(ReportTable {
+            title: "Routing-Graph Crossovers".into(),
+            note: String::new(),
+            columns: ["Route", "Kind", "Type", "Low-pass", "High-pass"]
+                .map(String::from)
+                .into(),
+            rows: route_rows,
+        });
+    }
+    (!tables.is_empty()).then_some(ReportTableGroup {
+        title: "Crossover Configuration".into(),
+        tables,
+    })
+}
+
+pub(crate) fn render_crossover_tables(group: &ReportTableGroup) -> String {
+    let mut html = String::new();
+    let _ = write!(
+        html,
+        "        <div class=\"plot-container\">\n            <h2>{}</h2>\n",
+        escape_html(&group.title)
+    );
+    for table in &group.tables {
+        let _ = write!(
+            html,
+            "            <h3>{}</h3>\n            <table class=\"bm-table\">\n                <thead><tr>",
+            escape_html(&table.title)
+        );
+        for column in &table.columns {
+            let _ = write!(html, "<th>{}</th>", escape_html(column));
+        }
+        html.push_str("</tr></thead>\n                <tbody>\n");
+        for row in &table.rows {
+            html.push_str("                    <tr>");
+            for cell in row {
+                let _ = write!(html, "<td>{}</td>", escape_html(cell));
+            }
+            html.push_str("</tr>\n");
+        }
         html.push_str("                </tbody>\n            </table>\n");
     }
     html.push_str("        </div>\n");

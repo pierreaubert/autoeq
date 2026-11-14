@@ -9,7 +9,10 @@
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::report_helpers::escape_html;
+use crate::{
+    report_document::{DiagnosticBlock, MetricCell, MetricTone, diagnostic_html},
+    report_table::ReportTable,
+};
 
 const CENTERS_HZ: [u32; 9] = [63, 125, 250, 500, 1_000, 2_000, 4_000, 8_000, 16_000];
 const DEFAULT_TOLERANCE_S: f64 = 0.05;
@@ -97,7 +100,46 @@ pub fn t60_rows(channel_data: &Value) -> Option<Vec<T60BandRow>> {
 /// rows, flatness/ITU summaries, and their presentation cells.
 pub fn t60_report(data: &Value) -> Value {
     let tolerance = tolerance(data);
-    let channels = data.get("channels").and_then(Value::as_object);
+    let channels = data["channels"].as_object();
+    let flatness_mean = complete_channel_mean(channels);
+    let flatness_window =
+        flatness_mean.map(|mean| [0.0_f64.max(mean - tolerance.0), mean + tolerance.0]);
+    let reference = itu_reference(data);
+    let room_rows = room_t60_rows(data);
+    let mut channel_reports = Map::new();
+    if let Some(channels) = channels {
+        for (name, channel) in channels {
+            let rows = t60_rows(channel);
+            let flatness = flatness_pct(rows.as_deref(), flatness_mean, tolerance.0);
+            let itu = itu_pct(rows.as_deref(), reference.as_ref());
+            channel_reports.insert(
+                name.clone(),
+                json!({
+                    "rows": rows,
+                    "flatness_pct": flatness,
+                    "flatness_window_s": flatness_window,
+                    "itu_pct": itu,
+                    "t60_table_html": diagnostic_html(&[t60_band_table(rows.as_deref())]),
+                    "flatness_cell_html": flatness_metric(flatness, tolerance).browser_html(),
+                    "itu_cell_html": itu_metric(itu).browser_html(),
+                }),
+            );
+        }
+    }
+    let room_table_html = room_t60_table(data, room_rows.as_deref())
+        .map(|table| diagnostic_html(&[table]))
+        .unwrap_or_default();
+    json!({
+        "tolerance": {"seconds": tolerance.0, "declared": tolerance.1},
+        "reference": reference,
+        "room_rows": room_rows,
+        "room_t60_table_html": room_table_html,
+        "itu_note_html": t60_itu_note(reference.as_ref().unwrap_or(&Value::Null)),
+        "channels": channel_reports,
+    })
+}
+
+fn complete_channel_mean(channels: Option<&Map<String, Value>>) -> Option<f64> {
     let complete = channels
         .map(|channels| {
             channels
@@ -115,59 +157,58 @@ pub fn t60_report(data: &Value) -> Value {
         .iter()
         .flat_map(|(_, rows)| rows.iter().filter_map(|row| row.t60_s))
         .collect();
-    let flatness_mean = stable_mean(&all_complete_values);
-    let flatness_window =
-        flatness_mean.map(|mean| [0.0_f64.max(mean - tolerance.0), mean + tolerance.0]);
+    stable_mean(&all_complete_values)
+}
 
-    let reference = itu_reference(data);
-    let room_rows = room_t60_rows(data);
-    let mut channel_reports = Map::new();
-    if let Some(channels) = channels {
-        for (name, channel) in channels {
-            let rows = t60_rows(channel);
-            let flatness = rows.as_ref().and_then(|rows| {
-                if rows.iter().any(|row| row.t60_s.is_none()) {
-                    return None;
-                }
-                let mean = flatness_mean?;
-                let inside = rows
-                    .iter()
-                    .filter(|row| {
-                        row.t60_s
-                            .is_some_and(|value| (value - mean).abs() <= tolerance.0)
-                    })
-                    .count();
-                Some(100.0 * inside as f64 / rows.len() as f64)
-            });
-            let itu = itu_pct(data, name);
-            channel_reports.insert(
-                name.clone(),
-                json!({
-                    "rows": rows,
-                    "flatness_pct": flatness,
-                    "flatness_window_s": flatness_window,
-                    "itu_pct": itu,
-                    "t60_table_html": t60_table_html(rows.as_deref()),
-                    "flatness_cell_html": flatness_cell(flatness, tolerance),
-                    "itu_cell_html": itu_cell(itu),
-                }),
-            );
-        }
+fn flatness_pct(rows: Option<&[T60BandRow]>, mean: Option<f64>, tolerance_s: f64) -> Option<f64> {
+    let rows = rows?;
+    let mean = mean?;
+    if rows.iter().any(|row| row.t60_s.is_none()) {
+        return None;
     }
+    let inside = rows
+        .iter()
+        .filter(|row| {
+            row.t60_s
+                .is_some_and(|value| (value - mean).abs() <= tolerance_s)
+        })
+        .count();
+    Some(100.0 * inside as f64 / rows.len() as f64)
+}
 
-    json!({
-        "tolerance": {"seconds": tolerance.0, "declared": tolerance.1},
-        "reference": reference,
-        "room_rows": room_rows,
-        "room_t60_table_html": room_t60_table_html(data, room_rows.as_deref()),
-        "itu_note_html": itu_note(reference.as_ref()),
-        "channels": channel_reports,
-    })
+pub(crate) fn summary_metrics(
+    data: &Value,
+    channels: &Map<String, Value>,
+) -> std::collections::BTreeMap<String, [MetricCell; 2]> {
+    let tolerance = tolerance(data);
+    let mean = complete_channel_mean(Some(channels));
+    let reference = itu_reference(data);
+    channels
+        .iter()
+        .map(|(name, channel)| {
+            let rows = t60_rows(channel);
+            let flatness = flatness_pct(rows.as_deref(), mean, tolerance.0);
+            let itu = itu_pct(rows.as_deref(), reference.as_ref());
+            (
+                name.clone(),
+                [flatness_metric(flatness, tolerance), itu_metric(itu)],
+            )
+        })
+        .collect()
+}
+
+pub(crate) fn t60_document_data(data: &Value) -> (Value, Option<DiagnosticBlock>) {
+    let rows = room_t60_rows(data);
+    let table = room_t60_table(data, rows.as_deref());
+    (
+        json!({"room_rows": rows, "reference": itu_reference(data)}),
+        table,
+    )
 }
 
 /// Render the report's explanatory BS.1116 note for a reference or JSON null.
 pub fn t60_itu_note(reference: &Value) -> String {
-    itu_note((!reference.is_null()).then_some(reference))
+    diagnostic_html(&[t60_reference(reference)])
 }
 
 fn finite_number(value: &Value) -> Option<f64> {
@@ -208,7 +249,7 @@ fn stable_mean(values: &[f64]) -> Option<f64> {
     scaled_sum.is_finite().then_some(scaled_sum)
 }
 
-fn itu_reference(data: &Value) -> Option<Value> {
+pub(crate) fn itu_reference(data: &Value) -> Option<Value> {
     let dimensions = data
         .get("metadata")
         .and_then(|metadata| metadata.get("effective_config"))
@@ -259,21 +300,25 @@ fn itu_reference(data: &Value) -> Option<Value> {
     Some(json!({"tm": tm, "source": "measured midband mean; room volume unavailable"}))
 }
 
-fn itu_note(reference: Option<&Value>) -> String {
-    let source = match reference {
-        Some(reference) => {
-            let tm = reference.get("tm").and_then(finite_number).unwrap_or(0.0);
-            let description = reference
-                .get("source")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            format!("Tm = {tm:.3} s — {}", escape_html(description))
-        }
-        None => "limits unavailable: no room volume or complete midband fits".to_owned(),
+pub(crate) fn t60_reference(reference: &Value) -> DiagnosticBlock {
+    let source = if reference.is_null() {
+        "limits unavailable: no room volume or complete midband fits".to_owned()
+    } else {
+        let tm = reference.get("tm").and_then(finite_number).unwrap_or(0.0);
+        let description = reference
+            .get("source")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        format!("Tm = {tm:.3} s — {description}")
     };
-    format!(
-        "<p class=\"epa-footer\">ITU-R BS.1116-3 §8.2.3.1, Figure 1: {source}. Upper limit covers 63 Hz–8 kHz; lower limit starts at 100 Hz. No extrapolated limits outside that range. A measured-mean reference checks relative decay shape only, not the volume-based recommendation. The summary’s fixed-window flatness score is a separate metric. <a href=\"https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.1116-3-201502-I!!PDF-E.pdf\">ITU recommendation</a>.</p>"
-    )
+    DiagnosticBlock::Reference {
+        text: format!(
+            "ITU-R BS.1116-3 §8.2.3.1, Figure 1: {source}. Upper limit covers 63 Hz–8 kHz; lower limit starts at 100 Hz. No extrapolated limits outside that range. A measured-mean reference checks relative decay shape only, not the volume-based recommendation. The summary’s fixed-window flatness score is a separate metric."
+        ),
+        label: "ITU recommendation".into(),
+        url: "https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.1116-3-201502-I!!PDF-E.pdf"
+            .into(),
+    }
 }
 
 fn room_t60_rows(data: &Value) -> Option<Vec<RoomRow>> {
@@ -312,10 +357,8 @@ struct RoomRow {
     speaker_count: usize,
 }
 
-fn room_t60_table_html(data: &Value, rows: Option<&[RoomRow]>) -> String {
-    let Some(rows) = rows.filter(|rows| !rows.is_empty()) else {
-        return String::new();
-    };
+fn room_t60_table(data: &Value, rows: Option<&[RoomRow]>) -> Option<DiagnosticBlock> {
+    let rows = rows.filter(|rows| !rows.is_empty())?;
     let channels = data
         .get("channels")
         .and_then(Value::as_object)
@@ -326,67 +369,66 @@ fn room_t60_table_html(data: &Value, rows: Option<&[RoomRow]>) -> String {
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let mut parts = vec![
-        "<h3>Octave-band T60 — room and speakers</h3><table class=\"epa-table\"><thead><tr><th>Centre (Hz)</th><th>Room mean (s)</th><th>Valid speakers</th>".to_owned(),
-    ];
-    for (name, _) in &channels {
-        parts.push(format!("<th>{} T60 (s)</th>", escape_html(name)));
-    }
-    parts.push("</tr></thead><tbody>".to_owned());
-    for (index, row) in rows.iter().enumerate() {
-        let mean = row
-            .t60_s
-            .map(|value| format!("{value:.3}"))
-            .unwrap_or_else(|| "n/a".to_owned());
-        parts.push(format!(
-            "<tr><td>{}</td><td>{mean}</td><td>{}</td>",
-            row.centre_hz, row.speaker_count
-        ));
-        for (_, bands) in &channels {
-            let value = bands[index]
-                .t60_s
-                .map(|value| format!("{value:.3}"))
-                .unwrap_or_else(|| "n/a".to_owned());
-            parts.push(format!("<td>{value}</td>"));
-        }
-        parts.push("</tr>".to_owned());
-    }
-    parts.push("</tbody></table>".to_owned());
-    parts.concat()
+    let mut columns = ["Centre (Hz)", "Room mean (s)", "Valid speakers"]
+        .map(str::to_owned)
+        .to_vec();
+    columns.extend(channels.iter().map(|(name, _)| format!("{name} T60 (s)")));
+    let rows = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let mut cells = vec![
+                row.centre_hz.to_string(),
+                format_t60(row.t60_s),
+                row.speaker_count.to_string(),
+            ];
+            cells.extend(
+                channels
+                    .iter()
+                    .map(|(_, bands)| format_t60(bands[index].t60_s)),
+            );
+            cells
+        })
+        .collect();
+    Some(DiagnosticBlock::EvidenceTable(ReportTable {
+        title: "Octave-band T60 — room and speakers".into(),
+        note: String::new(),
+        columns,
+        rows,
+    }))
 }
 
-fn t60_table_html(rows: Option<&[T60BandRow]>) -> String {
+pub(crate) fn t60_band_table(rows: Option<&[T60BandRow]>) -> DiagnosticBlock {
     let Some(rows) = rows else {
-        return "<p class=\"epa-footer\">Octave T60: pending roomeq field t60_octaves from a measured room impulse response.</p>".to_owned();
+        return DiagnosticBlock::Caption(
+            "Octave T60: pending roomeq field t60_octaves from a measured room impulse response."
+                .into(),
+        );
     };
-    let mut html = String::from(
-        "<div class=\"filters-section\"><h3>Octave-band T60</h3><p class=\"epa-footer\">Measured room IR; T30 preferred, T20 fallback. Invalid bands are excluded from the curve.</p><table class=\"epa-table\"><thead><tr><th>Centre (Hz)</th><th>T60 (s)</th><th>Fit</th><th>R²</th><th>Status</th></tr></thead><tbody>",
-    );
-    for row in rows {
-        let value = row
-            .t60_s
-            .map(|value| format!("{value:.3}"))
-            .unwrap_or_else(|| "n/a".to_owned());
-        let fit = row.fit_range.as_deref().unwrap_or("n/a");
-        let reason = escape_html(if row.reason.is_empty() {
-            "valid"
-        } else {
-            &row.reason
-        });
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{value}</td><td>{fit}</td><td>{:.3}</td><td>{reason}</td></tr>",
-            row.centre_hz, row.r2
-        ));
-    }
-    html.push_str("</tbody></table></div>");
-    html
+    DiagnosticBlock::EvidenceTable(ReportTable {
+        title: "Octave-band T60".into(),
+        note: "Measured room IR; T30 preferred, T20 fallback. Invalid bands are excluded from the curve.".into(),
+        columns: ["Centre (Hz)", "T60 (s)", "Fit", "R²", "Status"].map(str::to_owned).to_vec(),
+        rows: rows.iter().map(|row| {
+            vec![
+                row.centre_hz.to_string(),
+                format_t60(row.t60_s),
+                row.fit_range.as_deref().unwrap_or("n/a").to_owned(),
+                format!("{:.3}", row.r2),
+                if row.reason.is_empty() { "valid".into() } else { row.reason.clone() },
+            ]
+        }).collect(),
+    })
 }
 
-fn itu_pct(data: &Value, channel_name: &str) -> Option<f64> {
-    let reference = itu_reference(data)?;
+fn format_t60(value: Option<f64>) -> String {
+    value.map_or_else(|| "n/a".into(), |value| format!("{value:.3}"))
+}
+
+fn itu_pct(rows: Option<&[T60BandRow]>, reference: Option<&Value>) -> Option<f64> {
+    let reference = reference?;
     reference.get("volume_m3")?;
-    let channel = data.get("channels")?.get(channel_name)?;
-    let rows = t60_rows(channel)?;
+    let rows = rows?;
     let bands: Vec<&T60BandRow> = rows
         .iter()
         .filter(|row| (63..=8_000).contains(&row.centre_hz))
@@ -420,33 +462,37 @@ fn itu_pct(data: &Value, channel_name: &str) -> Option<f64> {
     Some(100.0 * inside as f64 / 8.0)
 }
 
-fn itu_cell(metric: Option<f64>) -> String {
-    let Some(metric) = metric else {
-        return "<td style=\"background:#eee;color:#666\" title=\"Requires valid recording_config.room_dimensions and all eight measured octave T60 fits from 63 Hz to 8 kHz\">Not assessed</td>".to_owned();
-    };
-    let color = if metric > 80.0 {
-        "#2ecc71"
+fn t60_metric_tone(metric: f64) -> MetricTone {
+    if metric > 80.0 {
+        MetricTone::Good
     } else if metric >= 50.0 {
-        "#f1c40f"
+        MetricTone::Warning
     } else {
-        "#e74c3c"
-    };
-    let count = (metric * 8.0 / 100.0).round();
-    format!(
-        "<td style=\"background:{color}33\" title=\"{count:.0}/8 octave centers within ITU-R BS.1116-3 Figure 1 limits around the volume recommendation; 63 Hz has only an upper bound; 4 kHz uses the midband limits; 16 kHz is excluded. Not overall room compliance.\">{metric:.1}</td>"
-    )
+        MetricTone::Poor
+    }
 }
 
-fn flatness_cell(metric: Option<f64>, tolerance: (f64, bool)) -> String {
+fn itu_metric(metric: Option<f64>) -> MetricCell {
     let Some(metric) = metric else {
-        return "<td style=\"background:#eee;color:#888\" title=\"needs roomeq field: nine valid measured t60_octaves fits\">pending</td>".to_owned();
+        return MetricCell {
+            value: "Not assessed".into(),
+            tone: MetricTone::Unassessed,
+            detail: Some("Requires valid recording_config.room_dimensions and all eight measured octave T60 fits from 63 Hz to 8 kHz".into()),
+        };
     };
-    let color = if metric > 80.0 {
-        "#2ecc71"
-    } else if metric >= 50.0 {
-        "#f1c40f"
-    } else {
-        "#e74c3c"
+    let count = (metric * 8.0 / 100.0).round();
+    MetricCell {
+        value: format!("{metric:.1}"),
+        tone: t60_metric_tone(metric),
+        detail: Some(format!(
+            "{count:.0}/8 octave centers within ITU-R BS.1116-3 Figure 1 limits around the volume recommendation; 63 Hz has only an upper bound; 4 kHz uses the midband limits; 16 kHz is excluded. Not overall room compliance."
+        )),
+    }
+}
+
+fn flatness_metric(metric: Option<f64>, tolerance: (f64, bool)) -> MetricCell {
+    let Some(metric) = metric else {
+        return MetricCell::pending("nine valid measured t60_octaves fits");
     };
     let source = if tolerance.1 {
         format!("declared ±{} s", general_number(tolerance.0))
@@ -456,10 +502,13 @@ fn flatness_cell(metric: Option<f64>, tolerance: (f64, bool)) -> String {
             general_number(tolerance.0)
         )
     };
-    format!(
-        "<td style=\"background:{color}33\" title=\"nine measured octave fits within {} of the complete-channel room mean\">{metric:.1}</td>",
-        escape_html(&source)
-    )
+    MetricCell {
+        value: format!("{metric:.1}"),
+        tone: t60_metric_tone(metric),
+        detail: Some(format!(
+            "nine measured octave fits within {source} of the complete-channel room mean"
+        )),
+    }
 }
 
 fn general_number(value: f64) -> String {
@@ -526,6 +575,20 @@ mod tests {
             expected["room_t60_table_html"]
         );
         assert_eq!(report["room_rows"], expected["room_rows"]);
+        let (document, room_table) = t60_document_data(&inputs["invalid"]);
+        assert_eq!(document["room_rows"], expected["room_rows"]);
+        let Some(DiagnosticBlock::EvidenceTable(room_table)) = room_table else {
+            panic!("validated room data should produce a native evidence table");
+        };
+        assert_eq!(room_table.rows.len(), CENTERS_HZ.len());
+        assert_eq!(
+            room_table.columns[..3],
+            ["Centre (Hz)", "Room mean (s)", "Valid speakers"]
+        );
+        assert_eq!(
+            diagnostic_html(&[DiagnosticBlock::EvidenceTable(room_table)]),
+            expected["room_t60_table_html"].as_str().unwrap()
+        );
     }
 
     #[test]

@@ -88,10 +88,9 @@ fn escape_html(s: &str) -> String {
 
 /// Load the checked-in shell template plus `dist/` bundle bytes.
 ///
-/// The `dist/` bundles are generated (`just report-wasm`) and may be absent
-/// from a fresh checkout, so they are read at runtime and a missing bundle is
-/// reported as `Err` instead of failing compilation via `include_bytes!`.
-/// Every caller already handles that `Err` by surfacing it to the user.
+/// With `bundled-shell`, the standalone 2D bundle is embedded at build
+/// time. Generate it with `just report-dist` before compiling that feature.
+/// Development builds can read the bundles from `dist/` at runtime.
 pub fn checked_in_assets() -> Result<ShellAssets, String> {
     let template = include_str!("../shell/template.html").to_string();
     // The WebAssembly producer must not embed its own checked-in WASM binary
@@ -102,7 +101,19 @@ pub fn checked_in_assets() -> Result<ShellAssets, String> {
         let _ = template;
         return Err("WebAssembly assembly requires explicit `shell_assets`".into());
     }
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), feature = "bundled-shell"))]
+    {
+        Ok(ShellAssets {
+            template,
+            wasm_2d_b64: b64(include_bytes!("../dist/report2d.wasm")),
+            glue_2d_b64: b64(include_bytes!("../dist/report2d.js")),
+            // The standalone template uses the shared 2D shell for both
+            // Canvas and WebGPU. The explorer bundle is a separate product.
+            wasm_gpui_b64: String::new(),
+            glue_gpui_b64: String::new(),
+        })
+    }
+    #[cfg(all(not(target_arch = "wasm32"), not(feature = "bundled-shell")))]
     {
         let dist = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("dist");
         let load = |file: &str| {
@@ -113,8 +124,12 @@ pub fn checked_in_assets() -> Result<ShellAssets, String> {
             template,
             wasm_2d_b64: b64(&load("report2d.wasm")?),
             glue_2d_b64: b64(&load("report2d.js")?),
-            wasm_gpui_b64: b64(&load("reportgpui.wasm")?),
-            glue_gpui_b64: b64(&load("reportgpui.js")?),
+            wasm_gpui_b64: load("reportgpui.wasm")
+                .map(|bytes| b64(&bytes))
+                .unwrap_or_default(),
+            glue_gpui_b64: load("reportgpui.js")
+                .map(|bytes| b64(&bytes))
+                .unwrap_or_default(),
         })
     }
 }

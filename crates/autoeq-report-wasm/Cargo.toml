@@ -20,6 +20,10 @@ bench = false
 [lints]
 workspace = true
 
+[features]
+# Enable in desktop distributions that ship the standalone report exporter.
+bundled-shell = []
+
 [dependencies]
 autoeq-core = { workspace = true }
 serde = { workspace = true }

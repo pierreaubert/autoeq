@@ -14,6 +14,9 @@ use roomeq_workflow::{FrozenBundleResource, FrozenOutputBundle, load_output_bund
 use serde_json::Value;
 
 mod dsp_replay;
+mod live;
+pub use live::{LiveReportInput, hydrate_live_report, prepare_live_report};
+
 #[doc(inline)]
 pub use dsp_replay::{CapturedFirResource, DspReplayError, DspReplayReport, DspReplayState};
 #[doc(inline)]
@@ -244,6 +247,9 @@ pub enum ReportInputError {
     /// The hydrated typed graph could not be converted to a JSON value.
     #[error("could not serialize hydrated report graph: {0}")]
     Serialization(String),
+    /// The portable report input rejected the hydrated graph or evidence.
+    #[error("invalid prepared report input: {0}")]
+    Preparation(String),
     /// A manifest-stamped graph must be loaded with its saved bundle path.
     #[error(
         "manifest-stamped graph requires the saved bundle path so its exact bytes can be verified"

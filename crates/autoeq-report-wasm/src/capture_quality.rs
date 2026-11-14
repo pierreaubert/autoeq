@@ -9,6 +9,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::report_table::ReportTable;
 use crate::schema::{ReportPayload, ReportProvenance, Section};
 
 /// Current version of the capture-quality input contract.
@@ -298,34 +299,117 @@ pub fn append_capture_quality_section(
             crate::schema::SCHEMA_VERSION
         )));
     }
+    if let Some(section) = capture_quality_section(report)? {
+        payload.sections.push(Section::Html {
+            html: section.html(),
+            tab: None,
+        });
+    }
+    Ok(())
+}
+
+/// Capture findings and the source identifiers for browser actions.
+#[derive(Debug, Clone)]
+pub struct CaptureQualitySection {
+    /// Findings in source order.
+    pub table: ReportTable,
+    action_sources: Vec<Option<String>>,
+}
+
+impl CaptureQualitySection {
+    pub(crate) fn browser_section(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": "html",
+            "html": self.html(),
+            "tab": null,
+            "bucket": CAPTURE_QUALITY_BUCKET,
+            "subhead": CAPTURE_QUALITY_SUBHEAD,
+        })
+    }
+
+    fn html(&self) -> String {
+        let mut html = String::from("<section class=\"capture-quality\"><h2>");
+        escape_html_into(&mut html, &self.table.title);
+        html.push_str("</h2><table><thead><tr>");
+        for column in &self.table.columns {
+            html.push_str("<th>");
+            escape_html_into(&mut html, column);
+            html.push_str("</th>");
+        }
+        html.push_str("<th>Actions</th></tr></thead><tbody>");
+        for (row, source) in self.table.rows.iter().zip(&self.action_sources) {
+            html.push_str("<tr>");
+            for cell in row {
+                push_cell(&mut html, cell);
+            }
+            html.push_str("<td>");
+            if let Some(source) = source {
+                html.push_str(
+                    "<div class=\"capture-quality-actions\" hidden data-capture-source-id=\"",
+                );
+                escape_html_into(&mut html, source);
+                html.push_str("\"><button type=\"button\" data-report-capture-action=\"select\" disabled>Select</button><button type=\"button\" data-report-capture-action=\"retake\" disabled>Review retake</button></div>");
+            }
+            html.push_str("</td></tr>");
+        }
+        html.push_str("</tbody></table></section>");
+        html
+    }
+}
+
+pub(crate) fn capture_quality_section(
+    report: &CaptureQualityReport,
+) -> Result<Option<CaptureQualitySection>, CaptureQualityReportError> {
     if report.schema_version != CAPTURE_QUALITY_INPUT_VERSION {
         return Err(CaptureQualityReportError::new(format!(
             "unsupported capture-quality input schema {}; expected {}",
             report.schema_version, CAPTURE_QUALITY_INPUT_VERSION
         )));
     }
+    validate_report(report)?;
     if report.sources.is_empty() {
-        return Ok(());
+        return Ok(None);
     }
 
-    validate_report(report)?;
-    let mut html = String::from(
-        "<section class=\"capture-quality\"><h2>Capture quality</h2><table><thead><tr><th>Source</th><th>Channel</th><th>Mic</th><th>Position</th><th>Take</th><th>Stimulus</th><th>Policy</th><th>Metric</th><th>Status</th><th>Value</th><th>Band</th><th>Method</th><th>Threshold</th><th>Evidence and recommendation</th><th>Actions</th></tr></thead><tbody>",
-    );
-
+    let mut rows = Vec::new();
+    let mut action_sources = Vec::new();
     for source in &report.sources {
         if source.findings.is_empty() {
-            render_source_row(&mut html, source, None, true);
+            rows.push(source_row(source, None));
+            action_sources.push(Some(source.source_id.clone()));
         } else {
             for (index, finding) in source.findings.iter().enumerate() {
-                render_source_row(&mut html, source, Some(finding), index == 0);
+                rows.push(source_row(source, Some(finding)));
+                action_sources.push((index == 0).then(|| source.source_id.clone()));
             }
         }
     }
-
-    html.push_str("</tbody></table></section>");
-    payload.sections.push(Section::Html { html, tab: None });
-    Ok(())
+    Ok(Some(CaptureQualitySection {
+        table: ReportTable {
+            title: CAPTURE_QUALITY_SUBHEAD.into(),
+            note: String::new(),
+            columns: [
+                "Source",
+                "Channel",
+                "Mic",
+                "Position",
+                "Take",
+                "Stimulus",
+                "Policy",
+                "Metric",
+                "Status",
+                "Value",
+                "Band",
+                "Method",
+                "Threshold",
+                "Evidence and recommendation",
+            ]
+            .map(String::from)
+            .into(),
+            rows,
+        },
+        action_sources,
+    }))
 }
 
 /// Appends capture findings to a versioned JSON payload without dropping extensions.
@@ -362,38 +446,14 @@ pub fn append_capture_quality_section_to_value(
     report: &CaptureQualityReport,
 ) -> Result<(), CaptureQualityReportError> {
     validate_json_payload(payload)?;
-    if report.schema_version != CAPTURE_QUALITY_INPUT_VERSION {
-        return Err(CaptureQualityReportError::new(format!(
-            "unsupported capture-quality input schema {}; expected {}",
-            report.schema_version, CAPTURE_QUALITY_INPUT_VERSION
-        )));
-    }
-    validate_report(report)?;
-    if report.sources.is_empty() {
+    let Some(section) = capture_quality_section(report)? else {
         return Ok(());
-    }
-
-    let title = payload
-        .get("title")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| CaptureQualityReportError::new("report payload title is missing"))?;
-    let mut evidence = ReportPayload::new(title);
-    append_capture_quality_section(&mut evidence, report)?;
-    let section = evidence
-        .sections
-        .pop()
-        .ok_or_else(|| CaptureQualityReportError::new("quality section was not generated"))?;
-    let mut section_value = serde_json::to_value(section).map_err(|error| {
-        CaptureQualityReportError::new(format!("could not serialize quality section: {error}"))
-    })?;
-    section_value["bucket"] = serde_json::Value::String(CAPTURE_QUALITY_BUCKET.to_string());
-    section_value["subhead"] = serde_json::Value::String(CAPTURE_QUALITY_SUBHEAD.to_string());
-
+    };
     let sections = payload
         .get_mut("sections")
         .and_then(serde_json::Value::as_array_mut)
         .ok_or_else(|| CaptureQualityReportError::new("report payload sections are missing"))?;
-    sections.push(section_value);
+    sections.push(section.browser_section());
     Ok(())
 }
 
@@ -592,71 +652,45 @@ fn validate_band(
     Ok(())
 }
 
-fn render_source_row(
-    html: &mut String,
+fn source_row(
     source: &CaptureQualitySource,
     finding: Option<&CaptureQualityFinding>,
-    include_actions: bool,
-) {
-    html.push_str("<tr>");
-    push_cell(html, &source.source_id);
-    push_optional_cell(html, source.channel.as_deref());
-    push_optional_cell(html, source.mic.as_deref());
-    push_optional_cell(html, source.position.as_deref());
-    push_optional_cell(html, source.take.map(|take| take.to_string()).as_deref());
-    push_optional_cell(
-        html,
-        source.stimulus.as_ref().map(format_stimulus).as_deref(),
-    );
-
+) -> Vec<String> {
+    let mut row = vec![
+        source.source_id.clone(),
+        display_cell(source.channel.as_deref()),
+        display_cell(source.mic.as_deref()),
+        display_cell(source.position.as_deref()),
+        display_cell(source.take.map(|take| take.to_string()).as_deref()),
+        display_cell(source.stimulus.as_ref().map(format_stimulus).as_deref()),
+    ];
     if let Some(finding) = finding {
-        push_optional_cell(html, finding.policy.as_deref());
-        push_cell(html, finding.metric.label());
-        push_cell(html, finding.status.label());
-        push_optional_cell(
-            html,
-            finding
-                .value
-                .map(|value| format!("{value} {}", finding.unit))
-                .as_deref(),
-        );
-        push_optional_cell(html, finding.band.map(format_band).as_deref());
-        push_optional_cell(html, finding.method.as_deref());
-        push_optional_cell(
-            html,
-            finding.threshold.as_ref().map(format_threshold).as_deref(),
-        );
-        let evidence = format_evidence(finding);
-        push_cell(html, &evidence);
+        row.extend([
+            display_cell(finding.policy.as_deref()),
+            finding.metric.label().into(),
+            finding.status.label().into(),
+            display_cell(
+                finding
+                    .value
+                    .map(|value| format!("{value} {}", finding.unit))
+                    .as_deref(),
+            ),
+            display_cell(finding.band.map(format_band).as_deref()),
+            display_cell(finding.method.as_deref()),
+            display_cell(finding.threshold.as_ref().map(format_threshold).as_deref()),
+            format_evidence(finding),
+        ]);
     } else {
-        push_cell(html, "—");
-        push_cell(html, "—");
-        push_cell(html, "No findings");
-        push_cell(html, "—");
-        push_cell(html, "—");
-        push_cell(html, "—");
-        push_cell(html, "—");
-        push_cell(html, "—");
+        row.extend(["—", "—", "No findings", "—", "—", "—", "—", "—"].map(String::from));
     }
-    if include_actions {
-        html.push_str(
-            "<td><div class=\"capture-quality-actions\" hidden data-capture-source-id=\"",
-        );
-        escape_html_into(html, &source.source_id);
-        html.push_str(
-            "\"><button type=\"button\" data-report-capture-action=\"select\" disabled>Select</button><button type=\"button\" data-report-capture-action=\"retake\" disabled>Review retake</button></div></td>",
-        );
-    } else {
-        html.push_str("<td></td>");
-    }
-    html.push_str("</tr>");
+    row
 }
 
-fn push_optional_cell(html: &mut String, value: Option<&str>) {
-    match value {
-        Some(value) if !value.is_empty() => push_cell(html, value),
-        _ => push_cell(html, "—"),
-    }
+fn display_cell(value: Option<&str>) -> String {
+    value
+        .filter(|value| !value.is_empty())
+        .unwrap_or("—")
+        .into()
 }
 
 fn push_cell(html: &mut String, value: &str) {

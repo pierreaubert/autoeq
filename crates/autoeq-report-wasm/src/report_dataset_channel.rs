@@ -25,6 +25,23 @@ pub fn build_dataset_channel_blocks(
     prepared: &PreparedReportData,
     options: &ReportDatasetOptions,
 ) -> Result<Vec<Value>, String> {
+    let mut blocks = build_document_channel_blocks(prepared, options)?;
+    for block in &mut blocks {
+        if let Some(groups) = block["groups"].as_object_mut() {
+            for group in groups.values_mut().filter_map(Value::as_array_mut) {
+                for section in group {
+                    crate::report_document::project_section(section)?;
+                }
+            }
+        }
+    }
+    Ok(blocks)
+}
+
+pub(crate) fn build_document_channel_blocks(
+    prepared: &PreparedReportData,
+    options: &ReportDatasetOptions,
+) -> Result<Vec<Value>, String> {
     prepared.validate()?;
     options.validate()?;
 
@@ -150,7 +167,6 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
     let mut speakers = Vec::new();
     let mut time_domain = Vec::new();
     let mut epa = Vec::new();
-    let safe_label = crate::report_helpers::escape_html(label);
     let is_driver = driver.is_some();
     let acoustic = if let Some(driver) = driver {
         driver
@@ -164,12 +180,12 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
     if driver.is_some() && final_curve.is_some() && prepared.replay.is_some() {
         caption = format!(
             "Corrected physical-driver response for {} includes the prepared driver response. Total driver EQ preview unavailable; individual filter details remain below.",
-            crate::report_helpers::escape_html(channel_name)
+            channel_name
         );
     } else if driver.is_some() && final_curve.is_some() {
         caption = format!(
             "Physical driver output of {}: its measurement through this driver's own DSP chain (shared EQ + driver gain/crossover/route). The EQ plot below shows this total driver shaping.",
-            crate::report_helpers::escape_html(channel_name)
+            channel_name
         );
     }
     if let Some(replay) = &prepared.replay {
@@ -179,8 +195,7 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
             caption = routed_source_reason(replay, channel_name);
         }
     } else if let Some(driver) = driver.filter(|_| final_curve.is_none()) {
-        let driver_label =
-            crate::report_helpers::escape_html(entry["label"].as_str().unwrap_or(channel_name));
+        let driver_label = entry["label"].as_str().unwrap_or(channel_name);
         let reason = if driver.get("initial_curve").is_some_and(is_curve) {
             "no prepared driver response was supplied"
         } else {
@@ -191,12 +206,7 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
         );
     }
 
-    let header = if caption.is_empty() {
-        format!("<h2>Channel: {safe_label}</h2>\n")
-    } else {
-        format!("<h2>Channel: {safe_label}</h2>\n<p class=\"epa-footer\">{caption}</p>\n")
-    };
-    push_html(&mut speakers, json!(header), false);
+    speakers.push(crate::report_document::channel_heading(label, &caption));
     if driver.is_none()
         && let Some(method) = prepared
             .replay
@@ -214,11 +224,7 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
             }
             _ => "Baseline summation method is unavailable.",
         };
-        push_html(
-            &mut speakers,
-            json!(format!("<p class=\"epa-footer\">{note}</p>")),
-            false,
-        );
+        speakers.push(crate::report_document::caption_section(note, false));
     }
 
     let response = crate::response_figures::response_figure_report(&json!({
@@ -255,36 +261,21 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
     if let Some(curve) = &baseline {
         landmark_channel["initial_curve"] = curve.clone();
     }
-    let landmarks =
-        crate::acoustic_curves::curve_report(&json!({"channels":{label:landmark_channel}}));
-    push_html(
-        &mut speakers,
-        landmarks
-            .get("landmarks_table_html")
-            .cloned()
-            .unwrap_or(Value::Null),
-        false,
-    );
+    let landmarks = crate::acoustic_curves::response_landmarks(&landmark_channel);
+    if let Some(table) = crate::acoustic_curves::landmarks_table([(label.into(), landmarks)]) {
+        speakers.push(crate::report_document::diagnostic_section(vec![table]));
+    }
 
     if is_driver {
         let rate = acoustic.get("sample_rate_hz").and_then(Value::as_f64);
         if let Some(rate) = rate {
-            push_html(
-                &mut time_domain,
-                json!(format!(
-                    "<p>Independent measured driver IR: {}; native sample rate {:.1} Hz. This is not the summed parent-speaker response. No measured post-DSP capture is implied.</p>",
-                    safe_label, rate
-                )),
-                false,
-            );
+            time_domain.push(crate::report_document::paragraph_section(&[format!(
+                "Independent measured driver IR: {label}; native sample rate {rate:.1} Hz. This is not the summed parent-speaker response. No measured post-DSP capture is implied."
+            )]));
             if rate <= 16_000.0 {
-                push_html(
-                    &mut time_domain,
-                    json!(
-                        "<p>1–8 kHz reflection analysis is unavailable at this native sample rate. T60 bands beyond Nyquist are marked unavailable.</p>"
-                    ),
-                    false,
-                );
+                time_domain.push(crate::report_document::paragraph_section(&[
+                    "1–8 kHz reflection analysis is unavailable at this native sample rate. T60 bands beyond Nyquist are marked unavailable."
+                ]));
             }
         }
     }
@@ -314,24 +305,14 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
             .and_then(Value::as_object)
             .is_some_and(|value| !value.is_empty());
     if has_acoustic_evidence {
-        push_html(
-            &mut time_domain,
-            json!(crate::channel_evidence::speech_transmission_html(
-                acoustic, label
-            )),
-            false,
-        );
-        let reflection =
-            crate::acoustic_reflections::reflection_report(acoustic, label, Some(label));
-        push_html(
-            &mut time_domain,
-            reflection.get("html").cloned().unwrap_or(Value::Null),
-            false,
-        );
-        if let Some(figures) = reflection["figures"].as_array() {
-            for figure in figures {
-                push_figure(&mut time_domain, figure.clone());
-            }
+        time_domain.push(crate::report_document::diagnostic_section(
+            crate::channel_evidence::speech_transmission(acoustic, label),
+        ));
+        let (reflection, figures) =
+            crate::acoustic_reflections::reflection_document(acoustic, label, Some(label));
+        time_domain.push(crate::report_document::diagnostic_section(vec![reflection]));
+        for figure in figures {
+            push_figure(&mut time_domain, figure);
         }
         let early_late = acoustic
             .get("early_late_curves")
@@ -343,83 +324,64 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
                     "label":label,"report":curves,"tab":label
                 }),
             )?;
-            if figure.is_null() {
-                push_html(
-                    &mut time_domain,
-                    json!(
-                        "<p class=\"epa-footer\">Early vs late sound figure is unavailable for the saved evidence.</p>"
-                    ),
-                    false,
-                );
+            let caption = if figure.is_null() {
+                "Early vs late sound figure is unavailable for the saved evidence."
             } else {
                 push_figure(&mut time_domain, figure);
-                push_html(
-                    &mut time_domain,
-                    json!(
-                        "<p class=\"epa-footer\">Third-octave early and late energy contributions share the full curve's peak-band reference. Full is an incoherent energy sum, not a coherent pressure response.</p>"
-                    ),
-                    false,
-                );
-            }
+                "Third-octave early and late energy contributions share the full curve's peak-band reference. Full is an incoherent energy sum, not a coherent pressure response."
+            };
+            time_domain.push(crate::report_document::caption_section(caption, false));
         } else {
-            push_html(
-                &mut time_domain,
-                json!(
-                    "<p class=\"epa-footer\">Early vs late sound: pending roomeq field early_late_curves with a shared level reference.</p>\n"
-                ),
-                false,
-            );
+            time_domain.push(crate::report_document::caption_section(
+                "Early vs late sound: pending roomeq field early_late_curves with a shared level reference.",
+                true,
+            ));
         }
 
         if is_driver {
-            let report = crate::acoustic_t60::t60_report(&json!({"channels":{label:acoustic}}));
-            let per_channel = &report["channels"][label];
-            push_html(
-                &mut time_domain,
-                per_channel
-                    .get("t60_table_html")
-                    .cloned()
-                    .unwrap_or(Value::Null),
-                false,
-            );
+            let reference =
+                crate::acoustic_t60::itu_reference(&json!({"channels":{label:acoustic}}));
+            let rows = crate::acoustic_t60::t60_rows(acoustic);
+            time_domain.push(crate::report_document::diagnostic_section(vec![
+                crate::acoustic_t60::t60_band_table(rows.as_deref()),
+            ]));
             let t60 = crate::temporal_figures::build_temporal_figure(
                 "create_t60_octaves_figure",
                 &json!({
-                    "label":label,"rows":per_channel["rows"],"tab":label,"itu_reference":report["reference"]
+                    "label":label,"rows":rows,"tab":label,"itu_reference":reference
                 }),
             )?;
             let has_t60_figure = !t60.is_null();
             push_figure(&mut time_domain, t60);
             if has_t60_figure {
-                push_html(
-                    &mut time_domain,
-                    json!(crate::acoustic_t60::t60_itu_note(&report["reference"])),
-                    false,
-                );
+                time_domain.push(crate::report_document::diagnostic_section(vec![
+                    crate::acoustic_t60::t60_reference(reference.as_ref().unwrap_or(&Value::Null)),
+                ]));
             }
         }
-        let waterfall = crate::channel_evidence::optimization_waterfall_html(
+        if let Some(waterfall) = crate::channel_evidence::optimization_waterfall(
             &acoustic["waterfall"],
             &acoustic["resonance_decays"],
-        )
-        .unwrap_or_else(|| {
-            "<p class=\"epa-footer\">Waterfall and resonance decay: pending roomeq fields waterfall and resonance_decays from a measured room impulse response.</p>\n"
-                .to_owned()
-        });
-        push_html(&mut time_domain, json!(waterfall), false);
-        let wavelet = crate::channel_evidence::optimization_wavelet_html(&acoustic["wavelet"])
-            .unwrap_or_else(|| {
-                "<p class=\"epa-footer\">Three-cycle wavelet: pending roomeq field wavelet from a measured room impulse response.</p>\n"
-                    .to_owned()
-            });
-        push_html(&mut time_domain, json!(wavelet), false);
+        ) {
+            time_domain.push(crate::report_document::diagnostic_section(waterfall));
+        } else {
+            time_domain.push(crate::report_document::caption_section(
+                "Waterfall and resonance decay: pending roomeq fields waterfall and resonance_decays from a measured room impulse response.", true,
+            ));
+        }
+        if let Some(wavelet) = crate::channel_evidence::optimization_wavelet(&acoustic["wavelet"]) {
+            time_domain.push(crate::report_document::diagnostic_section(wavelet));
+        } else {
+            time_domain.push(crate::report_document::caption_section(
+                "Three-cycle wavelet: pending roomeq field wavelet from a measured room impulse response.", true,
+            ));
+        }
     }
 
-    let epa_input = prepared.graph["metadata"]["epa_per_channel"][channel_name].clone();
-    let epa_html = crate::evidence_sections::evidence_section(
-        &json!({"builder":"epa_channel","epa":epa_input}),
-    )?;
-    push_html(&mut epa, epa_html, false);
+    let epa_input = &prepared.graph["metadata"]["epa_per_channel"][channel_name];
+    if let Some(scores) = crate::evidence_sections::epa_channel_block(epa_input) {
+        epa.push(crate::report_document::diagnostic_section(vec![scores]));
+    }
 
     let passes = if let Some(driver) = driver {
         split_driver_passes(channel, driver)
@@ -429,14 +391,16 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
     if let Some(driver) = driver {
         let driver_passes = passes.0;
         let shared_passes = passes.1;
-        let filter_html = crate::eq_sections::eq_section_html("driver_filters", &json!({
+        if let Some(listing) = crate::eq_sections::driver_filter_listing(&json!({
             "driver_name":label,"channel_name":channel_name,"id_prefix":format!("eq_{}",entry["driver"].as_u64().unwrap_or(0)),
             "driver_passes":driver_passes,"shared_passes":shared_passes
-        })).map_err(|error| error.to_string())?;
-        push_html(&mut speakers, json!(filter_html), false);
-        if let Some(summary) = driver_shaping_summary(channel, driver) {
-            push_html(&mut speakers, json!(summary), false);
+        })) {
+            speakers.push(crate::report_document::eq_filter_section(listing));
         }
+        speakers.push(crate::report_document::filter_summary(
+            "Sub DSP Chain",
+            driver_shaping_summary(driver),
+        ));
     } else {
         let filters = passes.0;
         let has_labeled = filters.as_array().into_iter().flatten().any(|pass| {
@@ -450,10 +414,10 @@ fn build_channel_block(input: ChannelBlockInput<'_>) -> Result<Value, String> {
                 .is_some_and(|items| !items.is_empty())
         });
         if filter_count {
-            let filter_html = crate::eq_sections::eq_section_html("filter_section", &json!({
+            let listing = crate::eq_sections::channel_filter_listing(&json!({
                 "title":if has_labeled {"EQ Filters (3-Pass Pipeline)"} else {"EQ Filters"},"labeled":has_labeled,"passes":filters
-            })).map_err(|error| error.to_string())?;
-            push_html(&mut speakers, json!(filter_html), false);
+            }));
+            speakers.push(crate::report_document::eq_filter_section(listing));
         }
     }
 
@@ -668,13 +632,13 @@ fn driver_replay_reason(
     else {
         return format!(
             "Corrected response unavailable for {}: no prepared driver evidence was supplied.",
-            crate::report_helpers::escape_html(entry["label"].as_str().unwrap_or(channel_name))
+            entry["label"].as_str().unwrap_or(channel_name)
         );
     };
     let Some(item) = match_identity(candidates, entry, driver) else {
         return format!(
             "Corrected response unavailable for {}: source driver identity is missing or ambiguous.",
-            crate::report_helpers::escape_html(entry["label"].as_str().unwrap_or(channel_name))
+            entry["label"].as_str().unwrap_or(channel_name)
         );
     };
     let reason = item["state"]["reason"]
@@ -682,8 +646,8 @@ fn driver_replay_reason(
         .unwrap_or("prepared response is unavailable");
     format!(
         "Raw measurement only; corrected response unavailable for {}: {}.",
-        crate::report_helpers::escape_html(entry["label"].as_str().unwrap_or(channel_name)),
-        crate::report_helpers::escape_html(reason)
+        entry["label"].as_str().unwrap_or(channel_name),
+        reason
     )
 }
 
@@ -697,8 +661,7 @@ fn routed_source_reason(replay: &crate::PreparedReplay, channel_name: &str) -> S
         .unwrap_or("no routed-source response was prepared");
     format!(
         "Corrected routed response unavailable for {}: {}.",
-        crate::report_helpers::escape_html(channel_name),
-        crate::report_helpers::escape_html(reason)
+        channel_name, reason
     )
 }
 
@@ -797,7 +760,7 @@ fn filter_descriptor(filter: &Value) -> Value {
     output
 }
 
-fn driver_shaping_summary(channel: &Value, driver: &Value) -> Option<String> {
+fn driver_shaping_summary(driver: &Value) -> String {
     let mut gain_db = 0.0;
     let mut delay_ms = 0.0;
     let mut inverted = false;
@@ -837,21 +800,7 @@ fn driver_shaping_summary(channel: &Value, driver: &Value) -> Option<String> {
             kind.map(|value| format!(" {value}")).unwrap_or_default()
         ));
     }
-    let _ = channel;
-    Some(format!(
-        "<div class=\"filters-section\">\n    <h3>Sub DSP Chain</h3>\n    <div class=\"filter-list\">{}</div>\n</div>\n",
-        crate::report_helpers::escape_html(&parts.join("; "))
-    ))
-}
-
-fn push_html(target: &mut Vec<Value>, html: Value, flat: bool) {
-    if let Some(html) = html.as_str().filter(|value| !value.is_empty()) {
-        let mut section = json!({"kind":"html","html":html,"tab":null});
-        if flat {
-            section["flat"] = json!(true);
-        }
-        target.push(section);
-    }
+    parts.join("; ")
 }
 
 fn push_figure(target: &mut Vec<Value>, figure: Value) {

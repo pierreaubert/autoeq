@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 
 use crate::PreparedReportData;
 use crate::report_dataset::ReportDatasetOptions;
+use crate::report_document::ReportDocument;
 
 /// A canonical dashboard payload and explicit preparation diagnostics.
 #[derive(Debug, Clone, Serialize)]
@@ -29,10 +30,25 @@ pub fn build_dataset_report(
     prepared: &PreparedReportData,
     options: &ReportDatasetOptions,
 ) -> Result<DatasetReport, String> {
+    let document = build_report_document(prepared, options)?;
+    Ok(DatasetReport {
+        payload: document.browser_payload(),
+        preparation_status: document.preparation_status,
+    })
+}
+
+/// Composes the dashboard document for both native and browser views.
+///
+/// # Errors
+/// Returns an error when preparation or section assembly rejects the inputs.
+pub fn build_report_document(
+    prepared: &PreparedReportData,
+    options: &ReportDatasetOptions,
+) -> Result<ReportDocument, String> {
     prepared.validate()?;
     options.validate()?;
-    let global = crate::report_dataset_global::build_global_report_sections(prepared, options)?;
-    let channels = crate::report_dataset_channel::build_dataset_channel_blocks(prepared, options)?;
+    let global = crate::report_dataset_global::build_global_document_sections(prepared, options)?;
+    let channels = crate::report_dataset_channel::build_document_channel_blocks(prepared, options)?;
     let mut preparation_status = global
         .get("preparation_status")
         .and_then(Value::as_array)
@@ -48,27 +64,76 @@ pub fn build_dataset_report(
             preparation_status.push(item.clone());
         }
     }
-    let payload = crate::report_assembly::report_assembly(&json!({
+    let payload = crate::report_assembly::assemble_report(&json!({
         "title":global.get("title").unwrap_or(&Value::Null),
         "status_sections": global.get("status_sections").unwrap_or(&Value::Null),
         "global_groups": global.get("global_groups").unwrap_or(&Value::Null),
         "channel_blocks": channels,
         "provenance": global.get("provenance").unwrap_or(&Value::Null),
-        "relative_levels_html": global.get("relative_levels_html").unwrap_or(&Value::Null),
-        "modes_html": global.get("modes_html").unwrap_or(&Value::Null),
+        "relative_levels": global.get("relative_levels").unwrap_or(&Value::Null),
+        "modes": global.get("modes").unwrap_or(&Value::Null),
     }))?;
-    Ok(DatasetReport {
-        payload,
-        preparation_status: Value::Array(preparation_status),
-    })
+    ReportDocument::from_assembled(payload, Value::Array(preparation_status))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::build_dataset_report;
+    use super::build_report_document;
     use crate::PreparedReportData;
     use crate::report_dataset::ReportDatasetOptions;
+    use crate::report_document::ReportSection;
     use serde_json::{Map, Value, json};
+
+    #[test]
+    fn structured_tables_keep_their_dashboard_order_in_html() {
+        let prepared = PreparedReportData::new(
+            json!({
+                "global_plugins": [{"plugin_type":"gain","parameters":{"gain_db":-2.5}}],
+                "channels": {},
+                "metadata": {"timing_diagnostics":{"channels":[
+                    {"name":"Left","measured_arrival_ms":1.25}
+                ]}}
+            }),
+            None,
+            None,
+            None,
+            json!({"schema_version":1,"state":"not_configured","target":null}),
+            None,
+        )
+        .unwrap();
+        let document = build_report_document(&prepared, &ReportDatasetOptions::default()).unwrap();
+        let browser = document.browser_payload();
+        assert!(
+            matches!(document.sections.first(), Some(ReportSection::PlaybackNotices(notices)) if notices.len() == 3)
+        );
+        assert_eq!(browser["sections"][0]["flat"], true);
+        assert!(document.sections.iter().any(|section| matches!(section, ReportSection::Text(text) if text.subhead() == Some("Time domain analysis") && text.paragraphs[0].starts_with("Arrival timing"))));
+        let tables: Vec<_> = document
+            .sections
+            .iter()
+            .enumerate()
+            .filter_map(|(index, section)| match section {
+                ReportSection::Table(table) => Some((index, table)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tables.len(), 2);
+        let (gain_index, gain) = tables[0];
+        let (timing_index, timing) = tables[1];
+        assert_eq!(gain.subhead(), Some("Summary"));
+        assert_eq!(gain.table.rows[0][4], "-2.500 dB");
+        assert_eq!(timing.subhead(), Some("Time of Flight"));
+        assert_eq!(timing.table.rows[0][1..3], ["1.250", "n/a"]);
+        for (index, title) in [
+            (gain_index, &gain.table.title),
+            (timing_index, &timing.table.title),
+        ] {
+            let section = &browser["sections"][index];
+            assert_eq!(section["kind"], "html");
+            assert!(section["html"].as_str().unwrap().contains(title));
+            assert!(section.get("table").is_none());
+        }
+    }
 
     #[test]
     fn full_dataset_payload_matches_python_dashboard_golden() {
@@ -142,17 +207,31 @@ mod tests {
         )
         .expect("source graph becomes a frozen report input");
 
-        let report = build_dataset_report(&prepared, &options)
+        let document = build_report_document(&prepared, &options)
             .expect("global and channel sections compose into a dashboard");
+        for section in &document.sections {
+            if let ReportSection::Legacy(section) = section {
+                assert!(
+                    matches!(
+                        section["kind"].as_str(),
+                        Some("figure" | "grid" | "bar" | "sankey")
+                    ),
+                    "dashboard fixture requires an unsupported section: {} / {}",
+                    section["bucket"],
+                    section["subhead"],
+                );
+            }
+        }
+        let payload = document.browser_payload();
         let mut expected = case["expected"].clone();
-        normalize_unavailable_driver_captions(&report.payload, &mut expected);
-        normalize_stable_unpaired_channel_order(&report.payload, &mut expected);
-        if let Some(path) = first_difference(&report.payload, &expected, String::new()) {
+        normalize_unavailable_driver_captions(&payload, &mut expected);
+        normalize_stable_unpaired_channel_order(&payload, &mut expected);
+        if let Some(path) = first_difference(&payload, &expected, String::new()) {
             panic!(
                 "integrated dashboard differs from the Python golden at {path}; schema, section order, and section data must be preserved"
             );
         }
-        assert!(report.preparation_status.is_array());
+        assert!(document.preparation_status.is_array());
     }
 
     fn first_difference(left: &Value, right: &Value, path: String) -> Option<String> {

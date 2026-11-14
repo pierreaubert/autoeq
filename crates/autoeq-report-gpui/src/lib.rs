@@ -10,6 +10,9 @@
 //! The explorer model ([`ExplorerModel`]) is platform-independent and unit
 //! tested; only the boot/view glue is wasm-gated.
 
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod native;
+
 pub use autoeq_report_wasm::schema;
 
 use schema::{ReportPayload, Section};

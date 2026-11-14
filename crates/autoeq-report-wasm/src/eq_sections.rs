@@ -8,6 +8,7 @@
 use std::fmt::Write as _;
 
 use crate::report_helpers::escape_html;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,39 +72,158 @@ pub fn eq_section_html(builder: &str, prepared: &Value) -> Result<String, EqSect
     Ok(html)
 }
 
-fn filter_section_html(prepared: &Value) -> String {
-    let title = prepared["title"].as_str().unwrap_or("EQ Filters");
-    let mut output = format!(
-        "<div class=\"filters-section\">\n    <h3>{}</h3>\n",
-        escape_html(title)
-    );
-    if prepared["labeled"].as_bool().unwrap_or(false) {
-        let passes = prepared["passes"].as_array().cloned().unwrap_or_default();
-        for pass in &passes {
-            let color = escape_html(pass["color"].as_str().unwrap_or(""));
-            let display_name = escape_html(pass["display_name"].as_str().unwrap_or(""));
-            let _ = write!(
-                output,
-                "    <h4 style=\"color: {color}; margin-bottom: 5px;\">{display_name}</h4>\n    <div class=\"filter-list\" style=\"margin-bottom: 10px;\">\n"
-            );
-            for (index, filter) in pass["filters"].as_array().into_iter().flatten().enumerate() {
-                output.push_str(&format_eq_filter_line(filter, index + 1));
-            }
-            output.push_str("</div>\n");
+/// Prepared EQ filter text grouped by origin and processing pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqFilterListing {
+    /// Listing heading.
+    pub title: String,
+    /// Explanatory note shown before the filter origins.
+    pub note: Option<String>,
+    /// Driver and shared filter origins, or a single unlabelled origin.
+    pub origins: Vec<EqFilterOrigin>,
+    style: EqFilterStyle,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+enum EqFilterStyle {
+    Channel,
+    Driver,
+}
+
+/// A filter origin within the listing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqFilterOrigin {
+    /// Display label, including the number of filters when supplied.
+    pub label: String,
+    /// Ordered filter passes.
+    pub passes: Vec<EqFilterPass>,
+    id: String,
+}
+
+/// A group of filters from one processing pass.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqFilterPass {
+    /// Pass label and color when the source describes a labelled pipeline.
+    pub heading: Option<(String, String)>,
+    /// Filter descriptions in execution order.
+    pub filters: Vec<EqFilterLine>,
+}
+
+/// A filter description and any Kautz bank sections.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EqFilterLine {
+    /// Main filter description.
+    pub summary: String,
+    /// Pole, Q, and weight for each Kautz section.
+    pub details: Vec<String>,
+    kautz: bool,
+}
+
+impl EqFilterLine {
+    fn write_html(&self, output: &mut String) {
+        output.push_str(&escape_html(&self.summary));
+        if self.kautz {
+            output.push_str("; ");
+            output.push_str(&escape_html(&self.details.join("; ")));
         }
-    } else {
-        output.push_str("    <div class=\"filter-list\">\n");
-        let mut number = 0;
-        for pass in prepared["passes"].as_array().into_iter().flatten() {
-            for filter in pass["filters"].as_array().into_iter().flatten() {
-                number += 1;
-                output.push_str(&format_eq_filter_line(filter, number));
-            }
-        }
-        output.push_str("</div>\n");
+        output.push_str("<br>\n");
     }
-    output.push_str("</div>\n");
-    output
+}
+
+fn filter_section_html(prepared: &Value) -> String {
+    channel_filter_listing(prepared).html()
+}
+
+pub(crate) fn channel_filter_listing(prepared: &Value) -> EqFilterListing {
+    EqFilterListing {
+        title: prepared["title"].as_str().unwrap_or("EQ Filters").into(),
+        note: None,
+        origins: vec![EqFilterOrigin {
+            label: String::new(),
+            passes: prepare_passes(
+                &prepared["passes"],
+                prepared["labeled"].as_bool().unwrap_or(false),
+            ),
+            id: String::new(),
+        }],
+        style: EqFilterStyle::Channel,
+    }
+}
+
+impl EqFilterListing {
+    pub(crate) fn html(&self) -> String {
+        match self.style {
+            EqFilterStyle::Channel => {
+                let mut html = format!(
+                    "<div class=\"filters-section\">\n    <h3>{}</h3>\n",
+                    escape_html(&self.title)
+                );
+                if let Some(origin) = self.origins.first() {
+                    write_passes(&mut html, &origin.passes, "    ", "", "");
+                }
+                html.push_str("</div>\n");
+                html
+            }
+            EqFilterStyle::Driver => {
+                let mut html = format!(
+                    "\n                <div class=\"filters-section\">\n                    <h3>{}</h3>\n",
+                    escape_html(&self.title)
+                );
+                if let Some(note) = &self.note {
+                    let _ = writeln!(
+                        html,
+                        "                    <p class=\"epa-footer\">{}</p>",
+                        escape_html(note)
+                    );
+                }
+                if self.origins.len() > 1 {
+                    html.push_str("                    <div class=\"eq-tabs\">\n                        <div class=\"eq-tab-header\">\n");
+                    for (index, origin) in self.origins.iter().enumerate() {
+                        let active = if index == 0 { " active" } else { "" };
+                        let _ = writeln!(
+                            html,
+                            "                            <button class=\"eq-tab-btn{active}\" onclick=\"openEqTab(event, '{}')\">{}</button>",
+                            safe_id_prefix(&origin.id),
+                            escape_html(&origin.label)
+                        );
+                    }
+                    html.push_str("                        </div>\n");
+                    for (index, origin) in self.origins.iter().enumerate() {
+                        let active = if index == 0 { " active" } else { "" };
+                        let _ = writeln!(
+                            html,
+                            "                        <div id=\"{}\" class=\"eq-tab-panel{active}\">",
+                            safe_id_prefix(&origin.id)
+                        );
+                        write_passes(
+                            &mut html,
+                            &origin.passes,
+                            "                    ",
+                            "\n",
+                            "                    ",
+                        );
+                        html.push_str("                        </div>\n");
+                    }
+                    html.push_str("                    </div>\n");
+                } else if let Some(origin) = self.origins.first() {
+                    let _ = writeln!(
+                        html,
+                        "                    <h4>{}</h4>",
+                        escape_html(&origin.label)
+                    );
+                    write_passes(
+                        &mut html,
+                        &origin.passes,
+                        "                    ",
+                        "\n",
+                        "                    ",
+                    );
+                }
+                html.push_str("                </div>\n");
+                html
+            }
+        }
+    }
 }
 
 fn eq_filter_summary_html(value: &Value) -> String {
@@ -126,6 +246,12 @@ fn eq_filter_summary_html(value: &Value) -> String {
 }
 
 fn format_eq_filter_line(filter: &Value, number: usize) -> String {
+    let mut html = String::new();
+    prepare_filter_line(filter, number).write_html(&mut html);
+    html
+}
+
+fn prepare_filter_line(filter: &Value, number: usize) -> EqFilterLine {
     if filter["topology"] == "kautz_filter" {
         let entries = filter["sections"]
             .as_array()
@@ -141,9 +267,12 @@ fn format_eq_filter_line(filter: &Value, number: usize) -> String {
                     significant(number_value(&section["weight"]).unwrap_or(0.0), 6),
                 )
             })
-            .collect::<Vec<_>>()
-            .join("; ");
-        return format!("Filter {number}: KAUTZ bank (unity dry path); {entries}<br>\n");
+            .collect();
+        return EqFilterLine {
+            summary: format!("Filter {number}: KAUTZ bank (unity dry path)"),
+            details: entries,
+            kautz: true,
+        };
     }
 
     let mut filter_type = filter["filter_type"]
@@ -153,44 +282,92 @@ fn format_eq_filter_line(filter: &Value, number: usize) -> String {
     if filter["topology"] == "warped_biquad" {
         filter_type = format!("WARPED {filter_type}");
     }
-    format!(
-        "Filter {number}: {} @ {} Hz, Q={}, Gain={} dB<br>\n",
-        escape_html(&filter_type),
-        fixed(number_value(&filter["freq"]).unwrap_or(0.0), 1),
-        fixed(number_value(&filter["q"]).unwrap_or(1.0), 2),
-        signed_fixed(number_value(&filter["db_gain"]).unwrap_or(0.0), 1),
-    )
+    EqFilterLine {
+        summary: format!(
+            "Filter {number}: {} @ {} Hz, Q={}, Gain={} dB",
+            filter_type,
+            fixed(number_value(&filter["freq"]).unwrap_or(0.0), 1),
+            fixed(number_value(&filter["q"]).unwrap_or(1.0), 2),
+            signed_fixed(number_value(&filter["db_gain"]).unwrap_or(0.0), 1),
+        ),
+        details: Vec::new(),
+        kautz: false,
+    }
+}
+
+fn has_labeled_passes(value: &Value) -> bool {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|pass| truthy(&pass["label"]))
+}
+
+fn prepare_passes(value: &Value, labeled: bool) -> Vec<EqFilterPass> {
+    let passes = value.as_array().into_iter().flatten();
+    if labeled {
+        passes
+            .map(|pass| EqFilterPass {
+                heading: Some((
+                    pass["display_name"].as_str().unwrap_or("").into(),
+                    pass["color"].as_str().unwrap_or("").into(),
+                )),
+                filters: pass["filters"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .enumerate()
+                    .map(|(index, filter)| prepare_filter_line(filter, index + 1))
+                    .collect(),
+            })
+            .collect()
+    } else {
+        vec![EqFilterPass {
+            heading: None,
+            filters: passes
+                .flat_map(|pass| pass["filters"].as_array().into_iter().flatten())
+                .enumerate()
+                .map(|(index, filter)| prepare_filter_line(filter, index + 1))
+                .collect(),
+        }]
+    }
+}
+
+fn write_passes(
+    html: &mut String,
+    passes: &[EqFilterPass],
+    indent: &str,
+    prefix: &str,
+    close_indent: &str,
+) {
+    for pass in passes {
+        if let Some((name, color)) = &pass.heading {
+            let color = escape_html(color);
+            let name = escape_html(name);
+            let _ = write!(
+                html,
+                "{prefix}{indent}<h4 style=\"color: {color}; margin-bottom: 5px;\">{name}</h4>\n{indent}<div class=\"filter-list\" style=\"margin-bottom: 10px;\">\n"
+            );
+        } else {
+            let _ = writeln!(html, "{prefix}{indent}<div class=\"filter-list\">");
+        }
+        for filter in &pass.filters {
+            filter.write_html(html);
+        }
+        let _ = writeln!(html, "{close_indent}</div>");
+    }
 }
 
 fn eq_passes_list_html(value: &Value) -> String {
-    let passes = value.as_array().cloned().unwrap_or_default();
-    let has_labeled = passes.iter().any(|pass| truthy(&pass["label"]));
-    let mut output = String::new();
-    if has_labeled {
-        for pass in &passes {
-            let color = escape_html(pass["color"].as_str().unwrap_or(""));
-            let display_name = escape_html(pass["display_name"].as_str().unwrap_or(""));
-            let _ = write!(
-                output,
-                "\n                    <h4 style=\"color: {color}; margin-bottom: 5px;\">{display_name}</h4>\n                    <div class=\"filter-list\" style=\"margin-bottom: 10px;\">\n"
-            );
-            for (index, filter) in pass["filters"].as_array().into_iter().flatten().enumerate() {
-                output.push_str(&format_eq_filter_line(filter, index + 1));
-            }
-            output.push_str("                    </div>\n");
-        }
-    } else {
-        output.push_str("\n                    <div class=\"filter-list\">\n");
-        let mut number = 0;
-        for pass in &passes {
-            for filter in pass["filters"].as_array().into_iter().flatten() {
-                number += 1;
-                output.push_str(&format_eq_filter_line(filter, number));
-            }
-        }
-        output.push_str("                    </div>\n");
-    }
-    output
+    let mut html = String::new();
+    write_passes(
+        &mut html,
+        &prepare_passes(value, has_labeled_passes(value)),
+        "                    ",
+        "\n",
+        "                    ",
+    );
+    html
 }
 
 fn eq_filter_table_html(value: &Value) -> String {
@@ -242,43 +419,44 @@ fn eq_filter_table_html(value: &Value) -> String {
 }
 
 fn driver_eq_filters_html(prepared: &Value) -> String {
-    let driver_passes = prepared["driver_passes"].clone();
-    let shared_passes = prepared["shared_passes"].clone();
-    let driver_count = filter_count(&driver_passes);
-    let shared_count = filter_count(&shared_passes);
+    driver_filter_listing(prepared).map_or_else(String::new, |listing| listing.html())
+}
+
+pub(crate) fn driver_filter_listing(prepared: &Value) -> Option<EqFilterListing> {
+    let driver_passes = &prepared["driver_passes"];
+    let shared_passes = &prepared["shared_passes"];
+    let driver_count = filter_count(driver_passes);
+    let shared_count = filter_count(shared_passes);
     if driver_count == 0 && shared_count == 0 {
-        return String::new();
+        return None;
     }
     let total = driver_count + shared_count;
-    let driver_name = escape_html(prepared["driver_name"].as_str().unwrap_or(""));
-    let channel_name = escape_html(prepared["channel_name"].as_str().unwrap_or(""));
-    let id_prefix = safe_id_prefix(prepared["id_prefix"].as_str().unwrap_or(""));
-    let mut output = format!(
-        "\n                <div class=\"filters-section\">\n                    <h3>EQ Filters</h3>\n                    <p class=\"epa-footer\">{total} PEQ filter(s) total: {driver_count} driver + {shared_count} shared channel. Numbering restarts in each tab; the EQ plot shows the combined response.</p>\n"
-    );
-    if driver_count > 0 && shared_count > 0 {
-        let driver_id = format!("{id_prefix}_drv");
-        let shared_id = format!("{id_prefix}_sh");
-        let _ = write!(
-            output,
-            "                    <div class=\"eq-tabs\">\n                        <div class=\"eq-tab-header\">\n                            <button class=\"eq-tab-btn active\" onclick=\"openEqTab(event, '{driver_id}')\">Driver: {driver_name} ({driver_count})</button>\n                            <button class=\"eq-tab-btn\" onclick=\"openEqTab(event, '{shared_id}')\">Shared channel {channel_name} ({shared_count})</button>\n                        </div>\n                        <div id=\"{driver_id}\" class=\"eq-tab-panel active\">\n{}                        </div>\n                        <div id=\"{shared_id}\" class=\"eq-tab-panel\">\n{}                        </div>\n                    </div>\n",
-            eq_passes_list_html(&driver_passes),
-            eq_passes_list_html(&shared_passes),
-        );
-    } else {
-        let (origin, passes) = if driver_count > 0 {
-            (format!("Driver: {driver_name}"), driver_passes)
-        } else {
-            (format!("Shared channel {channel_name}"), shared_passes)
-        };
-        let _ = write!(
-            output,
-            "                    <h4>{origin} ({total})</h4>\n{}",
-            eq_passes_list_html(&passes)
-        );
+    let driver = prepared["driver_name"].as_str().unwrap_or("");
+    let channel = prepared["channel_name"].as_str().unwrap_or("");
+    let prefix = safe_id_prefix(prepared["id_prefix"].as_str().unwrap_or(""));
+    let mut origins = Vec::new();
+    if driver_count > 0 {
+        origins.push(EqFilterOrigin {
+            label: format!("Driver: {driver} ({driver_count})"),
+            passes: prepare_passes(driver_passes, has_labeled_passes(driver_passes)),
+            id: format!("{prefix}_drv"),
+        });
     }
-    output.push_str("                </div>\n");
-    output
+    if shared_count > 0 {
+        origins.push(EqFilterOrigin {
+            label: format!("Shared channel {channel} ({shared_count})"),
+            passes: prepare_passes(shared_passes, has_labeled_passes(shared_passes)),
+            id: format!("{prefix}_sh"),
+        });
+    }
+    Some(EqFilterListing {
+        title: "EQ Filters".into(),
+        note: Some(format!(
+            "{total} PEQ filter(s) total: {driver_count} driver + {shared_count} shared channel. Numbering restarts in each tab; the EQ plot shows the combined response."
+        )),
+        origins,
+        style: EqFilterStyle::Driver,
+    })
 }
 
 fn all_eq_filters_html(value: &Value) -> String {
@@ -452,6 +630,36 @@ mod tests {
         ).unwrap();
         assert!(all.contains("Left&lt;script&gt;"));
         assert!(all.contains("-2.5 dB"));
+    }
+
+    #[test]
+    fn shared_and_driver_filter_origins_keep_distinct_numbering() {
+        let prepared = json!({
+            "driver_name":"Woofer",
+            "channel_name":"L",
+            "id_prefix":"eq_1",
+            "driver_passes":[{"filters":[{"topology":"kautz_filter","sections":[
+                {"pole":80,"q":0.7,"weight":0.25}
+            ]}]}],
+            "shared_passes":[{"filters":[{"freq":1000,"q":1,"db_gain":-2.5}]}],
+        });
+        let listing = super::driver_filter_listing(&prepared).unwrap();
+        assert_eq!(listing.origins[0].label, "Driver: Woofer (1)");
+        assert_eq!(listing.origins[1].label, "Shared channel L (1)");
+        let bank = &listing.origins[0].passes[0].filters[0];
+        assert_eq!(bank.summary, "Filter 1: KAUTZ bank (unity dry path)");
+        assert_eq!(
+            bank.details,
+            ["section 1: pole=80.0 Hz, Q=0.70, weight=+0.250000 (linear)"]
+        );
+        assert!(
+            listing.origins[1].passes[0].filters[0]
+                .summary
+                .starts_with("Filter 1: PEAK")
+        );
+        let html = listing.html();
+        assert!(html.contains("openEqTab(event, 'eq_1_drv')"));
+        assert!(html.contains("openEqTab(event, 'eq_1_sh')"));
     }
 
     #[test]

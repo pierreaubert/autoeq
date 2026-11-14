@@ -5,6 +5,9 @@
 
 // Rust guideline compliant 2026-02-21
 
+use crate::report_document::{DiagnosticBlock, diagnostic_html};
+use crate::report_table::ReportTable;
+
 use serde_json::{Value, json};
 
 const OCTAVES: [f64; 7] = [125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0];
@@ -36,15 +39,19 @@ struct GridDisplay<'a> {
 /// Renders the serialized speech-transmission result, or its established
 /// unavailable explanation when the stored evidence is absent or invalid.
 pub fn speech_transmission_html(channel: &Value, label: &str) -> String {
-    let title = format!(
-        "<h3>Speech Transmission Index — {}</h3>",
-        escape_html(label)
-    );
+    diagnostic_html(&speech_transmission(channel, label))
+}
+
+pub(crate) fn speech_transmission(channel: &Value, label: &str) -> Vec<DiagnosticBlock> {
+    let mut blocks = vec![DiagnosticBlock::Heading(format!(
+        "Speech Transmission Index — {label}"
+    ))];
     let report = channel.get("speech_transmission").unwrap_or(&Value::Null);
     if !valid_sti(report) {
-        return format!(
-            "{title}<p class=\"epa-footer\">STI unavailable: requires a native measured room impulse response covering all seven octaves (125 Hz–8 kHz), with usable band energy and its complete decay. Synthesized EQ impulses do not supply this result.</p>"
-        );
+        blocks.push(DiagnosticBlock::Caption(
+            "STI unavailable: requires a native measured room impulse response covering all seven octaves (125 Hz–8 kHz), with usable band energy and its complete decay. Synthesized EQ impulses do not supply this result.".into()
+        ));
+        return blocks;
     }
     let sti = number(report, "sti").unwrap_or_default();
     let rating = if sti < 0.3 {
@@ -60,52 +67,69 @@ pub fn speech_transmission_html(channel: &Value, label: &str) -> String {
     };
     let sample_rate = number(report, "sample_rate_hz").unwrap_or_default();
     let duration = number(report, "duration_s").unwrap_or_default();
-    let mut html = format!(
-        "{title}<p><strong>Full STI (IR-only): {sti:.3} — {rating}</strong></p><p>Indirect method using the IEC 60268-16:2020 full-STI model: 14 modulation frequencies in seven octave bands. Native capture: {} Hz, {duration:.3} s.</p><p class=\"epa-footer\">No operational speech/noise levels, auditory masking or hearing-threshold corrections are applied. Arbitrary IR amplitude does not establish calibrated SPL. This result describes the measured capture, not a post-EQ prediction or IEC-certified instrument result. Verify full decay, measurement SNR and linear time-invariant behavior.</p><div style=\"overflow-x:auto\"><table class=\"summary-table\"><caption>Modulation transfer m-values by octave band</caption><thead><tr><th scope=\"col\">Modulation (Hz)</th>",
-        format_g(sample_rate)
-    );
-    for center in OCTAVES {
-        html.push_str(&format!("<th scope=\"col\">{} Hz</th>", format_g(center)));
-    }
-    html.push_str("</tr></thead><tbody>");
+    blocks.extend([
+        DiagnosticBlock::Emphasis(format!("Full STI (IR-only): {sti:.3} — {rating}")),
+        DiagnosticBlock::Paragraph(format!(
+            "Indirect method using the IEC 60268-16:2020 full-STI model: 14 modulation frequencies in seven octave bands. Native capture: {} Hz, {duration:.3} s.",
+            format_g(sample_rate)
+        )),
+        DiagnosticBlock::Caption(
+            "No operational speech/noise levels, auditory masking or hearing-threshold corrections are applied. Arbitrary IR amplitude does not establish calibrated SPL. This result describes the measured capture, not a post-EQ prediction or IEC-certified instrument result. Verify full decay, measurement SNR and linear time-invariant behavior.".into()
+        ),
+    ]);
+    let columns = std::iter::once("Modulation (Hz)".into())
+        .chain(OCTAVES.map(|center| format!("{} Hz", format_g(center))))
+        .collect();
     let matrix = report["modulation_transfer"]
         .as_array()
         .expect("validated STI");
-    for (frequency, row) in MODULATIONS.into_iter().zip(matrix) {
-        html.push_str(&format!(
-            "<tr><th scope=\"row\">{}</th>",
-            format_g(frequency)
-        ));
-        for value in row.as_array().expect("validated STI row") {
-            html.push_str(&format!(
-                "<td>{:.3}</td>",
-                value.as_f64().unwrap_or_default()
-            ));
-        }
-        html.push_str("</tr>");
+    fn cells(row: &Value) -> impl Iterator<Item = String> {
+        row.as_array()
+            .expect("validated STI row")
+            .iter()
+            .map(|value| format!("{:.3}", value.as_f64().unwrap_or_default()))
     }
-    html.push_str("<tr><th scope=\"row\">MTI</th>");
-    for value in report["mti"].as_array().expect("validated STI MTI") {
-        html.push_str(&format!(
-            "<td><strong>{:.3}</strong></td>",
-            value.as_f64().unwrap_or_default()
-        ));
-    }
-    html.push_str("</tr></tbody></table></div>");
+    let mut rows: Vec<Vec<String>> = MODULATIONS
+        .into_iter()
+        .zip(matrix)
+        .map(|(frequency, row)| {
+            std::iter::once(format_g(frequency))
+                .chain(cells(row))
+                .collect()
+        })
+        .collect();
+    rows.push(
+        std::iter::once("MTI".into())
+            .chain(cells(&report["mti"]))
+            .collect(),
+    );
+    blocks.push(DiagnosticBlock::Matrix(ReportTable {
+        title: "Modulation transfer m-values by octave band".into(),
+        note: String::new(),
+        columns,
+        rows,
+    }));
     if let Some(warnings) = report.get("warnings").and_then(Value::as_array) {
-        for warning in warnings.iter().filter_map(Value::as_str) {
-            html.push_str(&format!(
-                "<p class=\"epa-footer\">{}</p>",
-                escape_html(warning)
-            ));
-        }
+        blocks.extend(
+            warnings
+                .iter()
+                .filter_map(Value::as_str)
+                .map(|warning| DiagnosticBlock::Caption(warning.into())),
+        );
     }
-    html
+    blocks
 }
 
 /// Builds the report HTML for the pre-correction waterfall when its complete
 /// serialized grid and decay evidence satisfy the stored schema.
 pub fn optimization_waterfall_html(waterfall: &Value, decays: &Value) -> Option<String> {
+    optimization_waterfall(waterfall, decays).map(|blocks| diagnostic_html(&blocks))
+}
+
+pub(crate) fn optimization_waterfall(
+    waterfall: &Value,
+    decays: &Value,
+) -> Option<Vec<DiagnosticBlock>> {
     if !valid_waterfall(waterfall, decays) {
         return None;
     }
@@ -117,12 +141,16 @@ pub fn optimization_waterfall_html(waterfall: &Value, decays: &Value) -> Option<
     let freqs = numbers(&waterfall["freqs_hz"])?;
     let rows = matrix(&waterfall["mags_db"])?;
     let resonances = decays["decays"].as_array()?;
-    let mut html = format!(
-        "<h3>Measured room IR waterfall and resonance decay</h3><p>{}</p><p>Supported band: {}–{} Hz. The grid is referenced to its own full-grid peak; colors and levels do not compare absolute output between channels.</p><h4>Pre-correction</h4>",
-        escape_html(scope),
-        format_g(lo),
-        format_g(hi)
-    );
+    let mut blocks = vec![
+        DiagnosticBlock::Heading("Measured room IR waterfall and resonance decay".into()),
+        DiagnosticBlock::Paragraph(scope.into()),
+        DiagnosticBlock::Paragraph(format!(
+            "Supported band: {}–{} Hz. The grid is referenced to its own full-grid peak; colors and levels do not compare absolute output between channels.",
+            format_g(lo),
+            format_g(hi)
+        )),
+        DiagnosticBlock::Subheading("Pre-correction".into()),
+    ];
     let highlights = worst_resonances(resonances, &freqs);
     let surface = grid_section(
         &freqs,
@@ -136,20 +164,24 @@ pub fn optimization_waterfall_html(waterfall: &Value, decays: &Value) -> Option<
             zmax: 0.0,
         },
     );
-    html.push_str(&embedded_figure(&surface));
-    html.push_str(&resonance_table_figures(
-        resonances,
-        &freqs,
-        &times,
-        &rows,
-        "Pre-correction",
-    ));
-    Some(html)
+    blocks.push(DiagnosticBlock::Chart(surface));
+    blocks.push(DiagnosticBlock::Table(resonance_table(resonances)));
+    if let Some(chart) = resonance_figure(resonances, &freqs, &times, &rows) {
+        blocks.push(DiagnosticBlock::Paragraph(
+            "Highlighted: up to two longest fitted decays, then strongest 60 ms peak. Curves retain the full-grid peak reference; no fitted intercept is exported, so no extrapolated fit line is invented.".into()
+        ));
+        blocks.push(DiagnosticBlock::Chart(chart));
+    }
+    Some(blocks)
 }
 
 /// Builds the report HTML for the pre-correction wavelet when the stored
 /// measured-IR evidence satisfies its serialized contract.
 pub fn optimization_wavelet_html(wavelet: &Value) -> Option<String> {
+    optimization_wavelet(wavelet).map(|blocks| diagnostic_html(&blocks))
+}
+
+pub(crate) fn optimization_wavelet(wavelet: &Value) -> Option<Vec<DiagnosticBlock>> {
     if !valid_wavelet(wavelet) {
         return None;
     }
@@ -166,12 +198,6 @@ pub fn optimization_wavelet_html(wavelet: &Value) -> Option<String> {
         .iter()
         .filter(|time| **time >= -1.0 && **time <= 15.0)
         .count();
-    let mut html = String::from(
-        "<h3>Measured room IR three-cycle wavelet</h3><p>Blue = −30 dB, red = 0 dB relative to the channel’s own full wavelet-grid peak. Colors do not compare absolute output levels.</p><p>Frequency runs left to right; time runs upward. Dense exports use 0.1 ms early-time sampling through 15 ms and 1 ms later sampling; the recorded time coordinates remain authoritative.</p>",
-    );
-    html.push_str(&format!(
-        "<p>Three-cycle wavelet; first 15 ms ({early_count} exported time samples). Log-frequency x-axis, time y-axis. Colours retain the full-grid peak reference. The cyan dashed ridge marks peak energy arrival time per frequency. Display cells reflect the exported sampling; zoom cannot restore omitted samples.</p>"
-    ));
     let section = grid_section(
         &freqs,
         &times,
@@ -184,8 +210,13 @@ pub fn optimization_wavelet_html(wavelet: &Value) -> Option<String> {
             zmax: 0.0,
         },
     );
-    html.push_str(&embedded_figure(&section));
-    Some(html)
+    Some(vec![
+        DiagnosticBlock::Heading("Measured room IR three-cycle wavelet".into()),
+        DiagnosticBlock::Paragraph("Blue = −30 dB, red = 0 dB relative to the channel’s own full wavelet-grid peak. Colors do not compare absolute output levels.".into()),
+        DiagnosticBlock::Paragraph("Frequency runs left to right; time runs upward. Dense exports use 0.1 ms early-time sampling through 15 ms and 1 ms later sampling; the recorded time coordinates remain authoritative.".into()),
+        DiagnosticBlock::Paragraph(format!("Three-cycle wavelet; first 15 ms ({early_count} exported time samples). Log-frequency x-axis, time y-axis. Colours retain the full-grid peak reference. The cyan dashed ridge marks peak energy arrival time per frequency. Display cells reflect the exported sampling; zoom cannot restore omitted samples.")),
+        DiagnosticBlock::Chart(section),
+    ])
 }
 
 fn valid_sti(report: &Value) -> bool {
@@ -225,7 +256,7 @@ fn valid_sti(report: &Value) -> bool {
         })
 }
 
-fn valid_waterfall(waterfall: &Value, decays: &Value) -> bool {
+pub(crate) fn valid_waterfall(waterfall: &Value, decays: &Value) -> bool {
     if waterfall.get("basis") != Some(&json!("measured_room_ir"))
         || waterfall.get("method") != Some(&json!("hann_stft_waterfall_v1"))
         || waterfall.get("reference") != Some(&json!("full_grid_peak"))
@@ -409,33 +440,45 @@ fn grid_section(
     section
 }
 
-fn resonance_table_figures(
+fn resonance_table(resonances: &[Value]) -> ReportTable {
+    ReportTable {
+        title: "Detected 60 ms peaks and fitted 20–200 ms decay".into(),
+        note: String::new(),
+        columns: [
+            "Frequency (Hz)",
+            "Level (dB re own grid peak)",
+            "Fitted decay (s)",
+        ]
+        .map(String::from)
+        .into(),
+        rows: resonances
+            .iter()
+            .map(|resonance| {
+                let frequency = number(resonance, "freq_hz").unwrap_or_default();
+                let level = number(resonance, "level_db").unwrap_or_default();
+                let decay = resonance["decay_time_s"]
+                    .as_f64()
+                    .map_or_else(|| "unavailable".to_owned(), format_g);
+                vec![
+                    format_g_precision(frequency, 3),
+                    format!("{level:.2}"),
+                    decay,
+                ]
+            })
+            .collect(),
+    }
+}
+
+fn resonance_figure(
     resonances: &[Value],
     freqs: &[f64],
     times: &[f64],
     rows: &[Vec<f64>],
-    label: &str,
-) -> String {
-    let mut html = String::from(
-        "<table><caption>Detected 60 ms peaks and fitted 20–200 ms decay</caption><tr><th>Frequency (Hz)</th><th>Level (dB re own grid peak)</th><th>Fitted decay (s)</th></tr>",
-    );
-    for resonance in resonances {
-        let frequency = number(resonance, "freq_hz").unwrap_or_default();
-        let level = number(resonance, "level_db").unwrap_or_default();
-        let decay = resonance["decay_time_s"]
-            .as_f64()
-            .map_or_else(|| "unavailable".to_owned(), format_g);
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{level:.2}</td><td>{decay}</td></tr>",
-            format_g_precision(frequency, 3)
-        ));
-    }
-    html.push_str("</table>");
+) -> Option<Value> {
     let selected = worst_resonances(resonances, freqs);
     if selected.is_empty() {
-        return html;
+        return None;
     }
-    html.push_str("<p>Highlighted: up to two longest fitted decays, then strongest 60 ms peak. Curves retain the full-grid peak reference; no fitted intercept is exported, so no extrapolated fit line is invented.</p>");
     let series = selected
         .iter()
         .map(|(index, name, color)| {
@@ -452,9 +495,8 @@ fn resonance_table_figures(
             json!({"name":name,"x":times,"y":y,"color":color,"width":2.0,"dash":"solid","visible":true,"y_axis":0})
         })
         .collect::<Vec<_>>();
-    let section = json!({"kind":"figure","figure":{"title":format!("{label}: decay of highlighted resonances"),"x":{"label":"Time from broadband peak (ms)","scale":"linear","min":0.0,"max":500.0},"y":{"label":"Level relative to full grid peak (dB)","scale":"linear","min":-60.0,"max":0.0},"y2":null,"series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null});
-    html.push_str(&embedded_figure(&section));
-    html
+    let section = json!({"kind":"figure","figure":{"title":"Pre-correction: decay of highlighted resonances","x":{"label":"Time from broadband peak (ms)","scale":"linear","min":0.0,"max":500.0},"y":{"label":"Level relative to full grid peak (dB)","scale":"linear","min":-60.0,"max":0.0},"y2":null,"series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null});
+    Some(section)
 }
 
 fn worst_resonances(resonances: &[Value], freqs: &[f64]) -> Vec<(usize, String, String)> {
@@ -523,7 +565,7 @@ fn resonance_color(frequency: f64) -> String {
     )
 }
 
-fn embedded_figure(section: &Value) -> String {
+pub(crate) fn embedded_figure(section: &Value) -> String {
     let encoded = serde_json::to_string(section).unwrap_or_else(|_| "{}".into());
     format!(
         "<div class=\"report-figure\" data-section=\"{}\"></div>",

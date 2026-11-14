@@ -4,7 +4,10 @@
 //! validation, triangular octave smoothing, landmark prominence, and downstream
 //! trim convention. Predicted curves are never presented as verification captures.
 
-use crate::report_helpers::escape_html as escape;
+use crate::{
+    report_document::{DiagnosticBlock, MetricCell, MetricTone, diagnostic_html},
+    report_table::ReportTable,
+};
 use serde_json::{Map, Value, json};
 
 fn points(curve: &Value) -> Option<Vec<(f64, f64)>> {
@@ -300,103 +303,138 @@ pub fn level_compensation(channels: &Value) -> Vec<Value> {
 
 /// Formats the deepest-notch cell while retaining unavailable values.
 pub fn notch_cell(notch: Option<f64>) -> String {
+    notch_metric(notch).browser_html()
+}
+
+pub(crate) fn notch_metric(notch: Option<f64>) -> MetricCell {
     let Some(notch) = notch else {
-        return "<td style=\"background:#eee;color:#888\">n/a</td>".into();
+        return MetricCell {
+            value: "n/a".into(),
+            tone: MetricTone::Pending,
+            detail: None,
+        };
     };
-    let color = if notch > -10.0 {
-        "#2ecc71"
+    let tone = if notch > -10.0 {
+        MetricTone::Good
     } else if notch >= -20.0 {
-        "#f1c40f"
+        MetricTone::Warning
     } else {
-        "#e74c3c"
+        MetricTone::Poor
     };
-    format!("<td style=\"background:{color}33\">{notch:+.1}</td>")
+    MetricCell {
+        value: format!("{notch:+.1}"),
+        tone,
+        detail: None,
+    }
 }
 
-fn level_html(rows: &[Value]) -> String {
+pub(crate) fn level_table(rows: &[Value]) -> Option<DiagnosticBlock> {
     if rows.is_empty() {
-        return String::new();
+        return None;
     }
-    let mut html = concat!("<div class=\"filters-section\">\n<h3>Relative level compensation</h3>\n",
-        "<p class=\"epa-footer\">Monitor band 0.5–3 kHz, sub band 30–80 Hz. Compensation is the attenuation still needed downstream, measured on the predicted post-DSP curves so any in-chain level alignment is not applied twice. The post-DSP columns include that trim: the offset is the predicted landing level versus the quietest monitor before correction (it includes EQ, time alignment and headroom attenuation; a negative value does not by itself indicate channel imbalance), and the balance column verifies the remaining spread against the quietest monitor after DSP. These are predictions, not verification captures.</p>\n",
-        "<table class=\"epa-table\"><thead><tr><th>Speaker</th><th>Level compensation (dB)</th><th>Post-DSP offset from original reference (dB)</th><th>Post-DSP balance vs reference monitor (dB)</th></tr></thead><tbody>\n").to_string();
-    for row in rows {
-        let cell = |key: &str| {
-            row[key]
-                .as_f64()
-                .map(|value| format!("{value:+.1}"))
-                .unwrap_or_else(|| "n/a".into())
-        };
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-            escape(row["speaker"].as_str().unwrap_or_default()),
-            cell("comp_db"),
-            cell("residual_db"),
-            cell("balance_db")
-        ));
-    }
-    html.push_str("</tbody></table></div>\n");
-    html
+    let rows = rows
+        .iter()
+        .map(|row| {
+            let cell = |key: &str| {
+                row[key]
+                    .as_f64()
+                    .map(|value| format!("{value:+.1}"))
+                    .unwrap_or_else(|| "n/a".into())
+            };
+            vec![
+                row["speaker"].as_str().unwrap_or_default().into(),
+                cell("comp_db"),
+                cell("residual_db"),
+                cell("balance_db"),
+            ]
+        })
+        .collect();
+    Some(DiagnosticBlock::CurveTable {
+        table: ReportTable {
+            title: "Relative level compensation".into(),
+            note: "Monitor band 0.5–3 kHz, sub band 30–80 Hz. Compensation is the attenuation still needed downstream, measured on the predicted post-DSP curves so any in-chain level alignment is not applied twice. The post-DSP columns include that trim: the offset is the predicted landing level versus the quietest monitor before correction (it includes EQ, time alignment and headroom attenuation; a negative value does not by itself indicate channel imbalance), and the balance column verifies the remaining spread against the quietest monitor after DSP. These are predictions, not verification captures.".into(),
+            columns: [
+                "Speaker",
+                "Level compensation (dB)",
+                "Post-DSP offset from original reference (dB)",
+                "Post-DSP balance vs reference monitor (dB)",
+            ].map(str::to_owned).to_vec(),
+            rows,
+        },
+        dim_unavailable: false,
+    })
 }
 
-fn landmarks_html(channels: &Map<String, Value>) -> String {
-    if channels.is_empty() {
-        return String::new();
-    }
-    let mut html = concat!("<div class=\"filters-section\">\n<h3>Frequency landmarks — peaks, notches, LF extension</h3>\n",
-        "<p class=\"epa-footer\">1/3-octave-smoothed measured response. Extrema need 3 dB prominence, 1/12 octave apart (top 3 each). LF extension is the −6 dB point below the 30–200 Hz peak.</p>\n",
-        "<table class=\"epa-table\"><thead><tr><th>Speaker</th><th>LF extension (−6 dB)</th><th>Strongest peaks (freq / level)</th><th>Strongest notches (freq / level)</th></tr></thead><tbody>\n").to_string();
-    for (name, channel) in channels {
-        let name = escape(name);
-        let marks = &channel["landmarks"];
-        if marks.is_null() {
-            html.push_str(&format!("<tr><td>{name}</td><td style=\"color:#999\">n/a</td><td style=\"color:#999\">n/a</td><td style=\"color:#999\">n/a</td></tr>\n"));
-            continue;
-        }
-        let extension = marks["lf_extension_hz"]
-            .as_f64()
-            .map(|f| format!("{f:.0} Hz"))
-            .unwrap_or_else(|| "&lt; 20 Hz".into());
-        let extrema = |key: &str| {
-            let values: Vec<String> = marks[key]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|pair| {
-                    Some(format!(
-                        "{:.0} Hz / {:+.1} dB",
-                        pair[0].as_f64()?,
-                        pair[1].as_f64()?
-                    ))
-                })
-                .collect();
-            if values.is_empty() {
-                "—".into()
-            } else {
-                values.join("<br>")
-            }
-        };
-        html.push_str(&format!(
-            "<tr><td>{name}</td><td>{extension}</td><td>{}</td><td>{}</td></tr>\n",
-            extrema("peaks"),
-            extrema("notches")
-        ));
-    }
-    html.push_str("</tbody></table></div>\n");
-    html
+pub(crate) fn landmarks_table(
+    channels: impl IntoIterator<Item = (String, Option<Value>)>,
+) -> Option<DiagnosticBlock> {
+    let rows: Vec<_> = channels
+        .into_iter()
+        .map(|(name, marks)| {
+            let Some(marks) = marks else {
+                return vec![name, "n/a".into(), "n/a".into(), "n/a".into()];
+            };
+            let extension = marks["lf_extension_hz"]
+                .as_f64()
+                .map(|f| format!("{f:.0} Hz"))
+                .unwrap_or_else(|| "< 20 Hz".into());
+            let extrema = |key: &str| {
+                let values: Vec<_> = marks[key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|pair| {
+                        Some(format!(
+                            "{:.0} Hz / {:+.1} dB",
+                            pair[0].as_f64()?,
+                            pair[1].as_f64()?
+                        ))
+                    })
+                    .collect();
+                if values.is_empty() {
+                    "—".into()
+                } else {
+                    values.join("\n")
+                }
+            };
+            vec![name, extension, extrema("peaks"), extrema("notches")]
+        })
+        .collect();
+    (!rows.is_empty()).then(|| DiagnosticBlock::CurveTable {
+        table: ReportTable {
+            title: "Frequency landmarks — peaks, notches, LF extension".into(),
+            note: "1/3-octave-smoothed measured response. Extrema need 3 dB prominence, 1/12 octave apart (top 3 each). LF extension is the −6 dB point below the 30–200 Hz peak.".into(),
+            columns: [
+                "Speaker",
+                "LF extension (−6 dB)",
+                "Strongest peaks (freq / level)",
+                "Strongest notches (freq / level)",
+            ].map(str::to_owned).to_vec(),
+            rows,
+        },
+        dim_unavailable: true,
+    })
 }
 
 /// Builds curve-derived report summaries from one in-memory RoomEQ result.
 pub fn curve_report(data: &Value) -> Value {
     let mut channels = Map::new();
+    let mut landmarks = Vec::new();
     if let Some(input) = data["channels"].as_object() {
         for (name, channel) in input {
             let notch = deepest_notch_db(channel);
-            channels.insert(name.clone(),json!({"landmarks":response_landmarks(channel),"deepest_notch_db":notch,"notch_cell_html":notch_cell(notch)}));
+            let marks = response_landmarks(channel);
+            channels.insert(name.clone(), json!({"landmarks":marks,"deepest_notch_db":notch,"notch_cell_html":notch_cell(notch)}));
+            landmarks.push((name.clone(), marks));
         }
     }
     let rows = level_compensation(&data["channels"]);
-    json!({"landmarks_table_html":landmarks_html(&channels),"level_compensation_html":level_html(&rows),"level_compensation":rows,"channels":channels})
+    let html = |block: Option<DiagnosticBlock>| {
+        block
+            .map(|block| diagnostic_html(&[block]))
+            .unwrap_or_default()
+    };
+    json!({"landmarks_table_html":html(landmarks_table(landmarks)),"level_compensation_html":html(level_table(&rows)),"level_compensation":rows,"channels":channels})
 }
 
 #[cfg(test)]

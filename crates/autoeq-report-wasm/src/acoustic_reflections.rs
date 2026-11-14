@@ -8,9 +8,13 @@
 
 use serde_json::{Value, json};
 
-const PENDING_REFLECTIONS: &str = "<p class=\"epa-footer\">1–8 kHz early reflections: pending roomeq field early_reflections from a measured room IR.</p>";
-const PENDING_CELL_COLOR: &str =
-    "<td style=\"background:#eee;color:#888\" title=\"needs roomeq field: ";
+use crate::report_document::{
+    DiagnosticBlock, EvidencePanel, MetricCell, MetricTone, diagnostic_html,
+};
+use crate::report_table::ReportTable;
+
+const PENDING_REFLECTIONS: &str =
+    "1–8 kHz early reflections: pending roomeq field early_reflections from a measured room IR.";
 
 /// Builds validated measured-reflection summaries, tables, and report figures.
 ///
@@ -50,10 +54,10 @@ pub fn reflection_report(channel: &Value, label: &str, tab: Option<&str>) -> Val
             "level_db": level.level_db,
             "upper_bound": level.upper_bound
         })),
-        "early_reflection_level_cell": reflection_level_cell(level),
+        "early_reflection_level_cell": reflection_level_metric(level).browser_html(),
         "early_late_ratio_db": ratio,
-        "early_late_ratio_cell": early_late_ratio_cell(ratio),
-        "html": reflections_html(validated, label),
+        "early_late_ratio_cell": early_late_ratio_metric(ratio).browser_html(),
+        "html": diagnostic_html(&[reflection_block(validated, label)]),
         "figures": reflection_figures(channel, validated, label, tab),
     })
 }
@@ -128,71 +132,93 @@ fn reflection_level(report: &Value) -> Option<ReflectionLevel> {
     })
 }
 
-fn reflections_html(report: Option<&Value>, label: &str) -> String {
+pub(crate) fn reflection_document(
+    channel: &Value,
+    label: &str,
+    tab: Option<&str>,
+) -> (DiagnosticBlock, Vec<Value>) {
+    let validated = validated_early_reflections(channel);
+    (
+        reflection_block(validated, label),
+        reflection_figures(channel, validated, label, tab),
+    )
+}
+
+fn reflection_block(report: Option<&Value>, label: &str) -> DiagnosticBlock {
     let Some(report) = report else {
-        return PENDING_REFLECTIONS.to_string();
+        return DiagnosticBlock::Caption(PENDING_REFLECTIONS.into());
     };
-    let mut parts = vec![
-        format!(
-            "<div class=\"filters-section\"><h3>1–8 kHz early reflections: {}</h3>",
-            crate::report_helpers::escape_html(label)
-        ),
-        format!(
-            "<p>Candidate search: first 15 ms after the filtered direct peak, at or above −15 dB relative to direct sound. Before uses the measured room IR; after is predicted through the saved DSP chain, not a new measurement. Reference: {}.</p>",
-            crate::report_helpers::escape_html(
-                report.get("direct_reference").and_then(Value::as_str).unwrap_or("")
-            )
-        ),
-        "<p>Candidate peaks are drawn over the measured 1–8 kHz energy-time envelope when the saved impulse response is available. Two-path first-dip and ripple values are estimates, not confirmed acoustic nulls.</p>".to_string(),
+    let reference = report
+        .get("direct_reference")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let paragraphs = vec![
+        format!("Candidate search: first 15 ms after the filtered direct peak, at or above −15 dB relative to direct sound. Before uses the measured room IR; after is predicted through the saved DSP chain, not a new measurement. Reference: {reference}."),
+        "Candidate peaks are drawn over the measured 1–8 kHz energy-time envelope when the saved impulse response is available. Two-path first-dip and ripple values are estimates, not confirmed acoustic nulls.".into(),
     ];
-    for (side, title) in [("pre", "Before"), ("post", "Predicted after EQ")] {
+    let groups = [("pre", "Before"), ("post", "Predicted after EQ")].into_iter().map(|(side, title)| {
         let events = array(report.get(side));
-        parts.push(format!("<h4>{title} ({} candidates)</h4>", events.len()));
-        if events.is_empty() {
-            parts.push("<p>No candidates were emitted at or above −15 dB within the 15 ms search window. This does not mean the room has no reflections.</p>".to_string());
-            continue;
-        }
-        parts.push("<table class=\"epa-table\"><thead><tr><th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th><th>Extra path (cm)</th><th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr></thead><tbody>".to_string());
-        for (index, event) in events.iter().enumerate() {
-            let ripple = event.get("ripple_db").filter(|value| !value.is_null());
-            let ripple_text = ripple
-                .and_then(|value| number(Some(value)))
+        let title = format!("{title} ({} candidates)", events.len());
+        let note = if events.is_empty() {
+            "No candidates were emitted at or above −15 dB within the 15 ms search window. This does not mean the room has no reflections.".into()
+        } else {
+            String::new()
+        };
+        let rows = events.into_iter().enumerate().map(|(index, event)| {
+            let ripple = number(event.get("ripple_db"))
                 .map(|value| format!("{value:.2}"))
-                .unwrap_or_else(|| "unbounded".to_string());
+                .unwrap_or_else(|| "unbounded".into());
             let gain = number(event.get("gain_dbfs")).unwrap_or(0.0);
             let time = number(event.get("time_ms")).unwrap_or(0.0);
             let distance = number(event.get("distance_cm")).unwrap_or(0.0);
             let dip = number(event.get("first_dip_hz")).unwrap_or(0.0);
-            parts.push(format!(
-                "<tr><td>{}</td><td>{gain:.2}</td><td>{time:.2}</td><td>{distance:.1}</td><td>{dip:.1}</td><td>{ripple_text}</td></tr>",
-                index + 1
-            ));
+            vec![(index + 1).to_string(), format!("{gain:.2}"), format!("{time:.2}"),
+                format!("{distance:.1}"), format!("{dip:.1}"), ripple]
+        }).collect();
+        ReportTable {
+            title,
+            note,
+            columns: ["Reflection", "Gain (dB re direct)", "Time (ms)", "Extra path (cm)", "First dip (Hz)", "Comb ripple (dB p-p)"].map(str::to_owned).to_vec(),
+            rows,
         }
-        parts.push("</tbody></table>".to_string());
-    }
-    parts.push("</div>".to_string());
-    parts.concat()
+    }).collect();
+    DiagnosticBlock::EvidencePanel(EvidencePanel {
+        title: format!("1–8 kHz early reflections: {label}"),
+        paragraphs,
+        groups,
+    })
 }
 
-fn reflection_level_cell(level: Option<ReflectionLevel>) -> String {
+pub(crate) fn reflection_metrics(channel: &Value) -> [MetricCell; 2] {
+    [
+        reflection_level_metric(validated_early_reflections(channel).and_then(reflection_level)),
+        early_late_ratio_metric(early_late_ratio_db(channel)),
+    ]
+}
+
+fn reflection_level_metric(level: Option<ReflectionLevel>) -> MetricCell {
     let Some(level) = level else {
-        return pending_cell("early_reflections");
+        return MetricCell::pending("early_reflections");
     };
-    let color = if level.level_db < -10.0 {
-        "#2ecc71"
+    let tone = if level.level_db < -10.0 {
+        MetricTone::Good
     } else if level.level_db <= -3.0 {
-        "#f1c40f"
+        MetricTone::Warning
     } else {
-        "#e74c3c"
+        MetricTone::Poor
     };
     let display = if level.upper_bound {
         format!("≤ {:.1}", level.level_db)
     } else {
         format!("{:+.1}", level.level_db)
     };
-    format!(
-        "<td style=\"background:{color}33\" title=\"strongest emitted post-correction 1–8 kHz reflection, dB relative to direct\">{display}</td>"
-    )
+    MetricCell {
+        value: display,
+        tone,
+        detail: Some(
+            "strongest emitted post-correction 1–8 kHz reflection, dB relative to direct".into(),
+        ),
+    }
 }
 
 fn early_late_ratio_db(channel: &Value) -> Option<f64> {
@@ -257,20 +283,24 @@ fn early_late_ratio_db(channel: &Value) -> Option<f64> {
     scaled_sum.is_finite().then_some(scaled_sum)
 }
 
-fn early_late_ratio_cell(ratio: Option<f64>) -> String {
+fn early_late_ratio_metric(ratio: Option<f64>) -> MetricCell {
     let Some(ratio) = ratio else {
-        return pending_cell("early_late_curves");
+        return MetricCell::pending("early_late_curves");
     };
-    let color = if ratio > 3.0 {
-        "#2ecc71"
+    let tone = if ratio > 3.0 {
+        MetricTone::Good
     } else if ratio >= 0.0 {
-        "#f1c40f"
+        MetricTone::Warning
     } else {
-        "#e74c3c"
+        MetricTone::Poor
     };
-    format!(
-        "<td style=\"background:{color}33\" title=\"arithmetic mean of early minus late dB at emitted 1–8 kHz third-octave centers\">{ratio:+.1}</td>"
-    )
+    MetricCell {
+        value: format!("{ratio:+.1}"),
+        tone,
+        detail: Some(
+            "arithmetic mean of early minus late dB at emitted 1–8 kHz third-octave centers".into(),
+        ),
+    }
 }
 
 fn reflection_figures(
@@ -552,13 +582,6 @@ fn valid_curve(curve: Option<&Value>) -> Option<(Vec<f64>, Vec<f64>)> {
         return None;
     }
     Some((frequencies, levels))
-}
-
-fn pending_cell(field: &str) -> String {
-    format!(
-        "{PENDING_CELL_COLOR}{}\">pending</td>",
-        crate::report_helpers::escape_html(field)
-    )
 }
 
 fn number(value: Option<&Value>) -> Option<f64> {

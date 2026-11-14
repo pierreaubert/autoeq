@@ -59,6 +59,48 @@ fn legacy_hydration_matches_python_measurements_and_preserves_raw_extensions() {
 }
 
 #[test]
+fn live_report_uses_canonical_hydration_and_preserves_inline_evidence() {
+    let fixture = hydration_fixture("legacy");
+    let mut graph: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.join("dsp.json")).unwrap()).unwrap();
+    let expected: serde_json::Value = serde_json::from_str(include_str!(
+        "../tests/fixtures/hydration/legacy/python-expected.json"
+    ))
+    .unwrap();
+    let initial = json!({"freq":[30.0,60.0],"spl":[71.0,72.0],"extension":"retain"});
+    graph["channels"]["L"]["initial_curve"] = initial.clone();
+    let live = super::hydrate_live_report(&graph, Some(&fixture.join("dsp_files"))).unwrap();
+    assert_eq!(live.graph["channels"]["L"]["initial_curve"], initial);
+    assert_eq!(
+        live.graph["channels"]["L"]["pre_ir"]["amplitude"],
+        expected["channels"]["L"]["pre_ir"]["amplitude"]
+    );
+    assert_eq!(
+        live.graph["channels"]["L"]["drivers"][0]["measured_acoustics"]["future_acoustics_extension"],
+        expected["channels"]["L"]["drivers"][0]["measured_acoustics"]["future_acoustics_extension"],
+    );
+    assert_eq!(
+        live.measurement_index.as_ref(),
+        Some(&expected["measurement_index"])
+    );
+    assert_eq!(
+        live.symmetric_pairs.as_ref(),
+        Some(&expected["symmetric_pairs"])
+    );
+}
+
+#[test]
+fn live_report_requires_original_bytes_for_manifested_assets() {
+    let fixture = hydration_fixture("manifested");
+    let graph: serde_json::Value =
+        serde_json::from_slice(&fs::read(fixture.join("dsp.json")).unwrap()).unwrap();
+    assert!(matches!(
+        super::hydrate_live_report(&graph, Some(&fixture.join("dsp_files"))),
+        Err(ReportInputError::ManifestedGraphRequiresSavedBundle)
+    ));
+}
+
+#[test]
 fn manifested_hydration_matches_python_measurements_and_preserves_raw_extensions() {
     let temp = tempfile::tempdir().expect("temporary directory");
     let fixture = hydration_fixture("manifested");
@@ -711,4 +753,52 @@ fn float32_mono_wav(samples: &[f32], sample_rate_hz: u32) -> Vec<u8> {
         writer.finalize().expect("finish fixture WAV");
     }
     cursor.into_inner()
+}
+
+#[test]
+fn live_report_reads_full_rate_ir_and_exported_curve_metadata() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dsp.json");
+    let mut graph = DspGraph::new("1");
+    graph.add_channel("L", Vec::new());
+    let curve = CurveData {
+        freq: vec![100.0, 1000.0],
+        spl: vec![79.5, 80.5],
+        noise_floor_db: Some(vec![-40.0, -41.0]),
+        ..CurveData::default()
+    };
+    let chain = graph.channels.get_mut("L").unwrap();
+    chain.initial_curve = Some(curve.clone());
+    chain.pre_ir = Some(roomeq_model::IrWaveform {
+        time_ms: (0..4097).map(|i| f64::from(i) / 48.0).collect(),
+        amplitude: (0..4097)
+            .map(|i| if i == 2048 { 1.0 } else { 0.0 })
+            .collect(),
+    });
+    graph.deployed_source_curves.insert("L".into(), curve);
+    save_output_bundle(&mut graph, &path).unwrap();
+    let assets = assets_dir_for(&path);
+    fs::remove_file(assets.join(roomeq_workflow::output_bundle::ARTIFACT_BUNDLE_MANIFEST_FILENAME))
+        .unwrap();
+    graph.artifact_bundle_schema_version = None;
+    let live =
+        super::hydrate_live_report(&serde_json::to_value(graph).unwrap(), Some(&assets)).unwrap();
+    let index = live.measurement_index.unwrap();
+    assert!(
+        index["channels"]["L"]["pre_ir"]
+            .as_str()
+            .unwrap()
+            .ends_with(".ir64")
+    );
+    let ir = &live.graph["channels"]["L"]["pre_ir"];
+    assert_eq!(ir["amplitude"].as_array().unwrap().len(), 4097);
+    assert_eq!(ir["amplitude"][2048], 1.0);
+    assert_eq!(
+        live.graph["channels"]["L"]["initial_curve"]["noise_floor_db"],
+        json!([-40.0, -41.0])
+    );
+    assert_eq!(
+        live.graph["deployed_source_curves"]["L"]["spl"],
+        json!([79.5, 80.5])
+    );
 }

@@ -103,6 +103,12 @@ fn add_tab_sections(
 /// # Errors
 /// Returns an error when groups, blocks, or prepared section shapes are invalid.
 pub fn report_assembly(request: &Value) -> Result<Value, String> {
+    let mut payload = assemble_report(request)?;
+    crate::report_document::project_sections(&mut payload)?;
+    Ok(payload)
+}
+
+pub(crate) fn assemble_report(request: &Value) -> Result<Value, String> {
     let mut groups = match request.get("global_groups") {
         None | Some(Value::Null) => Map::new(),
         Some(Value::Object(groups)) => groups.clone(),
@@ -129,9 +135,11 @@ pub fn report_assembly(request: &Value) -> Result<Value, String> {
         "groups": Value::Object(groups),
         "provenance": request.get("provenance").unwrap_or(&Value::Null),
         "relative_levels_html": request.get("relative_levels_html").unwrap_or(&Value::Null),
+        "relative_levels": request.get("relative_levels").unwrap_or(&Value::Null),
         "modes_html": request.get("modes_html").unwrap_or(&Value::Null),
+        "modes": request.get("modes").unwrap_or(&Value::Null),
     });
-    crate::dashboard_payload::dashboard_payload(&dashboard_request)
+    crate::dashboard_payload::assemble_dashboard(&dashboard_request)
 }
 
 #[cfg(test)]

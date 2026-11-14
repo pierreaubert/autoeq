@@ -7,6 +7,7 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 autoeq-core.workspace = true
+autoeq-report-wasm.workspace = true
 hound.workspace = true
 roomeq-engine.workspace = true
 roomeq-model.workspace = true

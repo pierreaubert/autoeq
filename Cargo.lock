@@ -1349,7 +1349,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1777,8 +1777,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-builder"
-version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+version = "0.11.1"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 dependencies = [
  "gpui-pretext",
  "serde",
@@ -1786,8 +1786,8 @@ dependencies = [
 
 [[package]]
 name = "gpui-d3rs"
-version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+version = "0.11.3"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 dependencies = [
  "delaunator",
  "fontdue",
@@ -1809,7 +1809,7 @@ dependencies = [
 [[package]]
 name = "gpui-design"
 version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 dependencies = [
  "serde",
  "sotf-gpui-toolkit-gpui",
@@ -1817,13 +1817,13 @@ dependencies = [
 
 [[package]]
 name = "gpui-layout-expr"
-version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+version = "0.11.1"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 
 [[package]]
 name = "gpui-pretext"
-version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+version = "0.11.1"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 dependencies = [
  "hashbrown 0.17.1",
  "unicode-bidi",
@@ -1833,12 +1833,12 @@ dependencies = [
 [[package]]
 name = "gpui-profiler"
 version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 
 [[package]]
 name = "gpui-ui-kit"
-version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+version = "0.11.1"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 dependencies = [
  "gpui-builder",
  "gpui-d3rs",
@@ -1852,6 +1852,7 @@ dependencies = [
  "serde_json",
  "smol",
  "sotf-gpui-toolkit-gpui",
+ "unicode-segmentation",
  "uuid",
  "web-time",
 ]
@@ -1859,7 +1860,7 @@ dependencies = [
 [[package]]
 name = "gpui-ui-kit-macros"
 version = "0.11.0"
-source = "git+https://github.com/pierreaubert/gpui-toolkit#8e3a43549c2f8dd6ae43fda875fcf2f2812d1095"
+source = "git+https://github.com/pierreaubert/gpui-toolkit#3d76f6ee0ecfffa1f98d35af42e8fa8a73c1b511"
 dependencies = [
  "gpui-layout-expr",
  "proc-macro2",
@@ -3503,7 +3504,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4146,7 +4147,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4203,7 +4204,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4627,7 +4628,7 @@ dependencies = [
 [[package]]
 name = "sotf-collections"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "indexmap",
  "rustc-hash 2.1.3",
@@ -4660,7 +4661,7 @@ dependencies = [
 [[package]]
 name = "sotf-derive_more"
 version = "2.1.2"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "sotf-derive_more-impl",
 ]
@@ -4668,7 +4669,7 @@ dependencies = [
 [[package]]
 name = "sotf-derive_more-impl"
 version = "2.1.2"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "convert_case",
  "proc-macro2",
@@ -4681,7 +4682,7 @@ dependencies = [
 [[package]]
 name = "sotf-derive_refineable"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4690,8 +4691,8 @@ dependencies = [
 
 [[package]]
 name = "sotf-gpui-toolkit-gpui"
-version = "0.2.3"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+version = "0.2.4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "accesskit",
  "anyhow",
@@ -4751,7 +4752,7 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-gpui-macros"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "heck",
  "proc-macro2",
@@ -4819,7 +4820,7 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-http-client"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "anyhow",
  "bytes",
@@ -4837,7 +4838,7 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-scheduler"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "async-channel",
  "async-task",
@@ -4853,7 +4854,7 @@ dependencies = [
 [[package]]
 name = "sotf-gpui-toolkit-sum-tree"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "heapless",
  "rayon",
@@ -4863,7 +4864,7 @@ dependencies = [
 [[package]]
 name = "sotf-gpui_shared_string"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "schemars",
  "serde",
@@ -4873,7 +4874,7 @@ dependencies = [
 [[package]]
 name = "sotf-gpui_util"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "anyhow",
  "log",
@@ -4936,7 +4937,7 @@ dependencies = [
 [[package]]
 name = "sotf-refineable"
 version = "0.1.0"
-source = "git+https://github.com/pierreaubert/sotf-3rdparties#739bbe8955e1fd63127feed062b085466f8030d4"
+source = "git+https://github.com/pierreaubert/sotf-3rdparties#9ce99e0828cf3708e16fadcbd0f1f457a6ad9355"
 dependencies = [
  "sotf-derive_refineable",
 ]
@@ -5281,7 +5282,7 @@ version = "0.2.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c2499c2d826531388872b2268718aed907a39bd785ab0dcfe57fab26283f92e"
 dependencies = [
- "skrifa 0.44.0",
+ "skrifa 0.40.0",
  "yazi",
  "zeno",
 ]
@@ -5379,7 +5380,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6050,7 +6051,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

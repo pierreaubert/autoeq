@@ -105,9 +105,11 @@ pub struct LegendEntry {
 pub struct DrawMeta {
     /// Legend entries in series order (empty when the legend is hidden).
     pub legend: Vec<LegendEntry>,
-    /// Plot-area geometry for client-side rubber-band zoom mapping.
-    /// `None` for chart kinds that do not support box zoom.
+    /// Effective plot geometry for viewport controls.
+    /// `None` for charts without an adjustable data viewport.
     pub plot: Option<PlotGeometry>,
+    /// Effective secondary y-axis bounds when its series are visible.
+    pub secondary_y: Option<[f64; 2]>,
 }
 
 /// Plot-area rectangle plus data domains of the last figure render.
@@ -134,6 +136,71 @@ pub struct PlotGeometry {
 }
 
 impl PlotGeometry {
+    /// Scales the plotted domains around a normalized canvas position.
+    ///
+    /// The top-left is `[0.0, 0.0]`. Factors below one zoom in. The x anchor
+    /// is interpolated in log space for log-frequency plots.
+    pub fn zoomed(self, factor: f64, anchor: [f64; 2]) -> Option<([f64; 2], [f64; 2])> {
+        fn scale(lo: f64, hi: f64, factor: f64, anchor: f64, log: bool) -> Option<[f64; 2]> {
+            if log && lo <= 0.0 {
+                return None;
+            }
+            let [lo, hi] = if log { [lo.ln(), hi.ln()] } else { [lo, hi] };
+            let center = lo + (hi - lo) * anchor.clamp(0.0, 1.0);
+            let range = [
+                center + (lo - center) * factor,
+                center + (hi - center) * factor,
+            ];
+            let range = if log { range.map(f64::exp) } else { range };
+            (range[0].is_finite()
+                && range[1].is_finite()
+                && range[0] < range[1]
+                && (!log || range[0] > 0.0))
+                .then_some(range)
+        }
+
+        if !factor.is_finite() || factor <= 0.0 {
+            return None;
+        }
+        Some((
+            scale(self.x_lo, self.x_hi, factor, anchor[0], self.log_x)?,
+            scale(self.y_lo, self.y_hi, factor, 1.0 - anchor[1], false)?,
+        ))
+    }
+
+    /// Translate the viewport by fractions of the chart width and height.
+    ///
+    /// Positive fractions follow the pointer to the right and down.
+    pub fn panned(self, dx: f64, dy: f64) -> Option<([f64; 2], [f64; 2])> {
+        let x = if self.log_x {
+            let [low, high] = [self.x_lo.ln(), self.x_hi.ln()];
+            let shift = (high - low) * dx;
+            [(low - shift).exp(), (high - shift).exp()]
+        } else {
+            let shift = (self.x_hi - self.x_lo) * dx;
+            [self.x_lo - shift, self.x_hi - shift]
+        };
+        let shift = (self.y_hi - self.y_lo) * dy;
+        let y = [self.y_lo + shift, self.y_hi + shift];
+        (x.into_iter().chain(y).all(f64::is_finite)
+            && x[0] < x[1]
+            && y[0] < y[1]
+            && (!self.log_x || x[0] > 0.0))
+            .then_some((x, y))
+    }
+
+    /// Map a canvas selection to increasing data domains, clamped to the plot.
+    pub fn selection(self, start: [f64; 2], end: [f64; 2]) -> Option<([f64; 2], [f64; 2])> {
+        if !start.into_iter().chain(end).all(f64::is_finite) {
+            return None;
+        }
+        let (ax, ay) = self.invert(start[0], start[1]);
+        let (bx, by) = self.invert(end[0], end[1]);
+        let x = [ax.min(bx), ax.max(bx)];
+        let y = [ay.min(by), ay.max(by)];
+        (x.into_iter().chain(y).all(f64::is_finite) && x[0] < x[1] && y[0] < y[1]).then_some((x, y))
+    }
+
     /// Map a canvas CSS-px point to data coordinates, clamped to the plot.
     pub fn invert(&self, px: f64, py: f64) -> (f64, f64) {
         let t = ((px - self.plot_x) / self.plot_w).clamp(0.0, 1.0);
@@ -774,6 +841,7 @@ pub fn draw_figure(ctx: &mut impl Ctx, fig: &Figure, w: f64, h: f64) -> DrawMeta
             y_hi,
             log_x,
         }),
+        secondary_y: y2_dom.map(|(low, high)| [low, high]),
         ..DrawMeta::default()
     };
     if fig.legend && !fig.series.is_empty() {

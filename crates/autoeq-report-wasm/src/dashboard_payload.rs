@@ -7,6 +7,8 @@
 
 use serde_json::{Value, json};
 
+use crate::report_document::{paragraph_section, project_sections};
+
 // Keep dashboard ordering consistent with the established standalone report.
 const GROUPS: &[(&str, &str, &str)] = &[
     ("why", "DSP analysis", "Why this correction?"),
@@ -50,6 +52,12 @@ fn sections(value: Option<&Value>, name: &str) -> Result<Vec<Value>, String> {
 /// # Errors
 /// Returns an error when supplied groups or sections have invalid shapes.
 pub fn dashboard_payload(request: &Value) -> Result<Value, String> {
+    let mut payload = assemble_dashboard(request)?;
+    project_sections(&mut payload)?;
+    Ok(payload)
+}
+
+pub(crate) fn assemble_dashboard(request: &Value) -> Result<Value, String> {
     if request
         .get("groups")
         .is_some_and(|value| !value.is_null() && !value.is_object())
@@ -61,24 +69,31 @@ pub fn dashboard_payload(request: &Value) -> Result<Value, String> {
     for (role, bucket, subhead) in GROUPS {
         let mut contents = sections(groups.get(*role), role)?;
         if *role == "time_domain" {
-            contents.insert(0,html_section("<p>Arrival timing and applied delays are in Time of Flight. The diagnostics below describe the measured room impulse responses.</p>"));
-            if let Some(modes) = request["modes_html"]
+            contents.insert(0,paragraph_section(&["Arrival timing and applied delays are in Time of Flight. The diagnostics below describe the measured room impulse responses."]));
+            if request["modes"].is_object() {
+                let mut section = request["modes"].clone();
+                section["footer"] = json!(true);
+                contents.push(section);
+            } else if let Some(modes) = request["modes_html"]
                 .as_str()
                 .filter(|value| !value.is_empty())
             {
                 contents.push(json!({"kind":"html","html":modes,"tab":null,"footer":true}));
             }
         } else if *role == "epa" {
-            contents.insert(0,html_section("<p>EPA scores are model-based psychoacoustic estimates before and after DSP. They are not listening-test results or proof of improved audibility. Compare each metric using its stated direction and units.</p>"));
-        } else if *role == "speakers"
-            && let Some(levels) = request["relative_levels_html"]
+            contents.insert(0,paragraph_section(&["EPA scores are model-based psychoacoustic estimates before and after DSP. They are not listening-test results or proof of improved audibility. Compare each metric using its stated direction and units."]));
+        } else if *role == "speakers" {
+            if request["relative_levels"].is_object() {
+                contents.insert(0, request["relative_levels"].clone());
+            } else if let Some(levels) = request["relative_levels_html"]
                 .as_str()
                 .filter(|value| !value.is_empty())
-        {
-            contents.insert(0, html_section(levels));
+            {
+                contents.insert(0, html_section(levels));
+            }
         }
         if contents.is_empty() {
-            contents.push(html_section("<p>No data available in this output.</p>"));
+            contents.push(paragraph_section(&["No data available in this output."]));
         }
         for mut section in contents {
             // The section shape was validated before adding canonical grouping.

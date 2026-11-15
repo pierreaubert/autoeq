@@ -40,9 +40,11 @@ pub mod report_dataset;
 pub mod report_dataset_channel;
 pub mod report_dataset_global;
 pub mod report_dataset_payload;
+pub mod report_document;
 pub(crate) mod report_helpers;
 pub mod report_provenance;
 pub mod report_sections;
+pub mod report_table;
 pub mod response_figures;
 pub mod schema;
 pub mod serialized_chain;
@@ -53,6 +55,7 @@ pub mod target_csv;
 pub mod target_overlay;
 pub mod temporal_figures;
 pub mod time_of_flight;
+pub mod viewer_smoothing;
 
 pub use bass_management::{
     BassManagementSections, bass_management_groups_table_html, bass_management_sections,

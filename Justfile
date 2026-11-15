@@ -71,7 +71,7 @@ report-dist-gpui:
 	#!/usr/bin/env bash
 	set -euo pipefail
 	target_dir="$(cargo +nightly metadata --no-deps --format-version 1 | python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')"
-	cargo +nightly build --release --target wasm32-unknown-unknown -p autoeq-report-gpui --target-dir "$target_dir"
+	cargo +nightly rustc --release --lib --crate-type cdylib --target wasm32-unknown-unknown -p autoeq-report-gpui --target-dir "$target_dir"
 	mkdir -p crates/autoeq-report-wasm/dist
 	"${WANDBIN:-wasm-bindgen}" --target web --out-name reportgpui --out-dir crates/autoeq-report-gpui/pkg "$target_dir/wasm32-unknown-unknown/release/autoeq_report_gpui.wasm"
 	cp crates/autoeq-report-gpui/pkg/reportgpui.js crates/autoeq-report-wasm/dist/reportgpui.js

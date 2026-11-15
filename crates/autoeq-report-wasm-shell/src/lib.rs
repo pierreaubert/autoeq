@@ -28,6 +28,7 @@ use autoeq_report_wasm::draw::{
 };
 use autoeq_report_wasm::grid::draw_grid;
 use autoeq_report_wasm::schema::{SCHEMA_VERSION, Section};
+use autoeq_report_wasm::viewer_smoothing::ViewerSmoothing;
 
 /// Retained per-canvas document for legend toggles.
 struct Retained {
@@ -224,6 +225,33 @@ pub fn produce_json(request_json: &str) -> Result<String, JsValue> {
     autoeq_report_wasm::producer::produce(&request).map_err(|error| JsValue::from_str(&error))
 }
 
+/// Returns the available display smoothing values and labels as JSON.
+#[wasm_bindgen]
+pub fn smoothing_options_json() -> String {
+    let options = ViewerSmoothing::OPTIONS.map(|(_, id, label)| [id, label]);
+    serde_json::json!(options).to_string()
+}
+
+/// Applies display smoothing to a chart and returns the updated section JSON.
+///
+/// # Errors
+/// Returns an error for invalid section JSON or an unknown smoothing value.
+#[wasm_bindgen]
+pub fn smooth_section_json(section_json: &str, mode: &str) -> Result<String, JsValue> {
+    let smoothing = ViewerSmoothing::OPTIONS
+        .iter()
+        .find(|(_, id, _)| *id == mode)
+        .map(|(mode, _, _)| *mode)
+        .ok_or_else(|| JsValue::from_str("unknown report smoothing mode"))?;
+    let mut section: Section = serde_json::from_str(section_json)
+        .map_err(|error| JsValue::from_str(&format!("invalid chart JSON: {error}")))?;
+    if let Section::Figure { figure, .. } = &mut section {
+        smoothing.apply(&figure.clone(), figure);
+    }
+    serde_json::to_string(&section)
+        .map_err(|error| JsValue::from_str(&format!("could not encode chart: {error}")))
+}
+
 /// Render one payload section into a canvas.
 ///
 /// Returns 0 on success, 1 when the canvas is missing, 2 on bad JSON.
@@ -270,21 +298,11 @@ pub fn selection_domain_json(canvas_id: &str, x0: f64, y0: f64, x1: f64, y1: f64
         .lock()
         .map(|map| map.get(canvas_id).and_then(|r| r.plot))
         .unwrap_or(None);
-    let Some(plot) = plot else {
+    let Some(([x_lo, x_hi], [y_lo, y_hi])) =
+        plot.and_then(|plot| plot.selection([x0, y0], [x1, y1]))
+    else {
         return String::new();
     };
-    if ![x0, y0, x1, y1].iter().all(|v| v.is_finite()) {
-        return String::new();
-    }
-    let (ax, ay) = plot.invert(x0.min(x1), y0.min(y1));
-    let (bx, by) = plot.invert(x0.max(x1), y0.max(y1));
-    let (x_lo, x_hi) = (ax.min(bx), ax.max(bx));
-    let (y_lo, y_hi) = (ay.min(by), ay.max(by));
-    if !(x_lo.is_finite() && x_hi.is_finite() && y_lo.is_finite() && y_hi.is_finite())
-        || !(x_hi > x_lo && y_hi > y_lo)
-    {
-        return String::new();
-    }
     format!("{{\"x\":[{x_lo:.6},{x_hi:.6}],\"y\":[{y_lo:.6},{y_hi:.6}]}}")
 }
 

@@ -7,7 +7,7 @@ description = "Full-GPUI enhanced report viewer for AutoEQ (WebGPU-gated)"
 license = "GPL-3.0-or-later"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [lints]
 workspace = true
@@ -17,8 +17,13 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 autoeq-report-wasm = { workspace = true }
 
-# GPUI stack is wasm-only: the native build keeps just the explorer model
-# (schema types + statistics), so `cargo check` on the host stays light.
+[features]
+native = ["dep:gpui", "dep:gpui-ui-kit"]
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+gpui-ui-kit = { version = "0.11", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false, optional = true }
+gpui = { package = "sotf-gpui-toolkit-gpui", git = "https://github.com/pierreaubert/sotf-3rdparties", version = "0.2.3", default-features = false, optional = true }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"

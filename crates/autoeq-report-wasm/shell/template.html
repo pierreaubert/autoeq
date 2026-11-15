@@ -642,14 +642,14 @@ function appendSection(host, sec, i) {
     toolbar.append(zoomOut, zoomIn, reset, move);
     let smoothing = null;
     // Viewer smoothing re-smooths the shipped (1/6-octave) curves in place.
-    if (sec.kind === "figure") {
+    if (sec.kind === "figure" && wasm2d.smoothing_options_json) {
         const label = document.createElement("label");
         label.textContent = "Smoothing";
         smoothing = document.createElement("select");
         smoothing.setAttribute("aria-label", "Smoothing");
         smoothing.disabled = sec.figure.x.scale !== "log";
         if (smoothing.disabled) smoothing.title = "Octave smoothing applies only to frequency plots";
-        for (const [value, text] of [["none", "None"], ["48", "1/48 octave"], ["24", "1/24 octave"], ["12", "1/12 octave"], ["6", "1/6 octave"], ["3", "1/3 octave"], ["2", "1/2 octave"], ["1", "1/1 octave"], ["var", "Var"], ["psycho", "Psychoacoustic"], ["erb", "ERB"]]) {
+        for (const [value, text] of JSON.parse(wasm2d.smoothing_options_json())) {
             const option = document.createElement("option");
             option.value = value;
             option.textContent = text;
@@ -737,7 +737,12 @@ function appendSection(host, sec, i) {
     });
     if (smoothing) {
         smoothing.addEventListener("change", () => {
-            graph.section = smoothedSection(graph.originalSection, smoothing.value);
+            const section = JSON.parse(wasm2d.smooth_section_json(
+                JSON.stringify(graph.originalSection), smoothing.value));
+            section.figure.series.forEach((series, index) => {
+                series.visible = graph.section.figure.series[index].visible;
+            });
+            graph.section = section;
             renderOne(graph);
         });
     }
@@ -1212,74 +1217,6 @@ function wireGraphPan(c) {
         const rect = c.el.getBoundingClientRect();
         zoomGraph(c, ev.deltaY < 0 ? 1 / 1.2 : 1.2, (ev.clientX - rect.left) / rect.width, (ev.clientY - rect.top) / rect.height);
     }, { passive: false });
-}
-
-// Full-width fraction-of-octave window for the variable REW-style modes:
-// Var is 1/48 below 100 Hz, 1/3 above 10 kHz, linear in log-frequency
-// between (1/6 at 1 kHz); Psychoacoustic is 1/3 below 100 Hz, 1/6 above
-// 1 kHz, varying between. Fixed 1/N modes bypass this helper.
-function smoothFractionFor(mode, freqHz) {
-    if (mode === "var") {
-        if (freqHz <= 100) return 1 / 48;
-        if (freqHz >= 10000) return 1 / 3;
-        return 1 / 48 + (1 / 3 - 1 / 48) * Math.log(freqHz / 100) / Math.log(100);
-    }
-    if (mode === "psycho") {
-        if (freqHz <= 100) return 1 / 3;
-        if (freqHz >= 1000) return 1 / 6;
-        return 1 / 3 + (1 / 6 - 1 / 3) * Math.log(freqHz / 100) / Math.log(10);
-    }
-    return 0;
-}
-
-// Equivalent rectangular bandwidth in Hz (Glasberg–Moore constants as
-// quoted by REW: 107.77·f + 24.673 with f in kHz).
-function erbHz(freqHz) {
-    return 107.77 * (freqHz / 1000) + 24.673;
-}
-
-function smoothedSection(section, smoothing) {
-    const out = structuredClone(section);
-    if (out.kind !== "figure" || smoothing === "none" || out.figure.x.scale !== "log") return out;
-    const erb = smoothing === "erb";
-    const psycho = smoothing === "psycho";
-    const fixedHalf = (!erb && smoothing !== "var" && !psycho) ? 0.5 / Number(smoothing) : 0;
-    // Psychoacoustic weights peaks via a cubic mean of linear amplitudes.
-    const acc = psycho ? v => Math.pow(10, 0.15 * v) : v => v;
-    const unacc = psycho ? m => (20 / 3) * Math.log10(m) : m => m;
-    const key = x => erb ? x : Math.log2(x);
-    const edges = x => {
-        if (erb) {
-            const half = erbHz(x) / 2;
-            return [x - half, x + half];
-        }
-        const half = fixedHalf || smoothFractionFor(smoothing, x) / 2;
-        const center = Math.log2(x);
-        return [center - half, center + half];
-    };
-    for (const series of out.figure.series) {
-        // Reference lines and candidate stems are markers, not sampled spectra.
-        if (series.x.some((x, i) => !(x > 0) || (i > 0 && x <= series.x[i - 1]))) continue;
-        // Window edges stay monotone in i (bandwidth slopes are far below
-        // 1 octave/octave), so the two-pointer sweep holds for every mode.
-        const source = series.y.slice();
-        let left = 0, right = 0, sum = 0, count = 0;
-        for (let i = 0; i < series.x.length; i++) {
-            const x = series.x[i];
-            if (!(x > 0) || !Number.isFinite(source[i])) continue;
-            const [lo, hi] = edges(x);
-            while (left < series.x.length && key(series.x[left]) < lo) {
-                if (Number.isFinite(source[left])) { sum -= acc(source[left]); count--; }
-                left++;
-            }
-            while (right < series.x.length && key(series.x[right]) <= hi) {
-                if (Number.isFinite(source[right])) { sum += acc(source[right]); count++; }
-                right++;
-            }
-            series.y[i] = count ? unacc(sum / count) : source[i];
-        }
-    }
-    return out;
 }
 
 function renderOne(c) {

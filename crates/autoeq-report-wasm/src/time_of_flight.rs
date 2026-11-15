@@ -15,18 +15,12 @@
 
 // Rust guideline compliant 2026-02-21
 
+use std::fmt::Write as _;
+
 use serde_json::Value;
 
-const SECTION_START: &str = "<div class=\"filters-section\">\n<h3>Time of flight</h3>\n";
-const SECTION_DESCRIPTION: &str = "<p class=\"epa-footer\">After-DSP arrival adds the deployed chain delay to the measured input arrival; it is not a post-playback capture.</p>";
-const TABLE_START: &str = concat!(
-    "<table class=\"epa-table\"><thead><tr><th>Monitor</th>",
-    "<th>Measured arrival before DSP (ms)</th>",
-    "<th>Applied delay (ms)</th>",
-    "<th>Calculated arrival after DSP (ms)</th>",
-    "<th>Offset vs reference (ms)</th>",
-    "</tr></thead><tbody>\n"
-);
+use crate::report_helpers::escape_html;
+use crate::report_table::{ReportTable, write_table_html};
 
 /// Builds the Time of Flight HTML fragment from RoomEQ metadata.
 ///
@@ -51,33 +45,54 @@ const TABLE_START: &str = concat!(
 ///
 /// This function does not panic for JSON input values.
 pub fn time_of_flight_html(metadata: &Value) -> String {
-    let rows = time_of_flight_rows(metadata);
-    let Some(rows) = rows.as_array().filter(|rows| !rows.is_empty()) else {
+    let Some(table) = time_of_flight_table(metadata) else {
         return String::new();
     };
+    render_timing_html(&table)
+}
 
-    let mut html = String::from(SECTION_START);
-    html.push_str(SECTION_DESCRIPTION);
-    html.push_str(TABLE_START);
-    for row in rows {
-        let Some(row) = row.as_object() else {
-            continue;
-        };
-        let name = row.get("name").and_then(Value::as_str).unwrap_or("?");
-        html.push_str("<tr><td>");
-        html.push_str(&escape_html(name));
-        html.push_str("</td><td>");
-        html.push_str(&format_number(row.get("before_ms")));
-        html.push_str("</td><td>");
-        html.push_str(&format_number(row.get("applied_ms")));
-        html.push_str("</td><td>");
-        html.push_str(&format_number(row.get("after_ms")));
-        html.push_str("</td><td>");
-        html.push_str(&format_number(row.get("offset_ms")));
-        html.push_str("</td></tr>\n");
-    }
-    html.push_str("</tbody></table></div>\n");
+pub(crate) fn render_timing_html(table: &ReportTable) -> String {
+    let mut html = String::new();
+    let _ = write!(
+        html,
+        "<div class=\"filters-section\">\n<h3>{}</h3>\n<p class=\"epa-footer\">{}</p>",
+        escape_html(&table.title),
+        escape_html(&table.note),
+    );
+    write_table_html(&mut html, table, "epa-table", "\n");
+    html.push_str("</div>\n");
     html
+}
+
+/// Builds the ordered timing table for the report.
+pub fn time_of_flight_table(metadata: &Value) -> Option<ReportTable> {
+    let rows = time_of_flight_rows(metadata);
+    let rows = rows.as_array().filter(|rows| !rows.is_empty())?;
+    Some(ReportTable {
+        title: "Time of flight".into(),
+        note: "After-DSP arrival adds the deployed chain delay to the measured input arrival; it is not a post-playback capture.".into(),
+        columns: [
+            "Monitor",
+            "Measured arrival before DSP (ms)",
+            "Applied delay (ms)",
+            "Calculated arrival after DSP (ms)",
+            "Offset vs reference (ms)",
+        ]
+        .map(String::from)
+        .into(),
+        rows: rows
+            .iter()
+            .map(|row| {
+                vec![
+                    row["name"].as_str().unwrap_or("?").to_owned(),
+                    format_number(row.get("before_ms")),
+                    format_number(row.get("applied_ms")),
+                    format_number(row.get("after_ms")),
+                    format_number(row.get("offset_ms")),
+                ]
+            })
+            .collect(),
+    })
 }
 
 /// Extracts canonical Time of Flight rows without formatting them.
@@ -197,21 +212,6 @@ fn python_repr_string(text: &str) -> String {
     }
     rendered.push(quote);
     rendered
-}
-
-fn escape_html(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#x27;"),
-            _ => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]

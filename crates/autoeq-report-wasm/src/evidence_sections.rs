@@ -6,9 +6,15 @@
 
 // Rust guideline compliant 2026-02-21
 
+use crate::report_document::{
+    DiagnosticBlock, DiagnosticIntroduction, DiagnosticSectionStyle, EpaDelta, EpaScoreRow,
+    NoticeTone, ReportNotice, ResonanceCell, ResonanceEvidence, ResonanceRow, TableStyle,
+    diagnostic_html, diagnostic_section, section_fragment, table_section,
+};
 use crate::report_helpers::{
     channel_sort_key, escape_html, format_ms, numeric_value, python_string,
 };
+use crate::report_table::{ReportTable, write_table_html};
 use serde_json::{Map, Value, json};
 
 const OK: &str = "#2ecc71";
@@ -31,12 +37,17 @@ fn number(value: &Value) -> Option<f64> {
     numeric_value(value).filter(|value| value.is_finite())
 }
 
-fn status_box(title: &str, color: &str, paragraphs: &[String]) -> String {
+fn status_box(notice: &ReportNotice) -> String {
+    let color = match notice.tone {
+        NoticeTone::Success => OK,
+        NoticeTone::Warning => WARN,
+        NoticeTone::Error => BAD,
+    };
     let mut html = format!(
         "<section class=\"playback-status-box\" role=\"note\" style=\"flex:1;min-width:260px;border:2px solid {color};padding:16px\"><h2>{}</h2>",
-        escape_html(title)
+        escape_html(&notice.title)
     );
-    for detail in paragraphs {
+    for detail in &notice.paragraphs {
         html.push_str(&format!("<p>{}</p>", escape_html(detail)));
     }
     html.push_str("</section>\n");
@@ -44,6 +55,10 @@ fn status_box(title: &str, color: &str, paragraphs: &[String]) -> String {
 }
 
 fn playback_status(request: &Value) -> String {
+    playback_notices_html(&playback_notices(request))
+}
+
+pub(crate) fn playback_notices(request: &Value) -> Vec<ReportNotice> {
     let metadata = &request["metadata"];
     let acceptance = &metadata["correction_acceptance"];
     let outcome = acceptance["outcome"].as_str();
@@ -67,23 +82,23 @@ fn playback_status(request: &Value) -> String {
     );
     let (eligibility_color, detail) = match outcome {
         Some("accepted" | "unchanged") if eligible => (
-            OK,
+            NoticeTone::Success,
             format!("Recorded verdict: {}.", outcome.unwrap_or_default()),
         ),
         Some("accepted" | "unchanged") => (
-            BAD,
+            NoticeTone::Error,
             format!(
                 "Recorded verdict is contradictory: outcome '{}' without matching accepted/decision flags.",
                 outcome.unwrap_or_default()
             ),
         ),
-        Some("rejected") => (BAD, "Recorded verdict: rejected.".into()),
+        Some("rejected") => (NoticeTone::Error, "Recorded verdict: rejected.".into()),
         None => (
-            WARN,
+            NoticeTone::Warning,
             "No recorded acceptance verdict (legacy or unverified output).".into(),
         ),
         Some(value) => (
-            WARN,
+            NoticeTone::Warning,
             format!("Recorded verdict: {value} — no playback approval."),
         ),
     };
@@ -155,27 +170,45 @@ fn playback_status(request: &Value) -> String {
         playback.push(format!("Runtime limiter required on physical outputs: {}. Response curves describe small-signal playback below limiting. Loud bass peaks may be reduced dynamically. Protection is sample-peak, not a true-peak or loudspeaker-excursion guarantee. Do not bypass the limiter or add downstream gain.", limited.join(", ")));
     }
     let playback_color = if !approved {
-        BAD
+        NoticeTone::Error
     } else if !reduced.is_empty() || !limited.is_empty() {
-        WARN
+        NoticeTone::Warning
     } else {
-        OK
+        NoticeTone::Success
     };
+    vec![
+        ReportNotice {
+            title,
+            tone: eligibility_color,
+            paragraphs: eligibility,
+        },
+        ReportNotice {
+            title: binding_title,
+            tone: if verified {
+                NoticeTone::Success
+            } else {
+                NoticeTone::Warning
+            },
+            paragraphs: vec![
+                request["binding_reason"]
+                    .as_str()
+                    .unwrap_or("Binding evidence unavailable.")
+                    .to_string(),
+            ],
+        },
+        ReportNotice {
+            title: format!("{prefix}Playback approval"),
+            tone: playback_color,
+            paragraphs: playback,
+        },
+    ]
+}
+
+pub(crate) fn playback_notices_html(notices: &[ReportNotice]) -> String {
     let mut html = "<section class=\"playback-status\" role=\"group\" aria-label=\"Playback verdict\" style=\"display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;border:0;padding:0\">".to_string();
-    html.push_str(&status_box(&title, eligibility_color, &eligibility));
-    html.push_str(&status_box(
-        &binding_title,
-        if verified { OK } else { WARN },
-        &[request["binding_reason"]
-            .as_str()
-            .unwrap_or("Binding evidence unavailable.")
-            .to_string()],
-    ));
-    html.push_str(&status_box(
-        &format!("{prefix}Playback approval"),
-        playback_color,
-        &playback,
-    ));
+    for notice in notices {
+        html.push_str(&status_box(notice));
+    }
     html.push_str("</section>\n");
     html
 }
@@ -189,23 +222,38 @@ fn labelled_heading(title: &str, label: &str) -> String {
 }
 
 fn waveform_status_html(data: &Value, label: &str) -> String {
-    let title = labelled_heading("Waveform-view availability", label);
-    let start = format!(
-        "<section class=\"waveform-status\"><h2>{}</h2>",
-        escape_html(&title)
+    waveform_status(data, label).map_or_else(String::new, |table| render_waveform_status(&table))
+}
+
+pub(crate) fn render_waveform_status(table: &ReportTable) -> String {
+    let mut html = format!(
+        "<section class=\"waveform-status\"><h2>{}</h2><p>{}</p>",
+        escape_html(&table.title),
+        escape_html(&table.note),
     );
+    if !table.columns.is_empty() {
+        write_table_html(&mut html, table, "", "");
+    }
+    html.push_str("</section>");
+    html
+}
+
+fn waveform_status(data: &Value, label: &str) -> Option<ReportTable> {
+    let title = labelled_heading("Waveform-view availability", label);
     let unavailable = |reason: &str| {
-        format!(
-            "{start}<p>Unavailable: {}.</p></section>",
-            escape_html(reason)
-        )
+        Some(ReportTable {
+            title: title.clone(),
+            note: format!("Unavailable: {reason}."),
+            columns: Vec::new(),
+            rows: Vec::new(),
+        })
     };
     if !data.is_object() {
         return unavailable("malformed report data");
     }
     let metadata = &data["metadata"];
     if metadata.is_null() {
-        return String::new();
+        return None;
     }
     if !metadata.is_object() {
         return unavailable("malformed waveform metadata");
@@ -213,7 +261,7 @@ fn waveform_status_html(data: &Value, label: &str) -> String {
     // The legacy Python renderer treats an absent field as an old report with
     // no waveform-view stage. An explicit null remains malformed evidence.
     let Some(outcomes) = metadata.get("stage_outcomes") else {
-        return String::new();
+        return None;
     };
     if !outcomes.is_array()
         || outcomes
@@ -229,7 +277,7 @@ fn waveform_status_html(data: &Value, label: &str) -> String {
         .filter(|stage| stage["stage"] == "waveform_views")
         .collect();
     if stages.is_empty() {
-        return String::new();
+        return None;
     }
     if stages.len() != 1 {
         return unavailable("conflicting waveform diagnostics");
@@ -270,7 +318,7 @@ fn waveform_status_html(data: &Value, label: &str) -> String {
     }
     let mut sorted = checks.iter().collect::<Vec<_>>();
     sorted.sort_by_key(|check| check["id"].as_str().unwrap_or_default());
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     for check in sorted {
         let id = check["id"].as_str().unwrap_or_default();
         let Some((view, channel)) = id.split_once(':') else {
@@ -302,16 +350,14 @@ fn waveform_status_html(data: &Value, label: &str) -> String {
             ),
             None => "Unavailable: recorded status and saved waveform disagree".to_string(),
         };
-        rows.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
-            escape_html(channel),
-            escape_html(view),
-            escape_html(&state)
-        ));
+        rows.push(vec![channel.into(), view.into(), state]);
     }
-    format!(
-        "{start}<p>An impulse response shows amplitude over time. Before DSP uses the imported room IR when supplied; otherwise it is reconstructed from the input response. After DSP is a calculated prediction, not a new microphone measurement. Available means the waveform was saved and can be plotted.</p><table><thead><tr><th>Channel</th><th>View</th><th>Status / reason</th></tr></thead><tbody>{rows}</tbody></table></section>"
-    )
+    Some(ReportTable {
+        title,
+        note: "An impulse response shows amplitude over time. Before DSP uses the imported room IR when supplied; otherwise it is reconstructed from the input response. After DSP is a calculated prediction, not a new microphone measurement. Available means the waveform was saved and can be plotted.".into(),
+        columns: ["Channel", "View", "Status / reason"].map(String::from).into(),
+        rows,
+    })
 }
 
 fn finite(value: &Value) -> Option<f64> {
@@ -470,12 +516,10 @@ pub fn coherent_capture_clock_reason(data: &Value, channels: [&str; 2]) -> Optio
     None
 }
 
-fn capture_clock_qa_html(data: &Value) -> String {
+fn capture_clock_qa(data: &Value) -> Option<ReportTable> {
     let config = clock_config(data);
-    let Some(speakers) = config["speakers"].as_object() else {
-        return String::new();
-    };
-    let mut rows = String::new();
+    let speakers = config["speakers"].as_object()?;
+    let mut rows = Vec::new();
     for (source_name, source) in speakers {
         if !source.is_object() {
             continue;
@@ -503,7 +547,7 @@ fn capture_clock_qa_html(data: &Value) -> String {
             let status = reason
                 .as_deref()
                 .unwrap_or("Clock gate passed; phase validity still required");
-            let cells = [
+            rows.push(vec![
                 source_name.to_string(),
                 geometry.into(),
                 microphone.into(),
@@ -513,35 +557,55 @@ fn capture_clock_qa_html(data: &Value) -> String {
                 number_text("residual_uncertainty_us"),
                 correction.into(),
                 status.into(),
-            ];
-            rows.push_str("<tr>");
-            for cell in cells {
-                rows.push_str(&format!("<td>{}</td>", escape_html(&cell)));
-            }
-            rows.push_str("</tr>");
+            ]);
         }
     }
-    if rows.is_empty() {
-        return String::new();
-    }
-    "<section class=\"capture-clock-qa\"><h2>Capture clock QA</h2><p>Every participating microphone needs a finite residual bound below 50 µs, a common reference, and passed measurement quality. Missing evidence uses magnitude only. Bounds assume linear clocks and correctly isolated timing markers.</p><table class=\"summary-table\"><thead><tr><th>Source</th><th>Geometry</th><th>Microphone</th><th>Device</th><th>Offset (samples)</th><th>Skew (ppm)</th><th>Residual (µs)</th><th>Correction</th><th>Coherent-use status</th></tr></thead><tbody>".to_string()
-        + &rows
-        + "</tbody></table></section>"
+    (!rows.is_empty()).then(|| ReportTable {
+        title: "Capture clock QA".into(),
+        note: "Every participating microphone needs a finite residual bound below 50 µs, a common reference, and passed measurement quality. Missing evidence uses magnitude only. Bounds assume linear clocks and correctly isolated timing markers.".into(),
+        columns: ["Source", "Geometry", "Microphone", "Device", "Offset (samples)",
+            "Skew (ppm)", "Residual (µs)", "Correction", "Coherent-use status"]
+            .map(str::to_owned).to_vec(),
+        rows,
+    })
+}
+
+pub(crate) fn render_capture_clock_qa(table: &ReportTable) -> String {
+    let mut html = format!(
+        "<section class=\"capture-clock-qa\"><h2>{}</h2><p>{}</p>",
+        escape_html(&table.title),
+        escape_html(&table.note),
+    );
+    write_table_html(&mut html, table, "summary-table", "");
+    html.push_str("</section>");
+    html
+}
+
+fn capture_clock_qa_html(data: &Value) -> String {
+    capture_clock_qa(data)
+        .as_ref()
+        .map(render_capture_clock_qa)
+        .unwrap_or_default()
 }
 
 /// Renders serialized captured-arrival evidence without estimating new directions.
 pub fn capture_reflections_html(data: &Value) -> String {
+    section_fragment(capture_reflections_section(data))
+        .expect("capture reflection evidence is serialized by AutoEQ")
+}
+
+fn capture_reflections_section(data: &Value) -> Value {
     let config = clock_config(data);
     let channels = data
         .get("channels")
         .and_then(Value::as_object)
         .or_else(|| config.get("speakers").and_then(Value::as_object));
     let Some(channels) = channels else {
-        return String::new();
+        return Value::Null;
     };
     let system_speakers = config["system"]["speakers"].as_object();
     let sources = config["speakers"].as_object();
-    let mut sections = String::new();
+    let mut blocks = Vec::new();
     for channel in channels.keys() {
         let source_id = system_speakers
             .and_then(|speakers| speakers.get(channel))
@@ -568,7 +632,7 @@ pub fn capture_reflections_html(data: &Value) -> String {
                     .map(|event| (event, false)),
             );
         }
-        let mut rows = String::new();
+        let mut rows = Vec::new();
         let mut plot_series = Vec::new();
         for (index, (event, is_direct)) in events.into_iter().enumerate() {
             let relative = finite(&event["relative_ms"]);
@@ -641,16 +705,9 @@ pub fn capture_reflections_html(data: &Value) -> String {
             let level_text = level
                 .map(|value| format!("{value:.1}"))
                 .unwrap_or_else(|| "—".into());
-            rows.push_str(&format!(
-                "<tr><td>{}</td><td>{time_text}</td><td>{level_text}</td><td>{}</td></tr>",
-                escape_html(&label),
-                escape_html(&status)
-            ));
+            rows.push(vec![label, time_text, level_text, status]);
         }
-        let plot = if plot_series.is_empty() {
-            String::new()
-        } else {
-            let figure = json!({
+        let chart = (!plot_series.is_empty()).then(|| json!({
                 "kind":"figure",
                 "figure":{
                     "title":"Conditional arrival azimuth and delay",
@@ -659,12 +716,7 @@ pub fn capture_reflections_html(data: &Value) -> String {
                     "y2":null,"series":plot_series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true
                 },
                 "tab":null
-            });
-            format!(
-                "{}<p>Azimuth uses the recorded session axes. Mirror-ambiguous arrivals are omitted.</p>",
-                embedded_report_figure(&figure)
-            )
-        };
+            }));
         let notes = report
             .get("issues")
             .and_then(Value::as_array)
@@ -676,17 +728,28 @@ pub fn capture_reflections_html(data: &Value) -> String {
                     .join("; ")
             })
             .unwrap_or_default();
-        sections.push_str(&format!(
-            "<section class=\"capture-reflections\"><h3>{}: early-arrival candidates</h3><p>{}</p>{plot}<table class=\"summary-table\"><thead><tr><th>Event</th><th>Relative ms</th><th>Level dB</th><th>Evidence</th></tr></thead><tbody>{rows}</tbody></table></section>",
-            escape_html(channel), escape_html(&notes)
-        ));
+        blocks.push(DiagnosticBlock::CaptureArrival {
+            table: ReportTable {
+                title: format!("{channel}: early-arrival candidates"),
+                note: notes,
+                columns: ["Event", "Relative ms", "Level dB", "Evidence"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                rows,
+            },
+            chart,
+        });
     }
-    if sections.is_empty() {
-        return String::new();
+    if blocks.is_empty() {
+        return Value::Null;
     }
-    format!(
-        "<section><h2>Measured arrival evidence</h2><p>Energy-based arrival candidates and conditional plane-wave directions. Microphone phase and source distance are not independently verified; fit residuals are not angular uncertainty bounds.</p>{sections}</section>"
-    )
+    let mut section = diagnostic_section(blocks);
+    section["introduction"] = json!(DiagnosticIntroduction {
+        title: "Measured arrival evidence".into(),
+        style: DiagnosticSectionStyle::Plain,
+        text: "Energy-based arrival candidates and conditional plane-wave directions. Microphone phase and source distance are not independently verified; fit residuals are not angular uncertainty bounds.".into(),
+    });
+    section
 }
 
 fn capture_reflection_direction_reason(source: &Value, event: &Value) -> Option<String> {
@@ -748,10 +811,14 @@ fn capture_reflection_direction_reason(source: &Value, event: &Value) -> Option<
 
 /// Renders the all-speaker resonance table from already validated saved grids.
 pub fn resonance_summary_html(data: &Value) -> String {
-    let Some(channels) = data.get("channels").and_then(Value::as_object) else {
-        return String::new();
-    };
-    let mut entries = Vec::<(String, Option<Vec<Value>>)>::new();
+    resonance_summary(data)
+        .map(|block| diagnostic_html(&[block]))
+        .unwrap_or_default()
+}
+
+fn resonance_summary(data: &Value) -> Option<DiagnosticBlock> {
+    let channels = data["channels"].as_object()?;
+    let mut entries = Vec::<(String, Option<&[Value]>)>::new();
     for (name, channel) in channels {
         let valid_drivers = channel["drivers"]
             .as_array()
@@ -772,68 +839,61 @@ pub fn resonance_summary_html(data: &Value) -> String {
             }
         }
     }
-    if !entries.iter().any(|(_, modes)| modes.is_some()) {
-        return String::new();
-    }
-    let count = entries
+    let columns = entries
         .iter()
-        .map(|(_, modes)| modes.as_ref().map_or(0, Vec::len))
-        .max()
-        .unwrap_or(0)
+        .filter_map(|(_, modes)| modes.map(<[Value]>::len))
+        .max()?
         .max(1);
-    let mut html = String::from(
-        "<h2>Room resonance summary — all speakers</h2><p>Pre-correction detections. Each cell gives frequency, 60 ms level relative to that speaker’s full-grid peak, and fitted decay time. Colours identify frequency, not severity. These candidates are not a geometric identification of room modes.</p><table><tr><th>Speaker</th>",
-    );
-    for index in 0..count {
-        html.push_str(&format!("<th>Mode {}</th>", index + 1));
-    }
-    html.push_str("</tr>");
-    for (name, modes) in entries {
-        html.push_str(&format!("<tr><th>{}</th>", escape_html(&name)));
-        match modes {
-            None => html.push_str(&format!("<td colspan=\"{count}\">Unavailable</td>")),
-            Some(modes) if modes.is_empty() => {
-                html.push_str(&format!(
-                    "<td colspan=\"{count}\">No candidates detected</td>"
-                ));
-            }
-            Some(mut modes) => {
-                modes.sort_by(|left, right| {
-                    finite(&left["freq_hz"])
-                        .unwrap_or_default()
-                        .total_cmp(&finite(&right["freq_hz"]).unwrap_or_default())
-                });
-                for mode in &modes {
-                    let frequency = finite(&mode["freq_hz"]).unwrap_or_default();
-                    let level = finite(&mode["level_db"]).unwrap_or_default();
-                    let decay = finite(&mode["decay_time_s"])
-                        .map(|value| format!("{value:.3} s"))
-                        .unwrap_or_else(|| "fit unavailable".into());
-                    let color = resonance_color(frequency);
-                    html.push_str(&format!(
-                        "<td style=\"background:{color}33;border-top:4px solid {color}\">{frequency:.1} Hz<br>{level:.2} dB<br>{decay}</td>"
-                    ));
+    let rows = entries
+        .into_iter()
+        .map(|(name, modes)| {
+            let evidence = match modes {
+                None => ResonanceEvidence::Unavailable,
+                Some([]) => ResonanceEvidence::NoCandidates,
+                Some(modes) => {
+                    let mut candidates = modes.iter().collect::<Vec<_>>();
+                    candidates.sort_by(|left, right| {
+                        finite(&left["freq_hz"])
+                            .unwrap_or_default()
+                            .total_cmp(&finite(&right["freq_hz"]).unwrap_or_default())
+                    });
+                    ResonanceEvidence::Candidates(
+                        candidates
+                            .into_iter()
+                            .map(|mode| {
+                                let frequency = finite(&mode["freq_hz"]).unwrap_or_default();
+                                let level = finite(&mode["level_db"]).unwrap_or_default();
+                                let decay = finite(&mode["decay_time_s"])
+                                    .map(|value| format!("{value:.3} s"))
+                                    .unwrap_or_else(|| "fit unavailable".into());
+                                ResonanceCell {
+                                    lines: [
+                                        format!("{frequency:.1} Hz"),
+                                        format!("{level:.2} dB"),
+                                        decay,
+                                    ],
+                                    color: resonance_color(frequency),
+                                }
+                            })
+                            .collect(),
+                    )
                 }
-                for _ in 0..count.saturating_sub(modes.len()) {
-                    html.push_str("<td>—</td>");
-                }
-            }
-        }
-        html.push_str("</tr>");
-    }
-    html.push_str("</table>");
-    html
+            };
+            ResonanceRow { name, evidence }
+        })
+        .collect();
+    Some(DiagnosticBlock::ResonanceSummary { columns, rows })
 }
 
-fn decay_modes(channel: &Value) -> Option<Vec<Value>> {
-    let _ = crate::channel_evidence::optimization_waterfall_html(
-        &channel["waterfall"],
-        &channel["resonance_decays"],
-    )?;
-    channel["resonance_decays"]["decays"].as_array().cloned()
+fn decay_modes(channel: &Value) -> Option<&[Value]> {
+    let decays = &channel["resonance_decays"];
+    if !crate::channel_evidence::valid_waterfall(&channel["waterfall"], decays) {
+        return None;
+    }
+    decays["decays"].as_array().map(Vec::as_slice)
 }
 
-fn resonance_color(frequency: f64) -> String {
+fn resonance_color(frequency: f64) -> u32 {
     let ratio = ((frequency.max(10.0) / 10.0).ln() / 30.0_f64.ln()).clamp(0.0, 1.0);
     let h = 0.5 + ratio / 3.0;
     let s = 0.65;
@@ -851,15 +911,11 @@ fn resonance_color(frequency: f64) -> String {
         4 => (t, p, v),
         _ => (v, p, q),
     };
-    format!(
-        "#{:02x}{:02x}{:02x}",
-        (r * 255.0).round() as u8,
-        (g * 255.0).round() as u8,
-        (b * 255.0).round() as u8
-    )
+    let [r, g, b] = [r, g, b].map(|value| (value * 255.0).round() as u32);
+    (r << 16) | (g << 8) | b
 }
 
-fn embedded_report_figure(section: &Value) -> String {
+pub(crate) fn embedded_report_figure(section: &Value) -> String {
     let encoded = serde_json::to_string(section).unwrap_or_else(|_| "{}".into());
     format!(
         "<div class=\"report-figure\" data-section=\"{}\"></div>",
@@ -870,19 +926,32 @@ fn embedded_report_figure(section: &Value) -> String {
 /// Renders capture verification views only after the native host confirms the
 /// frozen comparison payload bindings supplied in `verification`.
 pub fn capture_views_html(report: &Value, verification: &Value) -> String {
+    section_fragment(capture_views_section(report, verification).0)
+        .expect("capture comparisons are serialized by AutoEQ")
+}
+
+pub(crate) fn capture_views_section(report: &Value, verification: &Value) -> (Value, bool) {
+    use DiagnosticBlock::{EvidenceList, Heading, MajorHeading, Paragraph, VerificationStatus};
+    let section = |blocks| {
+        let mut section = diagnostic_section(blocks);
+        section["introduction"] = json!(DiagnosticIntroduction {
+            title: "Capture acceptance diagnostics".into(),
+            text: String::new(),
+            style: DiagnosticSectionStyle::CaptureViews,
+        });
+        section
+    };
     let unavailable = |reason: &str| {
-        format!(
-            "<section class=\"capture-views\"><h1>Capture acceptance diagnostics</h1><p>Unavailable: {}</p></section>",
-            escape_html(reason)
+        (
+            section(vec![Paragraph(format!("Unavailable: {reason}"))]),
+            false,
         )
     };
     if !report.is_object() {
         return unavailable("'Value' object has no attribute 'get'");
     }
-    let mut parts = vec![
-        "<section class=\"capture-views\"><h1>Capture acceptance diagnostics</h1>".to_string(),
-        "<p>These plots do not establish safety, improved room damping, or listener benefit. Hashes check artifact consistency, not operator declarations or hardware authenticity.</p>".to_string(),
-    ];
+    let mut complete = true;
+    let mut blocks = vec![Paragraph("These plots do not establish safety, improved room damping, or listener benefit. Hashes check artifact consistency, not operator declarations or hardware authenticity.".into())];
     let status = report.get("status").filter(|value| !value.is_null());
     if let Some(status) = status {
         let status = status.as_str().unwrap_or_default();
@@ -897,20 +966,21 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
         let (Some(count), Some(exit_code)) = (count, exit_code) else {
             return unavailable("invalid verification capture count or exit code");
         };
-        parts.push(format!(
-            "<p>Recorded capture verification status: <strong>{}</strong>; {count} pre-result capture check(s); process exit code {exit_code}. This is the report’s recorded verdict, not a new validation by the viewer.</p>",
-            escape_html(status)
-        ));
+        blocks.push(VerificationStatus {
+            status: status.into(),
+            count,
+            exit_code,
+        });
         if !report["detail"].is_null() {
             let Some(detail) = report["detail"].as_str() else {
                 return unavailable("invalid verification detail");
             };
-            parts.push(format!("<p>Recorded detail: {}</p>", escape_html(detail)));
+            blocks.push(Paragraph(format!("Recorded detail: {detail}")));
         }
     } else {
-        parts.push(
-            "<p>Recorded capture verification status unavailable in this legacy report.</p>".into(),
-        );
+        blocks.push(Paragraph(
+            "Recorded capture verification status unavailable in this legacy report.".into(),
+        ));
     }
     let graph = report["graph_id"].as_str();
     let comparisons = report["comparisons"].as_array();
@@ -938,7 +1008,10 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
     for (index, comparison) in comparisons.iter().enumerate() {
         let views = &comparison["capture_views"];
         if views.is_null() {
-            parts.push("<p>Unavailable: legacy comparison has no capture views.</p>".into());
+            complete = false;
+            blocks.push(Paragraph(
+                "Unavailable: legacy comparison has no capture views.".into(),
+            ));
             continue;
         }
         let binding = binding_rows.get(index);
@@ -977,18 +1050,11 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
         ) {
             return unavailable("unsupported capture evidence kind");
         }
-        parts.push(format!(
-            "<h2>{} / {}</h2>",
-            escape_html(source),
-            escape_html(seat)
-        ));
-        parts.push(format!(
-            "<p>Matched IR evidence: {}; baseline {}; candidate {}</p><p>{}</p>",
-            escape_html(kind),
-            escape_html(baseline),
-            escape_html(graph),
-            escape_html(scope)
-        ));
+        blocks.push(MajorHeading(format!("{source} / {seat}")));
+        blocks.push(Paragraph(format!(
+            "Matched IR evidence: {kind}; baseline {baseline}; candidate {graph}"
+        )));
+        blocks.push(Paragraph(scope.into()));
         if !views["ir_step"].is_null() {
             let view = &views["ir_step"];
             if view["provenance"]["graph_identity"] != graph {
@@ -997,16 +1063,15 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
             let Some(reference) = view["common_reference"].as_str() else {
                 return unavailable("missing IR sample-zero reference");
             };
-            parts.push(format!(
-                "<p>Common sample-zero reference: {}</p>",
-                escape_html(reference)
-            ));
+            blocks.push(Paragraph(format!(
+                "Common sample-zero reference: {reference}"
+            )));
             match capture_trace_figure(view, "ir", "raw sample units", "IR") {
-                Ok(html) => parts.push(html),
+                Ok(chart) => blocks.push(chart),
                 Err(reason) => return unavailable(&reason),
             }
             match capture_trace_figure(view, "step", "raw sample units", "STEP") {
-                Ok(html) => parts.push(html),
+                Ok(chart) => blocks.push(chart),
                 Err(reason) => return unavailable(&reason),
             }
         }
@@ -1032,15 +1097,13 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
             let Some(etc_scope) = etc["scope"].as_str() else {
                 return unavailable("missing ETC scope");
             };
-            parts.push(format!(
-                "<h3>Matched octave ETC</h3><p>{}</p>",
-                escape_html(etc_scope)
-            ));
-            parts.push(format!(
-                "<p>Analysis half-support by band (ms): {}; display floor: {} dB.</p>",
-                escape_html(&python_json(&etc["filter_half_support_ms"])),
-                escape_html(&python_json(&etc["display_floor_db"]))
-            ));
+            blocks.push(Heading("Matched octave ETC".into()));
+            blocks.push(Paragraph(etc_scope.into()));
+            blocks.push(Paragraph(format!(
+                "Analysis half-support by band (ms): {}; display floor: {} dB.",
+                python_json(&etc["filter_half_support_ms"]),
+                python_json(&etc["display_floor_db"]),
+            )));
             for band in etc["bands"].as_array().unwrap() {
                 let trace = json!({"times_ms":band["times_ms"],"pre_etc":band["pre_db"],"post_etc":band["post_db"]});
                 let label = format!("ETC {} Hz", python_number(&band["center_hz"]));
@@ -1050,20 +1113,20 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
                     "dB relative to the same baseline-band peak",
                     &label,
                 ) {
-                    Ok(html) => parts.push(html),
+                    Ok(chart) => blocks.push(chart),
                     Err(reason) => return unavailable(&reason),
                 }
             }
         }
         if !views["decay"].is_null() {
-            match capture_decay_html(&views["decay"], graph) {
-                Ok(html) => parts.push(html),
+            match capture_decay_blocks(&views["decay"], graph) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
         }
         if !views["octave_t60"].is_null() {
-            match capture_octave_t60_html(&views["octave_t60"]) {
-                Ok(html) => parts.push(html),
+            match capture_octave_t60_blocks(&views["octave_t60"]) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
             let band = &views["valid_band_hz"];
@@ -1098,32 +1161,32 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
             }
         }
         if !views["early_reflections"].is_null() {
-            match capture_early_reflections_html(&views["early_reflections"]) {
-                Ok(html) => parts.push(html),
+            match capture_early_reflections_blocks(&views["early_reflections"]) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
         }
         if !views["early_late_curves"].is_null() {
-            match capture_early_late_html(&views["early_late_curves"]) {
-                Ok(html) => parts.push(html),
+            match capture_early_late_blocks(&views["early_late_curves"]) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
         }
         if !views["waterfall"].is_null() {
-            match capture_waterfall_html(&views["waterfall"]) {
-                Ok(html) => parts.push(html),
+            match capture_waterfall_blocks(&views["waterfall"]) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
         }
         if !views["wavelet"].is_null() {
-            match capture_wavelet_html(&views["wavelet"]) {
-                Ok(html) => parts.push(html),
+            match capture_wavelet_blocks(&views["wavelet"]) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
         }
         if !views["ambient_noise"].is_null() {
-            match capture_noise_html(&views["ambient_noise"], graph) {
-                Ok(html) => parts.push(html),
+            match capture_noise_blocks(&views["ambient_noise"], graph) {
+                Ok(contents) => blocks.extend(contents),
                 Err(reason) => return unavailable(&reason),
             }
         }
@@ -1131,22 +1194,17 @@ pub fn capture_views_html(report: &Value, verification: &Value) -> String {
         let Some(unavailable_rows) = unavailable_rows else {
             return unavailable("'unavailable'");
         };
-        parts.push("<ul>".into());
+        let mut unavailable_items = Vec::new();
         for (key, reason) in unavailable_rows {
             let Some(reason) = reason.as_str() else {
                 return unavailable("invalid capture unavailability reason");
             };
-            parts.push(format!(
-                "<li>{} unavailable: {}</li>",
-                escape_html(key),
-                escape_html(reason)
-            ));
+            unavailable_items.push(format!("{key} unavailable: {reason}"));
         }
-        parts.push("</ul>".into());
+        blocks.push(EvidenceList(unavailable_items));
     }
-    parts.push(capture_room_mean_t60_html(&t60_groups));
-    parts.push("</section>".into());
-    parts.concat()
+    blocks.extend(capture_room_mean_t60_blocks(&t60_groups));
+    (section(blocks), complete)
 }
 
 fn capture_trace_figure(
@@ -1154,7 +1212,7 @@ fn capture_trace_figure(
     prefix: &str,
     units: &str,
     title: &str,
-) -> Result<String, String> {
+) -> Result<DiagnosticBlock, String> {
     let times = view["times_ms"]
         .as_array()
         .ok_or("missing raw trace arrays")?;
@@ -1193,10 +1251,10 @@ fn capture_trace_figure(
             {"name":"Candidate","x":x,"y":y1,"color":"#c56816","width":2.0,"dash":"solid","visible":true,"y_axis":0}
         ],"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true
     },"tab":null});
-    Ok(embedded_report_figure(&title_json))
+    Ok(DiagnosticBlock::CaptureChart(title_json))
 }
 
-fn capture_early_reflections_html(view: &Value) -> Result<String, String> {
+fn capture_early_reflections_blocks(view: &Value) -> Result<Vec<DiagnosticBlock>, String> {
     if view["method"] != "bandlimited_early_reflection_table_v1"
         || !numeric_array_equals(&view["band_hz"], &[1000.0, 8000.0])
         || finite(&view["threshold_dbfs"]) != Some(-15.0)
@@ -1212,15 +1270,15 @@ fn capture_early_reflections_html(view: &Value) -> Result<String, String> {
     let direct_reference = view["direct_reference"]
         .as_str()
         .ok_or("invalid early reflection analysis contract")?;
-    let mut parts = vec![
-        "<h3>Early reflection candidates (1–8 kHz)</h3>".to_string(),
-        format!("<p>{}</p>", escape_html(scope)),
-        format!(
-            "<p>{}; reflections below −15 dB relative to direct are omitted. Filtered direct samples: baseline {}, candidate {}; table times are relative to each direct peak.</p>",
-            escape_html(direct_reference),
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph, Subheading, Table};
+    let mut blocks = vec![
+        Heading("Early reflection candidates (1–8 kHz)".into()),
+        Paragraph(scope.into()),
+        Paragraph(format!(
+            "{direct_reference}; reflections below −15 dB relative to direct are omitted. Filtered direct samples: baseline {}, candidate {}; table times are relative to each direct peak.",
             view["pre_direct_sample"].as_u64().unwrap_or_default(),
-            view["post_direct_sample"].as_u64().unwrap_or_default()
-        ),
+            view["post_direct_sample"].as_u64().unwrap_or_default(),
+        )),
     ];
     for (key, label, color) in [
         ("pre", "Baseline", "#2864b4"),
@@ -1261,7 +1319,7 @@ fn capture_early_reflections_html(view: &Value) -> Result<String, String> {
             x.extend([time, time, time]);
             y.extend([json!(-40.0), json!(gain), Value::Null]);
         }
-        parts.push(format!("<h4>{label} ({} candidates)</h4>", events.len()));
+        blocks.push(Subheading(format!("{label} ({} candidates)", events.len())));
         if !events.is_empty() {
             let figure = json!({
                 "kind":"figure","figure":{
@@ -1273,30 +1331,49 @@ fn capture_early_reflections_html(view: &Value) -> Result<String, String> {
                     "hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true
                 },"tab":null
             });
-            parts.push(embedded_report_figure(&figure));
+            blocks.push(CaptureChart(figure));
         }
-        parts.push(
-            "<table><tr><th>Reflection</th><th>Gain (dB re direct)</th><th>Time (ms)</th><th>Extra path (cm)</th><th>First dip (Hz)</th><th>Comb ripple (dB p-p)</th></tr>".into(),
-        );
-        for (index, event) in events.iter().enumerate() {
-            let ripple = finite(&event["ripple_db"])
-                .map(|value| format!("{value:.2}"))
-                .unwrap_or_else(|| "unbounded".into());
-            let gain = finite(&event["gain_dbfs"]).unwrap_or_default();
-            let time = finite(&event["time_ms"]).unwrap_or_default();
-            let distance = finite(&event["distance_cm"]).unwrap_or_default();
-            let dip = finite(&event["first_dip_hz"]).unwrap_or_default();
-            parts.push(format!(
-                "<tr><td>{}</td><td>{gain:.2}</td><td>{time:.2}</td><td>{distance:.1}</td><td>{dip:.1}</td><td>{ripple}</td></tr>",
-                index + 1
-            ));
-        }
-        parts.push("</table>".into());
+        let rows = events
+            .iter()
+            .enumerate()
+            .map(|(index, event)| {
+                let ripple = finite(&event["ripple_db"])
+                    .map(|value| format!("{value:.2}"))
+                    .unwrap_or_else(|| "unbounded".into());
+                let gain = finite(&event["gain_dbfs"]).unwrap_or_default();
+                let time = finite(&event["time_ms"]).unwrap_or_default();
+                let distance = finite(&event["distance_cm"]).unwrap_or_default();
+                let dip = finite(&event["first_dip_hz"]).unwrap_or_default();
+                vec![
+                    (index + 1).to_string(),
+                    format!("{gain:.2}"),
+                    format!("{time:.2}"),
+                    format!("{distance:.1}"),
+                    format!("{dip:.1}"),
+                    ripple,
+                ]
+            })
+            .collect();
+        blocks.push(Table(ReportTable {
+            title: String::new(),
+            note: String::new(),
+            columns: [
+                "Reflection",
+                "Gain (dB re direct)",
+                "Time (ms)",
+                "Extra path (cm)",
+                "First dip (Hz)",
+                "Comb ripple (dB p-p)",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            rows,
+        }));
     }
-    Ok(parts.concat())
+    Ok(blocks)
 }
 
-fn capture_early_late_html(view: &Value) -> Result<String, String> {
+fn capture_early_late_blocks(view: &Value) -> Result<Vec<DiagnosticBlock>, String> {
     let band = view["valid_band_hz"].as_array();
     if view["method"] != "incoherent_band_energy"
         || view["reference"] != "full_peak_band"
@@ -1319,13 +1396,13 @@ fn capture_early_late_html(view: &Value) -> Result<String, String> {
     let scope = view["scope"].as_str().unwrap_or_default();
     let direct_reference = view["direct_reference"].as_str().unwrap_or_default();
     let mut common_freq: Option<Vec<f64>> = None;
-    let mut parts = vec![
-        "<h3>Captured IR early and late energy</h3>".to_string(),
-        format!("<p>{}</p>", escape_html(scope)),
-        format!(
-            "<p>20 ms split from {}; full, early, and late use one peak-band reference within each capture. Baseline and candidate levels have separate references.</p>",
-            escape_html(direct_reference)
-        ),
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph, Subheading};
+    let mut blocks = vec![
+        Heading("Captured IR early and late energy".into()),
+        Paragraph(scope.into()),
+        Paragraph(format!(
+            "20 ms split from {direct_reference}; full, early, and late use one peak-band reference within each capture. Baseline and candidate levels have separate references."
+        )),
     ];
     for (side, label) in [("pre", "Baseline"), ("post", "Candidate")] {
         let record = &view[side];
@@ -1383,10 +1460,11 @@ fn capture_early_late_html(view: &Value) -> Result<String, String> {
                 "capture early/late full level below a part: incoherent energy sum violated".into(),
             );
         }
-        parts.push(format!(
-            "<h4>{label}</h4><p>Direct sample: {}.</p>",
+        blocks.push(Subheading(label.into()));
+        blocks.push(Paragraph(format!(
+            "Direct sample: {}.",
             record["direct_sample"].as_u64().unwrap_or_default()
-        ));
+        )));
         let colors = ["#202020", "#2864b4", "#c56816"];
         let names = ["Full", "Early", "Late"];
         let series = names.iter().enumerate().map(|(index, name)| json!({
@@ -1398,7 +1476,7 @@ fn capture_early_late_html(view: &Value) -> Result<String, String> {
             "y":{"label":"Level vs full peak band (dB)","scale":"linear","min":null,"max":null},"y2":null,
             "series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true
         },"tab":null});
-        parts.push(embedded_report_figure(&figure));
+        blocks.push(CaptureChart(figure));
         let early_late = freq
             .iter()
             .zip(&levels[1])
@@ -1412,18 +1490,18 @@ fn capture_early_late_html(view: &Value) -> Result<String, String> {
         if freq[0] <= 1000.0 && *freq.last().unwrap_or(&0.0) >= 8000.0 && early_late.len() >= 2 {
             let ratio = early_late.iter().sum::<f64>() / early_late.len() as f64;
             if ratio.is_finite() {
-                parts.push(format!("<p>1–8 kHz mean early minus late: {ratio:+.2} dB (arithmetic mean of third-octave differences).</p>"));
+                blocks.push(Paragraph(format!("1–8 kHz mean early minus late: {ratio:+.2} dB (arithmetic mean of third-octave differences).")));
             }
         } else {
-            parts.push(
-                "<p>1–8 kHz early/late ratio unavailable: full band support is missing.</p>".into(),
-            );
+            blocks.push(Paragraph(
+                "1–8 kHz early/late ratio unavailable: full band support is missing.".into(),
+            ));
         }
     }
-    Ok(parts.concat())
+    Ok(blocks)
 }
 
-fn capture_octave_t60_html(view: &Value) -> Result<String, String> {
+fn capture_octave_t60_blocks(view: &Value) -> Result<Vec<DiagnosticBlock>, String> {
     let centers = [63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
     let band = view["valid_band_hz"]
         .as_array()
@@ -1473,13 +1551,17 @@ fn capture_octave_t60_html(view: &Value) -> Result<String, String> {
     let scope = view["scope"]
         .as_str()
         .ok_or("invalid octave T60 analysis contract")?;
-    let mut html = format!(
-        "<h3>Capture IR octave T60 diagnostic</h3><p>{}</p><p>Declared supported band: {}–{} Hz; minimum fit R²: {}. No invalid or EDT-only band is plotted; gaps are unavailable fits.</p>",
-        escape_html(scope),
-        python_number(&band[0]),
-        python_number(&band[1]),
-        python_number(&view["min_r2"])
-    );
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph, Table};
+    let mut blocks = vec![
+        Heading("Capture IR octave T60 diagnostic".into()),
+        Paragraph(scope.into()),
+        Paragraph(format!(
+            "Declared supported band: {}–{} Hz; minimum fit R²: {}. No invalid or EDT-only band is plotted; gaps are unavailable fits.",
+            python_number(&band[0]),
+            python_number(&band[1]),
+            python_number(&view["min_r2"]),
+        )),
+    ];
     let valid_values = ["pre", "post"].iter().any(|side| {
         view[*side]
             .as_array()
@@ -1517,30 +1599,57 @@ fn capture_octave_t60_html(view: &Value) -> Result<String, String> {
             }
             series.push(json!({"name":label,"x":x,"y":y,"color":color,"width":2.0,"dash":"solid","visible":true,"y_axis":0}));
         }
-        html.push_str(&embedded_report_figure(&json!({"kind":"figure","figure":{"title":"Baseline: measured octave-band T60","x":{"label":"Frequency (Hz)","scale":"log","min":20,"max":20000},"y":{"label":"T60 (s)","scale":"linear","min":0,"max":null},"y2":null,"series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null})));
+        blocks.push(CaptureChart(json!({"kind":"figure","figure":{"title":"Baseline: measured octave-band T60","x":{"label":"Frequency (Hz)","scale":"log","min":20,"max":20000},"y":{"label":"T60 (s)","scale":"linear","min":0,"max":null},"y2":null,"series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null})));
     }
-    html.push_str("<table><caption>Per-band T30/T20 estimates from matched IR captures</caption><tr><th>Hz</th><th>Baseline T60 (s)</th><th>Candidate T60 (s)</th><th>Baseline fit</th><th>Candidate fit</th></tr>");
-    for (index, center) in centers.iter().enumerate() {
-        let pre = &view["pre"][index];
-        let post = &view["post"][index];
-        let cell = |row: &Value| {
-            if row["valid"] == true {
-                format!("{:.3}", finite(&row["t60_s"]).unwrap_or_default())
-            } else {
+    let rows = centers
+        .iter()
+        .enumerate()
+        .map(|(index, center)| {
+            let pre = &view["pre"][index];
+            let post = &view["post"][index];
+            let cell = |row: &Value| {
+                if row["valid"] == true {
+                    format!("{:.3}", finite(&row["t60_s"]).unwrap_or_default())
+                } else {
+                    format!("n/a: {}", row["reason"].as_str().unwrap_or_default())
+                }
+            };
+            let fit = |row: &Value| {
                 format!(
-                    "n/a: {}",
-                    escape_html(row["reason"].as_str().unwrap_or_default())
+                    "{}; R²={:.3}",
+                    row["fit_range"].as_str().unwrap_or("n/a"),
+                    finite(&row["r2"]).unwrap_or_default(),
                 )
-            }
-        };
-        html.push_str(&format!("<tr><td>{center}</td><td>{}</td><td>{}</td><td>{}; R²={:.3}</td><td>{}; R²={:.3}</td></tr>", cell(pre), cell(post), escape_html(pre["fit_range"].as_str().unwrap_or("n/a")), finite(&pre["r2"]).unwrap_or_default(), escape_html(post["fit_range"].as_str().unwrap_or("n/a")), finite(&post["r2"]).unwrap_or_default()));
-    }
-    html.push_str("</table>");
-    Ok(html)
+            };
+            vec![
+                center.to_string(),
+                cell(pre),
+                cell(post),
+                fit(pre),
+                fit(post),
+            ]
+        })
+        .collect();
+    blocks.push(Table(ReportTable {
+        title: "Per-band T30/T20 estimates from matched IR captures".into(),
+        note: String::new(),
+        columns: [
+            "Hz",
+            "Baseline T60 (s)",
+            "Candidate T60 (s)",
+            "Baseline fit",
+            "Candidate fit",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        rows,
+    }));
+    Ok(blocks)
 }
 
-fn capture_room_mean_t60_html(groups: &[(String, String, Value)]) -> String {
-    let mut html = String::new();
+fn capture_room_mean_t60_blocks(groups: &[(String, String, Value)]) -> Vec<DiagnosticBlock> {
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph, Table};
+    let mut blocks = Vec::new();
     let mut keys = Vec::<String>::new();
     for (key, _, _) in groups {
         if !keys.contains(key) {
@@ -1560,7 +1669,6 @@ fn capture_room_mean_t60_html(groups: &[(String, String, Value)]) -> String {
         if sources.len() < 2 || sources.len() != entries.len() {
             continue;
         }
-        let first = &entries[0].2;
         let mut averages = [[(None, 0usize); 9]; 2];
         for (side_index, average_side) in averages.iter_mut().enumerate() {
             let side = if side_index == 0 { "pre" } else { "post" };
@@ -1583,7 +1691,14 @@ fn capture_room_mean_t60_html(groups: &[(String, String, Value)]) -> String {
         let seat = key.split('|').next().unwrap_or_default();
         let kind = key.split('|').nth(1).unwrap_or_default();
         let rate = key.split('|').nth(4).unwrap_or("0");
-        html.push_str(&format!("<h3>Capture room mean octave T60: {}</h3><p>{}; {} distinct sources with matching declared settings, {} Hz sample rate, and capture band ({}). Means include accepted T30/T20 fits only. Counts vary by band. This advisory average does not establish a passive-room damping change.</p>", escape_html(seat.trim_matches('"')), escape_html(kind.trim_matches('"')), sources.len(), rate, escape_html(&sources.iter().cloned().collect::<Vec<_>>().join(", "))));
+        blocks.push(Heading(format!(
+            "Capture room mean octave T60: {}",
+            seat.trim_matches('"')
+        )));
+        blocks.push(Paragraph(format!(
+            "{}; {} distinct sources with matching declared settings, {rate} Hz sample rate, and capture band ({}). Means include accepted T30/T20 fits only. Counts vary by band. This advisory average does not establish a passive-room damping change.",
+            kind.trim_matches('"'), sources.len(), sources.iter().cloned().collect::<Vec<_>>().join(", "),
+        )));
         if averages.iter().flatten().any(|(value, _)| value.is_some()) {
             let mut series = Vec::new();
             for (side_index, label, color) in
@@ -1591,27 +1706,48 @@ fn capture_room_mean_t60_html(groups: &[(String, String, Value)]) -> String {
             {
                 series.push(json!({"name":label,"x":centers,"y":averages[side_index].iter().map(|(v,_)| v.map(Value::from).unwrap_or(Value::Null)).collect::<Vec<_>>(),"color":color,"width":2.0,"dash":"solid","visible":true,"y_axis":0}));
             }
-            html.push_str(&embedded_report_figure(&json!({"kind":"figure","figure":{"title":"Capture room mean octave T60","x":{"label":"Frequency (Hz)","scale":"log","min":null,"max":null},"y":{"label":"T60 (s)","scale":"linear","min":null,"max":null},"y2":null,"series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null})));
+            blocks.push(CaptureChart(json!({"kind":"figure","figure":{"title":"Capture room mean octave T60","x":{"label":"Frequency (Hz)","scale":"log","min":null,"max":null},"y":{"label":"T60 (s)","scale":"linear","min":null,"max":null},"y2":null,"series":series,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null})));
         }
-        html.push_str("<table><caption>Accepted source fits; n is the number of contributing sources</caption><tr><th>Hz</th><th>Baseline mean (s)</th><th>Baseline n</th><th>Candidate mean (s)</th><th>Candidate n</th></tr>");
-        for (index, center) in centers.iter().enumerate() {
-            let (pre, pre_n) = averages[0][index];
-            let (post, post_n) = averages[1][index];
-            let pre = pre
-                .map(|v| format!("{v:.3}"))
-                .unwrap_or_else(|| "n/a".into());
-            let post = post
-                .map(|v| format!("{v:.3}"))
-                .unwrap_or_else(|| "n/a".into());
-            html.push_str(&format!("<tr><td>{center}</td><td>{pre}</td><td>{pre_n}</td><td>{post}</td><td>{post_n}</td></tr>"));
-        }
-        html.push_str("</table>");
-        let _ = first;
+        let rows = centers
+            .iter()
+            .enumerate()
+            .map(|(index, center)| {
+                let (pre, pre_n) = averages[0][index];
+                let (post, post_n) = averages[1][index];
+                let pre = pre
+                    .map(|v| format!("{v:.3}"))
+                    .unwrap_or_else(|| "n/a".into());
+                let post = post
+                    .map(|v| format!("{v:.3}"))
+                    .unwrap_or_else(|| "n/a".into());
+                vec![
+                    center.to_string(),
+                    pre,
+                    pre_n.to_string(),
+                    post,
+                    post_n.to_string(),
+                ]
+            })
+            .collect();
+        blocks.push(Table(ReportTable {
+            title: "Accepted source fits; n is the number of contributing sources".into(),
+            note: String::new(),
+            columns: [
+                "Hz",
+                "Baseline mean (s)",
+                "Baseline n",
+                "Candidate mean (s)",
+                "Candidate n",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            rows,
+        }));
     }
-    html
+    blocks
 }
 
-fn capture_decay_html(view: &Value, graph: &str) -> Result<String, String> {
+fn capture_decay_blocks(view: &Value, graph: &str) -> Result<Vec<DiagnosticBlock>, String> {
     if view["provenance"]["graph_identity"] != graph
         || view["method"] != "finite_window_octave_schroeder_v1"
     {
@@ -1622,18 +1758,22 @@ fn capture_decay_html(view: &Value, graph: &str) -> Result<String, String> {
         .filter(|bands| !bands.is_empty())
         .ok_or("missing decay bands")?;
     let scope = view["scope"].as_str().ok_or("invalid decay scope")?;
-    let mut html = format!(
-        "<h3>Matched octave decay</h3><p>{}</p><p>Finite-window T20 slope extrapolation, not passive-room RT. Noise-window and fit budgets are operator declarations: {}</p>",
-        escape_html(scope),
-        escape_html(&python_repr(&view["settings"]))
-    );
+    use DiagnosticBlock::{Heading, Paragraph};
+    let mut blocks = vec![
+        Heading("Matched octave decay".into()),
+        Paragraph(scope.into()),
+        Paragraph(format!(
+            "Finite-window T20 slope extrapolation, not passive-room RT. Noise-window and fit budgets are operator declarations: {}",
+            python_repr(&view["settings"])
+        )),
+    ];
     for band in bands {
         let center = finite(&band["center_hz"]).ok_or("unsupported decay octave")?;
         if ![63.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 4000.0].contains(&center) {
             return Err("unsupported decay octave".into());
         }
         let trace = json!({"times_ms":band["times_ms"],"pre_decay":band["pre_db"],"post_decay":band["post_db"]});
-        html.push_str(&capture_trace_figure(
+        blocks.push(capture_trace_figure(
             &trace,
             "decay",
             "dB relative to the same baseline-band integrated energy",
@@ -1644,28 +1784,24 @@ fn capture_decay_html(view: &Value, graph: &str) -> Result<String, String> {
         )?);
         if !band["post_normalized_db"].is_null() {
             let normalized = json!({"times_ms":band["times_ms"],"pre_decay":band["pre_normalized_db"],"post_decay":band["post_normalized_db"]});
-            html.push_str(&capture_trace_figure(
+            blocks.push(capture_trace_figure(
                 &normalized,
                 "decay",
                 "dB relative to each capture’s own initial band energy",
                 &format!("Normalized decay {} Hz", python_number(&band["center_hz"])),
             )?);
         } else {
-            html.push_str(
-                "<p>Candidate normalized decay unavailable: no nonzero energy reference.</p>",
-            );
+            blocks.push(Paragraph(
+                "Candidate normalized decay unavailable: no nonzero energy reference.".into(),
+            ));
         }
         for prefix in ["pre", "post"] {
             let fit = &band[format!("{prefix}_fit")];
             if fit.is_null() {
-                html.push_str(&format!(
-                    "<p>{prefix} fit unavailable: {}</p>",
-                    escape_html(
-                        band[format!("{prefix}_fit_unavailable")]
-                            .as_str()
-                            .unwrap_or("unspecified")
-                    )
-                ));
+                let reason = band[format!("{prefix}_fit_unavailable")]
+                    .as_str()
+                    .unwrap_or("unspecified");
+                blocks.push(Paragraph(format!("{prefix} fit unavailable: {reason}")));
             } else {
                 let seconds = finite(&fit["extrapolated_60_db_seconds"])
                     .filter(|v| *v > 0.0)
@@ -1673,14 +1809,14 @@ fn capture_decay_html(view: &Value, graph: &str) -> Result<String, String> {
                 let r2 = finite(&fit["r_squared"])
                     .filter(|v| (0.0..=1.0).contains(v))
                     .ok_or("invalid decay fit")?;
-                html.push_str(&format!("<p>{prefix} finite-window extrapolation: {seconds:.4} s; R²={r2:.4}; fit diagnostics: {}</p>", escape_html(&python_json(fit))));
+                blocks.push(Paragraph(format!("{prefix} finite-window extrapolation: {seconds:.4} s; R²={r2:.4}; fit diagnostics: {}", python_json(fit))));
             }
         }
     }
-    Ok(html)
+    Ok(blocks)
 }
 
-fn capture_waterfall_html(view: &Value) -> Result<String, String> {
+fn capture_waterfall_blocks(view: &Value) -> Result<Vec<DiagnosticBlock>, String> {
     if view["method"] != "hann_stft_waterfall_v1"
         || view["reference"] != "each_full_grid_peak"
         || finite(&view["window_ms"]) != Some(32.0)
@@ -1701,12 +1837,16 @@ fn capture_waterfall_html(view: &Value) -> Result<String, String> {
     let scope = view["scope"]
         .as_str()
         .ok_or("invalid capture waterfall scope")?;
-    let mut html = format!(
-        "<h3>Captured IR waterfall and resonance decay</h3><p>{}</p><p>Declared supported band: {}–{} Hz. Each grid is referenced to its own full-grid peak; colors and levels do not compare absolute output between captures.</p>",
-        escape_html(scope),
-        python_number(&band[0]),
-        python_number(&band[1])
-    );
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph, Subheading, Table};
+    let mut blocks = vec![
+        Heading("Captured IR waterfall and resonance decay".into()),
+        Paragraph(scope.into()),
+        Paragraph(format!(
+            "Declared supported band: {}–{} Hz. Each grid is referenced to its own full-grid peak; colors and levels do not compare absolute output between captures.",
+            python_number(&band[0]),
+            python_number(&band[1]),
+        )),
+    ];
     for (side, label) in [("pre", "Baseline"), ("post", "Candidate")] {
         let grid = &view[side]["grid"];
         let times = grid["times_ms"]
@@ -1798,7 +1938,7 @@ fn capture_waterfall_html(view: &Value) -> Result<String, String> {
             .collect::<Vec<_>>();
         let highlight_series = ranked.iter().take(2).map(|(_, row)| {
             let frequency = finite(&row["freq_hz"]).unwrap_or_default();
-            json!({"name":format!("{frequency:.1} Hz"),"x":[],"y":[],"color":resonance_color(frequency),"width":2.0,"dash":"solid","visible":true,"y_axis":0})
+            json!({"name":format!("{frequency:.1} Hz"),"x":[],"y":[],"color":format!("#{:06x}", resonance_color(frequency)),"width":2.0,"dash":"solid","visible":true,"y_axis":0})
         }).collect::<Vec<_>>();
         let grid_figure = json!({
             "kind":"grid",
@@ -1811,27 +1951,39 @@ fn capture_waterfall_html(view: &Value) -> Result<String, String> {
             "grid":{"x":freqs,"y":times,"z":z,"surface":true,"zmin":-60,"zmax":0,"highlights":highlights,"colormap":"turbo","show_surface":false,"show_contours":true},
             "tab":null
         });
-        html.push_str(&format!("<h4>{label}</h4>{}<table><caption>Detected 60 ms peaks and fitted 20–200 ms decay</caption><tr><th>Frequency (Hz)</th><th>Level (dB re own grid peak)</th><th>Fitted decay (s)</th></tr>",embedded_report_figure(&grid_figure)));
-        for r in resonances {
-            let freq = finite(&r["freq_hz"]).unwrap_or_default();
-            let level = finite(&r["level_db"]).unwrap_or_default();
-            let decay = finite(&r["decay_time_s"])
-                .map(|v| python_general(v, 3))
-                .unwrap_or_else(|| "unavailable".into());
-            html.push_str(&format!(
-                "<tr><td>{}</td><td>{level:.2}</td><td>{decay}</td></tr>",
-                python_general(freq, 3)
-            ));
-        }
-        html.push_str("</table>");
+        blocks.push(Subheading(label.into()));
+        blocks.push(CaptureChart(grid_figure));
+        let rows = resonances
+            .iter()
+            .map(|resonance| {
+                let freq = finite(&resonance["freq_hz"]).unwrap_or_default();
+                let level = finite(&resonance["level_db"]).unwrap_or_default();
+                let decay = finite(&resonance["decay_time_s"])
+                    .map(|value| python_general(value, 3))
+                    .unwrap_or_else(|| "unavailable".into());
+                vec![python_general(freq, 3), format!("{level:.2}"), decay]
+            })
+            .collect();
+        blocks.push(Table(ReportTable {
+            title: "Detected 60 ms peaks and fitted 20–200 ms decay".into(),
+            note: String::new(),
+            columns: [
+                "Frequency (Hz)",
+                "Level (dB re own grid peak)",
+                "Fitted decay (s)",
+            ]
+            .map(str::to_owned)
+            .to_vec(),
+            rows,
+        }));
         if !ranked.is_empty() {
-            html.push_str("<p>Highlighted: up to two longest fitted decays, then strongest 60 ms peak. Curves retain the full-grid peak reference; no fitted intercept is exported, so no extrapolated fit line is invented.</p>");
+            blocks.push(Paragraph("Highlighted: up to two longest fitted decays, then strongest 60 ms peak. Curves retain the full-grid peak reference; no fitted intercept is exported, so no extrapolated fit line is invented.".into()));
             let selected = ranked.iter().take(2).map(|(_, row)| {
                 let frequency = finite(&row["freq_hz"]).unwrap_or_default();
                 let label = finite(&row["decay_time_s"])
                     .map(|decay| format!("{frequency:.1} Hz — T60 {decay:.3} s"))
                     .unwrap_or_else(|| format!("{frequency:.1} Hz"));
-                let color = resonance_color(frequency);
+                let color = format!("#{:06x}", resonance_color(frequency));
                 let index = f.iter().enumerate().min_by(|(_, left), (_, right)| {
                     (*left - frequency).abs().total_cmp(&(*right - frequency).abs())
                 }).map(|(index, _)| index).unwrap_or_default();
@@ -1842,13 +1994,13 @@ fn capture_waterfall_html(view: &Value) -> Result<String, String> {
                 json!({"name":label,"x":t,"y":values,"color":color,"width":2.0,"dash":"solid","visible":true,"y_axis":0})
             }).collect::<Vec<_>>();
             let figure = json!({"kind":"figure","figure":{"title":format!("{label}: decay of highlighted resonances"),"x":{"label":"Time from broadband peak (ms)","scale":"linear","min":0,"max":500},"y":{"label":"Level relative to full grid peak (dB)","scale":"linear","min":-60,"max":0},"y2":null,"series":selected,"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null});
-            html.push_str(&embedded_report_figure(&figure));
+            blocks.push(CaptureChart(figure));
         }
     }
-    Ok(html)
+    Ok(blocks)
 }
 
-fn capture_wavelet_html(view: &Value) -> Result<String, String> {
+fn capture_wavelet_blocks(view: &Value) -> Result<Vec<DiagnosticBlock>, String> {
     if view["method"] != "complex_morlet_three_cycle_v1"
         || view["reference"] != "each_full_grid_peak"
         || finite(&view["cycles"]) != Some(3.0)
@@ -1870,10 +2022,12 @@ fn capture_wavelet_html(view: &Value) -> Result<String, String> {
     let scope = view["scope"]
         .as_str()
         .ok_or("invalid capture wavelet scope")?;
-    let mut html = format!(
-        "<h3>Captured IR three-cycle wavelet</h3><p>{}</p><p>Blue = −30 dB, red = 0 dB relative to each capture’s own full wavelet-grid peak. Colors do not compare absolute output levels.</p>",
-        escape_html(scope)
-    );
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph};
+    let mut blocks = vec![
+        Heading("Captured IR three-cycle wavelet".into()),
+        Paragraph(scope.into()),
+        Paragraph("Blue = −30 dB, red = 0 dB relative to each capture’s own full wavelet-grid peak. Colors do not compare absolute output levels.".into()),
+    ];
     for (side, _label) in [("pre", "Baseline"), ("post", "Candidate")] {
         let grid = &view[side];
         let freqs = grid["freqs_hz"]
@@ -1919,7 +2073,7 @@ fn capture_wavelet_html(view: &Value) -> Result<String, String> {
             .iter()
             .filter(|time| **time >= -1.0 && **time <= 15.0)
             .count();
-        html.push_str(&format!("<p>Three-cycle wavelet; first 15 ms ({early_count} exported time samples). Log-frequency x-axis, time y-axis. Colours retain the full-grid peak reference. The cyan dashed ridge marks peak energy arrival time per frequency. Display cells reflect the exported sampling; zoom cannot restore omitted samples.</p>"));
+        blocks.push(Paragraph(format!("Three-cycle wavelet; first 15 ms ({early_count} exported time samples). Log-frequency x-axis, time y-axis. Colours retain the full-grid peak reference. The cyan dashed ridge marks peak energy arrival time per frequency. Display cells reflect the exported sampling; zoom cannot restore omitted samples.")));
         let time_major = (0..times.len())
             .map(|time| {
                 (0..freqs.len())
@@ -1938,12 +2092,12 @@ fn capture_wavelet_html(view: &Value) -> Result<String, String> {
             "grid":{"x":freqs,"y":times,"z":time_major,"surface":false,"zmin":-30,"zmax":0,"highlights":[]},
             "tab":null
         });
-        html.push_str(&embedded_report_figure(&grid_figure));
+        blocks.push(CaptureChart(grid_figure));
     }
-    Ok(html)
+    Ok(blocks)
 }
 
-fn capture_noise_html(view: &Value, graph: &str) -> Result<String, String> {
+fn capture_noise_blocks(view: &Value, graph: &str) -> Result<Vec<DiagnosticBlock>, String> {
     let analysis = &view["analysis"];
     if analysis["method"] != "periodic_hann_welch_pressure_v1"
         || analysis["spectrum"]["provenance"]["graph_identity"] != graph
@@ -1980,16 +2134,22 @@ fn capture_noise_html(view: &Value, graph: &str) -> Result<String, String> {
     let scope = analysis["scope"]
         .as_str()
         .ok_or("invalid calibrated noise scope")?;
-    let mut html = format!(
-        "<h3>Calibrated ambient noise</h3><p>{}; {}</p><p>{}</p><p>Observation: {} s; bin spacing: {} Hz; Hann ENBW: {} Hz. Bin spacing is not resolving power. No self-noise subtraction.</p><details><summary>Numeric calibration and acquisition limitations</summary><pre>{}</pre></details>",
-        escape_html(kind),
-        escape_html(conditions),
-        escape_html(scope),
-        escape_html(&python_json(&analysis["duration_seconds"])),
-        escape_html(&python_json(&analysis["bin_spacing_hz"])),
-        escape_html(&python_json(&analysis["window_enbw_hz"])),
-        escape_html(&serde_json::to_string_pretty(&analysis["calibration"]).unwrap_or_default())
-    );
+    use DiagnosticBlock::{CaptureChart, Heading, Paragraph, PreformattedDisclosure, Table};
+    let mut blocks = vec![
+        Heading("Calibrated ambient noise".into()),
+        Paragraph(format!("{kind}; {conditions}")),
+        Paragraph(scope.into()),
+        Paragraph(format!(
+            "Observation: {} s; bin spacing: {} Hz; Hann ENBW: {} Hz. Bin spacing is not resolving power. No self-noise subtraction.",
+            python_json(&analysis["duration_seconds"]),
+            python_json(&analysis["bin_spacing_hz"]),
+            python_json(&analysis["window_enbw_hz"]),
+        )),
+        PreformattedDisclosure {
+            title: "Numeric calibration and acquisition limitations".into(),
+            text: serde_json::to_string_pretty(&analysis["calibration"]).unwrap_or_default(),
+        },
+    ];
     let levels = p
         .iter()
         .map(|v| {
@@ -2003,9 +2163,9 @@ fn capture_noise_html(view: &Value, graph: &str) -> Result<String, String> {
     let positive = levels.iter().any(Option::is_some);
     if positive {
         let figure = json!({"kind":"figure","figure":{"title":"Calibrated ambient pressure PSD","x":{"label":"Frequency (Hz)","scale":"log","min":null,"max":null},"y":{"label":"dB re (20 µPa)²/Hz","scale":"linear","min":null,"max":null},"y2":null,"series":[{"name":"Pressure PSD","x":x,"y":levels,"color":"#2864b4","width":2.0,"dash":"solid","visible":true,"y_axis":0}],"hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true},"tab":null});
-        html.push_str(&embedded_report_figure(&figure));
+        blocks.push(CaptureChart(figure));
     } else {
-        html.push_str("<p>No finite noise SPL: all estimated supported powers are zero. This is not proof of a noiseless room.</p>");
+        blocks.push(Paragraph("No finite noise SPL: all estimated supported powers are zero. This is not proof of a noiseless room.".into()));
     }
     let spectrum = &analysis["spectrum"];
     let centers = spectrum["freqs"]
@@ -2027,7 +2187,7 @@ fn capture_noise_html(view: &Value, graph: &str) -> Result<String, String> {
     {
         return Err("invalid noise octave arrays".into());
     }
-    html.push_str("<table><caption>FFT-bin-summed nominal octave levels, unweighted dB SPL re 20 µPa; not certified octave filters</caption><tr><th>Center (Hz)</th><th>Nominal band (Hz)</th><th>Summed bin centers (Hz)</th><th>dB SPL</th></tr>");
+    let mut rows = Vec::new();
     for i in 0..centers.len() {
         let level = finite(&db[i]).ok_or("invalid noise octave arrays")?;
         let edge = edges[i]
@@ -2051,27 +2211,28 @@ fn capture_noise_html(view: &Value, graph: &str) -> Result<String, String> {
         {
             return Err("invalid noise octave support".into());
         }
-        html.push_str(&format!(
-            "<tr><td>{}</td><td>{}–{}</td><td>{}–{}</td><td>{}</td></tr>",
+        rows.push(vec![
             python_general(finite(&centers[i]).unwrap_or_default(), 6),
-            python_general(elo, 4),
-            python_general(ehi, 4),
-            python_general(blo, 4),
-            python_general(bhi, 4),
-            python_general(level, 4)
-        ));
+            format!("{}–{}", python_general(elo, 4), python_general(ehi, 4)),
+            format!("{}–{}", python_general(blo, 4), python_general(bhi, 4)),
+            python_general(level, 4),
+        ]);
     }
-    html.push_str("</table>");
+    blocks.push(Table(ReportTable {
+        title: "FFT-bin-summed nominal octave levels, unweighted dB SPL re 20 µPa; not certified octave filters".into(),
+        note: String::new(),
+        columns: ["Center (Hz)", "Nominal band (Hz)", "Summed bin centers (Hz)", "dB SPL"].map(str::to_owned).to_vec(),
+        rows,
+    }));
     if let Some(unavailable) = analysis["unavailable_bands"].as_object() {
         for (band, reason) in unavailable {
-            html.push_str(&format!(
-                "<p>Noise {} Hz unavailable: {}</p>",
-                escape_html(band),
-                escape_html(&python_string(reason))
-            ));
+            blocks.push(Paragraph(format!(
+                "Noise {band} Hz unavailable: {}",
+                python_string(reason)
+            )));
         }
     }
-    Ok(html)
+    Ok(blocks)
 }
 
 fn finite_values(values: &[Value]) -> Option<Vec<f64>> {
@@ -2161,7 +2322,7 @@ fn python_repr(value: &Value) -> String {
     }
 }
 
-fn json_python_separators(value: &Value) -> String {
+pub(crate) fn json_python_separators(value: &Value) -> String {
     let compact = serde_json::to_string(value).unwrap_or_else(|_| "null".into());
     let mut result = String::with_capacity(compact.len() + compact.len() / 8);
     let mut in_string = false;
@@ -2189,7 +2350,7 @@ fn json_python_separators(value: &Value) -> String {
     result
 }
 
-fn magnitude_figure_html(view: &Value, label: &str) -> Result<String, String> {
+fn acceptance_magnitude_figure(view: &Value, label: &str) -> Result<Value, String> {
     let frequencies = view["freqs"]
         .as_array()
         .ok_or("magnitude traces are missing")?;
@@ -2237,7 +2398,7 @@ fn magnitude_figure_html(view: &Value, label: &str) -> Result<String, String> {
     let axis =
         |label: &str, scale: &str| json!({"label":label,"scale":scale,"min":null,"max":null});
     let series = |name: &str, values: &[f64], color: &str| json!({"name":name,"x":x,"y":values,"color":color,"width":2.0,"dash":"solid","visible":true,"y_axis":0});
-    let figure = json!({
+    Ok(json!({
         "kind":"figure",
         "figure":{
             "title":label,
@@ -2248,31 +2409,32 @@ fn magnitude_figure_html(view: &Value, label: &str) -> Result<String, String> {
             "hlines":[],"vlines":[],"xranges":[],"annotations":[],"legend":true
         },
         "tab":null
-    });
-    Ok(format!(
-        "<div class=\"report-figure\" data-section=\"{}\"></div>",
-        escape_html(&json_python_separators(&figure))
-    ))
+    }))
 }
 
 fn acceptance_views_html(request: &Value) -> String {
+    section_fragment(acceptance_views_section(request))
+        .expect("acceptance views are serialized by AutoEQ")
+}
+
+fn acceptance_views_section(request: &Value) -> Value {
+    use DiagnosticBlock::{AcceptanceChart, EvidenceList, Heading, Paragraph};
     let data = &request["data"];
     let label = request["label"].as_str().unwrap_or_default();
-    let heading = labelled_heading("Acceptance diagnostics", label);
-    let start = format!(
-        "<section class=\"acceptance-views\"><h2>{}</h2>",
-        escape_html(&heading)
-    );
-    let unavailable = |reason: &str| {
-        format!(
-            "{start}<p>Unavailable: {}</p></section>",
-            escape_html(reason)
-        )
+    let section = |blocks: Vec<DiagnosticBlock>| {
+        let mut section = diagnostic_section(blocks);
+        section["introduction"] = json!(DiagnosticIntroduction {
+            title: labelled_heading("Acceptance diagnostics", label),
+            text: String::new(),
+            style: DiagnosticSectionStyle::AcceptanceViews,
+        });
+        section
     };
+    let unavailable = |reason: &str| section(vec![Paragraph(format!("Unavailable: {reason}"))]);
     let evidence = &data["correction_decisions"]["acceptance_evidence"];
     if evidence.is_null() {
-        return format!(
-            "{start}<p>Unavailable: no production acceptance views were recorded (legacy or unfinalized output).</p></section>"
+        return unavailable(
+            "no production acceptance views were recorded (legacy or unfinalized output).",
         );
     }
     if request["binding_verified"] != true {
@@ -2311,10 +2473,9 @@ fn acceptance_views_html(request: &Value) -> String {
     {
         return unavailable("acceptance diagnostics do not cover the delivered channel set");
     }
-    let mut parts = vec![
-        start.clone(),
-        "<p>Retained predictions and serialized DSP controls—not recorded playback, physical safety certification, or demonstrated listener benefit. Existing measurement conditioning is retained; additional smoothing cannot recover raw detail.</p>".into(),
-        format!("<p>Graph: {}</p>", escape_html(graph_identity)),
+    let mut blocks = vec![
+        Paragraph("Retained predictions and serialized DSP controls—not recorded playback, physical safety certification, or demonstrated listener benefit. Existing measurement conditioning is retained; additional smoothing cannot recover raw detail.".into()),
+        Paragraph(format!("Graph: {graph_identity}")),
     ];
     for (channel, entry) in channels {
         if entry["source_id"].as_str() != Some(channel)
@@ -2322,16 +2483,12 @@ fn acceptance_views_html(request: &Value) -> String {
         {
             return unavailable("unsupported source or evidence classification");
         }
-        parts.push(format!("<h3>{}</h3>", escape_html(channel)));
-        parts.push(format!(
-            "<p>Seat provenance: {}</p>",
-            escape_html(
-                entry
-                    .get("seat_provenance")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unavailable")
-            )
-        ));
+        blocks.push(Heading(channel.clone()));
+        let seat = entry
+            .get("seat_provenance")
+            .and_then(Value::as_str)
+            .unwrap_or("unavailable");
+        blocks.push(Paragraph(format!("Seat provenance: {seat}")));
         let Some(bundle) = entry.get("bundle").filter(|value| value.is_object()) else {
             return unavailable("acceptance bundle is missing or malformed");
         };
@@ -2345,12 +2502,9 @@ fn acceptance_views_html(request: &Value) -> String {
         let Some(window) = settings["window"].as_str() else {
             return unavailable("acceptance window is missing or malformed");
         };
-        parts.push(format!(
-            "<p>Rate: {} Hz; levels: {}; window: {}</p>",
-            escape_html(&rate),
-            escape_html(normalization),
-            escape_html(window)
-        ));
+        blocks.push(Paragraph(format!(
+            "Rate: {rate} Hz; levels: {normalization}; window: {window}"
+        )));
         for (key, title, view) in [
             (
                 "magnitude",
@@ -2367,8 +2521,8 @@ fn acceptance_views_html(request: &Value) -> String {
                 if view["provenance"]["graph_identity"] != graph_identity {
                     return unavailable(&format!("{key} graph provenance mismatch"));
                 }
-                match magnitude_figure_html(view, title) {
-                    Ok(html) => parts.push(html),
+                match acceptance_magnitude_figure(view, title) {
+                    Ok(chart) => blocks.push(AcceptanceChart(chart)),
                     Err(error) => return unavailable(&error),
                 }
             }
@@ -2378,37 +2532,40 @@ fn acceptance_views_html(request: &Value) -> String {
             if disposition["graph_identity"] != graph_identity {
                 return unavailable("DSP disposition graph identity mismatch");
             }
-            parts.push(
-                "<p>Serialized DSP disposition (not calibrated output capability):</p><ul>".into(),
-            );
-            if let Some(controls) = disposition["channels"].as_array() {
-                for control in controls {
-                    let text = format!(
+            blocks.push(Paragraph(
+                "Serialized DSP disposition (not calibrated output capability):".into(),
+            ));
+            let controls = disposition["channels"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|control| {
+                    format!(
                         "{}: gain {} dB; delay {} ms; inverted {}",
                         python_string(&control["channel"]),
                         python_string(&control["gain_db"]),
                         python_string(&control["delay_ms"]),
-                        python_string(&control["inverted"])
-                    );
-                    parts.push(format!("<li>{}</li>", escape_html(&text)));
-                }
-            }
-            parts.push("</ul>".into());
+                        python_string(&control["inverted"]),
+                    )
+                })
+                .collect();
+            blocks.push(EvidenceList(controls));
         }
-        parts.push("<p>Unavailable evidence:</p><ul>".into());
-        let Some(unavailable) = entry.get("unavailable").and_then(Value::as_object) else {
+        let Some(inventory) = entry.get("unavailable").and_then(Value::as_object) else {
             return unavailable("acceptance unavailable-view inventory is missing or malformed");
         };
-        for (view, reason) in unavailable {
-            parts.push(format!(
-                "<li>{}: {}</li>",
-                escape_html(view),
-                escape_html(&python_string(reason))
-            ));
-        }
-        parts.push("</ul><p>No complete acoustic/headroom acceptance is established by these diagnostics.</p>".into());
+        blocks.push(Paragraph("Unavailable evidence:".into()));
+        blocks.push(EvidenceList(
+            inventory
+                .iter()
+                .map(|(view, reason)| format!("{view}: {}", python_string(reason)))
+                .collect(),
+        ));
+        blocks.push(Paragraph(
+            "No complete acoustic/headroom acceptance is established by these diagnostics.".into(),
+        ));
     }
-    format!("{}</section>", parts.join(""))
+    section(blocks)
 }
 
 fn evidence_band(value: &Value) -> Option<(f64, f64)> {
@@ -2457,17 +2614,6 @@ fn evidence_band_label(band: (f64, f64)) -> String {
     )
 }
 
-fn evidence_row(rows: &mut String, cells: &[String]) {
-    rows.push_str("<tr>");
-    for cell in cells {
-        rows.push_str(&format!(
-            "<td style=\"padding:8px;border-bottom:1px solid #ddd;vertical-align:top\">{}</td>",
-            escape_html(cell)
-        ));
-    }
-    rows.push_str("</tr>");
-}
-
 fn quantity(value: &Value, unit: &str) -> Option<String> {
     finite(value).map(|number| {
         format!("{} {unit}", format_general(number, 6))
@@ -2476,13 +2622,13 @@ fn quantity(value: &Value, unit: &str) -> Option<String> {
     })
 }
 
-fn verification_html(metadata: &Value) -> String {
+fn verification_items(metadata: &Value) -> Vec<String> {
     let comparisons = metadata
         .get("playback_comparisons")
         .filter(|value| value.as_array().is_some_and(|items| !items.is_empty()))
         .unwrap_or(&metadata["verification"]);
     let Some(comparisons) = comparisons.as_array().filter(|items| !items.is_empty()) else {
-        return String::new();
+        return Vec::new();
     };
     let kind_text = [
         ("stationary_ir", "acoustic capture"),
@@ -2555,16 +2701,7 @@ fn verification_html(metadata: &Value) -> String {
             listening["protocol_id"].as_str().filter(|value| !value.is_empty()).unwrap_or("unstated protocol")
         ));
     }
-    if items.is_empty() {
-        return String::new();
-    }
-    format!(
-        "<h3>Recorded playback and listening verification</h3><ul>{}</ul>",
-        items
-            .iter()
-            .map(|item| format!("<li>{}</li>", escape_html(item)))
-            .collect::<String>()
-    )
+    items
 }
 
 fn measurement_conditioning_history(stage: &Value) -> Vec<String> {
@@ -2646,14 +2783,9 @@ fn measurement_conditioning_history(stage: &Value) -> Vec<String> {
     details
 }
 
-fn output_loss_html(quality: &Value) -> String {
-    let Some(entries) = quality["useful_output"]
-        .as_array()
-        .filter(|items| !items.is_empty())
-    else {
-        return String::new();
-    };
-    let mut rows = String::new();
+fn output_loss_table(quality: &Value) -> Option<ReportTable> {
+    let entries = quality["useful_output"].as_array()?;
+    let mut rows = Vec::new();
     for entry in entries {
         if !entry.is_object() {
             continue;
@@ -2691,14 +2823,14 @@ fn output_loss_html(quality: &Value) -> String {
             }
         }
         detail.push_str(" Raw output evidence; display normalization cannot hide this loss.");
-        evidence_row(&mut rows, &[scope, detail]);
+        rows.push(vec![scope, detail]);
     }
-    if rows.is_empty() {
-        return String::new();
-    }
-    format!(
-        "<h3>Recorded raw output loss (unnormalized)</h3><div style=\"overflow-x:auto\"><table style=\"width:100%;border-collapse:collapse;text-align:left\"><thead><tr><th>Seat</th><th>Recorded loss</th></tr></thead><tbody>{rows}</tbody></table></div>"
-    )
+    (!rows.is_empty()).then(|| ReportTable {
+        title: "Recorded raw output loss (unnormalized)".into(),
+        note: String::new(),
+        columns: ["Seat", "Recorded loss"].map(str::to_owned).to_vec(),
+        rows,
+    })
 }
 
 fn k4_frequency_text(record: &Value) -> String {
@@ -2888,13 +3020,17 @@ fn k4_reason_text(record: &Value) -> String {
     reason
 }
 
-fn k4_section_html(data: &Value, verified: bool, binding_reason: &str) -> (String, Vec<String>) {
+fn correction_ledger(
+    data: &Value,
+    verified: bool,
+    binding_reason: &str,
+) -> (Vec<DiagnosticBlock>, Vec<String>) {
     let ledger = &data["correction_decisions"];
     let Some(decisions) = ledger["decisions"]
         .as_array()
         .filter(|items| !items.is_empty())
     else {
-        return (String::new(), Vec::new());
+        return (Vec::new(), Vec::new());
     };
     let metadata = &data["metadata"];
     let acceptance = &metadata["correction_acceptance"];
@@ -2925,7 +3061,7 @@ fn k4_section_html(data: &Value, verified: bool, binding_reason: &str) -> (Strin
             .iter()
             .any(|record| record["final_graph_identity"].as_str() != Some(payload_identity))
         || delivered.is_some_and(|value| value != payload_identity);
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     let mut history = Vec::new();
     for record in decisions {
         if !record.is_object() {
@@ -2979,14 +3115,10 @@ fn k4_section_html(data: &Value, verified: bool, binding_reason: &str) -> (Strin
                 reason.push_str(" Unverified: record identity does not match the recorded delivered graph; not displayed as applied.");
             }
         }
-        evidence_row(&mut rows, &[scope, frequency, decision, reason]);
+        rows.push(vec![scope, frequency, decision, reason]);
     }
     if rows.is_empty() && history.is_empty() {
-        return (String::new(), Vec::new());
-    }
-    let mut banner = format!("<p><strong>{}</strong></p>", escape_html(binding_reason));
-    if disagree {
-        banner.push_str("<p><strong>Final records disagree on the delivered-graph identity; this explanation is unverified and nothing below is shown as delivered.</strong></p>");
+        return (Vec::new(), Vec::new());
     }
     let statuses: [(&str, &[&str]); 3] = [
         ("applied", &["applied", "already_acceptable", "constrained"]),
@@ -3069,21 +3201,31 @@ fn k4_section_html(data: &Value, verified: bool, binding_reason: &str) -> (Strin
             } else {
                 format!(" Reasons: {}.", reasons.join(", "))
             };
-            format!(
-                "<li>{}</li>",
-                escape_html(&format!("{} {label} ({ids}).{why}", set_ids[*bucket].len()))
-            )
+            format!("{} {label} ({ids}).{why}", set_ids[*bucket].len())
         })
-        .collect::<String>();
-    let mut table = format!(
-        "<h3>Recorded final correction decisions</h3><h4>Final acceptance sets:</h4><ul class=\"acceptance-sets\">{summary_rows}</ul>{banner}"
-    );
-    if !rows.is_empty() {
-        table.push_str(&format!("<div style=\"overflow-x:auto\"><table style=\"width:100%;border-collapse:collapse;text-align:left\"><thead><tr><th>Channel / output / seat</th><th>Frequency</th><th>Decision</th><th>Why</th></tr></thead><tbody>{rows}</tbody></table></div>"));
-    } else {
-        table.push_str("<p>No final reconciled decisions recorded; provisional history below is not delivered correction.</p>");
+        .collect();
+    let mut blocks = vec![
+        DiagnosticBlock::Heading("Recorded final correction decisions".into()),
+        DiagnosticBlock::Subheading("Final acceptance sets:".into()),
+        DiagnosticBlock::AcceptanceSets(summary_rows),
+        DiagnosticBlock::Emphasis(binding_reason.into()),
+    ];
+    if disagree {
+        blocks.push(DiagnosticBlock::Emphasis("Final records disagree on the delivered-graph identity; this explanation is unverified and nothing below is shown as delivered.".into()));
     }
-    (table, history)
+    if rows.is_empty() {
+        blocks.push(DiagnosticBlock::Paragraph("No final reconciled decisions recorded; provisional history below is not delivered correction.".into()));
+    } else {
+        blocks.push(DiagnosticBlock::DecisionTable(ReportTable {
+            title: String::new(),
+            note: String::new(),
+            columns: ["Channel / output / seat", "Frequency", "Decision", "Why"]
+                .map(str::to_owned)
+                .to_vec(),
+            rows,
+        }));
+    }
+    (blocks, history)
 }
 
 fn correction_explanation_html(
@@ -3092,6 +3234,21 @@ fn correction_explanation_html(
     binding_verified: bool,
     binding_reason: &str,
 ) -> String {
+    section_fragment(correction_explanation_section(
+        data,
+        label,
+        binding_verified,
+        binding_reason,
+    ))
+    .expect("correction explanation is serialized by AutoEQ")
+}
+
+fn correction_explanation_section(
+    data: &Value,
+    label: &str,
+    binding_verified: bool,
+    binding_reason: &str,
+) -> Value {
     let metadata = &data["metadata"];
     let acceptance = &metadata["correction_acceptance"];
     let quality = &acceptance["acoustic_quality"];
@@ -3113,7 +3270,7 @@ fn correction_explanation_html(
             .unwrap_or(Value::Null),
     );
     observation = evidence_band(&quality["evaluated_band_hz"]).or(observation);
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     let outcome = acceptance["outcome"].as_str();
     let mut outcome_message = match outcome {
         Some("accepted") if acceptance["accepted"] != true || acceptance["decision"] != "accepted" => "The acceptance record is incomplete or inconsistent; final correction is not verified.".to_string(),
@@ -3135,20 +3292,15 @@ fn correction_explanation_html(
     if acceptance["decision"] == "identity_fallback" {
         outcome_message = "The final outcome is unchanged: it fell back to identity; no applied correction records can override that outcome. The fallback withheld correction; candidate records below are not delivered correction.".into();
     }
-    evidence_row(
-        &mut rows,
-        &[
-            "System".into(),
-            "All assessed frequencies".into(),
-            "Final outcome".into(),
-            outcome_message,
-        ],
-    );
+    rows.push(vec![
+        "System".into(),
+        "All assessed frequencies".into(),
+        "Final outcome".into(),
+        outcome_message,
+    ]);
     let correction = recorded.or(requested);
     if let Some(correction) = correction {
-        evidence_row(
-            &mut rows,
-            &[
+        rows.push(vec![
                 "System".into(),
                 evidence_band_label(correction),
                 "Correction scope".into(),
@@ -3157,12 +3309,11 @@ fn correction_explanation_html(
                 } else {
                     "The configuration permits response shaping in this band; it does not prove that every frequency was corrected.".into()
                 },
-            ],
-        );
+            ]);
         if let (Some(requested), Some(recorded)) = (requested, recorded)
             && requested != recorded
         {
-            evidence_row(&mut rows, &["System".into(), evidence_band_label(requested), "Requested scope".into(), "The requested correction band differs from the recorded active-correction band shown above.".into()]);
+            rows.push(vec!["System".into(), evidence_band_label(requested), "Requested scope".into(), "The requested correction band differs from the recorded active-correction band shown above.".into()]);
         }
         if let Some(observation) = observation {
             for outside in [
@@ -3170,12 +3321,12 @@ fn correction_explanation_html(
                 (correction.1.max(observation.0), observation.1),
             ] {
                 if outside.0 > 0.0 && outside.0 < outside.1 {
-                    evidence_row(&mut rows, &["System".into(), evidence_band_label(outside), "Outside correction scope".into(), "Excluded from the active correction band. Routing, crossovers, gain and filter tails can still affect playback here.".into()]);
+                    rows.push(vec!["System".into(), evidence_band_label(outside), "Outside correction scope".into(), "Excluded from the active correction band. Routing, crossovers, gain and filter tails can still affect playback here.".into()]);
                 }
             }
         }
     } else {
-        evidence_row(&mut rows, &["System".into(), "Frequency range unavailable".into(), "Scope not recorded".into(), "This output does not provide an explicit correction band. It is not inferred from the response curves.".into()]);
+        rows.push(vec!["System".into(), "Frequency range unavailable".into(), "Scope not recorded".into(), "This output does not provide an explicit correction band. It is not inferred from the response curves.".into()]);
     }
     if let Some(seats) = quality["final_seats"].as_array() {
         for seat in seats {
@@ -3189,17 +3340,17 @@ fn correction_explanation_html(
             );
             if let Some(bands) = seat["unassessed_bands_hz"].as_array() {
                 for band in bands.iter().filter_map(evidence_band) {
-                    evidence_row(&mut rows, &[scope.clone(), evidence_band_label(band), "Not assessed".into(), "Final playback was not assessed in this band. This does not establish that correction was absent or unnecessary.".into()]);
+                    rows.push(vec![scope.clone(), evidence_band_label(band), "Not assessed".into(), "Final playback was not assessed in this band. This does not establish that correction was absent or unnecessary.".into()]);
                 }
             }
         }
     }
-    let (k4_section, k4_history) = k4_section_html(data, binding_verified, binding_reason);
-    if k4_section.is_empty() {
-        evidence_row(&mut rows, &["System".into(), "Individual decisions unavailable".into(), "Reason unavailable".into(), "No versioned decision ledger was recorded with this output. Detailed reasons for individual peaks and dips are unavailable.".into()]);
+    let (ledger, ledger_history) = correction_ledger(data, binding_verified, binding_reason);
+    if ledger.is_empty() {
+        rows.push(vec!["System".into(), "Individual decisions unavailable".into(), "Reason unavailable".into(), "No versioned decision ledger was recorded with this output. Detailed reasons for individual peaks and dips are unavailable.".into()]);
     }
-    let verification = verification_html(metadata);
-    let output_loss = output_loss_html(quality);
+    let verification = verification_items(metadata);
+    let output_loss = output_loss_table(quality);
     let veto_reasons = [
         (
             "SubJnd",
@@ -3258,20 +3409,17 @@ fn correction_explanation_html(
                         "{reason} Confidence: {}. This filter-center record does not establish a frequency interval or the final exported filter set.",
                         assessment["confidence"].as_str().unwrap_or("unknown")
                     );
-                    evidence_row(
-                        &mut rows,
-                        &[
-                            channel.clone(),
-                            format!("{} Hz (filter center)", format_general(frequency, 6)),
-                            action,
-                            reason,
-                        ],
-                    );
+                    rows.push(vec![
+                        channel.clone(),
+                        format!("{} Hz (filter center)", format_general(frequency, 6)),
+                        action,
+                        reason,
+                    ]);
                 }
             }
         }
     }
-    let mut details = k4_history;
+    let mut details = ledger_history;
     if let Some(violations) = acceptance["violations"].as_array() {
         details.extend(
             violations
@@ -3322,27 +3470,68 @@ fn correction_explanation_html(
             }
         }
     }
-    let diagnostics = if details.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<details><summary>Recorded constraints and stage history</summary><p>Stage history may describe attempts that were later reverted. The final outcome above takes precedence.</p><ul>{}</ul></details>",
-            details
-                .iter()
-                .map(|item| format!("<li>{}</li>", escape_html(item)))
-                .collect::<String>()
-        )
-    };
-    let title = labelled_heading("Why this correction?", label);
-    format!(
-        "<section class=\"correction-explanation\"><h2>{}</h2><p>Recorded reasons for correction scope, limitations and the final outcome.</p><div style=\"overflow-x:auto\"><table style=\"width:100%;border-collapse:collapse;text-align:left\"><thead><tr><th>Channel / scope</th><th>Frequency</th><th>Decision</th><th>Why</th></tr></thead><tbody>{rows}</tbody></table></div>{k4_section}{verification}{output_loss}{diagnostics}<p>Detailed reasons for individual peaks and dips are unavailable unless recorded above. An unchanged response alone does not identify a cancellation, poor measurement, or an already acceptable result.</p></section>\n",
-        escape_html(&title)
-    )
+    let mut blocks = vec![DiagnosticBlock::DecisionTable(ReportTable {
+        title: String::new(),
+        note: String::new(),
+        columns: ["Channel / scope", "Frequency", "Decision", "Why"]
+            .map(str::to_owned)
+            .to_vec(),
+        rows,
+    })];
+    blocks.extend(ledger);
+    if !verification.is_empty() {
+        blocks.push(DiagnosticBlock::Heading(
+            "Recorded playback and listening verification".into(),
+        ));
+        blocks.push(DiagnosticBlock::EvidenceList(verification));
+    }
+    if let Some(table) = output_loss {
+        blocks.push(DiagnosticBlock::DecisionTable(table));
+    }
+    if !details.is_empty() {
+        blocks.push(DiagnosticBlock::StageHistory {
+            title: "Recorded constraints and stage history".into(),
+            note: "Stage history may describe attempts that were later reverted. The final outcome above takes precedence.".into(),
+            items: details,
+        });
+    }
+    blocks.push(DiagnosticBlock::Paragraph("Detailed reasons for individual peaks and dips are unavailable unless recorded above. An unchanged response alone does not identify a cancellation, poor measurement, or an already acceptable result.".into()));
+    let mut section = diagnostic_section(blocks);
+    section["introduction"] = json!(DiagnosticIntroduction {
+        title: labelled_heading("Why this correction?", label),
+        text: "Recorded reasons for correction scope, limitations and the final outcome.".into(),
+        style: DiagnosticSectionStyle::CorrectionExplanation,
+    });
+    section
 }
 
 /// Builds four global evidence renderers from saved data and externally
 /// verified binding evidence. Missing verification remains unavailable.
 pub fn global_evidence_sections(data: &Value, label: &str, binding: &Value) -> Map<String, Value> {
+    let mut sections = global_document_evidence(data, label, binding);
+    for key in [
+        "correction_explanation_html",
+        "acceptance_views_html",
+        "waveform_status_html",
+        "capture_clock_qa_html",
+        "capture_reflections_html",
+        "modes_summary_html",
+    ] {
+        if let Some(section) = sections.get_mut(key) {
+            *section = json!(
+                section_fragment(section.take())
+                    .expect("global evidence table is serialized by AutoEQ")
+            );
+        }
+    }
+    sections
+}
+
+pub(crate) fn global_document_evidence(
+    data: &Value,
+    label: &str,
+    binding: &Value,
+) -> Map<String, Value> {
     let verified = binding["verified"].as_bool().unwrap_or(false);
     let reason = binding["reason"]
         .as_str()
@@ -3351,11 +3540,11 @@ pub fn global_evidence_sections(data: &Value, label: &str, binding: &Value) -> M
     let mut sections = Map::new();
     sections.insert(
         "correction_explanation_html".into(),
-        json!(correction_explanation_html(data, label, verified, reason)),
+        correction_explanation_section(data, label, verified, reason),
     );
     sections.insert(
         "acceptance_views_html".into(),
-        json!(acceptance_views_html(&json!({
+        acceptance_views_section(&json!({
             "data":data,
             "label":label,
             "binding_verified":verified,
@@ -3363,23 +3552,25 @@ pub fn global_evidence_sections(data: &Value, label: &str, binding: &Value) -> M
             "binding_graph_identity":graph_identity,
             "acceptance_evidence_verified":binding["acceptance_evidence_verified"],
             "acceptance_evidence_reason":binding["acceptance_evidence_reason"],
-        }))),
+        })),
     );
     sections.insert(
         "waveform_status_html".into(),
-        json!(waveform_status_html(data, label)),
+        table_section(waveform_status(data, label), TableStyle::Waveform),
     );
     sections.insert(
         "capture_clock_qa_html".into(),
-        json!(capture_clock_qa_html(data)),
+        table_section(capture_clock_qa(data), TableStyle::CaptureClock),
     );
     sections.insert(
         "capture_reflections_html".into(),
-        json!(capture_reflections_html(data)),
+        capture_reflections_section(data),
     );
     sections.insert(
         "modes_summary_html".into(),
-        json!(resonance_summary_html(data)),
+        resonance_summary(data)
+            .map(|block| diagnostic_section(vec![block]))
+            .unwrap_or(Value::Null),
     );
     sections
 }
@@ -3444,6 +3635,12 @@ fn ringing_pair(masking: &Value, peak: &str, audible: &str) -> String {
 }
 
 fn mixed_phase(metadata: &Value, channels: &Value) -> String {
+    mixed_phase_block(metadata, channels)
+        .map(|block| diagnostic_html(&[block]))
+        .unwrap_or_default()
+}
+
+pub(crate) fn mixed_phase_block(metadata: &Value, channels: &Value) -> Option<DiagnosticBlock> {
     let phase = &metadata["mixed_phase_per_channel"];
     let mut masking = std::collections::BTreeMap::new();
     if let Some(channels) = channels.as_object() {
@@ -3472,7 +3669,7 @@ fn mixed_phase(metadata: &Value, channels: &Value) -> String {
         && post.is_none()
         && penalty.is_none()
     {
-        return String::new();
+        return None;
     }
     let mut names: Vec<_> = phase
         .as_object()
@@ -3483,7 +3680,7 @@ fn mixed_phase(metadata: &Value, channels: &Value) -> String {
         .collect();
     names.sort_by(|left, right| channel_sort_key(left).cmp(&channel_sort_key(right)));
     names.dedup();
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     for name in names {
         let report = &phase[&name];
         let empty = Value::Null;
@@ -3509,7 +3706,18 @@ fn mixed_phase(metadata: &Value, channels: &Value) -> String {
         let penalty = number(&mask["penalty"])
             .map(|value| format!("{value:.3}"))
             .unwrap_or_else(|| "-".into());
-        rows.push_str(&format!("<tr><td>{}</td><td>{}</td><td>{taps}</td><td>{range}</td><td>{rms}</td><td>{}</td><td>{}</td><td>{}</td><td>{penalty}</td></tr>\n", escape_html(&name), format_ms(report.get("estimated_delay_ms")), format_ms(mask.get("main_time_ms")), ringing_pair(mask,"pre_ringing_peak_db","pre_ringing_audible_db"), ringing_pair(mask,"post_ringing_peak_db","post_ringing_audible_db")));
+        let delay = format_ms(report.get("estimated_delay_ms"));
+        rows.push(vec![
+            name,
+            delay,
+            taps,
+            range,
+            rms,
+            format_ms(mask.get("main_time_ms")),
+            ringing_pair(mask, "pre_ringing_peak_db", "pre_ringing_audible_db"),
+            ringing_pair(mask, "post_ringing_peak_db", "post_ringing_audible_db"),
+            penalty,
+        ]);
     }
     let mut parts = Vec::new();
     if pre.is_some() || post.is_some() {
@@ -3524,20 +3732,29 @@ fn mixed_phase(metadata: &Value, channels: &Value) -> String {
     if let Some(penalty) = penalty {
         parts.push(format!("worst temporal masking penalty: {penalty:.3}"));
     }
-    let mut html = "<div class=\"filters-section mixed-phase-section\">\n<h3>Mixed-Phase and FIR Timing</h3>\n".to_string();
-    if !rows.is_empty() {
-        html.push_str("<table class=\"bm-table\">\n<thead><tr><th>Channel</th><th>Estimated delay</th><th>FIR taps</th><th>Residual phase range</th><th>Residual RMS</th><th>Main impulse</th><th>Pre peak / audible</th><th>Post peak / audible</th><th>Penalty</th></tr></thead>\n<tbody>\n");
-        html.push_str(&rows);
-        html.push_str("</tbody>\n</table>\n");
-    }
-    if !parts.is_empty() {
-        html.push_str(&format!(
-            "<p class=\"epa-footer\">{}.</p>\n",
-            escape_html(&parts.join("; "))
-        ));
-    }
-    html.push_str("</div>\n");
-    html
+    let note = if parts.is_empty() {
+        String::new()
+    } else {
+        format!("{}.", parts.join("; "))
+    };
+    Some(DiagnosticBlock::MixedPhaseTable(ReportTable {
+        title: "Mixed-Phase and FIR Timing".into(),
+        note,
+        columns: [
+            "Channel",
+            "Estimated delay",
+            "FIR taps",
+            "Residual phase range",
+            "Residual RMS",
+            "Main impulse",
+            "Pre peak / audible",
+            "Post peak / audible",
+            "Penalty",
+        ]
+        .map(str::to_owned)
+        .to_vec(),
+        rows,
+    }))
 }
 
 // Labels and precision are the existing EPA display contract, not scoring rules.
@@ -3552,48 +3769,48 @@ pub(crate) const EPA_FIELDS: &[(&str, &str, usize)] = &[
     ("loudness_balance", "Loudness balance", 3),
 ];
 
-fn delta(field: &str, pre: &Value, post: &Value) -> String {
+fn delta(field: &str, pre: &Value, post: &Value) -> EpaDelta {
     let (Some(pre), Some(post)) = (number(pre), number(post)) else {
-        return "<span style=\"color:#999\">-</span>".into();
+        return EpaDelta::Unavailable;
     };
     let delta = post - pre;
     if delta.abs() < 1e-9 {
-        return "<span style=\"color:#999\">=</span>".into();
+        return EpaDelta::Unchanged;
     }
     let higher_is_better = matches!(
         field,
         "preference" | "evaluation" | "total_loudness_sone" | "loudness_balance"
     );
-    let color = if (delta > 0.0) == higher_is_better {
-        OK
+    let display = format!("{delta:+.3}");
+    if (delta > 0.0) == higher_is_better {
+        EpaDelta::Improved(display)
     } else {
-        BAD
-    };
-    format!("<span style=\"color:{color};font-weight:600\">{delta:+.3}</span>")
+        EpaDelta::Worsened(display)
+    }
 }
 
-fn epa_channel(epa: &Value) -> String {
+pub(crate) fn epa_channel_block(epa: &Value) -> Option<DiagnosticBlock> {
     let (pre, post) = (&epa["pre"], &epa["post"]);
     if !populated(pre) && !populated(post) {
-        return String::new();
+        return None;
     }
-    let mut rows = String::new();
-    for (field, label, precision) in EPA_FIELDS {
-        let formatted = |value: &Value| {
-            number(value)
-                .map(|value| format!("{value:+.precision$}"))
-                .unwrap_or_else(|| "-".into())
-        };
-        rows.push_str(&format!(
-            "                        <tr><td>{label}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-            formatted(&pre[*field]),
-            formatted(&post[*field]),
-            delta(field, &pre[*field], &post[*field])
-        ));
-    }
-    format!(
-        "                <div class=\"epa-section\">\n                    <h3>EPA Psychoacoustic Scores</h3>\n                    <table class=\"epa-table\">\n                        <thead><tr><th>Metric</th><th>Before EQ</th><th>After EQ</th><th>Δ</th></tr></thead>\n                        <tbody>\n{rows}                        </tbody>\n                    </table>\n                    <p class=\"epa-footer\">Higher is better for Preference / Evaluation / Total loudness / Loudness balance; lower is better for Activity / Sharpness deviation / Roughness. Δ cells are green when the change improves the metric.</p>\n                </div>\n"
-    )
+    let rows = EPA_FIELDS
+        .iter()
+        .map(|(field, label, precision)| {
+            let formatted = |value: &Value| {
+                number(value)
+                    .map(|value| format!("{value:+.precision$}"))
+                    .unwrap_or_else(|| "-".into())
+            };
+            EpaScoreRow {
+                metric: (*label).into(),
+                before: formatted(&pre[*field]),
+                after: formatted(&post[*field]),
+                delta: delta(field, &pre[*field], &post[*field]),
+            }
+        })
+        .collect();
+    Some(DiagnosticBlock::EpaScores(rows))
 }
 
 fn epa_summary(metadata: &Value) -> Value {
@@ -3647,13 +3864,20 @@ pub fn evidence_section(request: &Value) -> Result<Value, String> {
         )),
         "group_delay" => json!(group_delay(&request["metadata"])),
         "mixed_phase" => json!(mixed_phase(&request["metadata"], &request["channels"])),
-        "epa_channel" => json!(epa_channel(&request["epa"])),
+        "epa_channel" => json!(
+            epa_channel_block(&request["epa"])
+                .map(|block| diagnostic_html(&[block]))
+                .unwrap_or_default()
+        ),
         "epa_summary" => epa_summary(&request["metadata"]),
-        "delta" => json!(delta(
-            request["field"].as_str().unwrap_or_default(),
-            &request["pre"],
-            &request["post"]
-        )),
+        "delta" => json!(
+            delta(
+                request["field"].as_str().unwrap_or_default(),
+                &request["pre"],
+                &request["post"]
+            )
+            .browser_html()
+        ),
         other => return Err(format!("unsupported evidence section builder `{other}`")),
     })
 }
@@ -3752,10 +3976,27 @@ mod tests {
             "../tests/fixtures/capture_views_nested_python.json"
         ))
         .unwrap();
-        let actual = capture_views_html(&fixture["report"], &fixture["verification"]);
+        let (section, available) =
+            capture_views_section(&fixture["report"], &fixture["verification"]);
+        assert!(available);
+        let blocks: Vec<DiagnosticBlock> =
+            serde_json::from_value(section["blocks"].clone()).unwrap();
+        let native_figures: Vec<_> = blocks
+            .into_iter()
+            .filter_map(|block| match block {
+                DiagnosticBlock::CaptureChart(chart) => {
+                    serde_json::from_value::<crate::schema::Section>(chart.clone())
+                        .expect("capture chart is readable by the shared native renderer");
+                    Some(chart)
+                }
+                _ => None,
+            })
+            .collect();
+        let actual = section_fragment(section).unwrap();
         let (actual_text, actual_figures) = split_embedded_figures(&actual);
         let (expected_text, expected_figures) =
             split_embedded_figures(fixture["expected"].as_str().unwrap());
+        assert_eq!(native_figures, expected_figures);
         assert_eq!(actual_text, expected_text);
         assert_eq!(actual_figures.len(), expected_figures.len());
         for (index, (actual, expected)) in actual_figures.iter().zip(&expected_figures).enumerate()

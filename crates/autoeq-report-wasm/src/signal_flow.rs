@@ -5,6 +5,10 @@
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
 
+use crate::report_document::{
+    DiagnosticBlock, SignalFlowStage, diagnostic_section, paragraph_section, project_section,
+};
+
 const LINK_COLOR: &str = "rgba(74,144,217,0.25)";
 
 /// Builds report sections that show saved DSP stages and routing ownership.
@@ -33,9 +37,17 @@ const LINK_COLOR: &str = "rgba(74,144,217,0.25)";
 ///
 /// This function does not panic for malformed report values.
 pub fn signal_flow_sections(data: &Value) -> Vec<Value> {
-    let sections = vec![html_section(
+    let mut sections = signal_flow_document_sections(data);
+    for section in &mut sections {
+        project_section(section).expect("signal-flow sections are serialized by AutoEQ");
+    }
+    sections
+}
+
+pub(crate) fn signal_flow_document_sections(data: &Value) -> Vec<Value> {
+    let sections = vec![flow_paragraph(
         None,
-        "<p>Read left to right. Each numbered node is a saved processing stage; expand its row below for parameters. Branches join at Σ before output processing. Link widths show connections, not signal level. Select All channels for the complete graph, or an output for its inputs.</p>",
+        "Read left to right. Each numbered node is a saved processing stage; expand its row below for parameters. Branches join at Σ before output processing. Link widths show connections, not signal level. Select All channels for the complete graph, or an output for its inputs.",
     )];
 
     let channels = data.get("channels").and_then(Value::as_object);
@@ -73,15 +85,15 @@ pub fn signal_flow_sections(data: &Value) -> Vec<Value> {
             .iter()
             .any(|plugin| plugin.pointer("/parameters/metadata/routes").is_none())
     {
-        return vec![html_section(
+        return vec![flow_paragraph(
             None,
-            "<p>Signal flow unavailable: additional global processing has no explicit position in the saved routing graph.</p>",
+            "Signal flow unavailable: additional global processing has no explicit position in the saved routing graph.",
         )];
     }
     let Some(channels) = channels.filter(|channels| !channels.is_empty()) else {
-        return vec![html_section(
+        return vec![flow_paragraph(
             None,
-            "<p>DSP signal flow unavailable: no saved channel chains.</p>",
+            "DSP signal flow unavailable: no saved channel chains.",
         )];
     };
 
@@ -377,11 +389,27 @@ impl Diagram {
     }
 
     fn sections(self) -> Vec<Value> {
-        let rows = self.rows.iter().map(|(number, label, detail)| {
-            let heading = detail.pointer("/parameters/label").and_then(Value::as_str).filter(|value| !value.is_empty()).unwrap_or(label);
-            let pretty = serde_json::to_string_pretty(detail).unwrap_or_else(|_| "{}".to_string());
-            format!("<tr><td>{number}</td><td>{}</td><td><details><summary>{}</summary><pre>{}</pre></details></td></tr>", escape_html(label), escape_html(heading), escape_html(&pretty))
-        }).collect::<String>();
+        let stages = self
+            .rows
+            .into_iter()
+            .map(|(number, label, detail)| {
+                let heading = detail
+                    .pointer("/parameters/label")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(&label)
+                    .to_owned();
+                SignalFlowStage {
+                    number,
+                    label,
+                    heading,
+                    parameters: serde_json::to_string_pretty(&detail)
+                        .unwrap_or_else(|_| "{}".to_string()),
+                }
+            })
+            .collect();
+        let mut stage_section = diagnostic_section(vec![DiagnosticBlock::SignalFlowStages(stages)]);
+        stage_section["tab"] = json!(self.tab);
         let mut depths = self.depths;
         for link in &self.links {
             if let (Some(source), Some(target)) = (
@@ -404,12 +432,7 @@ impl Diagram {
         let chart = json!({"title": self.title, "nodes": self.nodes, "links": self.links, "node_boxes": true});
         vec![
             json!({"kind": "sankey", "chart": chart, "tab": self.tab, "min_width": min_width, "min_height": min_height}),
-            html_section(
-                Some(&self.tab),
-                &format!(
-                    "<table><thead><tr><th>Node</th><th>Stage</th><th>Saved parameters</th></tr></thead><tbody>{rows}</tbody></table>"
-                ),
-            ),
+            stage_section,
         ]
     }
 }
@@ -431,8 +454,10 @@ fn plugin_name(plugin: &Value) -> String {
     .to_owned()
 }
 
-fn html_section(tab: Option<&str>, html: &str) -> Value {
-    json!({"kind": "html", "html": html, "tab": tab})
+fn flow_paragraph(tab: Option<&str>, text: &str) -> Value {
+    let mut section = paragraph_section(&[text]);
+    section["tab"] = json!(tab);
+    section
 }
 
 fn unavailable_section(tab: Option<&str>, reason: &str, regenerate: bool) -> Value {
@@ -441,13 +466,7 @@ fn unavailable_section(tab: Option<&str>, reason: &str, regenerate: bool) -> Val
     } else {
         ""
     };
-    html_section(
-        tab,
-        &format!(
-            "<p>Signal flow unavailable: {}.{suffix}</p>",
-            escape_html(reason)
-        ),
-    )
+    flow_paragraph(tab, &format!("Signal flow unavailable: {reason}.{suffix}"))
 }
 
 fn array(value: Option<&Value>) -> Vec<&Value> {
@@ -466,21 +485,6 @@ fn truthy(value: Option<&Value>) -> bool {
         Some(Value::Object(value)) => !value.is_empty(),
         _ => false,
     }
-}
-
-fn escape_html(value: &str) -> String {
-    let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '&' => escaped.push_str("&amp;"),
-            '<' => escaped.push_str("&lt;"),
-            '>' => escaped.push_str("&gt;"),
-            '"' => escaped.push_str("&quot;"),
-            '\'' => escaped.push_str("&#x27;"),
-            _ => escaped.push(character),
-        }
-    }
-    escaped
 }
 
 #[cfg(test)]

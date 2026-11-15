@@ -9,10 +9,12 @@
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 
-use crate::acoustic_curves::{curve_report, deepest_notch_db, notch_cell};
-use crate::acoustic_reflections::reflection_report;
-use crate::acoustic_t60::t60_report;
-use crate::report_helpers::escape_html;
+use crate::acoustic_curves::{deepest_notch_db, notch_metric};
+use crate::acoustic_reflections::reflection_metrics;
+use crate::acoustic_t60::summary_metrics;
+use crate::report_document::{
+    DiagnosticBlock, MetricCell, MetricTone, ResultsRow, diagnostic_html,
+};
 
 const DELIVERED_STATUSES: [&str; 3] = ["applied", "already_acceptable", "constrained"];
 
@@ -150,35 +152,43 @@ fn derive_summaries_from_decisions(decisions: &[Value]) -> Value {
 ///
 /// This function does not panic for malformed JSON values.
 pub fn operational_response_cell(summaries_by_channel: &Value, name: &str) -> String {
+    operational_response_metric(summaries_by_channel, name).browser_html()
+}
+
+fn operational_response_metric(summaries_by_channel: &Value, name: &str) -> MetricCell {
     let hit = summaries_by_channel.get(name).and_then(Value::as_array);
-    let Some(hit) = hit else {
-        return "<td style=\"background:#eee;color:#666\" title=\"No final EQ assessment is present in the saved decision ledger\">Not assessed</td>".to_owned();
+    let Some((hit, pct)) = hit.and_then(|hit| Some((hit, finite_number(hit.first()?)?))) else {
+        return MetricCell {
+            value: "Not assessed".into(),
+            tone: MetricTone::Unassessed,
+            detail: Some("No final EQ assessment is present in the saved decision ledger".into()),
+        };
     };
-    let Some(pct) = hit.first().and_then(finite_number) else {
-        return "<td style=\"background:#eee;color:#666\" title=\"No final EQ assessment is present in the saved decision ledger\">Not assessed</td>".to_owned();
-    };
-    let decided = hit.get(1).cloned().unwrap_or(Value::Null);
-    let delivered = hit.get(2).cloned().unwrap_or(Value::Null);
-    let color = if pct > 90.0 {
-        "#2ecc71"
+    let decided = hit.get(1).unwrap_or(&Value::Null);
+    let delivered = hit.get(2).unwrap_or(&Value::Null);
+    let tone = if pct > 90.0 {
+        MetricTone::Good
     } else if pct >= 80.0 {
-        "#f1c40f"
+        MetricTone::Warning
     } else {
-        "#e74c3c"
+        MetricTone::Poor
     };
-    let detail = if is_python_integer(&decided) && is_python_integer(&delivered) {
+    let detail = if is_python_integer(decided) && is_python_integer(delivered) {
         format!(
             "{}/{} final EQ scope delivered",
-            python_string(&delivered),
-            python_string(&decided)
+            python_string(delivered),
+            python_string(decided)
         )
     } else {
         "final EQ scope share".to_owned()
     };
-    format!(
-        "<td style=\"background:{color}33\" title=\"operational room response: {} (share of decided final equalization records delivered: Applied/AlreadyAcceptable/Constrained; empty scope stays pending, never 100%)\">{pct:.1}</td>",
-        escape_html(&detail)
-    )
+    MetricCell {
+        value: format!("{pct:.1}"),
+        tone,
+        detail: Some(format!(
+            "operational room response: {detail} (share of decided final equalization records delivered: Applied/AlreadyAcceptable/Constrained; empty scope stays pending, never 100%)"
+        )),
+    }
 }
 
 /// Escapes a missing-evidence field name in the report's pending cell.
@@ -187,10 +197,7 @@ pub fn operational_response_cell(summaries_by_channel: &Value, name: &str) -> St
 ///
 /// This function does not panic.
 pub fn pending_cell(field: &str) -> String {
-    format!(
-        "<td style=\"background:#eee;color:#888\" title=\"needs roomeq field: {}\">pending</td>",
-        escape_html(field)
-    )
+    MetricCell::pending(field).browser_html()
 }
 
 /// Composes the acoustic summary table from serialized report evidence.
@@ -203,7 +210,7 @@ pub fn pending_cell(field: &str) -> String {
 /// This function does not panic for malformed or incomplete JSON values.
 pub fn summary_table_html(data: &Value) -> String {
     let summaries = operational_summaries_by_channel(data);
-    summary_table_html_with_summaries(data, &summaries)
+    diagnostic_html(&[summary_block(data, &summaries)])
 }
 
 /// Builds the complete operational summary report response.
@@ -231,7 +238,7 @@ pub fn operational_summary_report(data: &Value) -> Value {
                 .collect::<Map<_, _>>()
         })
         .unwrap_or_default();
-    let table_html = summary_table_html_with_summaries(data, &summaries);
+    let table_html = diagnostic_html(&[summary_block(data, &summaries)]);
     json!({
         "operational_summaries_by_channel": summaries,
         "operational_response_cells": response_cells,
@@ -239,95 +246,34 @@ pub fn operational_summary_report(data: &Value) -> Value {
     })
 }
 
-fn summary_table_html_with_summaries(data: &Value, summaries: &Value) -> String {
-    let Some(channels) = data.get("channels").and_then(Value::as_object) else {
-        return empty_summary_table();
-    };
-    let curve_summary = curve_report(data);
-    let t60_summary = t60_report(data);
-    let mut html = concat!(
-        "<div class=\"filters-section\">\n<h3>Results summary</h3>\n",
-        "<p class=\"epa-footer\">Acoustic values use the imported room impulse response. ",
-        "Operational response is the share of final EQ decisions confirmed as delivered; ",
-        "“Not assessed” means the saved ledger has no final EQ assessment. ",
-        "Missing acoustic values require a measured room IR and valid analysis.</p>\n",
-        "<table class=\"epa-table\"><thead><tr><th>Speaker</th>",
-        "<th>Operational room response (%)</th>",
-        "<th>Early reflection level (dB)</th>",
-        "<th>Early vs late ratio (dB)</th>",
-        "<th>T60 flatness in window (%)</th>",
-        "<th>T60 within ITU recommendation (%)</th>",
-        "<th>Deepest notch &lt; 300 Hz (dB)</th>",
-        "</tr></thead><tbody>\n",
-    )
-    .to_owned();
-    // Python's legacy renderer sorts channel names before composing rows.
-    // serde_json object iteration order can vary with feature unification, so
-    // keep this explicit to preserve the report contract.
-    let mut channel_names = channels.keys().collect::<Vec<_>>();
-    channel_names.sort();
-    for name in channel_names {
-        let channel = &channels[name];
-        let reflections = reflection_report(channel, "", None);
-        let acoustic = t60_summary
-            .get("channels")
-            .and_then(|channels| channels.get(name));
-        let notch = deepest_notch_db(channel);
-        let notch_html = curve_summary
-            .get("channels")
-            .and_then(|channels| channels.get(name))
-            .and_then(|channel| channel.get("notch_cell_html"))
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .unwrap_or_else(|| notch_cell(notch));
-        let reflection_html = reflections
-            .get("early_reflection_level_cell")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let ratio_html = reflections
-            .get("early_late_ratio_cell")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let flatness_html = acoustic
-            .and_then(|channel| channel.get("flatness_cell_html"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let itu_html = acoustic
-            .and_then(|channel| channel.get("itu_cell_html"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        html.push_str(&format!(
-            "<tr><td>{}</td>{}{}{}{}{}{}</tr>\n",
-            escape_html(name),
-            operational_response_cell(summaries, name),
-            reflection_html,
-            ratio_html,
-            flatness_html,
-            itu_html,
-            notch_html
-        ));
-    }
-    html.push_str("</tbody></table></div>\n");
-    html
+pub(crate) fn results_summary(data: &Value) -> DiagnosticBlock {
+    summary_block(data, &operational_summaries_by_channel(data))
 }
 
-fn empty_summary_table() -> String {
-    concat!(
-        "<div class=\"filters-section\">\n<h3>Results summary</h3>\n",
-        "<p class=\"epa-footer\">Acoustic values use the imported room impulse response. ",
-        "Operational response is the share of final EQ decisions confirmed as delivered; ",
-        "“Not assessed” means the saved ledger has no final EQ assessment. ",
-        "Missing acoustic values require a measured room IR and valid analysis.</p>\n",
-        "<table class=\"epa-table\"><thead><tr><th>Speaker</th>",
-        "<th>Operational room response (%)</th>",
-        "<th>Early reflection level (dB)</th>",
-        "<th>Early vs late ratio (dB)</th>",
-        "<th>T60 flatness in window (%)</th>",
-        "<th>T60 within ITU recommendation (%)</th>",
-        "<th>Deepest notch &lt; 300 Hz (dB)</th>",
-        "</tr></thead><tbody>\n</tbody></table></div>\n",
-    )
-    .to_owned()
+fn summary_block(data: &Value, summaries: &Value) -> DiagnosticBlock {
+    let Some(channels) = data["channels"].as_object() else {
+        return DiagnosticBlock::ResultsSummary(Vec::new());
+    };
+    let rows = summary_metrics(data, channels)
+        .into_iter()
+        .map(|(name, [flatness, itu])| {
+            let channel = &channels[&name];
+            let [level, ratio] = reflection_metrics(channel);
+            let operational = operational_response_metric(summaries, &name);
+            ResultsRow {
+                speaker: name,
+                metrics: [
+                    operational,
+                    level,
+                    ratio,
+                    flatness,
+                    itu,
+                    notch_metric(deepest_notch_db(channel)),
+                ],
+            }
+        })
+        .collect();
+    DiagnosticBlock::ResultsSummary(rows)
 }
 
 fn finite_number(value: &Value) -> Option<f64> {

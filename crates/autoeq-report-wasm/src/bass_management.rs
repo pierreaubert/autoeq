@@ -2,9 +2,12 @@
 
 // Rust guideline compliant 2026-02-21
 
+use std::fmt::Write as _;
+
 use serde_json::Value;
 
 use crate::report_helpers::{escape_html, format_db, format_hz, format_ms, python_string};
+use crate::report_table::ReportTable;
 
 /// The canonical HTML fragments for bass-management metadata.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -24,8 +27,12 @@ pub fn bass_management_sections(report: &Value) -> BassManagementSections {
 }
 
 pub fn bass_management_summary_html(report: &Value) -> String {
+    bass_management_summary(report).map_or_else(String::new, |table| render_bass_summary(&table))
+}
+
+pub(crate) fn bass_management_summary(report: &Value) -> Option<ReportTable> {
     if !is_truthy(report) {
-        return String::new();
+        return None;
     }
     let routing = report.get("routing_graph").filter(|value| is_truthy(value));
     let routes = routing
@@ -63,15 +70,6 @@ pub fn bass_management_summary_html(report: &Value) -> String {
     advisories.sort();
     advisories.dedup();
     advisories.retain(|item| !item.is_empty() && item != "ok");
-    let advisory_html = if advisories.is_empty() {
-        String::new()
-    } else {
-        format!(
-            "<br><span style=\"color:#b36b00\">{}</span>",
-            escape_html(&advisories.join("; "))
-        )
-    };
-
     let enabled = report.get("enabled").is_some_and(is_truthy);
     let crossover_type = report
         .get("crossover_type")
@@ -83,11 +81,7 @@ pub fn bass_management_summary_html(report: &Value) -> String {
             .map(python_string)
             .unwrap_or_else(|| "-".to_string())
     } else {
-        physical_outputs
-            .iter()
-            .map(|name| escape_html(name))
-            .collect::<Vec<_>>()
-            .join(", ")
+        physical_outputs.join(", ")
     };
     let items = [
         ("Enabled", if enabled { "yes" } else { "no" }.to_string()),
@@ -95,7 +89,7 @@ pub fn bass_management_summary_html(report: &Value) -> String {
             "Crossover",
             format!(
                 "{} @ {}",
-                escape_html(&crossover_type),
+                crossover_type,
                 format_hz(report.get("crossover_frequency_hz"))
             ),
         ),
@@ -115,26 +109,56 @@ pub fn bass_management_summary_html(report: &Value) -> String {
             },
         ),
     ];
-    let mut html = String::from(
-        "<div class=\"metadata bass-management-section\">\n<h2>Bass Management</h2>\n<div class=\"metadata-grid\">",
+    Some(ReportTable {
+        title: "Bass Management".into(),
+        note: advisories.join("; "),
+        columns: ["Setting", "Value"].map(String::from).into(),
+        rows: items
+            .into_iter()
+            .map(|(label, value)| vec![label.into(), value])
+            .collect(),
+    })
+}
+
+pub(crate) fn render_bass_summary(table: &ReportTable) -> String {
+    let mut html = String::new();
+    let _ = write!(
+        html,
+        "<div class=\"metadata bass-management-section\">\n<h2>{}</h2>\n<div class=\"metadata-grid\">",
+        escape_html(&table.title)
     );
-    for (label, value) in items {
-        html.push_str(&format!(
-            "<div class=\"metadata-item\"><span class=\"metadata-label\">{label}:</span> <span class=\"metadata-value\">{value}</span></div>\n"
-        ));
+    for row in &table.rows {
+        if let [label, value] = row.as_slice() {
+            let _ = writeln!(
+                html,
+                "<div class=\"metadata-item\"><span class=\"metadata-label\">{}:</span> <span class=\"metadata-value\">{}</span></div>",
+                escape_html(label),
+                escape_html(value)
+            );
+        }
     }
     html.push_str("</div>\n");
-    html.push_str(&advisory_html);
+    if !table.note.is_empty() {
+        let _ = write!(
+            html,
+            "<br><span style=\"color:#b36b00\">{}</span>",
+            escape_html(&table.note)
+        );
+    }
     html.push_str("\n</div>\n");
     html
 }
 
 pub fn bass_management_groups_table_html(report: &Value) -> String {
+    bass_management_groups(report).map_or_else(String::new, |table| render_bass_table(&table))
+}
+
+pub(crate) fn bass_management_groups(report: &Value) -> Option<ReportTable> {
     let groups = selected_array(report, "groups", "group_results");
     if groups.is_empty() {
-        return String::new();
+        return None;
     }
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     for group in groups {
         let advisories = group
             .get("advisories")
@@ -159,62 +183,107 @@ pub fn bass_management_groups_table_html(report: &Value) -> String {
                     .join(", ")
             })
             .unwrap_or_default();
-        rows.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-            escape_html(&field_string(group, "group_id", "-")),
-            escape_html(&roles),
-            escape_html(&field_string(group, "crossover_type", "-")),
+        rows.push(vec![
+            field_string(group, "group_id", "-"),
+            roles,
+            field_string(group, "crossover_type", "-"),
             format_hz(group.get("selected_crossover_hz")),
             format_ms(group.get("main_delay_ms")),
             format_ms(group.get("bass_route_delay_ms")),
-            if group.get("polarity_inverted").is_some_and(is_truthy) { "yes" } else { "no" },
+            if group.get("polarity_inverted").is_some_and(is_truthy) {
+                "yes".into()
+            } else {
+                "no".into()
+            },
             format_db(group.get("trim_db")),
-            if advisories.is_empty() { "-".to_string() } else { escape_html(&advisories) },
-        ));
+            if advisories.is_empty() {
+                "-".into()
+            } else {
+                advisories
+            },
+        ]);
     }
-    format!(
-        concat!(
-            "<div class=\"filters-section bass-management-section\">\n",
-            "<h3>Per-Speaker-Group Crossovers</h3>\n<table class=\"bm-table\">\n",
-            "<thead><tr><th>Group</th><th>Roles</th><th>Type</th><th>Selected XO</th>",
-            "<th>Main delay</th><th>Bass delay</th><th>Invert bass</th><th>Trim</th><th>Advisories</th></tr></thead>\n",
-            "<tbody>{rows}</tbody>\n</table>\n</div>\n"
-        ),
-        rows = rows
-    )
+    Some(ReportTable {
+        title: "Per-Speaker-Group Crossovers".into(),
+        note: String::new(),
+        columns: [
+            "Group",
+            "Roles",
+            "Type",
+            "Selected XO",
+            "Main delay",
+            "Bass delay",
+            "Invert bass",
+            "Trim",
+            "Advisories",
+        ]
+        .map(String::from)
+        .into(),
+        rows,
+    })
 }
 
 pub fn bass_management_sub_outputs_table_html(report: &Value) -> String {
+    bass_management_outputs(report).map_or_else(String::new, |table| render_bass_table(&table))
+}
+
+pub(crate) fn bass_management_outputs(report: &Value) -> Option<ReportTable> {
     let outputs = selected_array(report, "sub_outputs", "sub_output_results");
     if outputs.is_empty() {
-        return String::new();
+        return None;
     }
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     for output in outputs {
-        rows.push_str(&format!(
-            "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-            escape_html(&field_string(output, "output_role", "-")),
-            escape_html(&field_string(output, "strategy_source", "-")),
+        rows.push(vec![
+            field_string(output, "output_role", "-"),
+            field_string(output, "strategy_source", "-"),
             format_db(output.get("gain_db")),
             format_ms(output.get("delay_ms")),
             if output.get("polarity_inverted").is_some_and(is_truthy) {
-                "yes"
+                "yes".into()
             } else {
-                "no"
+                "no".into()
             },
             format_db(output.get("headroom_contribution_db")),
-        ));
+        ]);
     }
-    format!(
-        concat!(
-            "<div class=\"filters-section bass-management-section\">\n",
-            "<h3>Physical Bass Outputs</h3>\n<table class=\"bm-table\">\n",
-            "<thead><tr><th>Output</th><th>Strategy</th><th>Gain</th><th>Delay</th>",
-            "<th>Invert</th><th>Headroom contribution</th></tr></thead>\n",
-            "<tbody>{rows}</tbody>\n</table>\n</div>\n"
-        ),
-        rows = rows
-    )
+    Some(ReportTable {
+        title: "Physical Bass Outputs".into(),
+        note: String::new(),
+        columns: [
+            "Output",
+            "Strategy",
+            "Gain",
+            "Delay",
+            "Invert",
+            "Headroom contribution",
+        ]
+        .map(String::from)
+        .into(),
+        rows,
+    })
+}
+
+pub(crate) fn render_bass_table(table: &ReportTable) -> String {
+    let mut html = String::new();
+    let _ = write!(
+        html,
+        "<div class=\"filters-section bass-management-section\">\n<h3>{}</h3>\n<table class=\"bm-table\">\n<thead><tr>",
+        escape_html(&table.title)
+    );
+    for column in &table.columns {
+        let _ = write!(html, "<th>{}</th>", escape_html(column));
+    }
+    html.push_str("</tr></thead>\n<tbody>");
+    for row in &table.rows {
+        html.push_str("<tr>");
+        for cell in row {
+            let _ = write!(html, "<td>{}</td>", escape_html(cell));
+        }
+        html.push_str("</tr>\n");
+    }
+    html.push_str("</tbody>\n</table>\n</div>\n");
+    html
 }
 
 fn selected_array<'a>(report: &'a Value, primary: &str, fallback: &str) -> Vec<&'a Value> {

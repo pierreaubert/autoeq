@@ -21,6 +21,40 @@ pub fn build_global_report_sections(
     prepared: &PreparedReportData,
     options: &ReportDatasetOptions,
 ) -> Result<Value, String> {
+    let mut global = build_global_document_sections(prepared, options)?;
+    if let Some(groups) = global["global_groups"].as_object_mut() {
+        for group in groups.values_mut().filter_map(Value::as_array_mut) {
+            for section in group {
+                crate::report_document::project_section(section)?;
+            }
+        }
+    }
+    if let Some(sections) = global["status_sections"].as_array_mut() {
+        for section in sections {
+            crate::report_document::project_section(section)?;
+        }
+    }
+    if let Some(shared) = global["shared_sections"].as_object_mut() {
+        crate::report_sections::project_shared_sections(shared)?;
+    }
+    let object = global.as_object_mut().expect("global document object");
+    for (key, html_key) in [
+        ("relative_levels", "relative_levels_html"),
+        ("modes", "modes_html"),
+    ] {
+        let section = object.shift_remove(key).unwrap_or_default();
+        object.insert(
+            html_key.into(),
+            json!(crate::report_document::section_fragment(section)?),
+        );
+    }
+    Ok(global)
+}
+
+pub(crate) fn build_global_document_sections(
+    prepared: &PreparedReportData,
+    options: &ReportDatasetOptions,
+) -> Result<Value, String> {
     prepared.validate()?;
     options.validate()?;
     let graph = &prepared.graph;
@@ -37,17 +71,16 @@ pub fn build_global_report_sections(
         groups.insert(role.to_string(), Value::Array(Vec::new()));
     }
     let mut preparation_status = Vec::new();
-    let shared = crate::report_sections::build_shared_sections(graph);
+    let shared = crate::report_sections::build_shared_document_sections(graph);
     let mut status_sections = Vec::new();
 
     let binding = crate::report_dataset::binding_evidence(prepared, options)?;
-    let playback = crate::evidence_sections::evidence_section(&json!({
-        "builder": "playback_status",
+    let playback = crate::evidence_sections::playback_notices(&json!({
         "metadata": graph.get("metadata").unwrap_or(&Value::Null),
         "binding_verified": binding["verified"],
         "binding_reason": binding["reason"],
-    }))?;
-    status_sections.push(html_section(playback.as_str().unwrap_or_default(), true));
+    }));
+    status_sections.push(json!({"kind":"playback_notices","notices":playback}));
     if options.payload_binding.is_none() {
         preparation_status.push(json!({
             "section":"playback_status",
@@ -63,48 +96,59 @@ pub fn build_global_report_sections(
         }));
     }
 
-    let global_evidence =
-        crate::report_sections::build_global_evidence_sections(graph, "", &binding);
-    for key in [
-        "correction_explanation_html",
-        "acceptance_views_html",
-        "waveform_status_html",
-    ] {
-        if let Some(section) = global_evidence.get(key) {
-            push_html(&mut groups, "why", section.clone());
-        }
-    }
-    if let Some(section) = global_evidence.get("capture_reflections_html") {
-        push_html(&mut groups, "time_domain", section.clone());
-    }
-    if let Some(section) = global_evidence.get("capture_clock_qa_html") {
-        push_html(&mut groups, "time_domain", section.clone());
-    }
+    let global_evidence = crate::evidence_sections::global_document_evidence(graph, "", &binding);
+    push_figure(
+        &mut groups,
+        "why",
+        global_evidence["correction_explanation_html"].clone(),
+    );
+    push_figure(
+        &mut groups,
+        "why",
+        global_evidence["acceptance_views_html"].clone(),
+    );
+    push_figure(
+        &mut groups,
+        "why",
+        global_evidence["waveform_status_html"].clone(),
+    );
+    push_figure(
+        &mut groups,
+        "time_domain",
+        global_evidence["capture_reflections_html"].clone(),
+    );
+    push_figure(
+        &mut groups,
+        "time_domain",
+        global_evidence["capture_clock_qa_html"].clone(),
+    );
 
-    let mixed_phase = crate::evidence_sections::evidence_section(&json!({
-        "builder":"mixed_phase",
-        "metadata":graph.get("metadata").unwrap_or(&Value::Null),
-        "channels":graph.get("channels").unwrap_or(&Value::Null),
-    }))?;
-    push_html(&mut groups, "why", mixed_phase);
-    let summary = crate::acoustic_summary::operational_summary_report(graph);
-    push_html(
+    if let Some(mixed_phase) =
+        crate::evidence_sections::mixed_phase_block(&graph["metadata"], &graph["channels"])
+    {
+        push_figure(
+            &mut groups,
+            "why",
+            crate::report_document::diagnostic_section(vec![mixed_phase]),
+        );
+    }
+    push_figure(
         &mut groups,
         "overview",
-        summary
-            .get("summary_table_html")
-            .cloned()
-            .unwrap_or(Value::Null),
+        crate::report_document::diagnostic_section(vec![crate::acoustic_summary::results_summary(
+            graph,
+        )]),
     );
     let combined = combined_overview(prepared, options, &mut preparation_status)?;
     for figure in combined.as_array().into_iter().flatten() {
         push_figure(&mut groups, "overview", figure.clone());
     }
-    for key in ["gain_summary_html", "crossover_config_html"] {
-        if let Some(section) = shared.get(key) {
-            push_html(&mut groups, "overview", section.clone());
-        }
-    }
+    push_figure(&mut groups, "overview", shared["gain_summary_html"].clone());
+    push_figure(
+        &mut groups,
+        "overview",
+        shared["crossover_config_html"].clone(),
+    );
     let bass = graph["metadata"]["bass_management"]
         .as_object()
         .is_some_and(|value| !value.is_empty());
@@ -115,7 +159,7 @@ pub fn build_global_report_sections(
             "bass_management_sub_outputs_table_html",
         ] {
             if let Some(section) = shared.get(key) {
-                push_html(&mut groups, "overview", section.clone());
+                push_figure(&mut groups, "overview", section.clone());
             }
         }
         for builder in ["routing", "headroom"] {
@@ -129,14 +173,20 @@ pub fn build_global_report_sections(
         }
     }
 
-    let curves = crate::acoustic_curves::curve_report(graph);
-    let t60 = crate::acoustic_t60::t60_report(graph);
+    let levels = crate::acoustic_curves::level_compensation(&graph["channels"]);
+    let relative_levels = crate::acoustic_curves::level_table(&levels)
+        .map(|table| crate::report_document::diagnostic_section(vec![table]));
+    let (t60, room_table) = crate::acoustic_t60::t60_document_data(graph);
     if let Some(rows) = t60
         .get("room_rows")
         .filter(|value| value.is_array() && !value.as_array().unwrap().is_empty())
     {
-        if let Some(table) = t60.get("room_t60_table_html") {
-            push_html(&mut groups, "time_domain", table.clone());
+        if let Some(table) = room_table {
+            push_figure(
+                &mut groups,
+                "time_domain",
+                crate::report_document::diagnostic_section(vec![table]),
+            );
         }
         let figure = crate::temporal_figures::build_temporal_figure(
             "create_t60_octaves_figure",
@@ -147,39 +197,41 @@ pub fn build_global_report_sections(
             }),
         )?;
         push_figure(&mut groups, "time_domain", figure);
-        push_html(
+        let counts = rows
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|row| {
+                Some(format!(
+                    "{} Hz: {}",
+                    row["centre_hz"].as_u64()?,
+                    row["speaker_count"].as_u64()?
+                ))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        push_figure(
             &mut groups,
             "time_domain",
-            json!(format!(
-                "<p class=\"epa-footer\">Room T60 contributing speakers by octave: {}</p>",
-                rows.as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(|row| {
-                        Some(format!(
-                            "{} Hz: {}",
-                            row["centre_hz"].as_u64()?,
-                            row["speaker_count"].as_u64()?
-                        ))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )),
+            crate::report_document::caption_section(
+                &format!("Room T60 contributing speakers by octave: {counts}"),
+                false,
+            ),
         );
-    }
-    if t60["room_rows"]
-        .as_array()
-        .is_some_and(|rows| !rows.is_empty())
-        && let Some(note) = t60.get("itu_note_html")
-    {
-        push_html(&mut groups, "time_domain", note.clone());
+        push_figure(
+            &mut groups,
+            "time_domain",
+            crate::report_document::diagnostic_section(vec![crate::acoustic_t60::t60_reference(
+                &t60["reference"],
+            )]),
+        );
     }
 
     let tof = shared
         .get("time_of_flight_html")
         .cloned()
         .unwrap_or(Value::Null);
-    push_html(&mut groups, "timing", tof);
+    push_figure(&mut groups, "timing", tof);
     // Reuse the report's stable channel-tab order so global and channel views
     // traverse the same prepared entries. This deliberately avoids relying on
     // JSON object insertion order, which is not retained by PreparedReportData.
@@ -201,21 +253,20 @@ pub fn build_global_report_sections(
     let unpaired = &pair_groups[1];
     if !pairs.as_array().is_none_or(Vec::is_empty) || !unpaired.as_array().is_none_or(Vec::is_empty)
     {
-        let mut summary = "<p>Rust aligns final curves within their shared frequency range. The absolute sum assumes equal phase; it is an upper bound, not a prediction of interference from simultaneous playback. The complex sum is the coherent pressure sum from measured phase; the sum difference between them is the cancellation loss.</p>".to_string();
-        if !unpaired.as_array().is_none_or(Vec::is_empty) {
+        let mut summary = vec!["Rust aligns final curves within their shared frequency range. The absolute sum assumes equal phase; it is an upper bound, not a prediction of interference from simultaneous playback. The complex sum is the coherent pressure sum from measured phase; the sum difference between them is the cancellation loss.".to_owned()];
+        if let Some(unpaired) = unpaired.as_array().filter(|channels| !channels.is_empty()) {
             let names = unpaired
-                .as_array()
-                .unwrap()
                 .iter()
                 .filter_map(Value::as_str)
                 .collect::<Vec<_>>()
                 .join(", ");
-            summary.push_str(&format!(
-                "<p>Unpaired channels (not summed): {}</p>",
-                crate::report_helpers::escape_html(&names)
-            ));
+            summary.push(format!("Unpaired channels (not summed): {names}"));
         }
-        push_html(&mut groups, "symmetric", json!(summary));
+        push_figure(
+            &mut groups,
+            "symmetric",
+            crate::report_document::paragraph_section(&summary),
+        );
         for pair in pairs.as_array().into_iter().flatten() {
             let Some(label) = pair[0].as_str() else {
                 continue;
@@ -225,18 +276,11 @@ pub fn build_global_report_sections(
                 .as_ref()
                 .and_then(|value| value.get(label))
             else {
-                groups
-                    .entry("symmetric".to_string())
-                    .or_insert_with(|| json!([]))
-                    .as_array_mut()
-                    .expect("global group is initialized as an array")
-                    .push(html_section_tab(
-                        &format!(
-                        "<p>Symmetric pair {}: no Rust pair export in this output bundle. Regenerate with the updated RoomEQ exporter.</p>",
-                        crate::report_helpers::escape_html(label)
-                        ),
-                        Some(label),
-                    ));
+                let mut note = crate::report_document::paragraph_section(&[format!(
+                    "Symmetric pair {label}: no Rust pair export in this output bundle. Regenerate with the updated RoomEQ exporter."
+                )]);
+                note["tab"] = json!(label);
+                push_figure(&mut groups, "symmetric", note);
                 continue;
             };
             let members = pair[1]
@@ -275,19 +319,14 @@ pub fn build_global_report_sections(
                 } else {
                     "both paired channels".to_owned()
                 };
-                groups
-                    .entry("symmetric".to_string())
-                    .or_insert_with(|| json!([]))
-                    .as_array_mut()
-                    .expect("global group is initialized as an array")
-                    .push(html_section_tab(
-                        &format!(
-                            "<p class=\"epa-footer\">Symmetric pair {}: complex sum unavailable without finite measured phase on both {} final curves; showing the absolute (magnitude) sum only.</p>",
-                            crate::report_helpers::escape_html(label),
-                            crate::report_helpers::escape_html(&names)
-                        ),
-                        Some(label),
-                    ));
+                let mut note = crate::report_document::caption_section(
+                    format!(
+                        "Symmetric pair {label}: complex sum unavailable without finite measured phase on both {names} final curves; showing the absolute (magnitude) sum only."
+                    ),
+                    false,
+                );
+                note["tab"] = json!(label);
+                push_figure(&mut groups, "symmetric", note);
                 preparation_status.push(json!({
                     "section":"symmetric_complex_sum",
                     "label":label,
@@ -303,21 +342,15 @@ pub fn build_global_report_sections(
         .cloned()
         .unwrap_or_else(|| json!([]));
     groups.insert("flow".to_string(), flow);
-    let epa = crate::evidence_sections::evidence_section(
-        &json!({"builder":"epa_summary","metadata":graph.get("metadata").unwrap_or(&Value::Null)}),
-    )?;
-    push_html(&mut groups, "epa", epa);
 
-    let mut capture_view_html = None;
+    let mut capture_view = Value::Null;
     if let Some(capture) = &options.capture_verification {
         if binding["verified"] != true {
-            capture_view_html = Some(format!(
-                "<section class=\"capture-views\"><h1>Capture acceptance diagnostics</h1><p>Unavailable: saved optimization graph binding is invalid: {}</p></section>\n",
-                crate::report_helpers::escape_html(
-                    binding["reason"]
-                        .as_str()
-                        .unwrap_or("payload binding is unavailable")
-                )
+            let reason = binding["reason"]
+                .as_str()
+                .unwrap_or("payload binding is unavailable");
+            capture_view = unavailable_capture_view(format!(
+                "saved optimization graph binding is invalid: {reason}"
             ));
             preparation_status.push(json!({
                 "section":"capture_views",
@@ -325,8 +358,8 @@ pub fn build_global_report_sections(
                 "reason":"capture verification cannot be displayed without a verified frozen payload binding"
             }));
         } else if capture["graph_id"] != binding["graph_identity"] {
-            capture_view_html = Some(
-                "<section class=\"capture-views\"><h1>Capture acceptance diagnostics</h1><p>Unavailable: verification candidate graph does not match the saved optimization graph.</p></section>\n".to_string(),
+            capture_view = unavailable_capture_view(
+                "verification candidate graph does not match the saved optimization graph".into(),
             );
             preparation_status.push(json!({
                 "section":"capture_views",
@@ -334,10 +367,10 @@ pub fn build_global_report_sections(
                 "reason":"verification candidate graph does not match the verified saved optimization graph"
             }));
         } else if let Some(view_bindings) = &options.capture_view_bindings {
-            let html = crate::evidence_sections::capture_views_html(capture, view_bindings);
+            let (section, rendered_available) =
+                crate::evidence_sections::capture_views_section(capture, view_bindings);
             let bindings_verified = capture_view_bindings_verified(capture, view_bindings);
-            let rendered_available = !html.contains("<p>Unavailable:");
-            capture_view_html = Some(html);
+            capture_view = section;
             preparation_status.push(json!({
                 "section":"capture_views",
                 "status":if bindings_verified && rendered_available { "available" } else { "unavailable" },
@@ -348,8 +381,8 @@ pub fn build_global_report_sections(
                 }
             }));
         } else {
-            capture_view_html = Some(
-                "<section class=\"capture-views\"><h1>Capture acceptance diagnostics</h1><p>Unavailable: capture-view payload verification is unavailable.</p></section>\n".to_string(),
+            capture_view = unavailable_capture_view(
+                "capture-view payload verification is unavailable.".into(),
             );
             preparation_status.push(json!({
                 "section":"capture_views",
@@ -364,16 +397,10 @@ pub fn build_global_report_sections(
             "reason":"capture verification evidence was not supplied"
         }));
     }
-    if let Some(html) = capture_view_html {
-        push_html(&mut groups, "why", json!(html));
-    }
-    let modes_html = global_evidence
+    push_figure(&mut groups, "why", capture_view);
+    let modes = global_evidence
         .get("modes_summary_html")
         .cloned()
-        .unwrap_or_else(|| json!(""));
-    let capture_reflections_html = global_evidence
-        .get("capture_reflections_html")
-        .and_then(Value::as_str)
         .unwrap_or_default();
     if graph["channels"].as_object().is_some_and(|channels| {
         channels.values().any(|channel| {
@@ -388,7 +415,7 @@ pub fn build_global_report_sections(
                 })
         })
     }) {
-        let rendered = modes_html.as_str().is_some_and(|html| !html.is_empty());
+        let rendered = !modes.is_null();
         preparation_status.push(json!({
             "section":"modes_summary",
             "status":if rendered { "available" } else { "unavailable" },
@@ -407,7 +434,7 @@ pub fn build_global_report_sections(
                 .any(|speaker| speaker["provenance"]["capture"]["reflection_report"].is_object())
         });
     if captured_arrival_evidence {
-        let rendered = !capture_reflections_html.is_empty();
+        let rendered = !global_evidence["capture_reflections_html"].is_null();
         preparation_status.push(json!({
             "section":"capture_reflections",
             "status":if rendered { "available" } else { "unavailable" },
@@ -423,8 +450,8 @@ pub fn build_global_report_sections(
         "title":"Room EQ",
         "status_sections":status_sections,
         "global_groups":groups,
-        "relative_levels_html":curves.get("level_compensation_html").cloned().unwrap_or_else(|| json!("")),
-        "modes_html":modes_html,
+        "relative_levels":relative_levels,
+        "modes":modes,
         "preparation_status":preparation_status,
         "shared_sections":shared,
         "provenance":crate::report_provenance::report_provenance(
@@ -469,27 +496,19 @@ fn capture_view_bindings_verified(report: &Value, verification: &Value) -> bool 
         })
 }
 
-fn html_section(html: &str, flat: bool) -> Value {
-    if flat {
-        json!({"kind":"html","html":html,"tab":null,"flat":true})
-    } else {
-        json!({"kind":"html","html":html,"tab":null})
-    }
-}
-
-fn html_section_tab(html: &str, tab: Option<&str>) -> Value {
-    json!({"kind":"html","html":html,"tab":tab})
-}
-
-fn push_html(groups: &mut Map<String, Value>, role: &str, value: Value) {
-    if let Some(html) = value.as_str().filter(|html| !html.is_empty()) {
-        groups
-            .entry(role.to_string())
-            .or_insert_with(|| json!([]))
-            .as_array_mut()
-            .expect("global group is initialized as an array")
-            .push(html_section(html, false));
-    }
+fn unavailable_capture_view(reason: String) -> Value {
+    use crate::report_document::{
+        DiagnosticBlock, DiagnosticIntroduction, DiagnosticSectionStyle, diagnostic_section,
+    };
+    let mut section = diagnostic_section(vec![DiagnosticBlock::Paragraph(format!(
+        "Unavailable: {reason}"
+    ))]);
+    section["introduction"] = json!(DiagnosticIntroduction {
+        title: "Capture acceptance diagnostics".into(),
+        text: String::new(),
+        style: DiagnosticSectionStyle::CaptureViewsUnavailable,
+    });
+    section
 }
 
 fn push_figure(groups: &mut Map<String, Value>, role: &str, value: Value) {
@@ -1056,6 +1075,56 @@ mod tests {
             !eq_series
                 .iter()
                 .any(|series| series["y"] == json!([99.0, 99.0]))
+        );
+    }
+
+    #[test]
+    fn bound_capture_comparisons_are_composed_as_native_sections() {
+        use crate::report_document::{DiagnosticBlock, ReportSection};
+
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../tests/fixtures/capture_views_nested_python.json"
+        ))
+        .unwrap();
+        let prepared = PreparedReportData::new(
+            json!({"channels":{}}),
+            Some(json!({"slim_graph_sha256":"loaded-digest"})),
+            None,
+            None,
+            json!({"schema_version":1,"state":"not_configured","target":null}),
+            None,
+        )
+        .unwrap();
+        let options = ReportDatasetOptions {
+            payload_binding: Some(json!({
+                "verified":true,
+                "reason":"hash verified",
+                "slim_graph_sha256":"loaded-digest",
+                "graph_identity":fixture["report"]["graph_id"],
+                "canonical_payload_sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+            })),
+            capture_verification: Some(fixture["report"].clone()),
+            capture_view_bindings: Some(fixture["verification"].clone()),
+            ..ReportDatasetOptions::default()
+        };
+        let document = crate::report_dataset_payload::build_report_document(&prepared, &options)
+            .expect("bound capture fixture composes");
+        assert!(document.sections.iter().all(|section| {
+            !matches!(section, ReportSection::Legacy(value) if value["kind"] == "html")
+        }));
+        assert!(document.sections.iter().any(|section| {
+            matches!(section, ReportSection::Diagnostics(diagnostics)
+                if diagnostics.blocks.iter().any(|block| matches!(block, DiagnosticBlock::CaptureChart(_))))
+        }));
+        assert!(
+            document
+                .preparation_status
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|entry| {
+                    entry["section"] == "capture_views" && entry["status"] == "available"
+                })
         );
     }
 

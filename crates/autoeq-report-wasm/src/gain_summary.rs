@@ -1,16 +1,22 @@
-//! Canonical HTML summary for deployed gain plugins.
+//! Canonical report summary for deployed gain plugins.
 
-// Rust guideline compliant 2026-02-21
+// Rust guideline compliant 2026-10-09
 
 use serde_json::Value;
 
-use crate::report_helpers::{channel_sort_key, escape_html, python_string};
+use crate::report_helpers::{channel_sort_key, python_string};
+use crate::report_table::{ReportTable, render_table_html};
 
-/// Renders the deployed gain plugins in global, channel, and driver order.
+/// Renders the deployed gain table as HTML.
+pub fn gain_summary_html(data: &Value) -> String {
+    gain_summary(data).map_or_else(String::new, |table| render_table_html(&table))
+}
+
+/// Builds the deployed gain table in global, channel, and driver order.
 ///
 /// The rows describe individual plugin entries; values are not summed because
 /// route-owned gains and crossover responses also affect playback.
-pub fn gain_summary_html(data: &Value) -> String {
+pub fn gain_summary(data: &Value) -> Option<ReportTable> {
     let mut owners: Vec<(String, Vec<&Value>)> = Vec::new();
     owners.push((
         "Global".to_string(),
@@ -47,7 +53,7 @@ pub fn gain_summary_html(data: &Value) -> String {
         }
     }
 
-    let mut rows = String::new();
+    let mut rows = Vec::new();
     for (owner, plugins) in owners {
         for (index, plugin) in plugins.into_iter().enumerate() {
             if plugin.get("plugin_type").and_then(Value::as_str) != Some("gain") {
@@ -69,34 +75,31 @@ pub fn gain_summary_html(data: &Value) -> String {
                 .and_then(|parameters| parameters.get("label"))
                 .map(python_string)
                 .unwrap_or_else(|| "unlabelled gain".to_string());
-            rows.push_str(&format!(
-                "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{}</td></tr>",
-                escape_html(&owner),
-                index + 1,
-                escape_html(&stage),
-                escape_html(&label),
+            rows.push(vec![
+                owner.clone(),
+                (index + 1).to_string(),
+                stage,
+                label,
                 gain,
-            ));
+            ]);
         }
     }
-    if rows.is_empty() {
-        return String::new();
-    }
 
-    format!(
-        concat!(
-            "<div class=\"plot-container\"><h2>Level Gains and Safety Attenuation</h2>",
-            "<p class=\"epa-footer\">The EQ-only overview does not show these gain plugins. ",
+    (!rows.is_empty()).then_some(ReportTable {
+        title: "Level Gains and Safety Attenuation".into(),
+        note: concat!(
+            "The EQ-only overview does not show these gain plugins. ",
             "They affect the post-DSP response even when the EQ trace is flat. ",
             "Entries are listed in plugin order within each owner; they are not a summed ",
             "input-to-output gain. Routing gains and crossover responses also affect playback. ",
-            "Route-owned entries describe routing and must not be counted twice.</p>",
-            "<table class=\"bm-table\"><thead><tr><th>Owner</th><th>Plugin #</th>",
-            "<th>Stage</th><th>Purpose</th><th>Gain</th></tr></thead><tbody>{rows}",
-            "</tbody></table></div>"
-        ),
-        rows = rows
-    )
+            "Route-owned entries describe routing and must not be counted twice."
+        )
+        .into(),
+        columns: ["Owner", "Plugin #", "Stage", "Purpose", "Gain"]
+            .map(String::from)
+            .into(),
+        rows,
+    })
 }
 
 fn object_array(value: Option<&Value>) -> Vec<&Value> {
@@ -119,7 +122,7 @@ fn is_truthy(value: &Value) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::gain_summary_html;
+    use super::{gain_summary, gain_summary_html};
 
     const PYTHON_GOLDEN: &str = concat!(
         "<div class=\"plot-container\"><h2>Level Gains and Safety Attenuation</h2><p class=\"epa-footer\">The EQ-only overview does not show these gain plugins. ",
@@ -146,6 +149,10 @@ mod tests {
                 ]}]}
             }
         });
+        let table = gain_summary(&data).unwrap();
+        assert_eq!(table.rows.len(), 4);
+        assert_eq!(table.rows[3][0], "Channel LFE / driver woofer<script>");
+        assert_eq!(table.rows[3][4], "-3.560 dB");
         assert_eq!(gain_summary_html(&data), PYTHON_GOLDEN);
     }
 

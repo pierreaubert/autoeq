@@ -9,10 +9,13 @@ use d3rs::scale::{LinearScale, LogScale, Scale};
 use d3rs::surface::{OrthographicProjection, Projection, SurfaceData, SurfaceMesh, SurfacePoint3D};
 
 use crate::draw::{
-    Ctx, DrawMeta, LegendEntry, PaintTriangle, TextAlign, draw_axis_layout, fmt_log_grid, fmt_num,
-    log_grid_ticks,
+    Ctx, DrawMeta, LegendEntry, PaintTriangle, PlotGeometry, TextAlign, draw_axis_layout,
+    fmt_log_grid, fmt_num, log_grid_ticks,
 };
 use crate::schema::{Figure, GridData};
+
+/// Default surface elevation and azimuth in degrees.
+pub const DEFAULT_SURFACE_ROTATION: [f64; 2] = [65.0, -12.0];
 
 fn valid(grid: &GridData) -> bool {
     grid.x.len() >= 2
@@ -151,7 +154,20 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
     let pw = (w - 172.0).max(60.0);
     let ph = (h - 140.0).max(60.0);
     ctx.fill_text(&fig.title, left, 22.0, TextAlign::Left);
-    let mut meta = DrawMeta::default();
+    let mut meta = DrawMeta {
+        plot: Some(PlotGeometry {
+            plot_x: left,
+            plot_y: top,
+            plot_w: pw,
+            plot_h: ph,
+            x_lo: xmin,
+            x_hi: xmax,
+            y_lo: ymin,
+            y_hi: ymax,
+            log_x: true,
+        }),
+        ..DrawMeta::default()
+    };
     let mut lx = left;
     for (i, series) in fig.series.iter().enumerate() {
         let width = ctx.text_width(&series.name) + 25.0;
@@ -181,7 +197,7 @@ pub fn draw_grid(ctx: &mut impl Ctx, fig: &Figure, grid: &GridData, w: f64, h: f
         let [elevation, azimuth] = grid
             .rotation
             .filter(|r| r.iter().all(|v| v.is_finite()))
-            .unwrap_or([65.0, -12.0]);
+            .unwrap_or(DEFAULT_SURFACE_ROTATION);
         let mut projection = OrthographicProjection::new()
             .scale(1.0)
             .rotation(-elevation, 0.0, azimuth)

@@ -21,7 +21,7 @@ autoeq-report-wasm = { workspace = true }
 native = ["dep:gpui", "dep:gpui-ui-kit"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-gpui-ui-kit = { version = "0.11", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false, optional = true }
+gpui-ui-kit = { version = "0.11", git = "https://github.com/pierreaubert/gpui-toolkit", default-features = false, optional = true, rev = "36bb357e8d17667c6dc0bce7c2443223c9b9070e" }
 gpui = { package = "sotf-gpui-toolkit-gpui", git = "https://github.com/pierreaubert/sotf-3rdparties", version = "0.2.3", default-features = false, optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

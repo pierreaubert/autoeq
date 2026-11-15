@@ -169,6 +169,14 @@ pub struct OptimizerConfig {
     /// Maximum number of iterations
     #[serde(default = "default_max_iter")]
     pub max_iter: usize,
+    /// Optional wall-clock budget for one channel's optimization, in
+    /// seconds. When set, the search stops at the next progress
+    /// callback after the budget elapses and keeps the best-so-far
+    /// result. `None` (default) means only iteration budgets apply.
+    /// This is what bounds optimization time on low-power machines
+    /// where a fixed iteration count takes unbounded wall time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_budget_seconds: Option<f64>,
     /// Optional hard objective-call cap for each joint sub-array search.
     /// Independent of the backend's generation/iteration limit in `max_iter`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -376,6 +384,7 @@ impl Default for OptimizerConfig {
             min_freq: default_min_freq(),
             max_freq: default_max_freq(),
             max_iter: default_max_iter(),
+            time_budget_seconds: None,
             joint_sub_evaluation_limit: None,
             bass_management_evaluation_limit: None,
             population: default_population(),

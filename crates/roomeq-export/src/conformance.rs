@@ -192,23 +192,135 @@ pub(super) fn validate_pipewire_input(
     output: &DspGraph,
     sample_rate: Option<f64>,
 ) -> anyhow::Result<()> {
-    if let Some(plugin) = output.global_plugins.first() {
+    let graph = super::camilladsp_routing_graph(output);
+    let routed_expected = routed_bass_management_declared(output);
+    if routed_expected && graph.is_none() {
         anyhow::bail!(
-            "PipeWire export does not yet support global plugin #0 ('{}'); use the \
-             CamillaDSP export for routed or matrix DSP graphs",
-            plugin.plugin_type
+            "PipeWire export found routed bass-management metadata but could not decode its graph"
         );
+    }
+    let routed = graph.as_ref().is_some_and(|graph| !graph.routes.is_empty());
+
+    // The bass-management matrix global plugin is a metadata carrier
+    // for the routing graph, not a rendered stage (same rule as the
+    // CamillaDSP routed export).
+    for (index, plugin) in output.global_plugins.iter().enumerate() {
+        let is_bass_management_matrix = plugin.plugin_type == "matrix"
+            && plugin
+                .parameters
+                .get("label")
+                .and_then(|label| label.as_str())
+                == Some("home_cinema_bass_management");
+        if !routed || !is_bass_management_matrix {
+            anyhow::bail!(
+                "PipeWire export does not support global plugin #{index} ('{}')",
+                plugin.plugin_type
+            );
+        }
     }
 
     let capabilities = ExportCapabilities {
         format: ExportFormat::PipeWire,
         supported_plugin_types: PIPEWIRE_PLUGIN_TYPES,
-        supports_driver_branches: false,
-        routed_stages: &[],
+        supports_driver_branches: routed,
+        routed_stages: if routed {
+            CAMILLADSP_ROUTED_STAGES
+        } else {
+            &[]
+        },
         normalize_identifier: normalize_export_identifier,
         validate_plugin: validate_pipewire_plugin,
     };
-    validate_export_input(output, &capabilities, sample_rate, None)
+    validate_export_input(output, &capabilities, sample_rate, graph.as_ref())?;
+    if let Some(graph) = graph.as_ref().filter(|graph| !graph.routes.is_empty()) {
+        validate_pipewire_routing_graph(output, graph, sample_rate)?;
+    }
+    Ok(())
+}
+
+fn validate_pipewire_routing_graph(
+    output: &DspGraph,
+    graph: &BassManagementRoutingGraph,
+    sample_rate: Option<f64>,
+) -> anyhow::Result<()> {
+    let (input_channels, output_channels) = routed_channel_names(output, graph);
+    validate_channel_list(&input_channels, "input")?;
+    validate_channel_list(&output_channels, "output")?;
+    let mut destination_has_route = vec![false; output_channels.len()];
+    for (route_index, route) in graph.routes.iter().enumerate() {
+        let context = format!(
+            "route #{route_index} ({} -> {})",
+            route.source_channel, route.destination
+        );
+        validate_route_endpoint(
+            route.source_index,
+            &route.source_channel,
+            &input_channels,
+            "source",
+            &context,
+        )?;
+        validate_route_endpoint(
+            route.destination_index,
+            &route.destination,
+            &output_channels,
+            "destination",
+            &context,
+        )?;
+        destination_has_route[route.destination_index] = true;
+
+        if route.high_pass_hz.is_some() && route.low_pass_hz.is_some() {
+            anyhow::bail!("PipeWire export {context} cannot be both high-pass and low-pass");
+        }
+        if let Some(frequency) = route.high_pass_hz.or(route.low_pass_hz) {
+            validate_frequency(frequency, sample_rate, &context)?;
+            // The serial renderer's crossover support is LR24/LR48.
+            match route.crossover_type.to_ascii_lowercase().as_str() {
+                "lr24" | "linkwitzriley4" | "linkwitz-riley-4" | "lr48" | "linkwitzriley8"
+                | "linkwitz-riley-8" => {}
+                other => {
+                    anyhow::bail!(
+                        "PipeWire export does not support crossover type '{other}' on {context}"
+                    );
+                }
+            }
+        }
+        if !route.delay_ms.is_finite() || route.delay_ms < 0.0 {
+            anyhow::bail!("PipeWire export requires a non-negative finite delay on {context}");
+        }
+        if !route.gain_db.is_finite()
+            || !route.gain_linear.is_finite()
+            || !route.matrix_gain.is_finite()
+        {
+            anyhow::bail!("PipeWire export requires finite gain values on {context}");
+        }
+    }
+
+    if let Some(index) = destination_has_route
+        .iter()
+        .position(|has_route| !has_route)
+    {
+        anyhow::bail!(
+            "PipeWire export output channel '{}' has no incoming route",
+            output_channels[index]
+        );
+    }
+    let physical = camilladsp_physical_routing(output, graph)?;
+    anyhow::ensure!(
+        physical
+            .physical
+            .inputs
+            .iter()
+            .map(|port| &port.name)
+            .eq(input_channels.iter())
+            && physical
+                .physical
+                .outputs
+                .iter()
+                .map(|port| &port.name)
+                .eq(output_channels.iter()),
+        "PipeWire resolved physical ports disagree with routed channel order"
+    );
+    Ok(())
 }
 
 pub(super) fn validate_serial_external_input(

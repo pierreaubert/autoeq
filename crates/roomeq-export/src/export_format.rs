@@ -325,7 +325,9 @@ pub fn query_export_capability_at_sample_rate(
     let has_extended_graph = has_routed_bass_management(graph) || !graph.global_plugins.is_empty();
     let extended_graph_unsupported = has_extended_graph
         && match format {
-            ExportFormat::CamillaDsp => !has_only_bass_management_matrix(graph),
+            ExportFormat::CamillaDsp | ExportFormat::PipeWire => {
+                !has_only_bass_management_matrix(graph)
+            }
             ExportFormat::EqualizerApo => false,
             _ => true,
         };
@@ -464,6 +466,18 @@ pub(super) fn ensure_external_export_supported(
         return validate_camilladsp_input(output, None);
     }
 
+    // PipeWire renders routed bass-management graphs natively
+    // (filter-chain node graph with mixer summing), under the same
+    // matrix-only restriction as CamillaDSP.
+    if matches!(format, ExportFormat::PipeWire) {
+        if (has_routed_bass_management || has_global_plugins)
+            && !has_only_bass_management_matrix(output)
+        {
+            return unsupported_graph_error(format);
+        }
+        return validate_pipewire_input(output, None);
+    }
+
     // Equalizer APO has its own graph renderer. It performs stricter
     // capability checks at render time because some static Channel/Copy
     // routings are representable while arbitrary graphs are not.
@@ -475,9 +489,6 @@ pub(super) fn ensure_external_export_supported(
     }
 
     if !has_routed_bass_management && !has_global_plugins {
-        if matches!(format, ExportFormat::PipeWire) {
-            return validate_pipewire_input(output, None);
-        }
         return validate_serial_external_input(output, format);
     }
 

@@ -61,7 +61,10 @@ pub(crate) fn optimize_maybe_multi_with_exact_checkpoint(
         let stopped = stopped.clone();
         Box::new(move |iteration, loss, epa| {
             let action = callback(iteration, loss, epa);
-            if !matches!(&action, autoeq_optim::de::CallbackAction::Continue) {
+            // Only a hard stop is cancellation. A budget stop
+            // (StopAcceptBest) ends the search but the channel keeps
+            // its best-so-far result.
+            if matches!(&action, autoeq_optim::de::CallbackAction::Stop) {
                 stopped.store(true, std::sync::atomic::Ordering::Relaxed);
             }
             action

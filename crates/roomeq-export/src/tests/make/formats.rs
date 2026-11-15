@@ -604,7 +604,9 @@ fn pipewire_never_silently_omits_unsupported_processing() {
         parameters: json!({"label": "home_cinema_bass_management"}),
     });
     let error = export_pipewire(&output, 48_000.0).unwrap_err().to_string();
-    assert!(error.contains("does not yet support global plugin #0 ('matrix')"));
+    // A matrix global plugin without a decodable routing graph is
+    // still unrepresentable; with one, the routed renderer handles it.
+    assert!(error.contains("does not support global plugin #0 ('matrix')"), "{error}");
 }
 
 #[test]
@@ -992,4 +994,49 @@ fn equalizer_apo_export_reconstructs_the_canonical_response() {
         let canonical = canonical_serial_db(&output.channels["left"], frequency, 48_000.0);
         assert!((exported - canonical).abs() < 1e-8);
     }
+}
+
+#[test]
+fn pipewire_renders_routed_bass_management_graph() {
+    let output = make_routed_bass_output();
+    let capability = crate::query_export_capability(&output, ExportFormat::PipeWire);
+    assert!(
+        capability.supported,
+        "routed graph must be PipeWire-capable: {:?}",
+        capability.reasons
+    );
+
+    let conf = export_pipewire(&output, 48_000.0).unwrap();
+    assert!(conf.contains("# Routed bass-management graph export"));
+    // Pre-route gain, route crossovers and delay are rendered nodes.
+    assert!(conf.contains("pre_L_plugin_0_gain"), "{conf}");
+    assert!(conf.contains("route_0_L_to_L_xo_0"), "{conf}");
+    assert!(conf.contains("label = bq_highpass"), "{conf}");
+    assert!(conf.contains("route_1_L_to_LFE_xo_0"), "{conf}");
+    assert!(conf.contains("label = bq_lowpass"), "{conf}");
+    assert!(conf.contains("route_1_L_to_LFE_delay"), "{conf}");
+    // LFE sums both redirected routes through one mixer, with the
+    // route gain (-6 dB) applied per input.
+    assert!(conf.contains("name = \"sum_LFE\""), "{conf}");
+    assert!(conf.contains("label = mixer"), "{conf}");
+    assert!(conf.contains("\"Gain 1\" = 0.501187233627"), "{conf}");
+    assert!(conf.contains("input = \"sum_LFE:In 1\""), "{conf}");
+    assert!(conf.contains("input = \"sum_LFE:In 2\""), "{conf}");
+    // Mains keep their own post chains and are not mixed.
+    assert!(conf.contains("post_LFE_plugin_0_eq_0"), "{conf}");
+    assert!(conf.contains("audio.channels = 3"), "{conf}");
+    assert!(conf.contains("audio.position = [ \"FL\", \"FR\", \"LFE\" ]"), "{conf}");
+    // Fan-out: the L pre chain feeds both the L high-pass route and
+    // the LFE low-pass route.
+    assert!(conf.contains("input = \"route_0_L_to_L_xo_0:In\""), "{conf}");
+    assert!(conf.contains("input = \"route_1_L_to_LFE_xo_0:In\""), "{conf}");
+}
+
+#[test]
+#[ignore = "manual: writes the routed PipeWire config to SOTF_PW_CONF_OUT for live validation"]
+fn dump_routed_pipewire_conf() {
+    let output = make_routed_bass_output();
+    let conf = export_pipewire(&output, 48_000.0).unwrap();
+    let path = std::env::var("SOTF_PW_CONF_OUT").expect("SOTF_PW_CONF_OUT");
+    std::fs::write(&path, conf).unwrap();
 }

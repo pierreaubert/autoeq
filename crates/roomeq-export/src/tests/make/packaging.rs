@@ -6,11 +6,12 @@ use std::path::Path;
 fn external_exports_reject_routed_bass_management() {
     let output = make_routed_bass_output();
     assert!(external_export_supported(&output, ExportFormat::CamillaDsp).is_ok());
+    // Routed graphs render natively as a filter-chain node graph.
+    assert!(external_export_supported(&output, ExportFormat::PipeWire).is_ok());
 
     for format in [
         ExportFormat::EasyEffects,
         ExportFormat::Wavelet,
-        ExportFormat::PipeWire,
         ExportFormat::RoonDsp,
         ExportFormat::Rew,
         ExportFormat::BiquadCoefficients,

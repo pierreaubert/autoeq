@@ -1254,6 +1254,12 @@ fn optimize_filters_with_run_control_dispatch(
                         control_for_callback.request_cancel();
                         return crate::de::CallbackAction::Stop;
                     }
+                    // Budget stop: end this backend's search but keep
+                    // the best-so-far result; it is not a cancellation
+                    // of the surrounding run.
+                    crate::de::CallbackAction::StopAcceptBest => {
+                        return crate::de::CallbackAction::StopAcceptBest;
+                    }
                 }
             }
             if control_for_callback.stop_requested() {

@@ -1200,8 +1200,128 @@ fn export_wavelet(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String>
     Ok(out)
 }
 
+/// Render one plugin chain as filter-chain builtin nodes, returning
+/// (node name, input port, output port) in chain order. Shared by
+/// the serial and routed PipeWire exporters; validation guarantees
+/// no plugin can be silently omitted from a successful export.
+fn write_pipewire_plugin_nodes(
+    out: &mut String,
+    ch_prefix: &str,
+    plugins: &[PluginConfigWrapper],
+) -> anyhow::Result<Vec<(String, &'static str, &'static str)>> {
+    let mut node_names = Vec::new();
+    for (plugin_index, plugin) in plugins.iter().enumerate() {
+        match plugin.plugin_type.as_str() {
+            "gain" => {
+                let gain_db = plugin.parameters["gain_db"].as_f64().unwrap();
+                let polarity = if plugin
+                    .parameters
+                    .get("invert")
+                    .and_then(|value| value.as_bool())
+                    == Some(true)
+                {
+                    -1.0
+                } else {
+                    1.0
+                };
+                let gain = polarity * 10.0_f64.powf(gain_db / 20.0);
+                let node_name = format!("{ch_prefix}_plugin_{plugin_index}_gain");
+                writeln!(
+                    out,
+                    "          {{ type = builtin  name = \"{node_name}\"  label = mixer  control = {{ \"Gain 1\" = {gain:.12} }} }}"
+                )?;
+                node_names.push((node_name, "In 1", "Out"));
+            }
+            "delay" => {
+                let delay_seconds = plugin.parameters["delay_ms"].as_f64().unwrap() / 1000.0;
+                let node_name = format!("{ch_prefix}_plugin_{plugin_index}_delay");
+                writeln!(
+                    out,
+                    "          {{ type = builtin  name = \"{node_name}\"  label = delay  config = {{ \"max-delay\" = {delay_seconds:.9} }}  control = {{ \"Delay (s)\" = {delay_seconds:.9} }} }}"
+                )?;
+                node_names.push((node_name, "In", "Out"));
+            }
+            "eq" => {
+                for (filter_index, filter) in extract_eq_filters(std::slice::from_ref(plugin))?
+                    .iter()
+                    .enumerate()
+                {
+                    let label = pipewire_filter_label(&filter.filter_type)?;
+                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_eq_{filter_index}");
+                    if matches!(
+                        filter.filter_type.as_str(),
+                        "lowpass" | "highpass" | "highpassvariableq"
+                    ) {
+                        writeln!(
+                            out,
+                            "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {:.9}  \"Q\" = {:.9} }} }}",
+                            filter.freq, filter.q
+                        )?;
+                    } else {
+                        writeln!(
+                            out,
+                            "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {:.9}  \"Q\" = {:.9}  \"Gain\" = {:.9} }} }}",
+                            filter.freq, filter.q, filter.gain_db
+                        )?;
+                    }
+                    node_names.push((node_name, "In", "Out"));
+                }
+            }
+            "crossover" => {
+                let crossover_type = plugin.parameters["type"].as_str().unwrap();
+                let output = plugin.parameters["output"].as_str().unwrap();
+                let frequency = plugin.parameters["frequency"].as_f64().unwrap();
+                let label = if output == "low" {
+                    "bq_lowpass"
+                } else {
+                    "bq_highpass"
+                };
+                let q_values: &[f64] = match crossover_type.to_ascii_lowercase().as_str() {
+                    "lr24" | "linkwitzriley4" | "linkwitz-riley-4" => {
+                        &[std::f64::consts::FRAC_1_SQRT_2; 2]
+                    }
+                    "lr48" | "linkwitzriley8" | "linkwitz-riley-8" => &[
+                        0.541_196_100_146,
+                        1.306_562_964_876,
+                        0.541_196_100_146,
+                        1.306_562_964_876,
+                    ],
+                    _ => unreachable!("validated PipeWire crossover type"),
+                };
+                for (section, q) in q_values.iter().enumerate() {
+                    let node_name =
+                        format!("{ch_prefix}_plugin_{plugin_index}_crossover_{section}");
+                    writeln!(
+                        out,
+                        "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {frequency:.9}  \"Q\" = {q:.12} }} }}"
+                    )?;
+                    node_names.push((node_name, "In", "Out"));
+                }
+            }
+            "convolution" => {
+                let ir_file = plugin.parameters["ir_file"].as_str().unwrap();
+                let node_name = format!("{ch_prefix}_plugin_{plugin_index}_convolver");
+                writeln!(
+                    out,
+                    "          {{ type = builtin  name = \"{node_name}\"  label = convolver  config = {{ filename = {} }} }}",
+                    serde_json::to_string(ir_file)?
+                )?;
+                node_names.push((node_name, "In", "Out"));
+            }
+            _ => unreachable!("validated PipeWire plugin type"),
+        }
+    }
+
+    Ok(node_names)
+}
+
 fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String> {
     validate_pipewire_input(output, Some(sample_rate))?;
+    if let Some(graph) = camilladsp_routing_graph(output)
+        && !graph.routes.is_empty()
+    {
+        return export_pipewire_routed(output, &graph, sample_rate);
+    }
     let mut out = String::new();
     writeln!(out, "# PipeWire filter-chain configuration")?;
     writeln!(out, "# Generated by roomeq")?;
@@ -1233,113 +1353,7 @@ fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String
 
     for (ch_idx, (ch_name, chain)) in channels.iter().enumerate() {
         let ch_prefix = format!("ch{}_{}", ch_idx, ch_name.replace(' ', "_"));
-        let mut node_names = Vec::new();
-
-        // Render every plugin in source order. Validation above guarantees that
-        // no plugin can be silently omitted from a successful export.
-        for (plugin_index, plugin) in chain.plugins.iter().enumerate() {
-            match plugin.plugin_type.as_str() {
-                "gain" => {
-                    let gain_db = plugin.parameters["gain_db"].as_f64().unwrap();
-                    let polarity = if plugin
-                        .parameters
-                        .get("invert")
-                        .and_then(|value| value.as_bool())
-                        == Some(true)
-                    {
-                        -1.0
-                    } else {
-                        1.0
-                    };
-                    let gain = polarity * 10.0_f64.powf(gain_db / 20.0);
-                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_gain");
-                    writeln!(
-                        out,
-                        "          {{ type = builtin  name = \"{node_name}\"  label = mixer  control = {{ \"Gain 1\" = {gain:.12} }} }}"
-                    )?;
-                    node_names.push((node_name, "In 1", "Out"));
-                }
-                "delay" => {
-                    let delay_seconds = plugin.parameters["delay_ms"].as_f64().unwrap() / 1000.0;
-                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_delay");
-                    writeln!(
-                        out,
-                        "          {{ type = builtin  name = \"{node_name}\"  label = delay  config = {{ \"max-delay\" = {delay_seconds:.9} }}  control = {{ \"Delay (s)\" = {delay_seconds:.9} }} }}"
-                    )?;
-                    node_names.push((node_name, "In", "Out"));
-                }
-                "eq" => {
-                    for (filter_index, filter) in extract_eq_filters(std::slice::from_ref(plugin))?
-                        .iter()
-                        .enumerate()
-                    {
-                        let label = pipewire_filter_label(&filter.filter_type)?;
-                        let node_name =
-                            format!("{ch_prefix}_plugin_{plugin_index}_eq_{filter_index}");
-                        if matches!(
-                            filter.filter_type.as_str(),
-                            "lowpass" | "highpass" | "highpassvariableq"
-                        ) {
-                            writeln!(
-                                out,
-                                "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {:.9}  \"Q\" = {:.9} }} }}",
-                                filter.freq, filter.q
-                            )?;
-                        } else {
-                            writeln!(
-                                out,
-                                "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {:.9}  \"Q\" = {:.9}  \"Gain\" = {:.9} }} }}",
-                                filter.freq, filter.q, filter.gain_db
-                            )?;
-                        }
-                        node_names.push((node_name, "In", "Out"));
-                    }
-                }
-                "crossover" => {
-                    let crossover_type = plugin.parameters["type"].as_str().unwrap();
-                    let output = plugin.parameters["output"].as_str().unwrap();
-                    let frequency = plugin.parameters["frequency"].as_f64().unwrap();
-                    let label = if output == "low" {
-                        "bq_lowpass"
-                    } else {
-                        "bq_highpass"
-                    };
-                    let q_values: &[f64] = match crossover_type.to_ascii_lowercase().as_str() {
-                        "lr24" | "linkwitzriley4" | "linkwitz-riley-4" => {
-                            &[std::f64::consts::FRAC_1_SQRT_2; 2]
-                        }
-                        "lr48" | "linkwitzriley8" | "linkwitz-riley-8" => &[
-                            0.541_196_100_146,
-                            1.306_562_964_876,
-                            0.541_196_100_146,
-                            1.306_562_964_876,
-                        ],
-                        _ => unreachable!("validated PipeWire crossover type"),
-                    };
-                    for (section, q) in q_values.iter().enumerate() {
-                        let node_name =
-                            format!("{ch_prefix}_plugin_{plugin_index}_crossover_{section}");
-                        writeln!(
-                            out,
-                            "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {frequency:.9}  \"Q\" = {q:.12} }} }}"
-                        )?;
-                        node_names.push((node_name, "In", "Out"));
-                    }
-                }
-                "convolution" => {
-                    let ir_file = plugin.parameters["ir_file"].as_str().unwrap();
-                    let node_name = format!("{ch_prefix}_plugin_{plugin_index}_convolver");
-                    writeln!(
-                        out,
-                        "          {{ type = builtin  name = \"{node_name}\"  label = convolver  config = {{ filename = {} }} }}",
-                        serde_json::to_string(ir_file)?
-                    )?;
-                    node_names.push((node_name, "In", "Out"));
-                }
-                _ => unreachable!("validated PipeWire plugin type"),
-            }
-        }
-
+        let mut node_names = write_pipewire_plugin_nodes(&mut out, &ch_prefix, &chain.plugins)?;
         if node_names.is_empty() {
             let node_name = format!("{ch_prefix}_passthrough");
             writeln!(
@@ -1401,6 +1415,353 @@ fn export_pipewire(output: &DspGraph, sample_rate: f64) -> anyhow::Result<String
 
     writeln!(out, "    }}")?; // args
     writeln!(out, "  }}")?; // module
+    writeln!(out, "]")?;
+
+    Ok(out)
+}
+
+/// One rendered chain's entry/exit ports in the routed graph.
+struct PipeWireChainEnds {
+    input: String,
+    output: String,
+}
+
+/// Link consecutive nodes of one rendered chain.
+fn write_pipewire_chain_links(
+    out: &mut String,
+    nodes: &[(String, &'static str, &'static str)],
+) -> anyhow::Result<()> {
+    for pair in nodes.windows(2) {
+        writeln!(
+            out,
+            "          {{ output = \"{}:{}\"  input = \"{}:{}\" }}",
+            pair[0].0, pair[0].2, pair[1].0, pair[1].1
+        )?;
+    }
+    Ok(())
+}
+
+/// Routed bass-management export as a PipeWire filter-chain graph.
+///
+/// Mirrors the CamillaDSP routed topology: per-input pre-route
+/// stages fan out to per-route crossover+delay chains, which sum
+/// (with route gains) into per-output post-route stages. Delay
+/// alignment follows the same stage padding as CamillaDSP, rounded
+/// to whole samples: PipeWire's delay node is a plain sample delay,
+/// so fractional alignment is approximate beyond one sample where
+/// CamillaDSP realizes it with an FIR.
+fn export_pipewire_routed(
+    output: &DspGraph,
+    graph: &BassManagementRoutingGraph,
+    sample_rate: f64,
+) -> anyhow::Result<String> {
+    let resolved = camilladsp_physical_routing(output, graph)?;
+    let graph = &resolved.graph;
+    let (input_channels, output_channels) = routed_channel_names(output, graph);
+    let delay_report = delay::report_routed(&resolved, sample_rate);
+    let pre_padding = delay_report.pre_route_padding_samples;
+    let route_padding = delay_report.route_padding_samples;
+    let post_padding = delay_report.post_route_padding_samples;
+
+    let mut out = String::new();
+    writeln!(out, "# PipeWire filter-chain configuration")?;
+    writeln!(out, "# Generated by roomeq")?;
+    writeln!(out, "# Routed bass-management graph export")?;
+    writeln!(
+        out,
+        "# roomeq_delay_padding_samples: pre={pre_padding} route={route_padding} post={post_padding}"
+    )?;
+    writeln!(out)?;
+    writeln!(out, "context.modules = [")?;
+    writeln!(out, "  {{ name = libpipewire-module-filter-chain")?;
+    writeln!(out, "    args = {{")?;
+    writeln!(out, "      filter.graph = {{")?;
+    writeln!(out, "        nodes = [")?;
+
+    // Pre-route stages, one chain per physical input. Track each
+    // rendered chain's nodes for intra-chain links plus its ends.
+    let mut pre_ends: Vec<Option<PipeWireChainEnds>> = Vec::new();
+    let mut pre_nodes: Vec<Vec<(String, &'static str, &'static str)>> = Vec::new();
+    for (channel_name, port) in input_channels.iter().zip(&resolved.physical.inputs) {
+        let prefix = format!("pre_{}", normalize_export_identifier(channel_name));
+        let mut nodes = write_pipewire_plugin_nodes(&mut out, &prefix, &port.plugins)?;
+        if pre_padding > 0 {
+            let delay_seconds = pre_padding as f64 / sample_rate;
+            let node_name = format!("{prefix}_pad_delay");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = delay  config = {{ \"max-delay\" = {delay_seconds:.9} }}  control = {{ \"Delay (s)\" = {delay_seconds:.9} }} }}"
+            )?;
+            nodes.push((node_name, "In", "Out"));
+        }
+        if nodes.is_empty() {
+            let node_name = format!("{prefix}_passthrough");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = copy }}"
+            )?;
+            nodes.push((node_name, "In", "Out"));
+        }
+        pre_ends.push(Some(PipeWireChainEnds {
+            input: format!("{}:{}", nodes[0].0, nodes[0].1),
+            output: format!("{}:{}", nodes[nodes.len() - 1].0, nodes[nodes.len() - 1].2),
+        }));
+        pre_nodes.push(nodes);
+    }
+
+    // Route chains: crossover sections, then delay (route delay plus
+    // the stage alignment padding, both as one delay node).
+    let mut route_ends: Vec<Option<PipeWireChainEnds>> = Vec::new();
+    let mut route_nodes: Vec<Vec<(String, &'static str, &'static str)>> = Vec::new();
+    for (route_idx, route) in graph.routes.iter().enumerate() {
+        let prefix = format!(
+            "route_{}_{}_to_{}",
+            route_idx,
+            normalize_export_identifier(&route.source_channel),
+            normalize_export_identifier(&route.destination)
+        );
+        let mut nodes: Vec<(String, &'static str, &'static str)> = Vec::new();
+        if let Some(freq) = route.high_pass_hz.or(route.low_pass_hz) {
+            let label = if route.high_pass_hz.is_some() {
+                "bq_highpass"
+            } else {
+                "bq_lowpass"
+            };
+            let q_values: &[f64] = match route.crossover_type.to_ascii_lowercase().as_str() {
+                "lr24" | "linkwitzriley4" | "linkwitz-riley-4" => {
+                    &[std::f64::consts::FRAC_1_SQRT_2; 2]
+                }
+                "lr48" | "linkwitzriley8" | "linkwitz-riley-8" => &[
+                    0.541_196_100_146,
+                    1.306_562_964_876,
+                    0.541_196_100_146,
+                    1.306_562_964_876,
+                ],
+                other => {
+                    anyhow::bail!("PipeWire export does not support crossover type '{other}'")
+                }
+            };
+            for (section, q) in q_values.iter().enumerate() {
+                let node_name = format!("{prefix}_xo_{section}");
+                writeln!(
+                    out,
+                    "          {{ type = builtin  name = \"{node_name}\"  label = {label}  control = {{ \"Freq\" = {freq:.9}  \"Q\" = {q:.12} }} }}"
+                )?;
+                nodes.push((node_name, "In", "Out"));
+            }
+        }
+        let route_delay_seconds = route.delay_ms / 1000.0 + route_padding as f64 / sample_rate;
+        if route_delay_seconds > 0.0 {
+            let node_name = format!("{prefix}_delay");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = delay  config = {{ \"max-delay\" = {route_delay_seconds:.9} }}  control = {{ \"Delay (s)\" = {route_delay_seconds:.9} }} }}"
+            )?;
+            nodes.push((node_name, "In", "Out"));
+        }
+        route_ends.push(if nodes.is_empty() {
+            None
+        } else {
+            Some(PipeWireChainEnds {
+                input: format!("{}:{}", nodes[0].0, nodes[0].1),
+                output: format!("{}:{}", nodes[nodes.len() - 1].0, nodes[nodes.len() - 1].2),
+            })
+        });
+        route_nodes.push(nodes);
+    }
+
+    // Post-route stages, one chain per physical output.
+    let mut post_ends: Vec<Option<PipeWireChainEnds>> = Vec::new();
+    let mut post_nodes: Vec<Vec<(String, &'static str, &'static str)>> = Vec::new();
+    for (channel_name, plugins) in output_channels.iter().zip(&resolved.post_plugins) {
+        let prefix = format!("post_{}", normalize_export_identifier(channel_name));
+        let mut nodes = write_pipewire_plugin_nodes(&mut out, &prefix, plugins)?;
+        if post_padding > 0 {
+            let delay_seconds = post_padding as f64 / sample_rate;
+            let node_name = format!("{prefix}_pad_delay");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = delay  config = {{ \"max-delay\" = {delay_seconds:.9} }}  control = {{ \"Delay (s)\" = {delay_seconds:.9} }} }}"
+            )?;
+            nodes.push((node_name, "In", "Out"));
+        }
+        if nodes.is_empty() {
+            let node_name = format!("{prefix}_passthrough");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = copy }}"
+            )?;
+            nodes.push((node_name, "In", "Out"));
+        }
+        post_ends.push(Some(PipeWireChainEnds {
+            input: format!("{}:{}", nodes[0].0, nodes[0].1),
+            output: format!("{}:{}", nodes[nodes.len() - 1].0, nodes[nodes.len() - 1].2),
+        }));
+        post_nodes.push(nodes);
+    }
+
+    // Sum mixers: one per output that needs gain/polarity or has
+    // more than one incoming route. Others link straight through.
+    let mut sum_inputs: Vec<Vec<(usize, f64)>> = vec![Vec::new(); output_channels.len()];
+    for (route_idx, route) in graph.routes.iter().enumerate() {
+        let gain = route.gain_linear * if route.polarity_inverted { -1.0 } else { 1.0 };
+        sum_inputs[route.destination_index].push((route_idx, gain));
+    }
+    let mut sum_ends: Vec<Option<String>> = Vec::new();
+    for (dest_idx, incoming) in sum_inputs.iter().enumerate() {
+        let needs_mixer = incoming.len() > 1
+            || incoming
+                .first()
+                .is_some_and(|(_, gain)| (*gain - 1.0).abs() > 1e-12);
+        if needs_mixer {
+            let node_name = format!(
+                "sum_{}",
+                normalize_export_identifier(&output_channels[dest_idx])
+            );
+            let controls = incoming
+                .iter()
+                .enumerate()
+                .map(|(i, (_, gain))| format!("\"Gain {}\" = {gain:.12}", i + 1))
+                .collect::<Vec<_>>()
+                .join("  ");
+            writeln!(
+                out,
+                "          {{ type = builtin  name = \"{node_name}\"  label = mixer  control = {{ {controls} }} }}"
+            )?;
+            sum_ends.push(Some(node_name));
+        } else {
+            sum_ends.push(None);
+        }
+    }
+    writeln!(out, "        ]")?;
+
+    // Links: intra-chain, fan-out, route chains, summing, post chains.
+    writeln!(out, "        links = [")?;
+    for nodes in pre_nodes
+        .iter()
+        .chain(route_nodes.iter())
+        .chain(post_nodes.iter())
+    {
+        let mut chain_links = String::new();
+        write_pipewire_chain_links(&mut chain_links, nodes)?;
+        out.push_str(&chain_links);
+    }
+    for (route_idx, route) in graph.routes.iter().enumerate() {
+        let source = &pre_ends[route.source_index]
+            .as_ref()
+            .expect("pre chain always has a passthrough")
+            .output;
+        let route_in = route_ends[route_idx]
+            .as_ref()
+            .map(|ends| ends.input.clone());
+        let dest = route.destination_index;
+        let sum_or_post = match &sum_ends[dest] {
+            Some(mixer) => {
+                let position = sum_inputs[dest]
+                    .iter()
+                    .position(|(idx, _)| *idx == route_idx)
+                    .expect("route listed in its destination sum");
+                format!("{mixer}:In {}", position + 1)
+            }
+            None => post_ends[dest]
+                .as_ref()
+                .expect("post chain always has a passthrough")
+                .input
+                .clone(),
+        };
+        match route_in {
+            Some(route_in) => {
+                writeln!(
+                    out,
+                    "          {{ output = \"{source}\"  input = \"{route_in}\" }}"
+                )?;
+                let route_out = route_ends[route_idx]
+                    .as_ref()
+                    .expect("route chain present when input exists")
+                    .output
+                    .clone();
+                writeln!(
+                    out,
+                    "          {{ output = \"{route_out}\"  input = \"{sum_or_post}\" }}"
+                )?;
+            }
+            None => {
+                writeln!(
+                    out,
+                    "          {{ output = \"{source}\"  input = \"{sum_or_post}\" }}"
+                )?;
+            }
+        }
+    }
+    for (dest_idx, mixer) in sum_ends.iter().enumerate() {
+        if let Some(mixer) = mixer {
+            let post_in = &post_ends[dest_idx]
+                .as_ref()
+                .expect("post chain always has a passthrough")
+                .input;
+            writeln!(
+                out,
+                "          {{ output = \"{mixer}:Out\"  input = \"{post_in}\" }}"
+            )?;
+        }
+    }
+    writeln!(out, "        ]")?;
+
+    let input_positions: Vec<String> = input_channels
+        .iter()
+        .map(|name| {
+            format!(
+                "\"{}\"",
+                pipewire_channel_position(channel_short_name(name))
+            )
+        })
+        .collect();
+    let output_positions: Vec<String> = output_channels
+        .iter()
+        .map(|name| {
+            format!(
+                "\"{}\"",
+                pipewire_channel_position(channel_short_name(name))
+            )
+        })
+        .collect();
+
+    writeln!(out, "        inputs  = [")?;
+    for ends in pre_ends.iter().flatten() {
+        writeln!(out, "          \"{}\"", ends.input)?;
+    }
+    writeln!(out, "        ]")?;
+    writeln!(out, "        outputs = [")?;
+    for ends in post_ends.iter().flatten() {
+        writeln!(out, "          \"{}\"", ends.output)?;
+    }
+    writeln!(out, "        ]")?;
+    writeln!(out, "      }}")?;
+
+    writeln!(out, "      capture.props = {{")?;
+    writeln!(out, "        node.name = \"roomeq_filter_input\"")?;
+    writeln!(out, "        media.class = \"Audio/Sink\"")?;
+    writeln!(out, "        audio.channels = {}", input_channels.len())?;
+    writeln!(
+        out,
+        "        audio.position = [ {} ]",
+        input_positions.join(", ")
+    )?;
+    writeln!(out, "      }}")?;
+    writeln!(out, "      playback.props = {{")?;
+    writeln!(out, "        node.name = \"roomeq_filter_output\"")?;
+    writeln!(out, "        node.passive = true")?;
+    writeln!(out, "        stream.dont-remix = true")?;
+    writeln!(out, "        audio.channels = {}", output_channels.len())?;
+    writeln!(
+        out,
+        "        audio.position = [ {} ]",
+        output_positions.join(", ")
+    )?;
+    writeln!(out, "      }}")?;
+
+    writeln!(out, "    }}")?;
+    writeln!(out, "  }}")?;
     writeln!(out, "]")?;
 
     Ok(out)

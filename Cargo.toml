@@ -127,11 +127,13 @@ proptest = { version = "1.9", default-features = false, features = ["std"] }
 serial_test = "4"
 wide = "0.6.1"
 
-# Shared primitives from the math-audio repository.
-math-iir-fir = { version = "0.5", git = "https://github.com/pierreaubert/math-audio" }
-math-dsp = { version = "0.5", git = "https://github.com/pierreaubert/math-audio" }
-math-optimisation = { version = "0.5", git = "https://github.com/pierreaubert/math-audio" }
-math-rir = { version = "0.5.12", git = "https://github.com/pierreaubert/math-audio" }
+# Shared primitives from the math-audio repository. The rev pin
+# carries CallbackAction::StopAcceptBest (fix/linux-phase4-optim)
+# until that branch merges to main.
+math-iir-fir = { version = "0.5", git = "https://github.com/pierreaubert/math-audio", rev = "0b64accb3be346e35f6e9eaf534dfb28b20636f2" }
+math-dsp = { version = "0.5", git = "https://github.com/pierreaubert/math-audio", rev = "0b64accb3be346e35f6e9eaf534dfb28b20636f2" }
+math-optimisation = { version = "0.5", git = "https://github.com/pierreaubert/math-audio", rev = "0b64accb3be346e35f6e9eaf534dfb28b20636f2" }
+math-rir = { version = "0.5.12", git = "https://github.com/pierreaubert/math-audio", rev = "0b64accb3be346e35f6e9eaf534dfb28b20636f2" }
 sofa-reader = { version = "0.2", git = "https://github.com/pierreaubert/sofa-reader" }
 
 # Core numerical computing

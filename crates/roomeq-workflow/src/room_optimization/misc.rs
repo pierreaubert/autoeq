@@ -111,28 +111,28 @@ pub(super) fn pipeline_stopped_error(step_id: PipelineStepId) -> AutoeqError {
     }
 }
 
+/// Expected total progress-callback iterations for one channel.
+///
+/// The callback reports DE *generations*, accumulated across the
+/// greedy filter-count passes. Each pass `k` (1..=num_filters) runs
+/// with the engine's per-step budget
+/// `max(max_iter / num_filters, 5000) * k` generations
+/// (`adaptive_budget_for_step` in roomeq-engine), so the honest
+/// denominator is the sum over passes — not `max_iter`, and not a
+/// single pass. With the old single-pass estimate the percentage
+/// saturated almost immediately and then appeared stuck for the
+/// remaining wall time on slow machines (sotf#222). Passes that
+/// break early on the improvement stall rule make the real total
+/// smaller; the percentage then under-reports and jumps at channel
+/// completion, which is the conservative direction.
 pub(super) fn optimizer_progress_iterations(config: &RoomConfig) -> usize {
-    let params_per_filter = match config.optimizer.peq_model.as_str() {
-        "free" | "ls-pk-hs" => 4,
-        _ => 3,
-    };
-    let n_params = config.optimizer.num_filters * params_per_filter;
-    let n_free = n_params.max(1);
-    let desired_pop = config
-        .optimizer
-        .population
-        .max(1)
-        .min(config.optimizer.max_iter.max(1));
-    let pop_multiplier = desired_pop.div_ceil(n_free).max(4);
-    let population_size = pop_multiplier * n_free;
-    const DE_GENERATIONS_FLOOR: usize = 5000;
-    let computed_generations =
-        config.optimizer.max_iter.saturating_sub(population_size) / population_size;
-    if config.optimizer.max_iter >= DE_GENERATIONS_FLOOR.saturating_mul(population_size) {
-        computed_generations.max(DE_GENERATIONS_FLOOR)
-    } else {
-        computed_generations.max(1)
-    }
+    let max_filters = config.optimizer.num_filters.max(1);
+    let base_budget = (config.optimizer.max_iter / max_filters).max(5000);
+    // sum_{k=1..=n} base * k = base * n(n+1)/2
+    base_budget
+        .saturating_mul(max_filters.saturating_add(1))
+        .saturating_mul(max_filters)
+        / 2
 }
 
 pub(super) fn prepare_room_config_with_frequency_samples(
@@ -730,7 +730,9 @@ mod tests {
         config.optimizer.max_iter = 1_000;
         config.optimizer.population = 10;
         let iters = optimizer_progress_iterations(&config);
-        assert!(iters > 0);
+        // Greedy passes k=1..=2 at max(max_iter/2, 5000)=5000 base:
+        // total generations = 5000 * (1 + 2) = 15000.
+        assert_eq!(iters, 15_000);
     }
 
     #[test]

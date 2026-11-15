@@ -883,6 +883,11 @@ fn execute_topology_workflow_on_pool(
     }
 
     let workflow_max_iterations = optimizer_progress_iterations(config);
+    let workflow_time_budget = config
+        .optimizer
+        .time_budget_seconds
+        .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+        .map(std::time::Duration::from_secs_f64);
     let workflow_cancelled = Arc::new(AtomicBool::new(false));
     let workflow_progress_factory = {
         let observer = Arc::clone(observer_shared);
@@ -899,11 +904,23 @@ fn execute_topology_workflow_on_pool(
             let stopped = Arc::new(AtomicBool::new(false));
             let stopped_for_callback = Arc::clone(&stopped);
             let workflow_cancelled = Arc::clone(&workflow_cancelled);
-            let callback: roomeq_engine::OptimProgressCallback =
-                Box::new(move |iter: usize, loss: f64, epa: Option<f64>| {
+            // Per-channel wall-clock budget (sotf#222): on slow
+            // machines a fixed generation budget takes unbounded
+            // time; stopping here keeps the best-so-far result.
+            let channel_started = std::time::Instant::now();
+            let callback: roomeq_engine::OptimProgressCallback = Box::new(
+                move |iter: usize, loss: f64, epa: Option<f64>| {
                     if workflow_cancelled.load(Ordering::Relaxed) {
                         stopped_for_callback.store(true, Ordering::Relaxed);
                         return roomeq_engine::CallbackAction::Stop;
+                    }
+                    if let Some(budget) = workflow_time_budget
+                        && channel_started.elapsed() > budget
+                    {
+                        log::info!(
+                            "Channel '{name}' reached its {budget:?} time budget at generation {iter}; keeping best-so-far"
+                        );
+                        return roomeq_engine::CallbackAction::StopAcceptBest;
                     }
                     let base_progress = speaker_idx as f64 / total as f64;
                     let speaker_progress = if max_iterations > 0 {
@@ -939,7 +956,8 @@ fn execute_topology_workflow_on_pool(
                             roomeq_engine::CallbackAction::Stop
                         }
                     }
-                });
+                },
+            );
             Some(crate::topology::WorkflowProgressCallback { callback, stopped })
         }
     };

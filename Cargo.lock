@@ -1892,6 +1892,7 @@ version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ea2d84b969582b4b1864a92dc5d27cd2b77b622a8d79306834f1be5ba20d84b"
 dependencies = [
+ "bytemuck",
  "cfg-if",
  "crunchy",
  "num-traits",
@@ -1995,6 +1996,16 @@ name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e17592d60ebacc7d5e169f4663c5f84f9161cc90328abcfe8456f41e4dfcb284"
+
+[[package]]
+name = "hexf"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6618f4550dcd7d9ddb5126ab18d48dfa31aa952159cb832390bda464d3bc827e"
+dependencies = [
+ "hexf-parse",
+ "syn 1.0.109",
+]
 
 [[package]]
 name = "hexf-parse"
@@ -3047,9 +3058,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-blas"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b9e1346a6fb0c859ba99a0c46d54c3b6f620b132ce1be4aa7ef93634002009b"
+checksum = "40afab6524d1878eb4a43eaa6be2865461fbfe7a87b71588cf302a54a3beb0c0"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -3060,21 +3071,23 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-core"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb71a758e4b67699331dc2f01a20ddc05a5b952b66be9e46857f2aafe19db353"
+checksum = "48de696fe1d22b9c57bd89188f1a1e6b4c395d197c3a1439ad93d63779191929"
 dependencies = [
  "bytemuck",
+ "half",
  "libc",
  "num-complex",
  "num-traits",
+ "twofloat",
 ]
 
 [[package]]
 name = "oxiblas-lapack"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a31dc82201c233fbadc57e7583644062c364f4eb8e77fa8c9fb830722ec8b7e8"
+checksum = "a3676e827cf86e104d3b4fbf27536a664281f500b7448b92356d8c27b407da48"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -3086,9 +3099,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-matrix"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3b5d0050e3dea737a5d9c7c30d0029a73f270c5edb59281cef991a4d13c9fb9"
+checksum = "eaa46d38c1f2357880bca0bb71a6f72e5aab5e6184b0fba7b02d2e7c8a9f4e0f"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -3098,9 +3111,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-ndarray"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "796fd699643634753a2314234ea1fab6f6fa9caa123f5797830894f0fa91ec86"
+checksum = "5a65316cc2c163357a99b9904cc7b74576ab06ca8442659ba3124cd581e38e8a"
 dependencies = [
  "bytemuck",
  "ndarray",
@@ -5288,6 +5301,17 @@ dependencies = [
 
 [[package]]
 name = "syn"
+version = "1.0.109"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72b64191b275b66ffe2469e8af2c1cfe3bafa67b529ead792a6d0160888b4237"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
 version = "2.0.119"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "872831b642d1a07999a962a351ed35b955ea2cfc8f3862091e2a240a84f17297"
@@ -5633,6 +5657,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
+]
+
+[[package]]
+name = "twofloat"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f25f7bfd28a043cba51ea618ad2d29c5fa991a1237a4c0b592b466fbbb60c5c"
+dependencies = [
+ "hexf",
+ "libm",
+ "num-traits",
 ]
 
 [[package]]

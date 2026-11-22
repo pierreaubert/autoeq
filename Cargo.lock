@@ -3029,9 +3029,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-blas"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "40afab6524d1878eb4a43eaa6be2865461fbfe7a87b71588cf302a54a3beb0c0"
+checksum = "3da58b0fe0df24ebc99e09cb37ca4d8335099a9acf835740d6e67c49c88ff16a"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -3042,9 +3042,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-core"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48de696fe1d22b9c57bd89188f1a1e6b4c395d197c3a1439ad93d63779191929"
+checksum = "a9084c549d133a9d6c00af5a527d76423e0c44cc8f36b81e096a13988e521676"
 dependencies = [
  "bytemuck",
  "half",
@@ -3056,9 +3056,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-lapack"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3676e827cf86e104d3b4fbf27536a664281f500b7448b92356d8c27b407da48"
+checksum = "7c2d0a7b2a89bff745360f2d55874ffd78725e9f149269fa6231f793b0340835"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -3070,9 +3070,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-matrix"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eaa46d38c1f2357880bca0bb71a6f72e5aab5e6184b0fba7b02d2e7c8a9f4e0f"
+checksum = "bc02832df310ed50cb20a024aec65ff1ea3859da9a643e83fa6902d98a1ce3f5"
 dependencies = [
  "bytemuck",
  "num-complex",
@@ -3082,9 +3082,9 @@ dependencies = [
 
 [[package]]
 name = "oxiblas-ndarray"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a65316cc2c163357a99b9904cc7b74576ab06ca8442659ba3124cd581e38e8a"
+checksum = "1408ea90fa29085309c4e358aa4af0c8acf47ee407b92bc66ec30048fb8514d7"
 dependencies = [
  "bytemuck",
  "ndarray",
